@@ -1,5 +1,10 @@
 # Combray
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
+**Latest release:** v<!-- version -->0.1.0<!-- /version --> · [Download](https://github.com/L-K-M/Combray/releases/latest)
+
 A personal Android browser powered by **Servo**, with controls at the bottom and one place to return to open tabs and recently visited pages.
 
 <img src="media-sources/icon.png" alt="Combray: an ivory folded C on a square pine-green background" width="160" height="160">
@@ -8,7 +13,7 @@ Combray connects to **Karakeep** for quick saves, **Hister** for long-term histo
 
 ## Status
 
-This repository contains the implementation handoff, design reference, icon, and repository checks. **There is no Android application or Servo integration yet.** The next step is the Servo feasibility milestone, M0, in the plan. No Android build, service integration, or target-site compatibility has been demonstrated by this bootstrap.
+This repository contains the implementation handoff, design reference, icon, repository checks, and build and release tooling. **There is no Android application or Servo integration yet.** The next step is the Servo feasibility milestone, M0, in the plan. No Android build, service integration, or target-site compatibility has been demonstrated by this bootstrap.
 
 ## Start here
 
@@ -27,7 +32,18 @@ python3 scripts/check_docs.py
 git diff --check
 ```
 
-These checks validate repository documentation and assets. The included GitHub Actions workflow runs the documentation check on pushes and pull requests once committed and pushed. Native build and device checks will be added with the first implementation milestone.
+These checks validate repository documentation and assets. The `checks.yml` workflow runs the documentation check on pushes and pull requests once committed and pushed. Native build and device checks will be added with the first implementation milestone.
+
+## Build and release tooling
+
+Build, install, release, and CI tooling is in place ahead of the app. It stays inert until the Gradle project exists; see [AGENTS.md](AGENTS.md#build-and-release-tooling).
+
+```sh
+scripts/build.sh                 # release APK -> dist/
+scripts/build.sh --debug         # debug APK -> dist/
+scripts/build.sh --install       # build, install on the connected device, launch
+scripts/release.sh X.Y.Z --push  # bump, tag vX.Y.Z, push; the tag publishes the APK
+```
 
 ## Contents
 
@@ -38,6 +54,7 @@ These checks validate repository documentation and assets. The included GitHub A
 | `docs/design/` | Existing UI concepts, sample interactions, and design guidance |
 | `media-sources/` | Original square icon and generation provenance |
 | `scripts/check_docs.py` | Dependency-free documentation and asset checks |
+| `scripts/build.sh`, `install.sh`, `release.sh` | Build, device install, and release helpers |
 
 ## License
 

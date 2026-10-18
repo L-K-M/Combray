@@ -17,6 +17,9 @@ captures/
 *.aab
 *.aar
 
+# Staged APKs (scripts/build.sh)
+dist/
+
 # Rust / local Servo builds (commit Cargo.lock for the application)
 **/target/
 servo-checkout/

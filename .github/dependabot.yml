@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Workflow actions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  # Add a `gradle` entry (directory: /) once the Gradle project lands — with
+  # no build files yet it would fail every scheduled run.

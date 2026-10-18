@@ -1,0 +1,99 @@
+# CI: prove every push to main and every PR.
+#
+#   scripts — bash -n + shellcheck over scripts/*.sh (always meaningful).
+#   android — JVM tests, Android lint, debug + release APKs, and a debug APK
+#             uploaded as a rolling artifact. The repo is set up before the
+#             app exists: until gradlew is committed this job records a notice
+#             and passes, then turns itself on with no workflow change.
+#
+# Hardening (family contract):
+#   - least-privilege token (contents: read)
+#   - cancel superseded PR runs, but never an in-progress main run — a
+#     permanently "cancelled" main commit masks breakage and breaks bisection
+#   - timeout on every job so a wedged Gradle daemon can't burn runner hours
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Syntax and shellcheck
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          shellcheck scripts/*.sh
+
+  android:
+    name: Test, lint, assemble
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect the Gradle project
+        id: detect
+        run: |
+          if [ -x gradlew ] && [ -f app/build.gradle.kts ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Android project yet (gradlew / app/build.gradle.kts missing); skipping the Android build."
+          fi
+
+      # Supply-chain gate: reject a tampered gradle-wrapper.jar.
+      - if: steps.detect.outputs.present == 'true'
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      # JDK 17 is the family default until M0 pins Combray's toolchain (AGENTS.md).
+      - if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # No SDK install step: the ubuntu runner image ships the Android SDK.
+      # A compileSdk newer than the runner's AGP knows about also needs
+      # android.suppressUnsupportedCompileSdk in gradle.properties.
+      - if: steps.detect.outputs.present == 'true'
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Test, lint, and assemble
+        if: steps.detect.outputs.present == 'true'
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+      # The release variant is the only one that runs R8, and R8 failures are
+      # invisible until they aren't: prove the APK that gets released still
+      # builds and shrinks on every PR, not once a tag is already pushed.
+      - name: Assemble release (proves R8 / minification)
+        if: steps.detect.outputs.present == 'true'
+        run: ./gradlew assembleRelease
+
+      - name: Upload debug APK
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: combray-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

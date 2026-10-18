@@ -1,0 +1,108 @@
+# Release: a pushed v* tag builds, verifies, and publishes the release APK.
+#
+# Signing: not configured yet. The plan keeps signing keys out of Git and
+# sets up release signing with M4; until then the stage step fails for want
+# of a signed app-release.apk, so do not tag before signing exists.
+#
+# Hardening (family contract): least-privilege permissions, no cancellation
+# (a half-cancelled publish is worse than a slow one), timeout, wrapper
+# validation before any Gradle execution, and a tag↔versionName gate so a tag
+# can only publish the version the commit actually declares.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      # JDK 17 is the family default until M0 pins Combray's toolchain (AGENTS.md).
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # No SDK install step: the ubuntu runner image ships the Android SDK.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      # The committed versionName at the tagged commit is the source of truth;
+      # the tag only names the Release. Same sed pattern scripts/release.sh's
+      # engine writes with, so this gate accepts everything the bumper produces.
+      - name: Verify tag matches committed versionName
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMITTED="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]*)".*$/\1/p' app/build.gradle.kts | head -n 1)"
+          if [ "$VERSION" != "$COMMITTED" ]; then
+            echo "!! tag v$VERSION does not match committed versionName $COMMITTED" >&2
+            echo "!! re-cut the release with scripts/release.sh" >&2
+            exit 1
+          fi
+
+      # Re-prove the tagged commit: a tag can land on a commit CI never saw.
+      - name: Test and lint
+        run: ./gradlew testDebugUnitTest lintDebug
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+
+      # Asset names say what they contain: <base>-<vX.Y.Z>-<os>-<arch>.
+      # Servo ships per-ABI native libraries and M0 starts with arm64.
+      - name: Stage release artifacts
+        run: |
+          ARCH="arm64"
+          APK="combray-${GITHUB_REF_NAME}-android-${ARCH}.apk"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/$APK"
+          (cd dist && sha256sum "$APK" > "$APK.sha256")
+
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: combray-release-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish release APK
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: combray-release-${{ github.sha }}
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: Combray ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/*.sha256
