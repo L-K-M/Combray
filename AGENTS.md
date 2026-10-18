@@ -56,7 +56,7 @@ Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`: `co
 2. In `app/build.gradle.kts`, set `namespace` and `applicationId`, and give the debug build type `applicationIdSuffix = ".debug"`.
 3. Declare `versionName = "0.1.0"` and `versionCode = 1` as plain literals: the release engine and the CI tag gate read and rewrite them with `sed`.
 4. Move the Android job in `.github/workflows/ci.yml` and the build job in `release.yml` to the toolchain M0 pins (JDK, NDK, Rust, Servo build steps). Both assume JDK 17 and a plain Gradle build today.
-5. Configure release signing before the first release tag (M4). Keep signing keys out of Git; `release.yml` expects a signed `app/build/outputs/apk/release/app-release.apk`.
+5. Configure release signing before the first release tag (M4). Keep signing keys out of Git; `release.yml` expects a signed `app/build/outputs/apk/release/app-release.apk`. Until then the release paths (`scripts/build.sh` without `--debug`, `scripts/install.sh --release`, `release.yml`) stop at the missing signed APK; use the debug build.
 6. Add `gradle` (and, once a crate exists, `cargo`) entries to `.github/dependabot.yml`.
 7. Generate and commit the launcher icons from `media-sources/icon.png`.
 
