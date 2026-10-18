@@ -23,26 +23,6 @@ Read [README.md](README.md), then [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTAT
 7. Run checks appropriate to the change. For this documentation bootstrap: `python3 scripts/check_docs.py` and `git diff --check`. Add native tests/build checks when there is native code. Do not claim device tests that were not run.
 8. Prefer small patches and inspect the actual diff. Do not commit, push, publish, or change the user's services unless the active task authorizes it. Do not read or export personal history to validate a fixture-based feature.
 
-## Free subagents via Junie
+## Subagents
 
-Proactively delegate suitable work to Junie Lite (Qwen3.6-27B-FP8) when briefing, review, and likely corrections cost less than doing it yourself. Choose tasks with clear scope, limited context, and an inexpensive acceptance check.
-
-Good candidates: repetitive edits, small implementations with explicit behavior, tests with independently established expected results, documentation updates, and focused code or log investigation. Keep architecture, ambiguous debugging, security decisions, concurrency, and subtle correctness reasoning in Codex. Delegate bounded substeps of larger tasks. Use deterministic tools directly when sufficient; avoid delegating trivial work.
-
-Run from the assigned checkout:
-
-```sh
-junie --skip-update-check --model junie-lite --task "<brief>"
-```
-
-Use existing authentication. Always select `junie-lite`; leave `--effort` unset. Never switch Junie to a paid model.
-
-When running Junie from Codex on macOS, the Codex sandbox can block access to Junie's saved Keychain login, local files, or network. If Junie reports “Cannot find authorization” or related sandbox permission errors, retry the same command once using the shell tool's approved execution outside the sandbox (`sandbox_permissions="require_escalated"` where available), explaining why. If this requirement has already been established in the current environment, request that execution mode on the first attempt.
-
-Do not classify Junie as unavailable solely because a sandboxed attempt failed. Do not extract tokens, change HOME/JUNIE_HOME, or disable sandboxing globally. If execution outside the sandbox is denied, unavailable, or still fails, continue in Codex and report the actual blocker.
-
-Check that Junie completed the requested task; exit status 0 alone does not establish success. This startup retry is separate from the task-correction retry below.
-
-Provide the objective, relevant paths, edit boundaries, acceptance checks, and required output: findings or changed files, checks run, and uncertainties. Workers must report blockers instead of guessing and must not delegate further.
-
-Isolate edits and prevent overlapping writes. Inspect actual results and verify behavior; passing worker-written tests alone is insufficient. Allow one targeted, inexpensive retry, then take over. Keep worker reports concise.
+Proactively delegate suitable work to available free or cheaper subagents running in other harnesses.
