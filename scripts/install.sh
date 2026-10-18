@@ -29,52 +29,52 @@ usage() { awk 'NR==1 && /^#!/ {next} /^#/ {sub(/^# ?/,""); print; next} {exit}' 
 VARIANT="debug"
 LAUNCH=1
 for arg in "$@"; do
-  case "$arg" in
-    --release) VARIANT="release" ;;
-    --debug) VARIANT="debug" ;;
-    --no-launch) LAUNCH=0 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
-  esac
+    case "$arg" in
+        --release) VARIANT="release" ;;
+        --debug) VARIANT="debug" ;;
+        --no-launch) LAUNCH=0 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+    esac
 done
 
 if [ ! -f app/build.gradle.kts ] || [ ! -x gradlew ]; then
-  echo "!! no Android project yet (app/build.gradle.kts and gradlew are missing)." >&2
-  exit 1
+    echo "!! no Android project yet (app/build.gradle.kts and gradlew are missing)." >&2
+    exit 1
 fi
 
 # Same SDK fallback as scripts/build.sh: AGP and adb both need it.
 if [ ! -f local.properties ] && [ -z "${ANDROID_HOME:-}" ]; then
-  for sdk in "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" "/opt/android-sdk"; do
-    if [ -d "$sdk/platforms" ]; then
-      export ANDROID_HOME="$sdk"
-      break
-    fi
-  done
+    for sdk in "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" "/opt/android-sdk"; do
+        if [ -d "$sdk/platforms" ]; then
+            export ANDROID_HOME="$sdk"
+            break
+        fi
+    done
 fi
 
 # The debug build carries the ".debug" applicationIdSuffix so both variants
 # can live on one device side by side.
 case "$VARIANT" in
-  debug)   TASK="installDebug";   APP_ID="ch.lkmc.combray.debug" ;;
-  release) TASK="installRelease"; APP_ID="ch.lkmc.combray" ;;
+    debug)   TASK="installDebug";   APP_ID="ch.lkmc.combray.debug" ;;
+    release) TASK="installRelease"; APP_ID="ch.lkmc.combray" ;;
 esac
 
 echo "==> ./gradlew $TASK  (builds and installs to the connected device)"
 ./gradlew "$TASK"
 
 if [ "$LAUNCH" -eq 1 ]; then
-  # Resolve adb from PATH, then from the Android SDK location.
-  ADB="$(command -v adb || true)"
-  for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
-    [ -n "$ADB" ] && break
-    if [ -n "$sdk" ] && [ -x "$sdk/platform-tools/adb" ]; then ADB="$sdk/platform-tools/adb"; fi
-  done
+    # Resolve adb from PATH, then from the Android SDK location.
+    ADB="$(command -v adb || true)"
+    for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+        [ -n "$ADB" ] && break
+        if [ -n "$sdk" ] && [ -x "$sdk/platform-tools/adb" ]; then ADB="$sdk/platform-tools/adb"; fi
+    done
 
-  if [ -n "$ADB" ]; then
-    echo "==> Launching $APP_ID"
-    "$ADB" shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-  else
-    echo "-- adb not found; skipping launch"
-  fi
+    if [ -n "$ADB" ]; then
+        echo "==> Launching $APP_ID"
+        "$ADB" shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+    else
+        echo "-- adb not found; skipping launch"
+    fi
 fi

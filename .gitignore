@@ -1,14 +1,41 @@
-# Gradle / Kotlin
+# Host/editor state
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+
+# Android / Gradle (commit the wrapper, including its jar)
 .gradle/
 .kotlin/
 **/build/
 local.properties
+captures/
+.cxx/
+.externalNativeBuild/
+*.apk
+*.aab
+*.aar
 
-# Staged artifacts (scripts/build.sh)
+# Staged APKs (scripts/build.sh)
 dist/
 
-# IDEs and OS
-.idea/
-*.iml
-.vscode/
-.DS_Store
+# Rust / local Servo builds (commit Cargo.lock for the application)
+**/target/
+servo-checkout/
+
+# Local credentials, signing material, and test-device data
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+.local/
+
+# Python/tool scratch
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/

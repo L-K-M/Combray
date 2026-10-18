@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - App icon master (`media-sources/icon.png`).
+- Implementation plan, integration evidence, design reference, and
+  documentation checks.
 - Repository tooling ahead of the app: build, install, and release scripts;
-  CI and tag-triggered release workflows; GLM code review; Dependabot; and a
-  committed debug keystore for sideload signing (docs/decisions/0001).
+  CI and tag-triggered release workflows; GLM code review; Dependabot.

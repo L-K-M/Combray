@@ -1,9 +1,8 @@
 # Release: a pushed v* tag builds, verifies, and publishes the release APK.
 #
-# Signing: BOTH build types are signed with the checked-in app/debug.keystore —
-# zero secrets, reproducible by anyone, deliberately sideload-only
-# (docs/decisions/0001). Switching to a real key later breaks upgrades for
-# every installed user, which is why it was decided on day one.
+# Signing: not configured yet. The plan keeps signing keys out of Git and
+# sets up release signing with M4; until then the stage step fails for want
+# of a signed app-release.apk, so do not tag before signing exists.
 #
 # Hardening (family contract): least-privilege permissions, no cancellation
 # (a half-cancelled publish is worse than a slow one), timeout, wrapper
@@ -35,6 +34,7 @@ jobs:
 
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
+      # JDK 17 is the family default until M0 pins Combray's toolchain (AGENTS.md).
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -64,9 +64,11 @@ jobs:
         run: ./gradlew assembleRelease
 
       # Asset names say what they contain: <base>-<vX.Y.Z>-<os>-<arch>.
+      # Servo ships per-ABI native libraries and M0 starts with arm64.
       - name: Stage release artifacts
         run: |
-          APK="combray-${GITHUB_REF_NAME}-android-universal.apk"
+          ARCH="arm64"
+          APK="combray-${GITHUB_REF_NAME}-android-${ARCH}.apk"
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk "dist/$APK"
           (cd dist && sha256sum "$APK" > "$APK.sha256")

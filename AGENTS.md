@@ -1,38 +1,44 @@
-# AGENTS.md
+# Instructions for implementation agents
 
-Combray is an Android app in early development. The repository holds the
-build, release, and CI tooling ahead of the app itself: when the Gradle
-project lands it plugs into what is already here — follow
-"When the Gradle project lands" below so it does.
+## Read first
+
+Read [README.md](README.md), then [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), then [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md). These files carry the project context; do not require the original chat to understand the work. The plan separates confirmed requirements, proposed defaults, and unresolved questions. Keep those distinctions when making changes.
+
+## Product boundaries
+
+- The app is **Combray**, a personal **Android** browser. **Servo is mandatory.** Do not replace it with Android WebView, Chromium, GeckoView, a remote renderer, or an external browser to pass a milestone. Report a concrete blocker and preserve the Servo direction.
+- Keep routine UI actions at the bottom. Tabs and short-term history share one Recent UI. Karakeep saves, Hister content/history search, and Kagi web search are core requirements.
+- Preserve the existing `LICENSE` and `media-sources/icon.png`. Icon artwork is square, opaque, edge-to-edge, with sharp outer corners. Launcher masking is Android's concern; do not bake a squircle into the source artwork.
+- Existing HTML is a design demo with sample data, not the browser or evidence of working integrations. Two layout alternatives remain; a proposed default is not a user-confirmed decision.
+- Personal use does not mean arbitrary sites, page content, tokens, or service requests are trusted. Never put native integration credentials in page JavaScript, navigation URLs, committed configuration, logs, or screenshots.
+
+## Implementation discipline
+
+1. Start with milestone M0. Prove independent Servo views, lifecycle handling, and correctly attributed text extraction on Android. Record exact revisions, commands, environment, results, and remaining limitations in `docs/ENGINE_SPIKE.md` when it exists.
+2. Keep Servo handles on their owner thread. Tag callbacks with tab identity, engine generation, and navigation identity. An equal URL is not proof of an equal document.
+3. Separate persistent logical tabs, visits, and native views. Closing, expiring local history, forgetting, and deleting remote content have different semantics.
+4. Make integration operations durable and tied to their original payload and destination. Test delayed callbacks, ambiguous network completion, process death, and deletion races, not just happy paths.
+5. Pin dependencies and toolchains once verified. Do not invent a Maven Servo artifact, JNI API, build command, or compatible version combination. Keep future Gradle wrapper files and dependency lockfiles in version control.
+6. Implement bounded vertical slices. Update the plan's status and record decisions after evidence changes. Do not mark a feature complete from fake engine events or mocked HTTP alone.
+7. Run checks appropriate to the change. For this documentation bootstrap: `python3 scripts/check_docs.py` and `git diff --check`. Add native tests/build checks when there is native code. Do not claim device tests that were not run.
+8. Prefer small patches and inspect the actual diff. Do not commit, push, publish, or change the user's services unless the active task authorizes it. Do not read or export personal history to validate a fixture-based feature.
+
+## Subagents
+
+Proactively delegate suitable work to available free or cheaper subagents running in other harnesses.
 
 ## Identity
 
-- Application id and Kotlin namespace: **`ch.lkmc.combray`** (fleet rule:
-  GitHub repos live under `ch.lkmc.*`, lowercase on Android). The debug build
-  adds `applicationIdSuffix = ".debug"` (`ch.lkmc.combray.debug`), so both
-  variants install side by side — `scripts/install.sh` launches by these ids.
-- App icon master: `media-sources/icon.png`. Launcher icons are derived from it
-  and committed; document the generator next to them when you add them.
+- Proposed application id and Kotlin namespace: **`ch.lkmc.combray`** (fleet rule: GitHub repos use `ch.lkmc.*`, lowercase on Android). The plan leaves the id open until M1; confirm it there before persistent data or signing rely on it. The debug build adds `applicationIdSuffix = ".debug"`, so both variants install side by side; `scripts/install.sh` launches by these ids.
+- Launcher icons derive from `media-sources/icon.png` and are committed; document the generator next to them.
 
-## Toolchain
+## Build and release tooling
 
-Model the project on the family's Android apps (Lern-Deutsch--Android /
-HalloMiao, Asterinked): JDK 17, Android Gradle Plugin 9 (Kotlin is built in —
-no separate `kotlin-android` plugin, and compiler options go in a top-level
-`kotlin { compilerOptions { … } }`), Gradle version catalog in
-`gradle/libs.versions.toml`, Jetpack Compose. Pin the toolchain in the
-catalog and the wrapper; CI uses whatever they say.
-
-- The ubuntu CI runners ship the Android SDK, so CI has no SDK install step.
-  A `compileSdk` newer than AGP knows about needs
-  `android.suppressUnsupportedCompileSdk=<level>` in `gradle.properties`.
-- Locally, the scripts find the SDK through `local.properties`, then
-  `ANDROID_HOME`, then the standard install locations.
-
-## Commands
+The family's build, install, release, and CI tooling is in place ahead of the app. It stays inert until the Gradle project exists, then switches on without workflow changes.
 
 | What | Command |
 |---|---|
+| Documentation check | `python3 scripts/check_docs.py` |
 | Release APK → `dist/` | `scripts/build.sh` |
 | Debug APK → `dist/` | `scripts/build.sh --debug` |
 | Build, install, launch on a device | `scripts/build.sh --install` (or `scripts/install.sh [--release]`) |
@@ -40,41 +46,24 @@ catalog and the wrapper; CI uses whatever they say.
 | CI gate | `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease` |
 | Cut a release | `scripts/release.sh X.Y.Z [--push]` |
 
-`scripts/release.sh` is a stub over the shared `lkm-release` engine
-(`gradle-android` kind, https://github.com/L-K-M/release-tool): it bumps
-`versionName`, increments `versionCode`, updates the README version marker,
-commits, and tags `vX.Y.Z`; `--push` pushes branch + tag, and the tag runs
-`.github/workflows/release.yml` (tag↔versionName gate → tests + lint →
-release APK → GitHub Release).
+`scripts/release.sh` is a stub over the shared `lkm-release` engine (`gradle-android` kind, https://github.com/L-K-M/release-tool): it bumps `versionName`, increments `versionCode`, updates the README version marker, commits, and tags `vX.Y.Z`; `--push` pushes branch and tag, and the tag runs `.github/workflows/release.yml` (tag/versionName gate, tests and lint, release APK, GitHub Release).
 
-Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`:
-`combray-v0.1.0-android-universal.apk` plus its `.sha256`.
+Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`: `combray-v0.1.0-android-arm64.apk` plus its `.sha256`. The arch is `arm64` because Servo ships per-ABI native libraries and M0 starts with arm64; update `ARCH` in `scripts/build.sh` and `release.yml` when M0 settles the ABIs.
 
 ## When the Gradle project lands
 
-1. Create it at the repo root with a single `app` module, and commit the Gradle
-   wrapper (`gradlew`, `gradle/wrapper/*`). CI's Android job switches on as
-   soon as `gradlew` and `app/build.gradle.kts` exist; until then it passes
-   with a notice.
-2. In `app/build.gradle.kts`, set `namespace` and `applicationId` to
-   `ch.lkmc.combray`, and give the debug build type
-   `applicationIdSuffix = ".debug"`.
-3. Declare `versionName = "0.1.0"` and `versionCode = 1` as plain string/int
-   literals — the release engine and the CI tag gate read and rewrite them
-   with `sed`.
-4. Sign **both** build types with the committed `app/debug.keystore` (alias
-   `androiddebugkey`, store and key password `android`) via a shared
-   `signingConfig` — see `docs/decisions/0001`. Turn on R8
-   (`isMinifyEnabled = true`) for release with a `proguard-rules.pro`.
-5. Add a `gradle` entry to `.github/dependabot.yml`.
-6. Generate and commit the launcher icons from `media-sources/icon.png`.
+1. Create it at the repo root with the APK module named `app`, and commit the Gradle wrapper (`gradlew`, `gradle/wrapper/*`). CI's Android job switches on once `gradlew` and `app/build.gradle.kts` exist; until then it passes with a notice.
+2. In `app/build.gradle.kts`, set `namespace` and `applicationId`, and give the debug build type `applicationIdSuffix = ".debug"`.
+3. Declare `versionName = "0.1.0"` and `versionCode = 1` as plain literals: the release engine and the CI tag gate read and rewrite them with `sed`.
+4. Move the Android job in `.github/workflows/ci.yml` and the build job in `release.yml` to the toolchain M0 pins (JDK, NDK, Rust, Servo build steps). Both assume JDK 17 and a plain Gradle build today.
+5. Configure release signing before the first release tag (M4). Keep signing keys out of Git; `release.yml` expects a signed `app/build/outputs/apk/release/app-release.apk`.
+6. Add `gradle` (and, once a crate exists, `cargo`) entries to `.github/dependabot.yml`.
+7. Generate and commit the launcher icons from `media-sources/icon.png`.
 
 ## Conventions
 
-- Work on a branch cut from the latest `origin/main`; every change lands
-  through a PR with green CI and the GLM review.
-- No secrets in the repo or the workflows. The debug keystore is not a secret
-  (decisions/0001).
+- Work on a branch cut from the latest `origin/main`; every change lands through a PR with green CI and the GLM review.
+- No secrets in the repo or the workflows.
 - Keep `CHANGELOG.md` current under `Unreleased`.
 
 <!-- shared-rules:start -->
