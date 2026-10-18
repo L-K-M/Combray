@@ -1,0 +1,14 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+**/build/
+local.properties
+
+# Staged artifacts (scripts/build.sh)
+dist/
+
+# IDEs and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
