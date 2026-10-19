@@ -16,6 +16,8 @@ All notable changes to this project are documented here. The format follows
   the Java/Kotlin libraries, checked and listed by the Licensee plugin.
 - Long-press on a link or image: open in a new tab, copy or share the
   address.
+- HTTP sign-in: a dialog naming the server asks for a username and
+  password, warns on unencrypted connections and stores nothing.
 - Local release signing through environment variables, with explicit validation
   of incomplete configuration and no committed signing material.
 - APK build-script regressions in CI and SHA-256 sidecars for local builds.

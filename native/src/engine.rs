@@ -25,12 +25,12 @@ use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
 use servo::CreateNewWebViewRequest;
 use servo::{
-    CompositionEvent, CompositionState, DevicePoint, EmbedderControl, EmbedderControlId,
-    EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError, Key, KeyState,
-    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts, PipelineId,
-    PrefValue, Preferences, RenderingContext, SelectElementOption, SelectElementOptionOrOptgroup,
-    Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType, TouchId, TouchPointerType,
-    WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
+    EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
+    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts,
+    PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
+    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType,
+    TouchId, TouchPointerType, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
@@ -195,7 +195,23 @@ impl Tab {
 /// A page control waiting for the application's answer. Dropping it answers with Servo's default.
 struct PendingControl {
     view: ViewKey,
-    control: EmbedderControl,
+    control: ControlHandle,
+}
+
+/// Servo's handle for a control: an embedder control, or a sign-in request, which Servo models
+/// separately. Dropping a sign-in request loads the server's 401 response.
+enum ControlHandle {
+    Embedder(EmbedderControl),
+    SignIn(AuthenticationRequest),
+}
+
+impl ControlHandle {
+    fn embedder_id(&self) -> Option<EmbedderControlId> {
+        match self {
+            ControlHandle::Embedder(control) => Some(control.id()),
+            ControlHandle::SignIn(_) => None,
+        }
+    }
 }
 
 struct PendingCapture {
@@ -1086,14 +1102,19 @@ impl Engine {
                     self.close_tab(view.tab);
                 }
             },
-            DelegateEvent::PageControl { view, control } => self.show_page_control(view, control),
+            DelegateEvent::PageControl { view, control } => {
+                self.show_page_control(view, ControlHandle::Embedder(control))
+            },
+            DelegateEvent::SignIn { view, request } => {
+                self.show_page_control(view, ControlHandle::SignIn(request))
+            },
             DelegateEvent::ControlHidden { view, control } => {
                 if self.ime_owner == Some((view, control)) {
                     self.ime_owner = None;
                     self.emit(EngineEvent::ImeHidden { view });
                 }
                 self.hide_controls(|pending| {
-                    pending.view == view && pending.control.id() == control
+                    pending.view == view && pending.control.embedder_id() == Some(control)
                 });
             },
             DelegateEvent::DefaultHandled { view, request } => {
@@ -1106,11 +1127,18 @@ impl Engine {
         }
     }
 
-    fn show_page_control(&mut self, view: ViewKey, control: EmbedderControl) {
+    fn show_page_control(&mut self, view: ViewKey, control: ControlHandle) {
         if self.live_tab(view).is_none() {
             return;
         }
-        let Some(description) = describe(&control) else {
+        let description = match &control {
+            ControlHandle::Embedder(control) => describe(control),
+            ControlHandle::SignIn(request) => Some(ControlDescription::SignIn {
+                origin: request.url().origin().ascii_serialization(),
+                proxy: request.for_proxy(),
+            }),
+        };
+        let Some(description) = description else {
             warn!("answering an unsupported page control with Servo's default");
             return;
         };
@@ -1157,7 +1185,23 @@ impl Engine {
                 return;
             },
         };
-        match (pending.control, response) {
+        let control = match pending.control {
+            ControlHandle::Embedder(control) => control,
+            ControlHandle::SignIn(request) => {
+                match response {
+                    ControlResponse::Credentials { username, password } => {
+                        request.authenticate(username, password)
+                    },
+                    // Dropped: the navigation shows the server's 401 page.
+                    ControlResponse::Dismiss => {},
+                    response => self.error(format!(
+                        "response {response:?} does not fit sign-in {id}; the sign-in was cancelled"
+                    )),
+                }
+                return;
+            },
+        };
+        match (control, response) {
             (EmbedderControl::SelectElement(mut select), ControlResponse::Select { ids }) => {
                 // Only offered, enabled options, each once; a single select keeps at most one.
                 let mut offered: HashSet<usize> = select_options(select.options())

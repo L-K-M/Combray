@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -28,16 +29,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import ch.lkmc.combray.R
@@ -76,6 +80,7 @@ fun PageControlDialog(
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
         is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onShare) { answer(ControlResponse.Dismiss) }
+        is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
         else -> ScriptDialog(control, content, onAnswer)
     }
 }
@@ -186,6 +191,57 @@ private fun ScriptDialog(
         } else {
             null
         },
+    )
+}
+
+/**
+ * HTTP sign-in. Names the server asking, not the page that linked there, and warns when the
+ * password would travel unencrypted. Nothing is stored: the fields use plain [remember], so a
+ * password never reaches saved instance state, and a rotation clears them.
+ */
+@Composable
+private fun SignInDialog(id: Long, content: PageControlContent.SignIn, onAnswer: (ControlResponse) -> Unit) {
+    var username by remember(id) { mutableStateOf("") }
+    var password by remember(id) { mutableStateOf("") }
+    val unencrypted = content.origin.startsWith("http:", ignoreCase = true)
+
+    AlertDialog(
+        onDismissRequest = { onAnswer(ControlResponse.Dismiss) },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = {
+            Text(
+                stringResource(if (content.proxy) R.string.sign_in_proxy_title else R.string.sign_in_title, content.origin),
+                modifier = Modifier.semantics { heading() },
+            )
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (unencrypted) Text(stringResource(R.string.sign_in_unencrypted), color = MaterialTheme.colorScheme.error)
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text(stringResource(R.string.sign_in_username)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Text),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.sign_in_password)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onAnswer(ControlResponse.Credentials(username, password)) }) {
+                Text(stringResource(R.string.sign_in_action))
+            }
+        },
+        dismissButton = { TextButton(onClick = { onAnswer(ControlResponse.Dismiss) }) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 

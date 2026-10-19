@@ -595,6 +595,21 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun repeatedSignInsAreNotCountedAsDialogs() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        showControl(1, 1, PageControlContent.SignIn("https://a.test", proxy = false))
+        browser.answerPageControl(1, ControlResponse.Credentials("ada", "wrong")); idle()
+
+        // A rejected password asks again; it must not be offered for blocking or be suppressed.
+        showControl(1, 2, PageControlContent.SignIn("https://a.test", proxy = false))
+        assertEquals(2L, state().pageControl?.id)
+        assertFalse(state().pageControl!!.offerBlocking)
+        assertEquals(1L to ControlResponse.Credentials("ada", "wrong"), engine.responses.last())
+    }
+
+    @Test
     fun aHiddenTabWaitingForAnAnswerKeepsItsRenderer() {
         engine = FakeEngine()
         browser = BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, maxLiveViews = 1).also { it.start() }

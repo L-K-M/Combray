@@ -131,6 +131,30 @@ class PageControlsTest {
         assertEquals(2, device.browser.browserState.value.openTabCount)
     }
 
+    /**
+     * One flow, because Servo keeps accepted credentials for the session: cancelling shows the
+     * server's own 401 page, then signing in through the dialog loads the protected page.
+     */
+    @Test
+    fun aSignInFromTheDialogReachesTheServer() {
+        val protected = "${Fixtures.BASE}/auth.html"
+        device.browser.openUrl(protected, Placement.CURRENT_TAB)
+        assertEquals(PageControlContent.SignIn(Fixtures.BASE, proxy = false), awaitControl().content)
+        awaitText("Sign in to ${Fixtures.BASE}")
+        compose.onNodeWithText("Cancel").performClick()
+        device.awaitState { it.activeTab?.title == "AUTH-REQUIRED" && it.activeTab?.loading == false }
+
+        device.browser.openUrl(protected, Placement.CURRENT_TAB)
+        awaitControl()
+        awaitText("Sign in to ${Fixtures.BASE}")
+        val fields = compose.onAllNodes(hasSetTextAction())
+        fields[0].performTextReplacement("ada")
+        fields[1].performTextReplacement("lovelace")
+        compose.onNodeWithText("Sign in").performClick()
+        device.awaitState { it.activeTab?.title == "AUTH:ada" }
+        assertEquals(null, device.browser.browserState.value.pageControl)
+    }
+
     private fun awaitText(text: String) =
         compose.waitUntil(DIALOG_TIMEOUT_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
 
