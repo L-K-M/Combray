@@ -663,8 +663,7 @@ impl Engine {
             self.emit(EngineEvent::ImeHidden { view: closed.view });
         }
         // Their answers could never reach the page; dropping sends Servo's defaults.
-        self.page_controls
-            .retain(|_, pending| pending.view != closed.view);
+        self.hide_controls(|pending| pending.view == closed.view);
         let view = closed.view;
         // Dropping the last handle closes the WebView in Servo.
         drop(closed);
@@ -1076,16 +1075,9 @@ impl Engine {
                     self.ime_owner = None;
                     self.emit(EngineEvent::ImeHidden { view });
                 }
-                let hidden: Vec<u64> = self
-                    .page_controls
-                    .iter()
-                    .filter(|(_, pending)| pending.view == view && pending.control.id() == control)
-                    .map(|(id, _)| *id)
-                    .collect();
-                for id in hidden {
-                    self.page_controls.remove(&id);
-                    self.emit(EngineEvent::ControlHidden { view, control: id });
-                }
+                self.hide_controls(|pending| {
+                    pending.view == view && pending.control.id() == control
+                });
             },
             DelegateEvent::DefaultHandled { view, request } => {
                 self.emit(EngineEvent::DefaultHandled { view, request })
@@ -1115,6 +1107,24 @@ impl Engine {
         });
     }
 
+    /// Drops the matching controls (Servo answers them with its defaults) and tells the app.
+    fn hide_controls(&mut self, matches: impl Fn(&PendingControl) -> bool) {
+        let hidden: Vec<u64> = self
+            .page_controls
+            .iter()
+            .filter(|(_, pending)| matches(pending))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in hidden {
+            if let Some(pending) = self.page_controls.remove(&id) {
+                self.emit(EngineEvent::ControlHidden {
+                    view: pending.view,
+                    control: id,
+                });
+            }
+        }
+    }
+
     fn respond_to_control(&mut self, id: u64, response: &str) {
         let Some(pending) = self.page_controls.remove(&id) else {
             // Hidden by the page or its tab closed while the user decided.
@@ -1139,6 +1149,10 @@ impl Engine {
                     ids.into_iter().filter(|id| offered.contains(id)).collect();
                 if !select.allow_select_multiple() {
                     chosen.truncate(1);
+                    // A single select has no empty answer: keep the previous selection.
+                    if chosen.is_empty() {
+                        return;
+                    }
                 }
                 select.select(chosen);
                 select.submit();
@@ -1347,7 +1361,6 @@ impl Engine {
     }
 }
 
-/// Maps an Android key (character plus key code) to a DOM key.
 /// What the application needs to present `control`; `None` for controls it does not present.
 fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
     let description = match control {
@@ -1402,6 +1415,7 @@ fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption
     options
 }
 
+/// Maps an Android key (character plus key code) to a DOM key.
 fn servo_key(key: KeyInput) -> Option<Key> {
     if let Some(character) = char::from_u32(key.unicode).filter(|c| *c != '\0' && !c.is_control()) {
         return Some(Key::Character(character.to_string()));

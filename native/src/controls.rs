@@ -70,9 +70,15 @@ impl ControlDescription {
                 selected,
                 multiple,
             } => {
-                let options: Vec<Value> = options
+                let sent = &options[..options.len().min(MAX_OPTIONS)];
+                // The page chooses the selection too: name only options that are sent.
+                let selected: Vec<usize> = selected
                     .iter()
-                    .take(MAX_OPTIONS)
+                    .copied()
+                    .filter(|id| sent.iter().any(|option| option.id == *id))
+                    .collect();
+                let options: Vec<Value> = sent
+                    .iter()
                     .map(|option| {
                         json!({
                             "id": option.id,
@@ -177,6 +183,28 @@ mod tests {
         assert_eq!(options[1]["group"], "Group");
         assert_eq!(json["selected"], json!([2]));
         assert_eq!(json["multiple"], false);
+    }
+
+    #[test]
+    fn selection_only_names_options_that_were_sent() {
+        let options = (0..MAX_OPTIONS + 5)
+            .map(|id| SelectOption {
+                id,
+                label: "o".into(),
+                disabled: false,
+                group: None,
+            })
+            .collect();
+        let json = ControlDescription::Select {
+            options,
+            selected: (0..MAX_OPTIONS + 5).collect(),
+            multiple: true,
+        }
+        .to_json();
+
+        let selected = json["selected"].as_array().unwrap();
+        assert_eq!(selected.len(), MAX_OPTIONS);
+        assert_eq!(selected.last().unwrap(), MAX_OPTIONS - 1);
     }
 
     #[test]
