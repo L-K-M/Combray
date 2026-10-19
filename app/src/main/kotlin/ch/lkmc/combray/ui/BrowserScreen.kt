@@ -258,12 +258,17 @@ fun BrowserScreen(graph: AppGraph) {
 
     // Shown over any sheet: the page is blocked until it gets an answer.
     state.pageControl?.let { control ->
+        // Through the address policy, like any link the app opens itself (no javascript:).
+        val navigation = { url: String -> AddressPolicy.interpret(url).primary as? AddressDecision.Navigate }
         PageControlDialog(
             control = control,
             staging = graph.uploads,
             uploadScope = graph.scope,
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
+            canOpenInNewTab = { url -> navigation(url) != null },
+            onOpenInNewTab = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.NEW_TAB) } },
+            onShare = { url -> share(context, url, resources.getString(R.string.share_chooser)) },
         )
     }
 }

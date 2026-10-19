@@ -1,12 +1,14 @@
 package ch.lkmc.combray.engine
 
 import android.content.Context
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -23,6 +25,24 @@ class EngineSurfaceView(
     context: Context,
     private val engineRunning: () -> Boolean,
 ) : SurfaceView(context), SurfaceHolder.Callback {
+
+    /**
+     * A long-press becomes a secondary click (Servo's context menu). The touches already sent
+     * are cancelled first, and the rest of that gesture stays with the app: otherwise the
+     * lift would also count as a tap on the link.
+     */
+    private var longPressed = false
+    private val longPressTimeoutMs = ViewConfiguration.getLongPressTimeout().toLong()
+    private val longPress = LongPressTracker(longPressTimeoutMs, ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    private var pressPointer = 0
+    private var pressX = 0f
+    private var pressY = 0f
+    private val longPressCheck = Runnable {
+        if (!longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
+        longPressed = true
+        NativeEngine.touch(NativeEngine.TOUCH_CANCEL, pressPointer, pressX, pressY)
+        NativeEngine.contextClick(pressX, pressY)
+    }
 
     init {
         holder.addCallback(this)
@@ -55,6 +75,8 @@ class EngineSurfaceView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!engineRunning()) return false
         requestFocus()
+        trackLongPress(event)
+        if (longPressed) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
                 sendPointer(event, event.actionIndex, NativeEngine.TOUCH_DOWN)
@@ -67,6 +89,22 @@ class EngineSurfaceView(
                 for (index in 0 until event.pointerCount) sendPointer(event, index, NativeEngine.TOUCH_MOVE)
         }
         return true
+    }
+
+    private fun trackLongPress(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                longPressed = false
+                pressPointer = event.getPointerId(0)
+                pressX = event.x
+                pressY = event.y
+                longPress.press(event.x, event.y, SystemClock.uptimeMillis())
+                removeCallbacks(longPressCheck)
+                postDelayed(longPressCheck, longPressTimeoutMs)
+            }
+            MotionEvent.ACTION_MOVE -> longPress.move(event.x, event.y)
+            else -> longPress.release()
+        }
     }
 
     private fun sendPointer(event: MotionEvent, index: Int, phase: Int) {

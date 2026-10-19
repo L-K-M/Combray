@@ -111,10 +111,32 @@ class PageControlsTest {
         shell("input keyevent KEYCODE_BACK")
     }
 
+    @Test
+    fun aLongPressOnALinkOffersToOpenItInANewTab() {
+        val opener = "${Fixtures.BASE}/opener.html"
+        device.browser.openUrl(opener, Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.title == "OPENER" && it.activeTab?.loading == false }
+        val seen = device.awaitScreen(Device.VIOLET)
+        assertTrue("opener not painted", device.matches(seen, Device.VIOLET))
+
+        pressPage(LONG_PRESS_MS)
+        val menu = awaitControl().content as PageControlContent.LinkMenu
+        assertEquals(Fixtures.solid(Device.BLUE), menu.link)
+        // The long-press did not also follow the link.
+        assertEquals(1, device.browser.browserState.value.openTabCount)
+
+        awaitText("Open in new tab")
+        compose.onNodeWithText("Open in new tab").performClick()
+        device.awaitPage(Fixtures.solid(Device.BLUE))
+        assertEquals(2, device.browser.browserState.value.openTabCount)
+    }
+
     private fun awaitText(text: String) =
         compose.waitUntil(DIALOG_TIMEOUT_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
 
-    private fun tapPage() {
+    private fun tapPage() = pressPage(TAP_MS)
+
+    private fun pressPage(durationMs: Long) {
         device.dismissSystemDialogs()
         val metrics = compose.activity.resources.displayMetrics
         val x = metrics.widthPixels / 2f
@@ -122,7 +144,8 @@ class PageControlsTest {
         val down = SystemClock.uptimeMillis()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
-        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))
+        if (durationMs > TAP_MS) Thread.sleep(durationMs)
+        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + durationMs, MotionEvent.ACTION_UP, x, y, 0))
     }
 
     private fun shell(command: String) {
@@ -135,5 +158,8 @@ class PageControlsTest {
         const val MARGIN = 0x1f6f78
         const val MARGIN_X = 0.05f
         const val DIALOG_TIMEOUT_MS = 30_000L
+        const val TAP_MS = 80L
+        /** Well past Android's long-press timeout (400–500 ms). */
+        const val LONG_PRESS_MS = 1_500L
     }
 }

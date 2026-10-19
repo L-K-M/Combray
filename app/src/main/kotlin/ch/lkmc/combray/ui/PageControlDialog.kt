@@ -1,5 +1,7 @@
 package ch.lkmc.combray.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,7 +32,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -62,13 +66,71 @@ fun PageControlDialog(
     uploadScope: CoroutineScope,
     onAnswer: (ControlResponse, DialogBlocking) -> Unit,
     onUploadFailed: () -> Unit,
+    /** Whether an address may open in a tab (the address policy refuses `javascript:` and the like). */
+    canOpenInNewTab: (String) -> Boolean,
+    onOpenInNewTab: (String) -> Unit,
+    onShare: (String) -> Unit,
 ) {
     val answer = { response: ControlResponse -> onAnswer(response, DialogBlocking.KEEP_SHOWING) }
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
+        is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onShare) { answer(ControlResponse.Dismiss) }
         else -> ScriptDialog(control, content, onAnswer)
     }
+}
+
+/** Long-press on a link or image. The app acts on the address; Servo's own menu is dismissed. */
+@Composable
+private fun LinkMenu(
+    content: PageControlContent.LinkMenu,
+    canOpenInNewTab: (String) -> Boolean,
+    onOpenInNewTab: (String) -> Unit,
+    onShare: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    val context = LocalContext.current
+    val copy = { url: String ->
+        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(url, url))
+    }
+    val actions = buildList {
+        content.link?.let { link ->
+            if (canOpenInNewTab(link)) add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
+            add(R.string.link_copy to { copy(link) })
+            add(R.string.link_share to { onShare(link) })
+        }
+        content.image?.let { image ->
+            if (canOpenInNewTab(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+            add(R.string.image_copy to { copy(image) })
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = {
+            Text(
+                content.link ?: content.image.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column {
+                actions.forEach { (label, action) ->
+                    TextButton(
+                        onClick = {
+                            onDone()
+                            action()
+                        },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = ROW_HEIGHT),
+                    ) { Text(stringResource(label), Modifier.fillMaxWidth()) }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDone) { Text(stringResource(R.string.action_cancel)) } },
+    )
 }
 
 @Composable

@@ -80,6 +80,9 @@ object NativeEngine {
 
     @JvmStatic external fun imeCommit(text: String)
 
+    /** Long-press at a surface point of the selected tab: Servo's context menu. */
+    @JvmStatic external fun contextClick(x: Float, y: Float)
+
     /** [response] is [ControlResponse.toJson]. */
     @JvmStatic external fun respondToControl(control: Long, response: String)
 

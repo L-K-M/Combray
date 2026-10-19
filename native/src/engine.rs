@@ -27,10 +27,10 @@ use servo::CreateNewWebViewRequest;
 use servo::{
     CompositionEvent, CompositionState, DevicePoint, EmbedderControl, EmbedderControlId,
     EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError, Key, KeyState,
-    KeyboardEvent, NamedKey, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
-    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog,
-    TouchEvent, TouchEventType, TouchId, TouchPointerType, WebView, WebViewBuilder,
-    WindowRenderingContext,
+    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts, PipelineId,
+    PrefValue, Preferences, RenderingContext, SelectElementOption, SelectElementOptionOrOptgroup,
+    Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType, TouchId, TouchPointerType,
+    WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
@@ -343,6 +343,7 @@ impl Engine {
             } => self.touch(phase, pointer, x, y),
             Command::Key { action, key } => self.key(action, key),
             Command::ImeCommit { text } => self.ime_commit(text),
+            Command::ContextClick { x, y } => self.context_click(x, y),
             Command::RespondToControl { control, response } => {
                 self.respond_to_control(control, &response)
             },
@@ -755,6 +756,22 @@ impl Engine {
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             state, key,
         )));
+    }
+
+    /// A long-press: a secondary-button click, which makes Servo fire `contextmenu` and, unless
+    /// the page cancels it, offer a context menu.
+    fn context_click(&mut self, x: f32, y: f32) {
+        let Some(webview) = self.active_webview() else {
+            return;
+        };
+        let point: WebViewPoint = DevicePoint::new(x, y).into();
+        for action in [MouseButtonAction::Down, MouseButtonAction::Up] {
+            webview.notify_input_event(InputEvent::MouseButton(MouseButtonEvent::new(
+                action,
+                MouseButton::Secondary,
+                point,
+            )));
+        }
     }
 
     fn ime_commit(&mut self, text: String) {
@@ -1177,6 +1194,8 @@ impl Engine {
                 picker.submit();
             },
             (EmbedderControl::FilePicker(picker), ControlResponse::Dismiss) => picker.dismiss(),
+            // The application performed the action itself.
+            (EmbedderControl::ContextMenu(menu), ControlResponse::Dismiss) => menu.dismiss(),
             // Dropping a select keeps its previous selection.
             (EmbedderControl::SelectElement(_), ControlResponse::Dismiss) => {},
             (_, response) => self.error(format!(
@@ -1391,6 +1410,15 @@ fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
                 .iter()
                 .map(|pattern| pattern.0.clone())
                 .collect(),
+        },
+        // Only links and images: the bottom bar has back, forward and reload, and editing
+        // actions need a clipboard bridge the app does not have.
+        EmbedderControl::ContextMenu(menu) => {
+            let info = menu.element_info();
+            return controls::link_menu(
+                info.link_url.as_ref().map(Url::as_str),
+                info.image_url.as_ref().map(Url::as_str),
+            );
         },
         _ => return None,
     };

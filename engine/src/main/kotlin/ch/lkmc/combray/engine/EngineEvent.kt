@@ -267,6 +267,7 @@ sealed interface EngineEvent {
                 boolean("multiple"),
                 array("extensions").map { (it as? JsonPrimitive)?.contentOrNull ?: throw IllegalArgumentException("extension is not a string") },
             )
+            "link_menu" -> PageControlContent.LinkMenu(optionalString("link"), optionalString("image"))
             else -> throw IllegalArgumentException("unknown control kind $kind")
         }
 
