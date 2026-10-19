@@ -32,12 +32,10 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
         try {
             // One directory per file: two picked files may share a name.
             uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
-        } catch (failure: IOException) {
+        } catch (failure: Exception) {
+            // Another app's provider may throw anything (IO, permission, bad URI): cancel the upload.
+            // No suspension point in the block, so cancellation cannot be swallowed here.
             Log.w(LOG_TAG, "could not copy a picked file", failure)
-            pick.deleteRecursively()
-            null
-        } catch (failure: SecurityException) {
-            Log.w(LOG_TAG, "picked file not readable", failure)
             pick.deleteRecursively()
             null
         }

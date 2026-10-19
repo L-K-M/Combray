@@ -96,11 +96,19 @@ impl ControlDescription {
             ControlDescription::Confirm { message } => {
                 json!({ "kind": "confirm", "message": bounded(message, MAX_MESSAGE_CHARS) })
             },
-            ControlDescription::Prompt { message, default } => json!({
-                "kind": "prompt",
-                "message": bounded(message, MAX_MESSAGE_CHARS),
-                "default": bounded(default, MAX_MESSAGE_CHARS),
-            }),
+            ControlDescription::Prompt { message, default } => {
+                // An unedited field is returned to the page: leave out a default too long to show.
+                let default = if default.chars().count() <= MAX_MESSAGE_CHARS {
+                    default.as_str()
+                } else {
+                    ""
+                };
+                json!({
+                    "kind": "prompt",
+                    "message": bounded(message, MAX_MESSAGE_CHARS),
+                    "default": default,
+                })
+            },
             ControlDescription::Files {
                 multiple,
                 extensions,
@@ -205,6 +213,18 @@ mod tests {
         let selected = json["selected"].as_array().unwrap();
         assert_eq!(selected.len(), MAX_OPTIONS);
         assert_eq!(selected.last().unwrap(), MAX_OPTIONS - 1);
+    }
+
+    #[test]
+    fn an_overlong_prompt_default_is_left_out_rather_than_cut() {
+        // Accepting the field unedited returns it to the page: a cut default would be wrong.
+        let json = ControlDescription::Prompt {
+            message: "Name?".into(),
+            default: "x".repeat(MAX_MESSAGE_CHARS + 1),
+        }
+        .to_json();
+
+        assert_eq!(json["default"], "");
     }
 
     #[test]

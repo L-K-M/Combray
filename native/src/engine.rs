@@ -1094,6 +1094,7 @@ impl Engine {
             return;
         }
         let Some(description) = describe(&control) else {
+            warn!("answering an unsupported page control with Servo's default");
             return;
         };
         let id = self.next_control;
@@ -1133,20 +1134,22 @@ impl Engine {
         let response = match controls::parse_response(response) {
             Ok(response) => response,
             Err(error) => {
-                self.error(error);
+                self.error(format!(
+                    "{error}; control {id} answered with Servo's default"
+                ));
                 return;
             },
         };
         match (pending.control, response) {
             (EmbedderControl::SelectElement(mut select), ControlResponse::Select { ids }) => {
-                // Only offered, enabled options; a single select keeps at most one.
-                let offered: HashSet<usize> = select_options(select.options())
+                // Only offered, enabled options, each once; a single select keeps at most one.
+                let mut offered: HashSet<usize> = select_options(select.options())
                     .into_iter()
                     .filter(|option| !option.disabled)
                     .map(|option| option.id)
                     .collect();
                 let mut chosen: Vec<usize> =
-                    ids.into_iter().filter(|id| offered.contains(id)).collect();
+                    ids.into_iter().filter(|id| offered.remove(id)).collect();
                 if !select.allow_select_multiple() {
                     chosen.truncate(1);
                     // A single select has no empty answer: keep the previous selection.

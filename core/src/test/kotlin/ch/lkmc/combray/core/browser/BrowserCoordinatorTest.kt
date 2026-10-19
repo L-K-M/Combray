@@ -555,6 +555,43 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun blockingIsOnlyHonouredWhereItWasOffered() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        // Neither a first dialog nor a select picker offers blocking.
+        showControl(1, 1, PageControlContent.Alert("one"))
+        browser.answerPageControl(1, ControlResponse.Accept, DialogBlocking.BLOCK_FOR_PAGE); idle()
+        showControl(1, 2, PageControlContent.Select(emptyList(), emptyList(), false))
+        browser.answerPageControl(2, ControlResponse.Dismiss, DialogBlocking.BLOCK_FOR_PAGE); idle()
+
+        showControl(1, 3, PageControlContent.Alert("three"))
+        assertEquals(3L, state().pageControl?.id)
+    }
+
+    @Test
+    fun aCrashDropsPendingControlsAndTheDialogBlock() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        showControl(1, 1, PageControlContent.Alert("one"))
+        browser.answerPageControl(1, ControlResponse.Accept); idle()
+        showControl(1, 2, PageControlContent.Alert("two"))
+        browser.answerPageControl(2, ControlResponse.Dismiss, DialogBlocking.BLOCK_FOR_PAGE); idle()
+        showControl(1, 3, PageControlContent.Alert("pending"))
+
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        assertNull(state().pageControl)
+        val answered = engine.responses.size
+        browser.answerPageControl(3, ControlResponse.Accept); idle()
+        assertEquals(answered, engine.responses.size)
+
+        showControl(1, 4, PageControlContent.Alert("after"))
+        assertEquals(4L, state().pageControl?.id)
+    }
+
+    @Test
     fun aHiddenTabWaitingForAnAnswerKeepsItsRenderer() {
         engine = FakeEngine()
         browser = BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, maxLiveViews = 1).also { it.start() }

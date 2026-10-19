@@ -264,8 +264,10 @@ class BrowserCoordinator(
     /** Answers [control]; ignored if the page withdrew it or its tab closed meanwhile. */
     fun answerPageControl(control: Long, response: ControlResponse, blocking: DialogBlocking = DialogBlocking.KEEP_SHOWING) = submit {
         val view = liveByTab.values.firstOrNull { live -> live.controls.any { it.id == control } } ?: return@submit
-        view.controls.removeAll { it.id == control }
-        if (blocking == DialogBlocking.BLOCK_FOR_PAGE) view.dialogsBlocked = true
+        val answered = view.controls.first { it.id == control }
+        view.controls.remove(answered)
+        // Only where the dialog offered it: a stray request must not silence the page's dialogs.
+        if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
         engine.respondToControl(control, response)
         publish()
     }
@@ -308,6 +310,9 @@ class BrowserCoordinator(
                 it.crashed = true
                 it.loading = false
                 it.controls.clear()
+                it.dialogDocument = null
+                it.dialogCount = 0
+                it.dialogsBlocked = false
             }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }

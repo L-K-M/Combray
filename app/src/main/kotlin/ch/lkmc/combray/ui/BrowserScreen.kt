@@ -261,6 +261,7 @@ fun BrowserScreen(graph: AppGraph) {
         PageControlDialog(
             control = control,
             staging = graph.uploads,
+            uploadScope = graph.scope,
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
         )

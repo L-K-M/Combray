@@ -26,7 +26,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,6 +43,7 @@ import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 private val ROW_HEIGHT = 48.dp
@@ -52,18 +52,21 @@ private const val DISABLED_ALPHA = 0.38f
 /**
  * Presents what the focused page asks. Back answers with the default (cancel, keep the
  * selection); a tap outside does nothing, so a stray touch cannot answer a page's question.
+ * Uploads are copied in [uploadScope], which must outlive the composition: a rotation during
+ * the copy would otherwise drop the answer and leave the page waiting with nothing shown.
  */
 @Composable
 fun PageControlDialog(
     control: PageControl,
     staging: UploadStaging,
+    uploadScope: CoroutineScope,
     onAnswer: (ControlResponse, DialogBlocking) -> Unit,
     onUploadFailed: () -> Unit,
 ) {
     val answer = { response: ControlResponse -> onAnswer(response, DialogBlocking.KEEP_SHOWING) }
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
-        is PageControlContent.Files -> FilePicker(control.id, content, staging, answer, onUploadFailed)
+        is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
         else -> ScriptDialog(control, content, onAnswer)
     }
 }
@@ -208,10 +211,10 @@ private fun FilePicker(
     id: Long,
     content: PageControlContent.Files,
     staging: UploadStaging,
+    scope: CoroutineScope,
     onAnswer: (ControlResponse) -> Unit,
     onUploadFailed: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     val deliver = { uris: List<Uri> ->
         if (uris.isEmpty()) {
             onAnswer(ControlResponse.Dismiss)
