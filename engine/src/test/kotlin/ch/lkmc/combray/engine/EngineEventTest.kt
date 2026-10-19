@@ -81,6 +81,11 @@ class EngineEventTest {
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.Files(true, listOf("png", "pdf")), files.content)
 
+        val menu = EngineEvent.parse(
+            """{"type":"control_shown","control":8,"kind":"link_menu","link":"https://a.test/","image":null,"tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(PageControlContent.LinkMenu("https://a.test/", null), menu.content)
+
         assertEquals(
             EngineEvent.ControlHidden(ViewRef(1, 2), 7),
             EngineEvent.parse("""{"type":"control_hidden","control":7,"tab":1,"generation":2}"""),

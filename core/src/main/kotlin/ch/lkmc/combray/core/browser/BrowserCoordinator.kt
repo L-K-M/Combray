@@ -323,7 +323,9 @@ class BrowserCoordinator(
     }
 
     private fun onControlShown(view: LiveView, event: EngineEvent.ControlShown) {
-        val dialog = event.content !is PageControlContent.Select && event.content !is PageControlContent.Files
+        val dialog = event.content is PageControlContent.Alert ||
+            event.content is PageControlContent.Confirm ||
+            event.content is PageControlContent.Prompt
         if (dialog) {
             // Counting restarts with each document, so a page that navigated may ask again.
             if (view.dialogDocument != view.currentDocument) {

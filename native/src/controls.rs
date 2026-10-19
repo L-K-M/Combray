@@ -26,6 +26,8 @@ pub const MAX_LABEL_CHARS: usize = 300;
 /// A `<select>` with more entries is shown truncated; the rest cannot be picked.
 pub const MAX_OPTIONS: usize = 2_000;
 pub const MAX_FILE_EXTENSIONS: usize = 50;
+/// Longer link addresses are left out of a link menu rather than cut (a cut URL is wrong).
+pub const MAX_URL_CHARS: usize = 32_768;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectOption {
@@ -58,6 +60,11 @@ pub enum ControlDescription {
     Files {
         multiple: bool,
         extensions: Vec<String>,
+    },
+    /// A long-press on a link or image; the application acts on the addresses itself.
+    LinkMenu {
+        link: Option<String>,
+        image: Option<String>,
     },
 }
 
@@ -119,6 +126,13 @@ impl ControlDescription {
                     .map(|extension| bounded(extension, MAX_LABEL_CHARS))
                     .collect();
                 json!({ "kind": "files", "multiple": multiple, "extensions": extensions })
+            },
+            ControlDescription::LinkMenu { link, image } => {
+                let fits = |url: &Option<String>| {
+                    url.clone()
+                        .filter(|url| url.chars().count() <= MAX_URL_CHARS)
+                };
+                json!({ "kind": "link_menu", "link": fits(link), "image": fits(image) })
             },
         }
     }
@@ -225,6 +239,19 @@ mod tests {
         .to_json();
 
         assert_eq!(json["default"], "");
+    }
+
+    #[test]
+    fn link_menus_leave_out_overlong_addresses() {
+        let json = ControlDescription::LinkMenu {
+            link: Some("https://a.test/".into()),
+            image: Some(format!("https://a.test/{}", "x".repeat(MAX_URL_CHARS))),
+        }
+        .to_json();
+
+        assert_eq!(json["kind"], "link_menu");
+        assert_eq!(json["link"], "https://a.test/");
+        assert_eq!(json["image"], Value::Null);
     }
 
     #[test]

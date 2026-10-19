@@ -20,6 +20,9 @@ sealed interface PageControlContent {
 
     /** [extensions] come from the `accept` attribute, without the dot. */
     data class Files(val multiple: Boolean, val extensions: List<String>) : PageControlContent
+
+    /** A long-press on a link and/or image; answer with [ControlResponse.Dismiss] after acting. */
+    data class LinkMenu(val link: String?, val image: String?) : PageControlContent
 }
 
 /** The answer to a page control. */

@@ -420,6 +420,16 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommit<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_contextClick<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    x: jfloat,
+    y: jfloat,
+) {
+    send(Command::ContextClick { x, y });
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_respondToControl<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,

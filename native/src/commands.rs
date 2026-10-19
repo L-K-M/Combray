@@ -122,6 +122,11 @@ pub enum Command {
     ImeCommit {
         text: String,
     },
+    /// Long-press at a surface point on the active view.
+    ContextClick {
+        x: f32,
+        y: f32,
+    },
     /// The application's answer to a page control, as JSON (see `controls::ControlResponse`).
     RespondToControl {
         control: u64,

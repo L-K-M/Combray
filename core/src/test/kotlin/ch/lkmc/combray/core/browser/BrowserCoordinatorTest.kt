@@ -539,13 +539,16 @@ class BrowserCoordinatorTest {
         assertTrue(state().pageControl!!.offerBlocking)
         browser.answerPageControl(2, ControlResponse.Dismiss, DialogBlocking.BLOCK_FOR_PAGE); idle()
 
-        // Blocked: answered without being shown. Select pickers are not dialogs and still show.
+        // Blocked: answered without being shown. Select pickers and link menus are not dialogs.
         showControl(1, 3, PageControlContent.Confirm("three"))
         assertNull(state().pageControl)
         assertEquals(3L to ControlResponse.Dismiss, engine.responses.last())
         showControl(1, 4, PageControlContent.Select(emptyList(), emptyList(), false))
         assertEquals(4L, state().pageControl?.id)
         browser.answerPageControl(4, ControlResponse.Dismiss); idle()
+        showControl(1, 6, PageControlContent.LinkMenu("https://a.test/l", null))
+        assertEquals(6L, state().pageControl?.id)
+        browser.answerPageControl(6, ControlResponse.Dismiss); idle()
 
         // A new document may ask again.
         commit(1, 11, "https://a.test/next", index = 1, length = 2)

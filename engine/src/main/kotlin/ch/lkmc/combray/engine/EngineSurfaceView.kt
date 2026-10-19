@@ -1,12 +1,15 @@
 package ch.lkmc.combray.engine
 
 import android.content.Context
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
+import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -23,6 +26,25 @@ class EngineSurfaceView(
     context: Context,
     private val engineRunning: () -> Boolean,
 ) : SurfaceView(context), SurfaceHolder.Callback {
+
+    /**
+     * A long-press becomes a secondary click (Servo's context menu). The touches already sent
+     * are cancelled first, and the rest of that gesture stays with the app: otherwise the
+     * lift would also count as a tap on the link.
+     */
+    private var longPressed = false
+    private val gestures = GestureDetector(
+        context,
+        object : GestureDetector.SimpleOnGestureListener() {
+            override fun onLongPress(event: MotionEvent) {
+                val now = SystemClock.uptimeMillis()
+                if (!LongPress.firedOnTime(event.downTime, now, ViewConfiguration.getLongPressTimeout().toLong())) return
+                longPressed = true
+                NativeEngine.touch(NativeEngine.TOUCH_CANCEL, event.getPointerId(0), event.x, event.y)
+                NativeEngine.contextClick(event.x, event.y)
+            }
+        },
+    )
 
     init {
         holder.addCallback(this)
@@ -55,6 +77,9 @@ class EngineSurfaceView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!engineRunning()) return false
         requestFocus()
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) longPressed = false
+        gestures.onTouchEvent(event)
+        if (longPressed) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
                 sendPointer(event, event.actionIndex, NativeEngine.TOUCH_DOWN)

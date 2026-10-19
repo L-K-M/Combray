@@ -187,14 +187,15 @@ impl WebViewDelegate for TabDelegate {
             EmbedderControl::InputMethod(input_method) => input_method,
             control @ (EmbedderControl::SelectElement(_)
             | EmbedderControl::SimpleDialog(_)
-            | EmbedderControl::FilePicker(_)) => {
+            | EmbedderControl::FilePicker(_)
+            | EmbedderControl::ContextMenu(_)) => {
                 self.push(DelegateEvent::PageControl {
                     view: self.view,
                     control,
                 });
                 return;
             },
-            // Colour pickers and context menus get Servo's default response when dropped.
+            // Colour pickers get Servo's default response when dropped.
             _ => {
                 self.push(DelegateEvent::DefaultHandled {
                     view: self.view,
