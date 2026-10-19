@@ -128,14 +128,24 @@ impl ControlDescription {
                 json!({ "kind": "files", "multiple": multiple, "extensions": extensions })
             },
             ControlDescription::LinkMenu { link, image } => {
-                let fits = |url: &Option<String>| {
-                    url.clone()
-                        .filter(|url| url.chars().count() <= MAX_URL_CHARS)
-                };
-                json!({ "kind": "link_menu", "link": fits(link), "image": fits(image) })
+                json!({ "kind": "link_menu", "link": link, "image": image })
             },
         }
     }
+}
+
+/// A menu for a long-pressed link or image, or None if no address is left to act on. Longer
+/// addresses are left out rather than cut: a cut URL is a different, wrong address.
+pub fn link_menu(link: Option<&str>, image: Option<&str>) -> Option<ControlDescription> {
+    let fits = |url: Option<&str>| {
+        url.filter(|url| url.chars().count() <= MAX_URL_CHARS)
+            .map(str::to_owned)
+    };
+    let (link, image) = (fits(link), fits(image));
+    if link.is_none() && image.is_none() {
+        return None;
+    }
+    Some(ControlDescription::LinkMenu { link, image })
 }
 
 /// The application's answer to a control.
@@ -243,15 +253,21 @@ mod tests {
 
     #[test]
     fn link_menus_leave_out_overlong_addresses() {
-        let json = ControlDescription::LinkMenu {
-            link: Some("https://a.test/".into()),
-            image: Some(format!("https://a.test/{}", "x".repeat(MAX_URL_CHARS))),
-        }
-        .to_json();
+        let overlong = format!("https://a.test/{}", "x".repeat(MAX_URL_CHARS));
+        let json = link_menu(Some("https://a.test/"), Some(&overlong))
+            .unwrap()
+            .to_json();
 
         assert_eq!(json["kind"], "link_menu");
         assert_eq!(json["link"], "https://a.test/");
         assert_eq!(json["image"], Value::Null);
+    }
+
+    #[test]
+    fn a_menu_left_without_addresses_is_not_shown() {
+        let overlong = format!("https://a.test/{}", "x".repeat(MAX_URL_CHARS));
+        assert_eq!(link_menu(Some(&overlong), None), None);
+        assert_eq!(link_menu(None, None), None);
     }
 
     #[test]

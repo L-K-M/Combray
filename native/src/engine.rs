@@ -1415,13 +1415,10 @@ fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
         // actions need a clipboard bridge the app does not have.
         EmbedderControl::ContextMenu(menu) => {
             let info = menu.element_info();
-            if info.link_url.is_none() && info.image_url.is_none() {
-                return None;
-            }
-            ControlDescription::LinkMenu {
-                link: info.link_url.as_ref().map(Url::to_string),
-                image: info.image_url.as_ref().map(Url::to_string),
-            }
+            return controls::link_menu(
+                info.link_url.as_ref().map(Url::as_str),
+                info.image_url.as_ref().map(Url::as_str),
+            );
         },
         _ => return None,
     };

@@ -265,6 +265,7 @@ fun BrowserScreen(graph: AppGraph) {
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
             // Through the address policy, like any link the app opens itself (no javascript:).
+            canOpenInNewTab = { url -> AddressPolicy.interpret(url).primary is AddressDecision.Navigate },
             onOpenInNewTab = { url -> (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrl(it.url, Placement.NEW_TAB) } },
             onShare = { url -> share(context, url, resources.getString(R.string.share_chooser)) },
         )

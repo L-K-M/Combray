@@ -66,6 +66,8 @@ fun PageControlDialog(
     uploadScope: CoroutineScope,
     onAnswer: (ControlResponse, DialogBlocking) -> Unit,
     onUploadFailed: () -> Unit,
+    /** Whether an address may open in a tab (the address policy refuses `javascript:` and the like). */
+    canOpenInNewTab: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
     onShare: (String) -> Unit,
 ) {
@@ -73,26 +75,32 @@ fun PageControlDialog(
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
-        is PageControlContent.LinkMenu -> LinkMenu(content, onOpenInNewTab, onShare) { answer(ControlResponse.Dismiss) }
+        is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onShare) { answer(ControlResponse.Dismiss) }
         else -> ScriptDialog(control, content, onAnswer)
     }
 }
 
 /** Long-press on a link or image. The app acts on the address; Servo's own menu is dismissed. */
 @Composable
-private fun LinkMenu(content: PageControlContent.LinkMenu, onOpenInNewTab: (String) -> Unit, onShare: (String) -> Unit, onDone: () -> Unit) {
+private fun LinkMenu(
+    content: PageControlContent.LinkMenu,
+    canOpenInNewTab: (String) -> Boolean,
+    onOpenInNewTab: (String) -> Unit,
+    onShare: (String) -> Unit,
+    onDone: () -> Unit,
+) {
     val context = LocalContext.current
     val copy = { url: String ->
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(url, url))
     }
     val actions = buildList {
         content.link?.let { link ->
-            add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
+            if (canOpenInNewTab(link)) add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
             add(R.string.link_copy to { copy(link) })
             add(R.string.link_share to { onShare(link) })
         }
         content.image?.let { image ->
-            add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+            if (canOpenInNewTab(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
             add(R.string.image_copy to { copy(image) })
         }
     }
