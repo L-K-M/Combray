@@ -61,6 +61,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun setThrottled(tab: Long, throttled: Boolean) = NativeEngine.setThrottled(tab, throttled)
 
+    override fun respondToControl(control: Long, response: ControlResponse) =
+        NativeEngine.respondToControl(control, response.toJson())
+
     override fun capture(tab: Long, document: Long, capture: Long, maxTextBytes: Int, timeoutMs: Int) =
         NativeEngine.capture(tab, document, capture, maxTextBytes, timeoutMs, false)
 

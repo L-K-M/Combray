@@ -122,6 +122,11 @@ pub enum Command {
     ImeCommit {
         text: String,
     },
+    /// The application's answer to a page control, as JSON (see `controls::ControlResponse`).
+    RespondToControl {
+        control: u64,
+        response: String,
+    },
     Capture(CaptureRequest),
     /// Test support: run `script` in the tab's current document without a document guard.
     Evaluate {

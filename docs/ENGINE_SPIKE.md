@@ -212,7 +212,7 @@ Emulator under software emulation; useful for relative comparisons only.
 - **One process.** v0.6.0 runs everything in the app process on Android (`Opts::multiprocess` defaults to false, and servoshell's Android port does not support content processes). There is no content sandbox beyond Android's app sandbox. Web content shares the address space with the native bridge.
 - **No page-to-native bridge.** Page scripts cannot call the engine; the only JavaScript Combray runs is the capture script and the harness's test evaluations, both issued natively.
 - **Hostile pages.** A page can redefine any built-in the capture script uses. That changes only its own reported text; it cannot attach text to another document, because document identity comes from the engine. It can make the script run forever: there is no interruption (section 10).
-- **Permissions** are denied; popups (`request_create_new`) are refused; dialogs, select and file pickers fall back to Servo's default response.
+- **Permissions** are denied; popups (`request_create_new`) are refused; dialogs, select and file pickers fall back to Servo's default response. (The app presents dialogs, select and file pickers since M4; see section 13.)
 - The harness's network security configuration is a statement of intent only: Servo has its own network stack and does not consult Android's policy.
 
 ## 10. Limitations and checks not run
@@ -258,6 +258,7 @@ The app (M1–M3) uses the same bridge, thread model and capture path. Changes s
 | `tab_closed` for `window.close()` (`notify_closed`) | A page closing its own window closes the logical tab like a user close | `native/src/delegate.rs` |
 | `ime_shown {kind}` from Servo's `InputMethodType` | The keyboard matches the field: password fields disable suggestions and personalized learning | `native/src/delegate.rs`, `EngineSurfaceView.kt` |
 | Log filter: Servo `error` only, Combray `info` | Servo's warnings often name page URLs | `native/src/jni_api.rs` |
+| `control_shown {control, kind}` / `control_hidden` and `respondToControl(control, json)` for `<select>` pickers, `alert`/`confirm`/`prompt` and `<input type=file>` | The engine dropped them, so Servo answered with defaults: dropdowns could not change, `confirm()` returned false and uploads were impossible. The engine keeps each Servo handle until the app answers or the page withdraws it; page strings are bounded (4,000 characters, 2,000 options) | `native/src/controls.rs`, `engine.rs` |
 
 Evidence on the emulator (`scripts/check-app.sh`, [BUILDING.md](BUILDING.md#emulator-and-checks)): after the app went to the background, the cookie jar on disk contained a cookie set moments earlier (`ProcessDeathTest#prepare`, passed), and after a forced stop and relaunch Servo sent that cookie again (`ProcessDeathTest#verify`, passed in run `run9`).
 

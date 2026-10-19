@@ -6,8 +6,10 @@ import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.engine.Attribution
+import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.HistoryKind
+import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -477,6 +479,92 @@ class BrowserCoordinatorTest {
         assertEquals(tabA, state().activeTab?.id)
         assertEquals(1L to "https://a-next.test/", engine.navigated.single().let { it.first to it.third })
         assertEquals(1L, engine.selected.last())
+    }
+
+    private fun showControl(native: Long, control: Long, content: PageControlContent) {
+        engine.emit(EngineEvent.ControlShown(engine.view(native), control, content))
+        idle()
+    }
+
+    @Test
+    fun aPageControlIsShownForTheFocusedTabOnlyAndAnswered() {
+        ready()
+        browser.openUrl("https://a.test/x", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/x")
+        val tabA = state().activeTab!!.id
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        // A hidden tab's dialog waits until that tab is focused.
+        showControl(1, 5, PageControlContent.Confirm("Leave?"))
+        assertNull(state().pageControl)
+
+        browser.selectTab(tabA); idle()
+        val shown = state().pageControl!!
+        assertEquals(5L, shown.id)
+        assertEquals("a.test", shown.site)
+        assertFalse(shown.offerBlocking)
+
+        browser.answerPageControl(5, ControlResponse.Accept); idle()
+        assertEquals(listOf(5L to ControlResponse.Accept), engine.responses)
+        assertNull(state().pageControl)
+    }
+
+    @Test
+    fun aWithdrawnControlDisappearsAndClosingTheTabDropsItsControls() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        showControl(1, 5, PageControlContent.Select(emptyList(), emptyList(), false))
+        engine.emit(EngineEvent.ControlHidden(engine.view(1), 5)); idle()
+        assertNull(state().pageControl)
+
+        showControl(1, 6, PageControlContent.Alert("hi"))
+        browser.closeTab(state().activeTab!!.id); idle()
+        browser.answerPageControl(6, ControlResponse.Accept); idle()
+        assertTrue(engine.responses.isEmpty())
+    }
+
+    @Test
+    fun repeatedDialogsCanBeBlockedUntilThePageNavigates() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        showControl(1, 1, PageControlContent.Alert("one"))
+        assertFalse(state().pageControl!!.offerBlocking)
+        browser.answerPageControl(1, ControlResponse.Accept); idle()
+
+        showControl(1, 2, PageControlContent.Alert("two"))
+        assertTrue(state().pageControl!!.offerBlocking)
+        browser.answerPageControl(2, ControlResponse.Dismiss, DialogBlocking.BLOCK_FOR_PAGE); idle()
+
+        // Blocked: answered without being shown. Select pickers are not dialogs and still show.
+        showControl(1, 3, PageControlContent.Confirm("three"))
+        assertNull(state().pageControl)
+        assertEquals(3L to ControlResponse.Dismiss, engine.responses.last())
+        showControl(1, 4, PageControlContent.Select(emptyList(), emptyList(), false))
+        assertEquals(4L, state().pageControl?.id)
+        browser.answerPageControl(4, ControlResponse.Dismiss); idle()
+
+        // A new document may ask again.
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+        showControl(1, 5, PageControlContent.Alert("five"))
+        assertEquals(5L, state().pageControl?.id)
+        assertFalse(state().pageControl!!.offerBlocking)
+    }
+
+    @Test
+    fun aHiddenTabWaitingForAnAnswerKeepsItsRenderer() {
+        engine = FakeEngine()
+        browser = BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, maxLiveViews = 1).also { it.start() }
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        showControl(1, 5, PageControlContent.Alert("wait"))
+
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertTrue(1L !in engine.closed)
     }
 
     private companion object {

@@ -25,10 +25,12 @@ use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
 use servo::CreateNewWebViewRequest;
 use servo::{
-    CompositionEvent, CompositionState, DevicePoint, EmbedderControlId, EventLoopWaker, ImeEvent,
-    InputEvent, JSValue, JavaScriptEvaluationError, Key, KeyState, KeyboardEvent, NamedKey, Opts,
-    PipelineId, PrefValue, Preferences, RenderingContext, Servo, ServoBuilder, TouchEvent,
-    TouchEventType, TouchId, TouchPointerType, WebView, WebViewBuilder, WindowRenderingContext,
+    CompositionEvent, CompositionState, DevicePoint, EmbedderControl, EmbedderControlId,
+    EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError, Key, KeyState,
+    KeyboardEvent, NamedKey, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
+    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog,
+    TouchEvent, TouchEventType, TouchId, TouchPointerType, WebView, WebViewBuilder,
+    WindowRenderingContext,
 };
 use url::Url;
 
@@ -37,6 +39,7 @@ use crate::commands::{
     CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
     TouchPhase,
 };
+use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
 use crate::delegate::{DelegateEvent, DelegateQueue, TabDelegate};
 use crate::events::{
     Attribution, CaptureReport, CaptureStatus, EngineEvent, HistoryChange, LoadPhase, ViewKey,
@@ -189,6 +192,12 @@ impl Tab {
     }
 }
 
+/// A page control waiting for the application's answer. Dropping it answers with Servo's default.
+struct PendingControl {
+    view: ViewKey,
+    control: EmbedderControl,
+}
+
 struct PendingCapture {
     view: ViewKey,
     document: u64,
@@ -226,6 +235,8 @@ struct Engine {
     capture_results: CaptureResults,
     evaluation_results: EvaluationResults,
     pending_captures: HashMap<i64, PendingCapture>,
+    page_controls: HashMap<u64, PendingControl>,
+    next_control: u64,
 }
 
 impl Engine {
@@ -248,6 +259,8 @@ impl Engine {
             capture_results: Default::default(),
             evaluation_results: Default::default(),
             pending_captures: HashMap::new(),
+            page_controls: HashMap::new(),
+            next_control: 1,
         }
     }
 
@@ -330,6 +343,9 @@ impl Engine {
             } => self.touch(phase, pointer, x, y),
             Command::Key { action, key } => self.key(action, key),
             Command::ImeCommit { text } => self.ime_commit(text),
+            Command::RespondToControl { control, response } => {
+                self.respond_to_control(control, &response)
+            },
             Command::Capture(request) => self.start_capture(request),
             Command::Evaluate {
                 tab,
@@ -646,6 +662,9 @@ impl Engine {
             self.ime_owner = None;
             self.emit(EngineEvent::ImeHidden { view: closed.view });
         }
+        // Their answers could never reach the page; dropping sends Servo's defaults.
+        self.page_controls
+            .retain(|_, pending| pending.view != closed.view);
         let view = closed.view;
         // Dropping the last handle closes the WebView in Servo.
         drop(closed);
@@ -1051,10 +1070,21 @@ impl Engine {
                     self.close_tab(view.tab);
                 }
             },
-            DelegateEvent::ImeHidden { view, control } => {
+            DelegateEvent::PageControl { view, control } => self.show_page_control(view, control),
+            DelegateEvent::ControlHidden { view, control } => {
                 if self.ime_owner == Some((view, control)) {
                     self.ime_owner = None;
                     self.emit(EngineEvent::ImeHidden { view });
+                }
+                let hidden: Vec<u64> = self
+                    .page_controls
+                    .iter()
+                    .filter(|(_, pending)| pending.view == view && pending.control.id() == control)
+                    .map(|(id, _)| *id)
+                    .collect();
+                for id in hidden {
+                    self.page_controls.remove(&id);
+                    self.emit(EngineEvent::ControlHidden { view, control: id });
                 }
             },
             DelegateEvent::DefaultHandled { view, request } => {
@@ -1064,6 +1094,77 @@ impl Engine {
                 error!("view {view:?} crashed: {reason}");
                 self.emit(EngineEvent::Crashed { view, reason });
             },
+        }
+    }
+
+    fn show_page_control(&mut self, view: ViewKey, control: EmbedderControl) {
+        if self.live_tab(view).is_none() {
+            return;
+        }
+        let Some(description) = describe(&control) else {
+            return;
+        };
+        let id = self.next_control;
+        self.next_control += 1;
+        self.page_controls
+            .insert(id, PendingControl { view, control });
+        self.emit(EngineEvent::ControlShown {
+            view,
+            control: id,
+            description,
+        });
+    }
+
+    fn respond_to_control(&mut self, id: u64, response: &str) {
+        let Some(pending) = self.page_controls.remove(&id) else {
+            // Hidden by the page or its tab closed while the user decided.
+            return;
+        };
+        let response = match controls::parse_response(response) {
+            Ok(response) => response,
+            Err(error) => {
+                self.error(error);
+                return;
+            },
+        };
+        match (pending.control, response) {
+            (EmbedderControl::SelectElement(mut select), ControlResponse::Select { ids }) => {
+                // Only offered, enabled options; a single select keeps at most one.
+                let offered: HashSet<usize> = select_options(select.options())
+                    .into_iter()
+                    .filter(|option| !option.disabled)
+                    .map(|option| option.id)
+                    .collect();
+                let mut chosen: Vec<usize> =
+                    ids.into_iter().filter(|id| offered.contains(id)).collect();
+                if !select.allow_select_multiple() {
+                    chosen.truncate(1);
+                }
+                select.select(chosen);
+                select.submit();
+            },
+            (
+                EmbedderControl::SimpleDialog(SimpleDialog::Prompt(mut prompt)),
+                ControlResponse::Text { value },
+            ) => {
+                prompt.set_current_value(&value);
+                prompt.confirm();
+            },
+            (EmbedderControl::SimpleDialog(dialog), ControlResponse::Accept) => dialog.confirm(),
+            (EmbedderControl::SimpleDialog(dialog), ControlResponse::Dismiss) => dialog.dismiss(),
+            (EmbedderControl::FilePicker(mut picker), ControlResponse::Files { mut paths }) => {
+                if !picker.allow_select_multiple() {
+                    paths.truncate(1);
+                }
+                picker.select(&paths);
+                picker.submit();
+            },
+            (EmbedderControl::FilePicker(picker), ControlResponse::Dismiss) => picker.dismiss(),
+            // Dropping a select keeps its previous selection.
+            (EmbedderControl::SelectElement(_), ControlResponse::Dismiss) => {},
+            (_, response) => self.error(format!(
+                "response {response:?} does not fit control {id}; answered with the default"
+            )),
         }
     }
 
@@ -1216,6 +1317,7 @@ impl Engine {
     fn shutdown(&mut self) {
         info!("shutting down Servo");
         self.pending_captures.clear();
+        self.page_controls.clear();
         self.active = None;
         // Close every view first: each WebView holds a Servo handle.
         self.tabs.clear();
@@ -1246,6 +1348,60 @@ impl Engine {
 }
 
 /// Maps an Android key (character plus key code) to a DOM key.
+/// What the application needs to present `control`; `None` for controls it does not present.
+fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
+    let description = match control {
+        EmbedderControl::SelectElement(select) => ControlDescription::Select {
+            options: select_options(select.options()),
+            selected: select.selected_options(),
+            multiple: select.allow_select_multiple(),
+        },
+        EmbedderControl::SimpleDialog(SimpleDialog::Alert(alert)) => ControlDescription::Alert {
+            message: alert.message().to_owned(),
+        },
+        EmbedderControl::SimpleDialog(SimpleDialog::Confirm(confirm)) => {
+            ControlDescription::Confirm {
+                message: confirm.message().to_owned(),
+            }
+        },
+        EmbedderControl::SimpleDialog(SimpleDialog::Prompt(prompt)) => ControlDescription::Prompt {
+            message: prompt.message().to_owned(),
+            default: prompt.current_value().to_owned(),
+        },
+        EmbedderControl::FilePicker(picker) => ControlDescription::Files {
+            multiple: picker.allow_select_multiple(),
+            extensions: picker
+                .filter_patterns()
+                .iter()
+                .map(|pattern| pattern.0.clone())
+                .collect(),
+        },
+        _ => return None,
+    };
+    Some(description)
+}
+
+/// Flattens `<optgroup>`s: each option remembers its group's label.
+fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption> {
+    let option = |option: &SelectElementOption, group: Option<&String>| SelectOption {
+        id: option.id,
+        label: option.label.clone(),
+        disabled: option.is_disabled,
+        group: group.cloned(),
+    };
+    let mut options = Vec::new();
+    for entry in entries {
+        match entry {
+            SelectElementOptionOrOptgroup::Option(single) => options.push(option(single, None)),
+            SelectElementOptionOrOptgroup::Optgroup {
+                label,
+                options: grouped,
+            } => options.extend(grouped.iter().map(|single| option(single, Some(label)))),
+        }
+    }
+    options
+}
+
 fn servo_key(key: KeyInput) -> Option<Key> {
     if let Some(character) = char::from_u32(key.unicode).filter(|c| *c != '\0' && !c.is_control()) {
         return Some(Key::Character(character.to_string()));

@@ -1,6 +1,7 @@
 package ch.lkmc.combray.engine
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -132,6 +133,12 @@ sealed interface EngineEvent {
 
     data class Crashed(val view: ViewRef, val reason: String) : EngineEvent
 
+    /** A page control waits for [EnginePort.respondToControl] with [control]. */
+    data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
+
+    /** The page withdrew [control] or its view closed; an answer would be ignored. */
+    data class ControlHidden(val view: ViewRef, val control: Long) : EngineEvent
+
     data class EngineError(val message: String, val tab: Long?, val request: Long?) : EngineEvent
 
     data object ShutdownComplete : EngineEvent
@@ -188,6 +195,8 @@ sealed interface EngineEvent {
                 "ime_shown" -> ImeShown(event.view(), event.boolean("multiline"), event.optionalString("kind") ?: "text")
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
+                "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
+                "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))
                 "shutdown_complete" -> ShutdownComplete
                 "profile_persisted" -> ProfilePersisted(event.boolean("ok"))
@@ -241,6 +250,28 @@ sealed interface EngineEvent {
                 optionalString("detail"),
             )
         }
+
+        private fun JsonObject.pageControl(): PageControlContent = when (val kind = string("kind")) {
+            "select" -> PageControlContent.Select(
+                array("options").map {
+                    val option = it as? JsonObject ?: throw IllegalArgumentException("option is not an object")
+                    SelectEntry(option.int("id"), option.string("label"), option.boolean("disabled"), option.optionalString("group"))
+                },
+                array("selected").map { (it as? JsonPrimitive)?.intOrNull ?: throw IllegalArgumentException("selected is not an integer") },
+                boolean("multiple"),
+            )
+            "alert" -> PageControlContent.Alert(string("message"))
+            "confirm" -> PageControlContent.Confirm(string("message"))
+            "prompt" -> PageControlContent.Prompt(string("message"), string("default"))
+            "files" -> PageControlContent.Files(
+                boolean("multiple"),
+                array("extensions").map { (it as? JsonPrimitive)?.contentOrNull ?: throw IllegalArgumentException("extension is not a string") },
+            )
+            else -> throw IllegalArgumentException("unknown control kind $kind")
+        }
+
+        private fun JsonObject.array(key: String): JsonArray =
+            get(key) as? JsonArray ?: throw IllegalArgumentException("$key is not an array")
 
         private fun JsonObject.view() = ViewRef(long("tab"), long("generation"))
 

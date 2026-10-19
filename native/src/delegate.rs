@@ -55,11 +55,17 @@ pub enum DelegateEvent {
         multiline: bool,
         kind: &'static str,
     },
+    /// A `<select>` picker, script dialog or file picker; kept whole until answered.
+    PageControl {
+        view: ViewKey,
+        control: EmbedderControl,
+    },
     /// The page closed its own window (`window.close()`); Servo has discarded the view.
     ClosedByPage {
         view: ViewKey,
     },
-    ImeHidden {
+    /// Servo withdrew a control it showed (keyboard or page control).
+    ControlHidden {
         view: ViewKey,
         control: EmbedderControlId,
     },
@@ -177,14 +183,25 @@ impl WebViewDelegate for TabDelegate {
     }
 
     fn show_embedder_control(&self, _webview: WebView, embedder_control: EmbedderControl) {
-        let EmbedderControl::InputMethod(input_method) = embedder_control else {
-            // Select pickers, dialogs and file pickers fall back to Servo's default response
-            // when dropped. M0 does not present them.
-            self.push(DelegateEvent::DefaultHandled {
-                view: self.view,
-                request: "embedder_control",
-            });
-            return;
+        let input_method = match embedder_control {
+            EmbedderControl::InputMethod(input_method) => input_method,
+            control @ (EmbedderControl::SelectElement(_)
+            | EmbedderControl::SimpleDialog(_)
+            | EmbedderControl::FilePicker(_)) => {
+                self.push(DelegateEvent::PageControl {
+                    view: self.view,
+                    control,
+                });
+                return;
+            },
+            // Colour pickers and context menus get Servo's default response when dropped.
+            _ => {
+                self.push(DelegateEvent::DefaultHandled {
+                    view: self.view,
+                    request: "embedder_control",
+                });
+                return;
+            },
         };
         // The field type lets the keyboard behave: no suggestions or learning for passwords.
         let kind = match input_method.input_method_type() {
@@ -209,7 +226,7 @@ impl WebViewDelegate for TabDelegate {
     }
 
     fn hide_embedder_control(&self, _webview: WebView, control_id: EmbedderControlId) {
-        self.push(DelegateEvent::ImeHidden {
+        self.push(DelegateEvent::ControlHidden {
             view: self.view,
             control: control_id,
         });

@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.browser
 
+import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
@@ -79,6 +80,12 @@ class FakeEngine : EnginePort {
     override fun reload(tab: Long) = Unit
 
     override fun setThrottled(tab: Long, throttled: Boolean) = Unit
+
+    val responses = mutableListOf<Pair<Long, ControlResponse>>()
+
+    override fun respondToControl(control: Long, response: ControlResponse) {
+        responses += control to response
+    }
 
     override fun capture(tab: Long, document: Long, capture: Long, maxTextBytes: Int, timeoutMs: Int) {
         captures += document to capture

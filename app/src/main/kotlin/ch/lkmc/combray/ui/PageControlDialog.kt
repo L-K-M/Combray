@@ -1,0 +1,237 @@
+package ch.lkmc.combray.ui
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import ch.lkmc.combray.R
+import ch.lkmc.combray.UploadStaging
+import ch.lkmc.combray.core.browser.DialogBlocking
+import ch.lkmc.combray.core.browser.PageControl
+import ch.lkmc.combray.engine.ControlResponse
+import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.SelectEntry
+import kotlinx.coroutines.launch
+
+private val ROW_HEIGHT = 48.dp
+private const val DISABLED_ALPHA = 0.38f
+
+/**
+ * Presents what the focused page asks. Back answers with the default (cancel, keep the
+ * selection); a tap outside does nothing, so a stray touch cannot answer a page's question.
+ */
+@Composable
+fun PageControlDialog(
+    control: PageControl,
+    staging: UploadStaging,
+    onAnswer: (ControlResponse, DialogBlocking) -> Unit,
+    onUploadFailed: () -> Unit,
+) {
+    val answer = { response: ControlResponse -> onAnswer(response, DialogBlocking.KEEP_SHOWING) }
+    when (val content = control.content) {
+        is PageControlContent.Select -> SelectDialog(control.id, content, answer)
+        is PageControlContent.Files -> FilePicker(control.id, content, staging, answer, onUploadFailed)
+        else -> ScriptDialog(control, content, onAnswer)
+    }
+}
+
+@Composable
+private fun ScriptDialog(
+    control: PageControl,
+    content: PageControlContent,
+    onAnswer: (ControlResponse, DialogBlocking) -> Unit,
+) {
+    var block by rememberSaveable(control.id) { mutableStateOf(false) }
+    val blocking = if (block) DialogBlocking.BLOCK_FOR_PAGE else DialogBlocking.KEEP_SHOWING
+    val (message, prompt) = when (content) {
+        is PageControlContent.Alert -> content.message to null
+        is PageControlContent.Confirm -> content.message to null
+        is PageControlContent.Prompt -> content.message to content.default
+        else -> return
+    }
+    var text by rememberSaveable(control.id) { mutableStateOf(prompt.orEmpty()) }
+    val cancellable = content !is PageControlContent.Alert
+
+    AlertDialog(
+        onDismissRequest = { onAnswer(ControlResponse.Dismiss, blocking) },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = {
+            Text(
+                control.site?.let { stringResource(R.string.page_dialog_title, it) } ?: stringResource(R.string.page_dialog_title_unknown),
+                modifier = Modifier.semantics { heading() },
+            )
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (message.isNotEmpty()) Text(message)
+                if (prompt != null) {
+                    OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+                if (control.offerBlocking) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = ROW_HEIGHT).toggleable(block, role = Role.Checkbox) { block = it },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = block, onCheckedChange = null)
+                        Text(stringResource(R.string.page_dialog_block), Modifier.padding(start = 12.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onAnswer(if (prompt != null) ControlResponse.Text(text) else ControlResponse.Accept, blocking) }) {
+                Text(stringResource(R.string.action_ok))
+            }
+        },
+        dismissButton = if (cancellable) {
+            { TextButton(onClick = { onAnswer(ControlResponse.Dismiss, blocking) }) { Text(stringResource(R.string.action_cancel)) } }
+        } else {
+            null
+        },
+    )
+}
+
+@Composable
+private fun SelectDialog(id: Long, content: PageControlContent.Select, onAnswer: (ControlResponse) -> Unit) {
+    var chosen by rememberSaveable(id) { mutableStateOf(content.selected.toSet()) }
+    val pick = { option: SelectEntry ->
+        if (content.multiple) {
+            chosen = if (option.id in chosen) chosen - option.id else chosen + option.id
+        } else {
+            // A single choice answers at once, like a native dropdown.
+            onAnswer(ControlResponse.Select(listOf(option.id)))
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { onAnswer(ControlResponse.Dismiss) },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text(stringResource(R.string.page_select_title), Modifier.semantics { heading() }) },
+        text = {
+            LazyColumn {
+                items(content.options.withGroupHeaders()) { row ->
+                    when (row) {
+                        is SelectRow.Group -> Text(
+                            row.label,
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp).semantics { heading() },
+                        )
+                        is SelectRow.Choice -> OptionRow(row.option, row.option.id in chosen, content.multiple) { pick(row.option) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (content.multiple) {
+                TextButton(onClick = { onAnswer(ControlResponse.Select(chosen.toList())) }) { Text(stringResource(R.string.action_ok)) }
+            }
+        },
+        dismissButton = { TextButton(onClick = { onAnswer(ControlResponse.Dismiss) }) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+@Composable
+private fun OptionRow(option: SelectEntry, selected: Boolean, multiple: Boolean, onClick: () -> Unit) {
+    val role = if (multiple) Role.Checkbox else Role.RadioButton
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = ROW_HEIGHT).selectable(selected, enabled = !option.disabled, role = role, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (multiple) {
+            Checkbox(checked = selected, onCheckedChange = null, enabled = !option.disabled)
+        } else {
+            RadioButton(selected = selected, onClick = null, enabled = !option.disabled)
+        }
+        Text(
+            option.label,
+            modifier = Modifier.padding(start = 12.dp),
+            color = if (option.disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA) else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+private sealed interface SelectRow {
+    data class Group(val label: String) : SelectRow
+
+    data class Choice(val option: SelectEntry) : SelectRow
+}
+
+/** A header before each run of options that share an `<optgroup>`. */
+private fun List<SelectEntry>.withGroupHeaders(): List<SelectRow> {
+    val rows = ArrayList<SelectRow>(size)
+    var group: String? = null
+    for (option in this) {
+        val label = option.group
+        if (label != null && label != group) rows += SelectRow.Group(label)
+        group = label
+        rows += SelectRow.Choice(option)
+    }
+    return rows
+}
+
+/** Opens Android's document picker once per control; the picked files are copied for Servo. */
+@Composable
+private fun FilePicker(
+    id: Long,
+    content: PageControlContent.Files,
+    staging: UploadStaging,
+    onAnswer: (ControlResponse) -> Unit,
+    onUploadFailed: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val deliver = { uris: List<Uri> ->
+        if (uris.isEmpty()) {
+            onAnswer(ControlResponse.Dismiss)
+        } else {
+            scope.launch {
+                val paths = staging.stage(uris)
+                if (paths == null) onUploadFailed()
+                onAnswer(paths?.let { ControlResponse.Files(it) } ?: ControlResponse.Dismiss)
+            }
+        }
+    }
+    val one = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> deliver(listOfNotNull(uri)) }
+    val many = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> deliver(uris) }
+
+    // Saved: after a configuration change the picker is still open and must not open twice.
+    var launchedFor by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(id) {
+        if (launchedFor == id) return@LaunchedEffect
+        launchedFor = id
+        val types = UploadStaging.mimeTypesFor(content.extensions)
+        if (content.multiple) many.launch(types) else one.launch(types)
+    }
+}

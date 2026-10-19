@@ -6,6 +6,7 @@
 //!        ▼                                             │
 //!  jni_api ──Command──▶ engine thread (owns Servo) ─EngineEvent─┘
 //!                         ├─ delegate: per-view WebViewDelegate → queue
+//!                         ├─ controls: select pickers, script dialogs, file pickers
 //!                         ├─ capture: bounded in-page text snapshot
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
@@ -14,6 +15,7 @@
 //! without Servo.
 
 pub mod capture;
+pub mod controls;
 pub mod events;
 mod panic_policy;
 

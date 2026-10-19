@@ -420,6 +420,25 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommit<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_respondToControl<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    control: jlong,
+    response: JString<'local>,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let response = java_string(env, response)?;
+        send(Command::RespondToControl {
+            // IDs come from `control_shown`, which never emits a negative one.
+            control: control as u64,
+            response,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_capture<'local>(
     _env: EnvUnowned<'local>,
     _class: JClass<'local>,
