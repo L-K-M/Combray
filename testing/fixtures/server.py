@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Synthetic pages and fake services for Combray's device checks (no live services, no personal data).
+
+    python3 -I testing/fixtures/server.py [--port 8766]
+
+The device reaches it through `adb reverse tcp:8766 tcp:8766` at http://localhost:8766.
+
+Pages
+  /solid/<rrggbb>.html       whole page in one color; title SOLID-<rrggbb> (pixel checks)
+  /echo?q=...                title ECHO:<q as received> (query encoding checks)
+  /cookie-set?v=<alnum>      sets cookie combray=<v> (one year)
+  /cookie-echo               title COOKIE:<Cookie header>
+  /opener.html               link with target=_blank to /solid/3b4f8a.html
+  /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
+  /private.html              page for exclusion checks
+Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
+service's own host is never captured for Hister)
+  POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks; key "fixture-key"
+Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
+  POST /hister/api/add (needs Origin: hister://), GET /hister/search?q=&format=json; token "fixture-token"
+Admin (for the checks)
+  GET  /_admin/state                    JSON: bookmarks, hister documents, request log
+  POST /_admin/reset                    forget everything
+  POST /_admin/fault?service=karakeep|hister&kind=<fault>&count=<n>
+       faults: none, store_then_hang, too_many_requests, server_error, unauthorized
+"""
+
+import argparse
+import html
+import http.server
+import json
+import threading
+import time
+import urllib.parse
+
+DEFAULT_PORT = 8766
+KARAKEEP_KEY = "fixture-key"
+HISTER_TOKEN = "fixture-token"
+HANG_SECONDS = 20
+COOKIE_NAME = "combray"
+COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60
+MAX_BODY_BYTES = 2 * 1024 * 1024
+FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unauthorized"}
+
+lock = threading.Lock()
+state = {"bookmarks": {}, "hister": {}, "log": []}
+faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
+
+
+def page(title, body, head=""):
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{html.escape(title)}</title>{head}</head><body>{body}</body></html>"
+    )
+
+
+def take_fault(service):
+    with lock:
+        kind, count = faults[service]
+        if count <= 0:
+            return "none"
+        faults[service][1] = count - 1
+        return kind
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def send(self, status, body=b"", content_type="text/html; charset=utf-8", headers=()):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for name, value in headers:
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_json(self, status, value, headers=()):
+        self.send(status, json.dumps(value), "application/json", headers)
+
+    def body(self):
+        length = min(int(self.headers.get("Content-Length") or 0), MAX_BODY_BYTES)
+        return self.rfile.read(length)
+
+    def record(self, entry):
+        with lock:
+            state["log"].append(entry)
+
+    def do_GET(self):
+        url = urllib.parse.urlsplit(self.path)
+        query = urllib.parse.parse_qs(url.query, keep_blank_values=True)
+        path = url.path
+
+        if path.startswith("/solid/") and path.endswith(".html"):
+            color = path[len("/solid/"):-len(".html")]
+            if len(color) != 6 or any(c not in "0123456789abcdef" for c in color):
+                return self.send(400, page("bad color", ""))
+            return self.send(200, page(f"SOLID-{color}", f"<p>SOLID-{color}</p>",
+                                       f"<style>html,body{{margin:0;min-height:100%;background:#{color}}}</style>"))
+        if path == "/echo":
+            received = query.get("q", [""])[0]
+            return self.send(200, page(f"ECHO:{received}", f"<p id='q'>{html.escape(received)}</p>"))
+        if path == "/cookie-set":
+            value = "".join(c for c in query.get("v", ["unset"])[0] if c.isascii() and c.isalnum())[:32]
+            cookie = f"{COOKIE_NAME}={value}; Max-Age={COOKIE_MAX_AGE_SECONDS}; Path=/"
+            return self.send(200, page(f"COOKIE-SET:{value}", "<p>set</p>"), headers=[("Set-Cookie", cookie)])
+        if path == "/cookie-echo":
+            return self.send(200, page(f"COOKIE:{self.headers.get('Cookie', '')}", "<p>echo</p>"))
+        if path == "/opener.html":
+            # The link fills the page, so a tap anywhere in the page area follows it.
+            return self.send(200, page("OPENER", "<a id='open' target='_blank' href='/solid/3b4f8a.html' "
+                                                 "style='display:block;height:100vh;font-size:48px;color:#fff'>open new tab</a>",
+                                       "<style>html,body{margin:0;background:#5b2a86}</style>"))
+        if path == "/rendered.html":
+            # The rendered phrase is the parameter reversed: it is in neither the URL nor the title.
+            phrase = "".join(c for c in query.get("p", ["x"])[0] if c.isascii() and c.isalnum())[:40][::-1]
+            script = f"<script>addEventListener('load',function(){{document.getElementById('t').textContent='RENDERED-{phrase}';}});</script>"
+            return self.send(200, page("RENDERED", "<p id='t'>static placeholder</p>", script))
+        if path == "/private.html":
+            return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
+
+        if path == "/keep/api/v1/bookmarks":
+            if self.headers.get("Authorization") != f"Bearer {KARAKEEP_KEY}":
+                return self.send_json(401, {"error": "unauthorized"})
+            self.record({"service": "karakeep", "method": "GET"})
+            return self.send_json(200, {"bookmarks": [], "nextCursor": None})
+        if path == "/hister/search":
+            if not self.hister_authorized():
+                return self.send_json(401, {"error": "unauthorized"})
+            text = query.get("q", [""])[0]
+            self.record({"service": "hister", "method": "GET", "q": text})
+            with lock:
+                docs = [d for d in state["hister"].values() if text and text.lower() in (d["text"] + " " + d["title"]).lower()]
+            return self.send_json(200, {
+                "query": text,
+                "total": len(docs),
+                "documents": [{"url": d["url"], "title": d["title"], "text": d["text"][:200]} for d in docs],
+                "history": [],
+                "page_key": None,
+            })
+        if path == "/_admin/state":
+            with lock:
+                return self.send_json(200, state)
+        return self.send(404, page("not found", ""))
+
+    def do_POST(self):
+        url = urllib.parse.urlsplit(self.path)
+        query = urllib.parse.parse_qs(url.query)
+        path = url.path
+        raw = self.body()
+
+        if path == "/_admin/reset":
+            with lock:
+                state["bookmarks"].clear()
+                state["hister"].clear()
+                state["log"].clear()
+                for value in faults.values():
+                    value[0], value[1] = "none", 0
+            return self.send_json(200, {"ok": True})
+        if path == "/_admin/fault":
+            service = query.get("service", [""])[0]
+            kind = query.get("kind", ["none"])[0]
+            if service not in faults or kind not in FAULTS:
+                return self.send_json(400, {"error": "bad fault"})
+            with lock:
+                faults[service] = [kind, int(query.get("count", ["1"])[0])]
+            return self.send_json(200, {"ok": True})
+
+        if path == "/keep/api/v1/bookmarks":
+            return self.karakeep_create(raw)
+        if path == "/hister/api/add":
+            return self.hister_add(raw)
+        return self.send(404, page("not found", ""))
+
+    def karakeep_create(self, raw):
+        fault = take_fault("karakeep")
+        if fault == "unauthorized" or self.headers.get("Authorization") != f"Bearer {KARAKEEP_KEY}":
+            return self.send_json(401, {"error": "unauthorized"})
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return self.send_json(400, {"error": "bad json"})
+        if data.get("type") != "link" or not str(data.get("url", "")).startswith(("http://", "https://")):
+            return self.send_json(400, {"error": "bad bookmark"})
+        self.record({"service": "karakeep", "method": "POST", "url": data["url"], "title": data.get("title")})
+        if fault == "too_many_requests":
+            return self.send_json(429, {"error": "slow down"}, headers=[("Retry-After", "1")])
+        if fault == "server_error":
+            return self.send_json(503, {"error": "unavailable"})
+        with lock:
+            existing = state["bookmarks"].get(data["url"])
+            if existing is None:
+                existing = {"id": f"bm{len(state['bookmarks']) + 1}", "url": data["url"], "title": data.get("title")}
+                state["bookmarks"][data["url"]] = existing
+                status = 201
+            else:
+                status = 200
+        if fault == "store_then_hang":
+            time.sleep(HANG_SECONDS)
+        return self.send_json(status, existing)
+
+    def hister_authorized(self):
+        token = self.headers.get("X-Access-Token") or self.headers.get("Authorization", "").removeprefix("Bearer ")
+        return token == HISTER_TOKEN
+
+    def hister_add(self, raw):
+        fault = take_fault("hister")
+        if fault == "unauthorized" or not self.hister_authorized():
+            return self.send_json(401, {"error": "unauthorized"})
+        # Hister's CSRF guard: native clients identify with Origin: hister:// (docs/INTEGRATIONS.md).
+        if self.headers.get("Origin") != "hister://":
+            return self.send_json(403, {"error": "csrf"})
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return self.send_json(400, {"error": "bad json"})
+        if not data.get("url"):
+            return self.send_json(400, {"error": "url required"})
+        self.record({"service": "hister", "method": "POST", "url": data["url"], "bytes": len(raw)})
+        if fault == "too_many_requests":
+            return self.send_json(429, {"error": "slow down"}, headers=[("Retry-After", "1")])
+        if fault == "server_error":
+            return self.send_json(503, {"error": "unavailable"})
+        key = data["url"].split("#")[0]
+        with lock:
+            state["hister"][key] = {"url": data["url"], "title": data.get("title", ""), "text": data.get("text", "")}
+        if fault == "store_then_hang":
+            time.sleep(HANG_SECONDS)
+        return self.send(201)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    args = parser.parse_args()
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    print(f"serving Combray fixtures on http://127.0.0.1:{args.port}", flush=True)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

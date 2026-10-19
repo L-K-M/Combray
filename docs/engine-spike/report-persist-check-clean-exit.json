@@ -1,0 +1,50 @@
+{
+  "scenario": "persist-check",
+  "started_at_ms": 1792353842682,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "session-last-url-recovery-clean-exit",
+      "status": "passed",
+      "detail": {
+        "saved": {
+          "selected": 1,
+          "tabs": [
+            {
+              "tab": 1,
+              "url": "http:\/\/localhost:8765\/a.html"
+            }
+          ]
+        },
+        "restored_committed_urls": [
+          "http:\/\/localhost:8765\/a.html"
+        ],
+        "expected_tab": 1,
+        "expected_url": "http:\/\/localhost:8765\/a.html"
+      }
+    },
+    {
+      "id": "profile-cookie-persists-clean-exit",
+      "status": "passed",
+      "detail": {
+        "expected": "clean14105",
+        "cookie_header_seen_by_server": "COOKIE-HEADER[m0cookie=clean14105]"
+      }
+    },
+    {
+      "id": "profile-localstorage-persists-clean-exit",
+      "status": "passed",
+      "detail": {
+        "expected": "clean14105",
+        "stored": "clean14105"
+      }
+    }
+  ]
+}

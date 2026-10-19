@@ -8,6 +8,10 @@
 *.html text eol=lf
 gradlew text eol=lf
 *.bat text eol=crlf
+# Patches must apply byte for byte; diff context lines legitimately end in spaces.
+*.patch text eol=lf -whitespace
 *.png binary
 *.jpg binary
 *.webp binary
+# Raw device output kept verbatim as evidence
+docs/engine-spike/*.txt -whitespace

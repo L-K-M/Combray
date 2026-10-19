@@ -2,10 +2,24 @@
 
 The repository's existing Unlicense applies to Combray's own work subject to the terms in [LICENSE](LICENSE). It does not relicense third-party code, fonts, icons, or dependencies.
 
-No Servo engine or Android dependency is vendored in this bootstrap. Servo source files inspected for planning carry the Mozilla Public License 2.0. When incorporating Servo, preserve applicable notices, identify modified covered files, and provide the required source and license material with distribution. Determine obligations from the exact dependencies and files incorporated, rather than treating this planning note as a complete license inventory.
+No Servo engine or Android dependency is vendored in this repository. Servo source files carry the Mozilla Public License 2.0. When incorporating Servo, preserve applicable notices, identify modified covered files, and provide the required source and license material with distribution. Determine obligations from the exact dependencies and files incorporated, rather than treating this note as a complete license inventory.
 
 The design concept's standalone renderer includes visualization support code and loads Lucide and Floating UI from public CDNs. These are development preview dependencies, not an Android dependency selection. [Lucide's license](https://lucide.dev/license) includes ISC terms and MIT terms for Feather-derived icons; [Floating UI](https://github.com/floating-ui/floating-ui/blob/master/LICENSE) uses MIT terms. The HTML does not contain a complete third-party license inventory. Before distributing the prototype or incorporating its runtime into the app, inventory the actual bundled libraries and retain required notices. The Android implementation should use a separately selected, licensed native icon set.
 
 The original app icon was generated with OpenAI's built-in ImageGen tool. Its prompt and provenance are in [media-sources](media-sources/README.md).
 
-M0 must record Servo's exact revision and imported components. Before an APK is shared, add the actual dependency/license inventory, notices, and source-availability instructions for the resulting build. This file is currently a tracking note, not a completed audit.
+## App and engine
+
+The app and the M0 harness ([ENGINE_SPIKE.md](docs/ENGINE_SPIKE.md), [BUILDING.md](docs/BUILDING.md)) build against these inputs. Servo, its crates, SpiderMonkey and the NDK are downloaded at build time, not stored in Git; the Gradle wrapper files are committed:
+
+| Component | Use | License / notes |
+| --- | --- | --- |
+| Servo v0.6.0 (`c78d2c206f80a1c8b67eefa97f773bba513205d3`) | Engine, linked into `libcombray_engine.so` | MPL-2.0. Modified Servo files are those touched by `native/servo/patches/` (0001–0004); the patches are MPL-2.0 modifications |
+| Servo's crate dependencies (`native/Cargo.lock`), including prebuilt SpiderMonkey (`mozjs_sys` 153.3.0-0), jemalloc and aws-lc | Linked into the native library | Mixed: MPL-2.0, MIT, Apache-2.0, BSD and others; not yet inventoried |
+| Android NDK r29 `libc++_shared.so` | Packaged in the harness APK | Apache-2.0 with LLVM exception (see the NDK's `NOTICE`) |
+| Gradle wrapper (`gradlew`, `spike/android/gradlew`, `gradle/wrapper/gradle-wrapper.jar`) | Build tooling, copied from Servo's Android project | Apache-2.0 (Gradle) |
+| AndroidX (Activity, Core, Lifecycle, Room, SQLite, WorkManager), Jetpack Compose (UI, Foundation, Material 3), Material icons core | Bundled in the app APK (`gradle/libs.versions.toml`) | Apache-2.0 |
+| kotlinx.coroutines, kotlinx.serialization, Kotlin standard library | Bundled in the app APK | Apache-2.0 |
+| Robolectric, JUnit 4, AndroidX Test, kotlinx-coroutines-test | Tests only, not distributed | MIT (Robolectric), EPL-1.0 (JUnit 4), Apache-2.0 |
+
+The app and harness APKs are local test artifacts. Do not share them: they have no complete license inventory, notices screen or source-availability offer (M4). Before an APK is shared, add the actual dependency/license inventory, notices, and source-availability instructions for that build. This file is a tracking note, not a completed audit.

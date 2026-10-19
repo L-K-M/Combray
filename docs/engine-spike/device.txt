@@ -1,0 +1,7 @@
+ro.product.model=Android SDK built for x86_64
+ro.build.version.release=11
+ro.build.version.sdk=30
+ro.product.cpu.abilist=x86_64,x86
+ro.hardware.egl=emulation
+ro.kernel.qemu=1
+GLES: Google (Google Inc.), Android Emulator OpenGL ES Translator (Google SwiftShader), OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)

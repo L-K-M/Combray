@@ -1,0 +1,13 @@
+--------- beginning of main
+--------- beginning of system
+--------- beginning of kernel
+servoshell::egl::android: init
+servo_base: couldn't open /data/user/0/org.servo.servoshell/files/servo/auth_cache.json: No such file or directory (os error 2)
+servo_base: couldn't open /data/user/0/org.servo.servoshell/files/servo/hsts_list.json: No such file or directory (os error 2)
+servo_base: couldn't open /data/user/0/org.servo.servoshell/files/servo/cookie_jar.json: No such file or directory (os error 2)
+servo_base: couldn't open /data/user/0/org.servo.servoshell/files/servo/localstorage.json: No such file or directory (os error 2)
+servo_base: couldn't open /data/user/0/org.servo.servoshell/files/servo/localstorage.json: No such file or directory (os error 2)
+paint::painter: Running on Android Emulator OpenGL ES Translator (Google SwiftShader) with OpenGL version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)
+servoshell::egl::app: Setting viewport to Rect(720x927 at (0, 0))
+servo_constellation::constellation: Pipeline(1,1): Visibility change for closed pipeline
+servoshell::egl::app: SERVO_ANDROID_SMOKETEST_OK

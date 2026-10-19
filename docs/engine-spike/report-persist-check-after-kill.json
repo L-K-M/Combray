@@ -1,0 +1,50 @@
+{
+  "scenario": "persist-check",
+  "started_at_ms": 1792353910470,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "session-last-url-recovery-after-kill",
+      "status": "passed",
+      "detail": {
+        "saved": {
+          "selected": 1,
+          "tabs": [
+            {
+              "tab": 1,
+              "url": "http:\/\/localhost:8765\/a.html"
+            }
+          ]
+        },
+        "restored_committed_urls": [
+          "http:\/\/localhost:8765\/a.html"
+        ],
+        "expected_tab": 1,
+        "expected_url": "http:\/\/localhost:8765\/a.html"
+      }
+    },
+    {
+      "id": "profile-cookie-persists-after-kill",
+      "status": "failed",
+      "detail": {
+        "expected": "kill2726",
+        "cookie_header_seen_by_server": "COOKIE-HEADER[m0cookie=clean14105]"
+      }
+    },
+    {
+      "id": "profile-localstorage-persists-after-kill",
+      "status": "passed",
+      "detail": {
+        "expected": "kill2726",
+        "stored": "kill2726"
+      }
+    }
+  ]
+}

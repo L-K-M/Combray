@@ -14,13 +14,13 @@ Read [README.md](README.md), then [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTAT
 
 ## Implementation discipline
 
-1. Start with milestone M0. Prove independent Servo views, lifecycle handling, and correctly attributed text extraction on Android. Record exact revisions, commands, environment, results, and remaining limitations in `docs/ENGINE_SPIKE.md` when it exists.
+1. Follow the milestone status in the plan. M0 (engine) is done; M1–M3 (browser shell and Recent, Karakeep and Kagi, Hister) are implemented with fixture and device evidence; continue from the plan's "Next implementation session". Record engine revisions, patches, commands, environment, results, and limitations in `docs/ENGINE_SPIKE.md`.
 2. Keep Servo handles on their owner thread. Tag callbacks with tab identity, engine generation, and navigation identity. An equal URL is not proof of an equal document.
 3. Separate persistent logical tabs, visits, and native views. Closing, expiring local history, forgetting, and deleting remote content have different semantics.
 4. Make integration operations durable and tied to their original payload and destination. Test delayed callbacks, ambiguous network completion, process death, and deletion races, not just happy paths.
 5. Pin dependencies and toolchains once verified. Do not invent a Maven Servo artifact, JNI API, build command, or compatible version combination. Keep future Gradle wrapper files and dependency lockfiles in version control.
 6. Implement bounded vertical slices. Update the plan's status and record decisions after evidence changes. Do not mark a feature complete from fake engine events or mocked HTTP alone.
-7. Run checks appropriate to the change. For this documentation bootstrap: `python3 scripts/check_docs.py` and `git diff --check`. Add native tests/build checks when there is native code. Do not claim device tests that were not run.
+7. Run checks appropriate to the change: `python3 scripts/check_docs.py` and `git diff --check` always; for Kotlin, `./gradlew testDebugUnitTest lintDebug assembleDebug`; for `native/`, `cargo fmt --check` and `cargo test --lib`; for app or engine behavior, `scripts/build-native.sh` and `scripts/check-app.sh` on a device or emulator (engine-only: `scripts/m0/run-checks.sh`; see [BUILDING.md](docs/BUILDING.md)). Do not claim device tests that were not run.
 8. Prefer small patches and inspect the actual diff. Do not commit, push, publish, or change the user's services unless the active task authorizes it. Do not read or export personal history to validate a fixture-based feature.
 
 ## Subagents
@@ -29,7 +29,7 @@ Proactively delegate suitable work to available free or cheaper subagents runnin
 
 ## Identity
 
-- Proposed application id and Kotlin namespace: **`ch.lkmc.combray`** (fleet rule: GitHub repos use `ch.lkmc.*`, lowercase on Android). The plan leaves the id open until M1; confirm it there before persistent data or signing rely on it. The debug build adds `applicationIdSuffix = ".debug"`, so both variants install side by side; `scripts/install.sh` launches by these ids.
+- Proposed application id and Kotlin namespace: **`ch.lkmc.combray`** (fleet rule: GitHub repos use `ch.lkmc.*`, lowercase on Android). The app uses it since M1; it is still a proposal: confirm it with the owner before signing a release (changing it later loses installed data). The debug build adds `applicationIdSuffix = ".debug"`, so both variants install side by side; `scripts/install.sh` launches by these ids.
 - Launcher icons derive from `media-sources/icon.png` and are committed; document the generator next to them.
 
 ## Build and release tooling
@@ -50,15 +50,15 @@ The family's build, install, release, and CI tooling is in place ahead of the ap
 
 Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`: `combray-v0.1.0-android-arm64.apk` plus its `.sha256`. The arch is `arm64` because Servo ships per-ABI native libraries and M0 starts with arm64; update `ARCH` in `scripts/build.sh` and `release.yml` when M0 settles the ABIs.
 
-## When the Gradle project lands
+## Gradle project
 
-1. Create it at the repo root with the APK module named `app`, and commit the Gradle wrapper (`gradlew`, `gradle/wrapper/*`). CI's Android job switches on once `gradlew` and `app/build.gradle.kts` exist; until then it passes with a notice.
-2. In `app/build.gradle.kts`, set `namespace` and `applicationId`, and give the debug build type `applicationIdSuffix = ".debug"`.
-3. Declare `versionName = "0.1.0"` and `versionCode = 1` as plain literals: the release engine and the CI tag gate read and rewrite them with `sed`.
-4. Move the Android job in `.github/workflows/ci.yml` and the build job in `release.yml` to the toolchain M0 pins (JDK, NDK, Rust, Servo build steps). Both assume JDK 17 and a plain Gradle build today.
-5. Configure release signing before the first release tag (M4). Keep signing keys out of Git; `release.yml` expects a signed `app/build/outputs/apk/release/app-release.apk`. Until then the release paths (`scripts/build.sh` without `--debug`, `scripts/install.sh --release`, `release.yml`) stop at the missing signed APK; use the debug build.
-6. Add `gradle` (and, once a crate exists, `cargo`) entries to `.github/dependabot.yml`.
-7. Generate and commit the launcher icons from `media-sources/icon.png`.
+The Gradle project exists at the repo root (`app`, `core`, `engine`), with the wrapper committed, so CI's Android job runs.
+
+1. Done: `namespace`/`applicationId` `ch.lkmc.combray`, debug suffix `.debug`, `versionName = "0.1.0"` and `versionCode = 1` as plain literals (the release engine and CI tag gate rewrite them with `sed`).
+2. Open: CI and `release.yml` build Kotlin only (JDK 17, plain Gradle). The native engine (`scripts/build-native.sh`: pinned Servo, NDK r29, Rust 1.97.1) is not built in CI, so CI APKs have no engine and the app says so. A released APK needs `COMBRAY_ABI=arm64 scripts/build-native.sh` first.
+3. Open (M4): release signing before the first release tag. Keep signing keys out of Git; `release.yml` expects a signed `app/build/outputs/apk/release/app-release.apk`. Until then the release paths stop at the missing signed APK; use the debug build.
+4. Done: a `gradle` Dependabot entry. No `cargo` entry on purpose: `native/Cargo.lock` mirrors the pinned Servo release's lockfile.
+5. Done: launcher icons generated from `media-sources/icon.png` by `scripts/generate-launcher-icons.py` (rerun it after changing the artwork).
 
 ## Conventions
 

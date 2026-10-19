@@ -1,0 +1,329 @@
+package ch.lkmc.combray.ui
+
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.combray.AppGraph
+import ch.lkmc.combray.R
+import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.BrowserState
+import ch.lkmc.combray.core.browser.EngineStatus
+import ch.lkmc.combray.core.browser.KeyboardRequest
+import ch.lkmc.combray.core.browser.Notice
+import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.integration.SaveRequest
+import ch.lkmc.combray.core.integration.SaveStatus
+import ch.lkmc.combray.core.policy.AddressDecision
+import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.EngineSurfaceView
+import kotlinx.coroutines.launch
+
+private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
+
+/**
+ * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
+ * surface stays in place under every overlay, so sheets never release a renderer.
+ */
+@Composable
+fun BrowserScreen(graph: AppGraph) {
+    val browser = graph.browser
+    val state by browser.browserState.collectAsStateWithLifecycle()
+    var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
+    var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val tab = state.activeTab
+    val saveStatus by remember(tab?.url) { graph.integrations.saveStatus(tab?.url) }
+        .collectAsStateWithLifecycle(SaveStatus.Unsaved)
+    val histerService by graph.integrations.hister.service.collectAsStateWithLifecycle(null)
+
+    val closedMessage = stringResource(R.string.notice_tab_closed)
+    val notOpened = stringResource(R.string.notice_address_not_opened)
+    val undo = stringResource(R.string.action_undo)
+    LaunchedEffect(state.notice) {
+        val notice = state.notice ?: return@LaunchedEffect
+        browser.noticeShown(notice)
+        // Clearing the notice restarts this effect: the snackbar runs in the screen's scope.
+        scope.launch {
+            when (notice) {
+                is Notice.TabClosed -> {
+                    // A newer close replaces the last Undo instead of queuing behind it.
+                    snackbar.currentSnackbarData?.dismiss()
+                    val result = snackbar.showSnackbar(closedMessage, actionLabel = undo, duration = SnackbarDuration.Short)
+                    if (result == SnackbarResult.ActionPerformed) browser.reopenTab(notice.tabId)
+                }
+                is Notice.Problem -> snackbar.showSnackbar(notice.message)
+                Notice.AddressNotOpened -> snackbar.showSnackbar(notOpened)
+            }
+        }
+    }
+
+    // The page focused or left an editable element.
+    LaunchedEffect(state.keyboard, surfaceView) {
+        val request = state.keyboard ?: return@LaunchedEffect
+        val view = surfaceView ?: return@LaunchedEffect
+        when (request) {
+            is KeyboardRequest.Show -> view.showKeyboard(request.kind)
+            KeyboardRequest.Hide -> view.hideKeyboard()
+        }
+        browser.keyboardHandled(request)
+    }
+
+    // The address editor submits to the tab it was opened for; null opens a new tab.
+    var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
+    val editAddress = {
+        addressTab = tab?.id
+        sheet = Sheet.ADDRESS
+    }
+    // An unused blank tab is the new tab already; typing there makes no second one.
+    val editNewTab = {
+        addressTab = tab?.takeIf { it.isHome }?.id
+        sheet = Sheet.ADDRESS
+    }
+
+    // Back: close the open sheet first, then go back in the page, then leave the app.
+    BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
+    BackHandler(enabled = sheet == Sheet.NONE && tab?.canGoBack == true) { browser.goBack() }
+
+    val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            ) {
+                AndroidView(
+                    factory = { viewContext ->
+                        EngineSurfaceView(viewContext) { graph.engineRunning() }.also { surfaceView = it }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                PageOverlay(
+                    state = state,
+                    onOpenAddress = editAddress,
+                    onOpenRecent = { sheet = Sheet.RECENT },
+                    onReload = browser::reload,
+                )
+            }
+            BottomBar(
+                tab = tab,
+                openTabs = state.openTabCount,
+                saveStatus = saveStatus,
+                onBack = browser::goBack,
+                onAddress = editAddress,
+                onSave = {
+                    // Snapshot now: switching tabs right after the tap must not change what is saved.
+                    val url = tab?.url
+                    val title = tab?.title
+                    scope.launch {
+                        when (graph.integrations.save(url, title)) {
+                            SaveRequest.NotConfigured -> {
+                                // Timed, not Indefinite (the default with an action): it must not block later notices.
+                                snackbar.currentSnackbarData?.dismiss()
+                                val result = snackbar.showSnackbar(
+                                    resources.getString(R.string.save_not_set_up),
+                                    actionLabel = resources.getString(R.string.action_open_settings),
+                                    duration = SnackbarDuration.Long,
+                                )
+                                if (result == SnackbarResult.ActionPerformed) sheet = Sheet.SETTINGS
+                            }
+                            SaveRequest.NotSaveable -> snackbar.showSnackbar(resources.getString(R.string.save_not_saveable))
+                            SaveRequest.Sensitive -> snackbar.showSnackbar(resources.getString(R.string.save_sensitive))
+                            SaveRequest.AlreadyQueued -> snackbar.showSnackbar(resources.getString(R.string.save_already_queued))
+                            SaveRequest.NeedsAttention -> {
+                                snackbar.currentSnackbarData?.dismiss()
+                                val result = snackbar.showSnackbar(
+                                    resources.getString(R.string.save_needs_attention),
+                                    actionLabel = resources.getString(R.string.action_open_settings),
+                                    duration = SnackbarDuration.Long,
+                                )
+                                if (result == SnackbarResult.ActionPerformed) sheet = Sheet.SETTINGS
+                            }
+                            SaveRequest.Queued -> Unit
+                        }
+                    }
+                },
+                onRecent = { sheet = Sheet.RECENT },
+                onMore = { sheet = Sheet.MORE },
+                // Clear of the navigation bar and, in landscape, of a display cutout.
+                modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
+            )
+        }
+        // Above the keyboard too: a page field can hold it while a Save error shows. Recent is a
+        // separate window over this one and shows the snackbars itself while it is open.
+        if (sheet != Sheet.RECENT) {
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).imePadding().navigationBarsPadding().padding(bottom = 72.dp))
+        }
+    }
+
+    val dismiss = { sheet = Sheet.NONE }
+    when (sheet) {
+        Sheet.NONE -> Unit
+        Sheet.ADDRESS -> AddressSheet(
+            target = addressTab,
+            currentUrl = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url },
+            onDecision = { decision ->
+                dismiss()
+                val target = addressTab
+                val open = { url: String -> if (target != null) browser.openUrlInTab(target, url) else browser.openUrl(url, Placement.NEW_TAB) }
+                when (decision) {
+                    is AddressDecision.Navigate -> open(decision.url)
+                    is AddressDecision.Search -> open(decision.url)
+                    is AddressDecision.External -> openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
+                    is AddressDecision.Rejected -> Unit
+                }
+            },
+            onDismiss = dismiss,
+        )
+        Sheet.RECENT -> RecentSheet(
+            browser = browser,
+            hister = graph.integrations.hister,
+            onOpenUrl = { url ->
+                dismiss()
+                // Hister results open as new navigations, through the same address policy.
+                (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrl(it.url, Placement.NEW_TAB) }
+            },
+            onNewTab = editNewTab,
+            snackbar = snackbar,
+            onDismiss = dismiss,
+        )
+        Sheet.MORE -> MoreSheet(
+            tab = tab,
+            onForward = { dismiss(); browser.goForward() },
+            onReload = { dismiss(); browser.reload() },
+            onNewTab = editNewTab,
+            onShare = { url -> dismiss(); share(context, url, resources.getString(R.string.share_chooser)) },
+            onPageInfo = { sheet = Sheet.PAGE_INFO },
+            onSettings = { sheet = Sheet.SETTINGS },
+            captureEnabled = histerService?.captureEnabled,
+            onPauseCapture = {
+                dismiss()
+                scope.launch { graph.integrations.hister.setCaptureEnabled(false) }
+            },
+            onDismiss = dismiss,
+        )
+        Sheet.SETTINGS -> SettingsSheet(integrations = graph.integrations, onDismiss = dismiss)
+        Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
+    }
+}
+
+/** What covers the page area when there is no page to show, or the page cannot be shown. */
+@Composable
+private fun PageOverlay(
+    state: BrowserState,
+    onOpenAddress: () -> Unit,
+    onOpenRecent: () -> Unit,
+    onReload: () -> Unit,
+) {
+    val tab: ActiveTab? = state.activeTab
+    when {
+        state.engine == EngineStatus.LIBRARY_MISSING -> OverlayMessage(stringResource(R.string.engine_missing))
+        state.engine == EngineStatus.FAILED -> OverlayMessage(stringResource(R.string.engine_failed))
+        tab == null || tab.isHome -> Home(onOpenAddress, onOpenRecent)
+        tab.crashed -> OverlayMessage(stringResource(R.string.page_crashed)) {
+            Button(onClick = onReload) { Text(stringResource(R.string.action_reload)) }
+        }
+        state.engine == EngineStatus.STARTING -> OverlayMessage(stringResource(R.string.engine_starting))
+    }
+}
+
+@Composable
+private fun Home(onOpenAddress: () -> Unit, onOpenRecent: () -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                stringResource(R.string.home_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(stringResource(R.string.home_body), textAlign = TextAlign.Center)
+            Button(onClick = onOpenAddress, modifier = Modifier.widthIn(min = 240.dp)) {
+                Text(stringResource(R.string.address_placeholder))
+            }
+            OutlinedButton(onClick = onOpenRecent, modifier = Modifier.widthIn(min = 240.dp)) {
+                Text(stringResource(R.string.action_recent))
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverlayMessage(message: String, action: @Composable () -> Unit = {}) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(message, textAlign = TextAlign.Center)
+            action()
+        }
+    }
+}
+
+private fun openExternally(context: Context, url: String, noApp: String, notify: (String) -> Unit) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+    } catch (none: ActivityNotFoundException) {
+        notify(noApp)
+    }
+}
+
+private fun share(context: Context, url: String, title: String) {
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
+    context.startActivity(Intent.createChooser(send, title))
+}

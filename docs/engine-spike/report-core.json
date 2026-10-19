@@ -1,0 +1,769 @@
+{
+  "scenario": "core",
+  "started_at_ms": 1792352952772,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "views-two-independent-webviews",
+      "status": "passed",
+      "detail": {
+        "webviews": [
+          "WebViewId(PainterId(1), (0,1))",
+          "WebViewId(PainterId(1), (0,2))"
+        ],
+        "tab1": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967297,
+          "url": "http:\/\/localhost:8765\/a.html"
+        },
+        "tab2": {
+          "tab": 2,
+          "generation": 2,
+          "document": 4294967298,
+          "url": "http:\/\/localhost:8765\/b.html"
+        }
+      }
+    },
+    {
+      "id": "engine-renders-on-android",
+      "status": "passed",
+      "detail": {
+        "painted_event": {
+          "type": "painted",
+          "frames": 1,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "screen": "#2e6b4f"
+      }
+    },
+    {
+      "id": "views-switching",
+      "status": "passed",
+      "detail": {
+        "tab2_painted_when_selected": true,
+        "tab1_painted_when_reselected": true,
+        "tab2_paint_events_while_hidden": 0,
+        "screen_when_tab2_selected": "#8a5a2b",
+        "screen_when_tab1_selected": "#2e6b4f"
+      }
+    },
+    {
+      "id": "views-independent-navigation",
+      "status": "passed",
+      "detail": {
+        "tab1": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967299,
+          "url": "http:\/\/localhost:8765\/c.html"
+        },
+        "tab2_document_unchanged": true,
+        "tab2_url": "http:\/\/localhost:8765\/b.html",
+        "screen": "#3b4f8a"
+      }
+    },
+    {
+      "id": "views-back-forward",
+      "status": "passed",
+      "detail": {
+        "back": {
+          "type": "document_committed",
+          "document": 4294967297,
+          "sequence": 4,
+          "url": "http:\/\/localhost:8765\/a.html",
+          "index": 0,
+          "length": 2,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "forward": {
+          "type": "document_committed",
+          "document": 4294967299,
+          "sequence": 5,
+          "url": "http:\/\/localhost:8765\/c.html",
+          "index": 1,
+          "length": 2,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "back_document_reused": true,
+        "forward_document_reused": true,
+        "tab2_commits_during_traversal": 0
+      }
+    },
+    {
+      "id": "views-same-url-tabs-independent",
+      "status": "passed",
+      "detail": {
+        "tab1_document": 4294967297,
+        "tab2_document": 4294967300,
+        "global_in_tab2": "undefined",
+        "nonce1": "0z3psya825",
+        "nonce2": "30o8olvfps",
+        "capture1": {
+          "type": "capture",
+          "capture": 10015,
+          "document": 4294967297,
+          "status": "captured",
+          "elapsed_ms": 398,
+          "content": {
+            "url": "http:\/\/localhost:8765\/a.html",
+            "title": "M0-A",
+            "text": "M0-A\nNONCE-0z3psya825\nFixture page A. MARKER-PAGE-A.",
+            "text_bytes": 52,
+            "sha256": "691450632d1c70065108450ea7590f6e6f4b86ab7892137614ee8fccd6ea93fa",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "capture2": {
+          "type": "capture",
+          "capture": 10016,
+          "document": 4294967300,
+          "status": "captured",
+          "elapsed_ms": 406,
+          "content": {
+            "url": "http:\/\/localhost:8765\/a.html",
+            "title": "M0-A",
+            "text": "M0-A\nNONCE-30o8olvfps\nFixture page A. MARKER-PAGE-A.",
+            "text_bytes": 52,
+            "sha256": "1c6060a4fa7c01bbf2bbaabe0ba61148262ea45fc4b75481a0c454982f20716b",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 2,
+          "generation": 2,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "memory-baseline",
+      "status": "passed",
+      "detail": {
+        "pss_kb_two_tabs": 144347,
+        "pss_kb_ten_tabs": 160059,
+        "note": "Debug.MemoryInfo total PSS of the harness process (emulator, x86_64), small fixture pages, measured early in the scenario"
+      }
+    },
+    {
+      "id": "navigation-taxonomy",
+      "status": "passed",
+      "detail": {
+        "base": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967309,
+          "url": "http:\/\/localhost:8765\/a.html"
+        },
+        "fragment": {
+          "event": "same_document_navigation",
+          "document": 4294967309,
+          "url": "http:\/\/localhost:8765\/a.html#section"
+        },
+        "push_state": {
+          "event": "same_document_navigation",
+          "document": 4294967309,
+          "url": "http:\/\/localhost:8765\/a.html?pushed=1"
+        },
+        "replace_state_same_url": {
+          "event": "history_updated",
+          "document": 4294967309,
+          "url": "http:\/\/localhost:8765\/a.html?pushed=1"
+        },
+        "embedder_fragment_load": {
+          "event": "document_committed",
+          "document": 4294967310,
+          "url": "http:\/\/localhost:8765\/a.html?pushed=1#other",
+          "same_document": false
+        },
+        "failed_load": {
+          "event": "document_committed",
+          "document": 4294967311,
+          "url": "http:\/\/localhost:9\/unreachable",
+          "title": "Error loading page",
+          "load_complete": true
+        }
+      }
+    },
+    {
+      "id": "input-touch-tap",
+      "status": "passed",
+      "detail": {
+        "tap_px": [
+          272,
+          598.23334
+        ],
+        "tapCount": 1
+      }
+    },
+    {
+      "id": "input-keys-and-ime-visibility",
+      "status": "passed",
+      "detail": {
+        "ime_shown_event": {
+          "type": "ime_shown",
+          "multiline": false,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "focused": "field",
+        "value": "abc"
+      }
+    },
+    {
+      "id": "input-ime-commit-unicode",
+      "status": "passed",
+      "detail": {
+        "committed": "é😀中",
+        "before": "abc",
+        "value": "abcé😀中"
+      }
+    },
+    {
+      "id": "input-touch-scroll",
+      "status": "passed",
+      "detail": {
+        "scrollY": 248
+      }
+    },
+    {
+      "id": "input-selection",
+      "status": "not_run",
+      "detail": {
+        "reason": "M0 forwards no selection gestures or selection sync; not exercised"
+      }
+    },
+    {
+      "id": "surface-resize",
+      "status": "passed",
+      "detail": {
+        "innerHeight_before": 413,
+        "innerHeight_resized": 248,
+        "innerHeight_restored": 413,
+        "surface_target_px": 496,
+        "page_document": 4294967312
+      }
+    },
+    {
+      "id": "capture-js-rendered-text",
+      "status": "passed",
+      "detail": {
+        "page": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967313,
+          "url": "http:\/\/localhost:8765\/js-rendered.html"
+        },
+        "capture": {
+          "type": "capture",
+          "capture": 10056,
+          "document": 4294967313,
+          "status": "captured",
+          "elapsed_ms": 183,
+          "content": {
+            "url": "http:\/\/localhost:8765\/js-rendered.html",
+            "title": "M0-JS",
+            "text": "M0-JS\nNONCE-iwenn39xn5\nJS-RENDERED-PHRASE iwenn39xn5",
+            "text_bytes": 52,
+            "sha256": "28115882fef086b406afb515fe3316546b780f4fd4455db1588f36698aa88787",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-redirect-attribution",
+      "status": "passed",
+      "detail": {
+        "requested": "http:\/\/localhost:8765\/redirect?to=\/c.html",
+        "committed_urls": [
+          "http:\/\/localhost:8765\/c.html"
+        ],
+        "capture": {
+          "type": "capture",
+          "capture": 10058,
+          "document": 4294967314,
+          "status": "captured",
+          "elapsed_ms": 744,
+          "content": {
+            "url": "http:\/\/localhost:8765\/c.html",
+            "title": "M0-C",
+            "text": "M0-C\nNONCE-4qnjaubvvu\nFixture page C. MARKER-PAGE-C.",
+            "text_bytes": 52,
+            "sha256": "2db9afeec0d62b325df5b82939ff9d16726221c976c7e81312b6a27e55a21b8d",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-same-url-reload",
+      "status": "passed",
+      "detail": {
+        "first": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967315,
+          "url": "http:\/\/localhost:8765\/b.html"
+        },
+        "second": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967316,
+          "url": "http:\/\/localhost:8765\/b.html"
+        },
+        "first_nonce": "sktw2c84ad",
+        "unguarded_nonce_after_reload": "eqjxbgz1s7",
+        "servo_guard_for_old_document": {
+          "type": "capture",
+          "capture": 10067,
+          "document": 4294967315,
+          "status": "document_not_found",
+          "elapsed_ms": 23,
+          "content": null,
+          "observed_url": null,
+          "detail": "Servo reported that the document is no longer active",
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "local_guard_for_old_document": {
+          "type": "capture",
+          "capture": 10068,
+          "document": 4294967315,
+          "status": "document_not_found",
+          "elapsed_ms": 0,
+          "content": null,
+          "observed_url": null,
+          "detail": "refused locally: document already replaced",
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "capture_new_document": {
+          "type": "capture",
+          "capture": 10069,
+          "document": 4294967316,
+          "status": "captured",
+          "elapsed_ms": 739,
+          "content": {
+            "url": "http:\/\/localhost:8765\/b.html",
+            "title": "M0-B",
+            "text": "M0-B\nNONCE-eqjxbgz1s7\nFixture page B. MARKER-PAGE-B.",
+            "text_bytes": 52,
+            "sha256": "3dc6a131b652eb8c06804dcce02f28eb04f284af3ef0879d367899360208beb3",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-navigation-during-capture",
+      "status": "passed",
+      "detail": {
+        "old_document": 4294967317,
+        "new_document": 4294967318,
+        "capture": {
+          "type": "capture",
+          "capture": 10075,
+          "document": 4294967317,
+          "status": "stale_document",
+          "elapsed_ms": 20444,
+          "content": null,
+          "observed_url": "http:\/\/localhost:8765\/slow-capture.html",
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "capture_event_before_commit": false
+      }
+    },
+    {
+      "id": "capture-close-during-capture",
+      "status": "passed",
+      "detail": {
+        "capture": {
+          "type": "capture",
+          "capture": 10078,
+          "document": 4294967319,
+          "status": "tab_closed",
+          "elapsed_ms": 67,
+          "content": null,
+          "observed_url": null,
+          "detail": "tab closed before the result arrived",
+          "tab": 2,
+          "generation": 2,
+          "schema": 1
+        },
+        "closed_generation": 2,
+        "recreated_generation": 11
+      }
+    },
+    {
+      "id": "capture-stale-title-ignored",
+      "status": "passed",
+      "detail": {
+        "new_document": 4294967322,
+        "tab_title": "M0-C",
+        "stale_reports": [
+          {
+            "type": "title",
+            "document": 4294967321,
+            "title": "M0-STALE-FROM-A",
+            "attribution": "stale",
+            "tab": 1,
+            "generation": 1,
+            "schema": 1
+          },
+          {
+            "type": "title",
+            "document": 4294967321,
+            "title": "M0-STALE-FROM-A",
+            "attribution": "stale",
+            "tab": 1,
+            "generation": 1,
+            "schema": 1
+          }
+        ],
+        "misattributed": [],
+        "reports_before_commit": [],
+        "stale_report_observed": true,
+        "unattributed_titles_seen": [
+          "null",
+          "",
+          "M0-C",
+          "M0-STALE-FROM-A"
+        ]
+      }
+    },
+    {
+      "id": "capture-shadow-dom",
+      "status": "passed",
+      "detail": {
+        "open_shadow_root_supported": true,
+        "capture": {
+          "type": "capture",
+          "capture": 10096,
+          "document": 4294967323,
+          "status": "captured",
+          "elapsed_ms": 502,
+          "content": {
+            "url": "http:\/\/localhost:8765\/shadow.html",
+            "title": "M0-SHADOW",
+            "text": "M0-SHADOW\nNONCE-599u3264ju\nSHADOW-TEXT\nSLOTTED-LIGHT-TEXT\nMARKER-PAGE-SHADOW.",
+            "text_bytes": 77,
+            "sha256": "0569cd15dc71c97e63d534801b5a271e519a6d356b233b9e68fd838aba9dadb1",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 20,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-bounds-multibyte",
+      "status": "passed",
+      "detail": {
+        "small": {
+          "type": "capture",
+          "capture": 10102,
+          "document": 4294967324,
+          "status": "captured",
+          "elapsed_ms": 534,
+          "content": {
+            "url": "http:\/\/localhost:8765\/multibyte.html",
+            "title": "M0-MULTIBYTE",
+            "text": "M0-MULTIBYTE\nNONCE-qhbula34ke\nGrüße aus Zürich — 日本語のテキスト — Ελληνικά — emoji 😀🎉 — עברית. Grüße aus Zürich — 日本語のテキスト — Ελληνικά — emoji 😀🎉 — עברית. Grüße aus Zü…",
+            "text_bytes": 998,
+            "sha256": "05031488c31a3ee948fa0ba0edb5c115e38f518df5de421db69e287e52f053e0",
+            "truncated_in_page": true,
+            "truncated_natively": false,
+            "nodes_visited": 12,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "small_utf8_bytes": 998,
+        "full": {
+          "type": "capture",
+          "capture": 10103,
+          "document": 4294967324,
+          "status": "captured",
+          "elapsed_ms": 757,
+          "content": {
+            "url": "http:\/\/localhost:8765\/multibyte.html",
+            "title": "M0-MULTIBYTE",
+            "text": "M0-MULTIBYTE\nNONCE-qhbula34ke\nGrüße aus Zürich — 日本語のテキスト — Ελληνικά — emoji 😀🎉 — עברית. Grüße aus Zürich — 日本語のテキスト — Ελληνικά — emoji 😀🎉 — עברית. Grüße aus Zü…",
+            "text_bytes": 21029,
+            "sha256": "bcd9e8f12478bc078bf79b6270e5a02660837bf028c5409e572c62f621e34db7",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-bounds-large",
+      "status": "passed",
+      "detail": {
+        "capture": {
+          "type": "capture",
+          "capture": 10109,
+          "document": 4294967325,
+          "status": "captured",
+          "elapsed_ms": 6039,
+          "content": {
+            "url": "http:\/\/localhost:8765\/large.html",
+            "title": "M0-LARGE",
+            "text": "M0-LARGE\nNONCE-v6u8x1g7b9\nLarge fixture sentence for bounded capture. Large fixture sentence for bounded capture. Large fixture sentence for bounded capture. La…",
+            "text_bytes": 261996,
+            "sha256": "636cafc3ca829001bbb53e45e16fe6e4562a1472bf5f2c43ffa82cb47f280a53",
+            "truncated_in_page": true,
+            "truncated_natively": false,
+            "nodes_visited": 308,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-empty-document",
+      "status": "passed",
+      "detail": {
+        "capture": {
+          "type": "capture",
+          "capture": 10114,
+          "document": 4294967326,
+          "status": "empty",
+          "elapsed_ms": 231,
+          "content": {
+            "url": "http:\/\/localhost:8765\/empty.html",
+            "title": "M0-EMPTY",
+            "text": "",
+            "text_bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 1,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-hostile-page",
+      "status": "passed",
+      "detail": {
+        "throwing_builtins": {
+          "type": "capture",
+          "capture": 10131,
+          "document": 4294967327,
+          "status": "script_error",
+          "elapsed_ms": 30,
+          "content": null,
+          "observed_url": null,
+          "detail": "EvaluationFailure(Some(JavaScriptErrorInfo { message: \"hostile getComputedStyle\", filename: \"http:\/\/localhost:8765\/hostile-throw.html\", stack: Some(\"window.getComputedStyle@http:\/\/localhost:8765\/hostile-throw.html:11:49\\nhidden@:67:24\\n@:94:25\\n@:124:3\\n\"), line_number: 11, column: 49 }))",
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "huge_getter": {
+          "type": "capture",
+          "capture": 10137,
+          "document": 4294967328,
+          "status": "captured",
+          "elapsed_ms": 428,
+          "content": {
+            "url": "http:\/\/localhost:8765\/hostile-huge.html",
+            "title": "M0-HOSTILE-HUGE",
+            "text": "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH…",
+            "text_bytes": 262144,
+            "sha256": "a0bc6eb3ce46e0a440f7dea4c839dc6c990bab414a225ba4d2050f43999998fa",
+            "truncated_in_page": true,
+            "truncated_natively": false,
+            "nodes_visited": 2,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "huge_child_list": {
+          "type": "capture",
+          "capture": 10143,
+          "document": 4294967329,
+          "status": "script_error",
+          "elapsed_ms": 229,
+          "content": null,
+          "observed_url": null,
+          "detail": "EvaluationFailure(Some(JavaScriptErrorInfo { message: \"can't access property \\\"nodeType\\\", node is undefined\", filename: \"\", stack: Some(\"@:86:9\\n@:124:3\\n\"), line_number: 86, column: 9 }))",
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        }
+      }
+    },
+    {
+      "id": "capture-timeout-abandons-result",
+      "status": "passed",
+      "detail": {
+        "capture": {
+          "type": "capture",
+          "capture": 10149,
+          "document": 4294967330,
+          "status": "timed_out",
+          "elapsed_ms": 15,
+          "content": null,
+          "observed_url": null,
+          "detail": "deadline passed; Servo cannot interrupt the script, only the result is abandoned",
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "late_result_ignored": true
+      }
+    },
+    {
+      "id": "hidden-view-behaviour",
+      "status": "passed",
+      "detail": {
+        "timer_ticks_per_second_hidden": 9.4,
+        "timer_ticks_per_second_hidden_throttled": 1,
+        "page_requests_ticks_per_second": 10
+      }
+    },
+    {
+      "id": "views-close-one-keeps-other",
+      "status": "passed",
+      "detail": {
+        "tab1_after_close": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967332,
+          "url": "http:\/\/localhost:8765\/b.html"
+        },
+        "capture": {
+          "type": "capture",
+          "capture": 10202,
+          "document": 4294967332,
+          "status": "captured",
+          "elapsed_ms": 213,
+          "content": {
+            "url": "http:\/\/localhost:8765\/b.html",
+            "title": "M0-B",
+            "text": "M0-B\nNONCE-rm7znrvxnq\nFixture page B. MARKER-PAGE-B.",
+            "text_bytes": 52,
+            "sha256": "9bec3c38127149eaa9855a8b165c5a88a3db1fc988c06b6b1e2325c78a37c122",
+            "truncated_in_page": false,
+            "truncated_natively": false,
+            "nodes_visited": 13,
+            "node_budget_exhausted": false
+          },
+          "observed_url": null,
+          "detail": null,
+          "tab": 1,
+          "generation": 1,
+          "schema": 1
+        },
+        "tab2_events_after_close": [],
+        "screen": "#8a5a2b"
+      }
+    },
+    {
+      "id": "display-follows-navigation",
+      "status": "failed",
+      "detail": {
+        "navigations_checked": 15,
+        "navigations_not_traceable": 2,
+        "mismatches": [
+          {
+            "url": "http:\/\/localhost:8765\/b.html",
+            "document": 4294967332,
+            "expected": "#8a5a2b",
+            "screen": "#51864f",
+            "event_index": 678
+          }
+        ]
+      }
+    }
+  ]
+}

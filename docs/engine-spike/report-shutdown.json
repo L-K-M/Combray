@@ -1,0 +1,22 @@
+{
+  "scenario": "shutdown",
+  "started_at_ms": 1792353727478,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "engine-clean-shutdown",
+      "status": "passed",
+      "detail": {
+        "acknowledged_by_jni_wait": true,
+        "duration_ms": 79629
+      }
+    }
+  ]
+}

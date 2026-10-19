@@ -1,6 +1,6 @@
 # Combray implementation plan
 
-**Handoff date:** 18 October 2026. **Audience:** an implementation LLM or developer taking over without the original conversation. **Current state:** documentation and design assets only; no Android project, native bridge, database, or working service connection.
+**Handoff date:** 18 October 2026. **Audience:** an implementation LLM or developer taking over without the original conversation. **Current state (19 October 2026):** M0 engine spike done on an x86_64 emulator: pinned, patched Servo v0.6.0, a native bridge (`native/`) and a test harness app (`spike/`); see [ENGINE_SPIKE.md](ENGINE_SPIKE.md). M1–M3 implemented in `app/`, `core/` and `engine/`; their device checks pass on the emulator against fixtures. No physical device or real service tried yet; status per check in [section 9](#9-milestones-and-implementation-tasks).
 
 Combray is a personal Android browser using Servo. It should make browsing feel simple: the page stays central, the controls stay within thumb reach, open tabs and recently visited pages share one place, and the user's existing services handle saving, long-term recall, and web search.
 
@@ -17,7 +17,7 @@ Combray is a personal Android browser using Servo. It should make browsing feel 
 9. [Milestones and implementation tasks](#9-milestones-and-implementation-tasks)
 10. [Acceptance and verification](#10-acceptance-and-verification)
 11. [Decisions, risks, and open questions](#11-decisions-risks-and-open-questions)
-12. [First implementation session](#12-first-implementation-session)
+12. [Next implementation session](#12-next-implementation-session)
 13. [References and evidence limits](#13-references-and-evidence-limits)
 
 ## 1. Takeover and requirement status
@@ -98,8 +98,9 @@ app/                         Compose chrome, Activity, Android intents/insets
 core/                        logical state, Room, repositories, integration policy
 engine/                      Kotlin engine port and Android surface adapter
 native/                      Rust bridge / pinned Servo integration
-docs/ENGINE_SPIKE.md          added by M0: exact setup and measured capability evidence
-docs/BUILDING.md              added with the first reproducible APK build
+docs/ENGINE_SPIKE.md          M0: exact setup and measured capability evidence
+docs/BUILDING.md              M0: reproducible build of the engine harness
+spike/                        M0 harness app and fixture site; test tooling, not product code
 ```
 
 Network clients may live in `core` until separate modules improve testing. Use constructor injection and immutable UI state; a DI framework is optional. UI observes repositories via StateFlow and sends explicit actions to a coordinator. Do not let Composables own native views, database transactions, or upload jobs. A repository coordinates durable logical state; an engine host manages ephemeral views; an integration repository manages destination-bound jobs.
@@ -114,6 +115,8 @@ Compose UI -> browser coordinator -> durable state (tabs / visits / outbox)
 outbox -> worker -> native HTTP clients -> Karakeep / Hister
 Kagi -> ordinary navigation in the Servo profile
 ```
+
+**Status (M1):** built as shown. `core/browser/BrowserCoordinator.kt` owns logical state and the engine port; `core/integration/` holds the outbox, the Karakeep and Hister clients and their policies; the Room schema is exported to `core/schemas/`. UI code reaches the database and the network only through the coordinator and `Integrations`.
 
 ### Servo integration facts and limits
 
@@ -295,9 +298,9 @@ For a usable personal release, assess target sites including authenticated pages
 
 ## 8. Build and repository strategy
 
-### Bootstrap deliberately stops before an unverified build
+### M0 established the engine build; the product build is M1
 
-There is no `gradlew`, Android manifest, Cargo crate, or buildable app in this bootstrap. Creating placeholders would not establish Servo compatibility. M0 owns that work. Do not report a missing Gradle task as a regression in the documentation setup, and do not add a fake build that only renders the HTML prototype.
+M0 added a verified engine build: `native/` (Rust bridge against the pinned Servo tree), `spike/android/` (Gradle harness) and `scripts/m0/` ([BUILDING.md](BUILDING.md)). There is still no product app module. Do not add a fake build that only renders the HTML prototype.
 
 Use an exact Servo commit or verified release branch, record its upstream URL and license, and document any patch set. The current Rust docs and Android book are mutable; their latest APIs may differ from that commit. For a fork, keep a small patch series and document how to rebase/update it. Do not commit a huge generated engine build or native binary without a deliberate reproducibility/artifact decision.
 
@@ -305,7 +308,7 @@ Use an exact Servo commit or verified release branch, record its upstream URL an
 
 The official [Android build guide](https://book.servo.org/building/android.html) is the starting point. Its inspected commands include `./mach build --android`, `./mach install --android`, and `./mach run --android https://www.servo.org/`, run in a Servo checkout, **not in this Combray bootstrap**. The default target described is `aarch64-linux-android`. M0 must verify available emulator/device ABI combinations instead of assuming x86 emulator support.
 
-At inspection the guide referenced JDK 21 and NDK `28.2.13676358`; SDK/emulator examples contained differing platform numbers. These observations are not a complete locked toolchain. Reconcile them with the pinned source's Gradle, `rust-toolchain.toml`, mach setup and actual build errors. Never copy an inconsistent SDK recipe blindly. Android 10/API 29 is a proposed minimum based on upstream Android support reporting, subject to the owner's device and selected revision. Choose compile/target SDK deliberately and record it; do not infer it from minSdk.
+At inspection the guide referenced JDK 21 and NDK `28.2.13676358`; SDK/emulator examples contained differing platform numbers. M0 found that Servo v0.6.0's build rejects anything but NDK r29 (`29.0.14206865` works) and pinned the rest in [BUILDING.md](BUILDING.md#pinned-inputs). These observations are not a complete locked toolchain. Reconcile them with the pinned source's Gradle, `rust-toolchain.toml`, mach setup and actual build errors. Never copy an inconsistent SDK recipe blindly. Android 10/API 29 is a proposed minimum based on upstream Android support reporting, subject to the owner's device and selected revision. Choose compile/target SDK deliberately and record it; do not infer it from minSdk.
 
 The implementation must pin Gradle distribution/checksum, Android Gradle Plugin, Kotlin/Compose setup, JDK, Rust toolchain, SDK/NDK, Servo revision, supported ABIs and required resource bundles. Include engine resources, shared native libraries, JNI packaging and licenses in the APK. Account for per-ABI `.so` loading, resource paths, app profile directories and surface initialization. Test startup on a clean install, not only with a developer checkout present.
 
@@ -321,7 +324,7 @@ The provided launcher source is a 1254×1254 opaque square bitmap. Keep it as th
 
 ## 9. Milestones and implementation tasks
 
-Every milestone below is **not started** at handoff. Track progress by replacing status with concrete evidence and referencing commits or local reports. A blocked engine requirement is not “complete with a fallback.” Tasks may be split among bounded workers, but keep architecture, native ownership, privacy and cross-thread correctness under a single accountable review.
+M0 is done with open blockers; M1–M3 are implemented and checked on an emulator with fixtures, with the gaps listed in their status; M4 is **not started** (statuses below). Track progress by replacing status with concrete evidence and referencing commits or local reports. A blocked engine requirement is not “complete with a fallback.” Tasks may be split among bounded workers, but keep architecture, native ownership, privacy and cross-thread correctness under a single accountable review.
 
 ### M0 — Prove Servo on Android
 
@@ -337,6 +340,20 @@ Every milestone below is **not started** at handoff. Track progress by replacing
 
 **Gate:** independent real Servo views and correctly identified capture must pass on Android before building integration architecture around the adapter. Mocked events, desktop-only tests, loading screenshots, or merely opening the upstream demo do not pass. A reported blocker needs a minimal reproduction and the next plausible Servo-specific approach, not an engine swap.
 
+**Status (18 October 2026): gate met on an x86_64 emulator; two engine blockers open.** Evidence and commands: [ENGINE_SPIKE.md](ENGINE_SPIKE.md), [BUILDING.md](BUILDING.md).
+
+| Step | Result |
+| --- | --- |
+| 1. Revision and approach | Done: Servo v0.6.0 (LTS line), own `cdylib` in `native/` with three small Servo patches |
+| 2. Upstream Android build | Passed: servoshell built for x86_64 and passed upstream's smoke procedure on the emulator (`scripts/m0/smoke-upstream.sh`). ARM64 harness build: passed (compiles and packages; not run). Physical device: not run |
+| 3. Two independent views | Passed (identity, switching, back/forward, same URL in two tabs, close). **Open defect:** after creating views while a large page is shown, later navigations of the visible view do not reach the screen; Home and return does not clear it, rotation does (minimal reproduction fails) |
+| 4. Input and surface lifecycle | Passed: tap, touch scroll, keys with IME shown, IME commit, resize, background/foreground, rotation. Selection and pinch zoom not run |
+| 5. Attributed, bounded capture | Passed: JS-rendered text, redirect, same-URL reload, navigation and close during capture, stale titles, multibyte and size bounds, hostile pages, timeouts, open shadow DOM |
+| 6. Profile, taxonomy, recovery, hidden views, memory | Cookies survive a clean engine shutdown but **not process death** (Servo writes the cookie jar only at exit); localStorage survives both; last-URL recovery passed; taxonomy recorded; hidden views keep running at full rate unless throttled; memory measured |
+| 7. Report and build instructions | Done |
+
+Blockers to resolve before relying on them in M1: the stale-frame defect (multi-tab display) and cookie persistence across process death (logins). Limitations to design around: embedder scripts cannot be interrupted; content runs in the app process without a separate sandbox.
+
 ### M1 — Durable browser shell and Recent
 
 **Depends on:** M0 core lifecycle and event contract. **Outcome:** useful browsing with no service credentials.
@@ -348,6 +365,19 @@ Every milestone below is **not started** at handoff. Track progress by replacing
 5. Persist and lazily restore logical tabs after process death; disclose unsupported native session details. Add explicit local forget operations without remote deletion claims.
 
 **Gate:** A→B navigation, two same-URL tabs, close/reopen, failed loads, ten-tab switching, old closed-history expiry with old open tabs retained, rotation/surface recreation, and process-kill recovery pass. No state depends on keeping an Activity or native pointer alive. A fresh install can browse at least public fixture sites without configured services.
+
+**Status (19 October 2026): implemented; gate passed on an x86_64 emulator.** Unit tests (Robolectric, fake engine and fake clock) cover the coordinator's state rules; device checks run the real engine on the emulator (Android 11, API 30) against `testing/fixtures/server.py` (`scripts/check-app.sh`, evidence in `build/device-checks/<run>/`, not committed). Run `run9` passed all 18 device checks of M1–M3 with the current code. No physical device has been tried.
+
+| Gate check | Result | Evidence |
+| --- | --- | --- |
+| A→B navigation, two same-URL tabs, close and Undo, failed load, ten tabs, rotation | Passed on the device (`run9`) and in unit tests | `BrowsingTest`, `BrowserCoordinatorTest` |
+| Page-opened window becomes a focused tab; external link opens a new tab | Passed on the device (`run9`) and in unit tests | `BrowsingTest`, `BrowserCoordinatorTest` |
+| Closed-history expiry with old open tabs kept | Passed in unit tests (fake clock); runs at startup and whenever the app returns | `closedHistoryExpiresButOpenTabsDoNot` |
+| Process-kill recovery | Passed on the device (`run9`): after a forced stop, three logical tabs and the active one were restored and painted, the save queued before the kill reached the server, and the cookie set before the kill was sent again | `ProcessDeathTest` |
+| No state depends on an Activity or native pointer | Passed by design and unit tests: native views are a cache of logical tabs with generation checks | `BrowserCoordinatorTest` |
+| Fresh install browses fixture sites without services | Passed: every device run starts from cleared app data | `check-app.sh` |
+
+Not done: text selection, pinch zoom, file upload, downloads, permissions UI and a Recent home layout. Stop is missing (Servo 0.6.0 has no API for it).
 
 ### M2 — Karakeep saves and Kagi search
 
@@ -361,6 +391,18 @@ Every milestone below is **not started** at handoff. Track progress by replacing
 
 **Gate:** one-tap save produces the intended bookmark and status, including a safe retry after ambiguous success. A query containing spaces, Unicode, `&` and `#` arrives intact at Kagi. Searching and saving still target the intended page if the user switches tabs immediately. Test Kagi on the real engine, not just URI formatting.
 
+**Status (19 October 2026): implemented; checked with a fake Karakeep.** No real Karakeep or Kagi was contacted (fixtures only, by the task's rules).
+
+| Gate check | Result | Evidence |
+| --- | --- | --- |
+| One tap saves the page with its title | Passed on the device (`run9`) | `SaveTest#oneTapSavesThePageWithItsTitle` |
+| Lost answer after the server stored the link: retried, one bookmark | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
+| Rejected key pauses saves until resumed with a working key | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
+| Save targets the tapped page when the tab changes right after | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
+| Query with spaces, Unicode, `&` and `#` arrives intact | Passed through the real engine against the fixture server standing in for Kagi (`run9`); URI rules in unit tests | `BrowsingTest#aSearchQueryReachesTheServerEncodedExactlyOnce`, `AddressPolicyTest` |
+| Kagi login and cookie persistence on kagi.com | **Not run** (no live services); cookie persistence across a forced stop passed on the device with a fixture cookie (`ProcessDeathTest`) | — |
+| Deliberate test save on the owner's server | **Not run** | — |
+
 ### M3 — Hister content and long-term search
 
 **Depends on:** verified M0 extraction and M1/M2 persistence. **Outcome:** useful long-term recall with privacy controls.
@@ -372,6 +414,19 @@ Every milestone below is **not started** at handoff. Track progress by replacing
 5. Test realistic rendered text and an excluded/private fixture. Verify a unique fixture phrase is searchable after acceptance, then explicitly clean up the test document when authorized. Record whether accepted-but-skipped documents can be detected.
 
 **Gate:** search finds a distinctive phrase that exists only in the rendered content, not just the URL/title. Navigation, same-URL reloads, capture delay, forget/exclusion, offline restart and account switching cannot misattribute or redirect data. UI does not mistake auth errors for no history. Old jobs are not knowingly sent after newer acknowledged content for the same server key.
+
+**Status (19 October 2026): implemented; checked with a fake Hister.** The fake follows the request and response shapes recorded in [INTEGRATIONS.md](INTEGRATIONS.md) for the pinned Hister revision; no deployed Hister was contacted.
+
+| Gate check | Result | Evidence |
+| --- | --- | --- |
+| A phrase only in the rendered page (written by script) becomes searchable | Passed on the device (`run9`) | `HisterTest#aPhraseThatExistsOnlyInTheRenderedPageBecomesSearchable` |
+| Excluded site never sent; paused capture sends nothing | Passed on the device (`run9`) and in unit tests | `HisterTest`, `HisterIntegrationTest` |
+| Same-URL reload, navigation during capture, stale results, delayed capture | Passed in unit tests and on the engine in M0 | `CaptureTest`, M0 section 5 |
+| Forget and exclusion cancel queued and in-flight captures | Passed in unit tests | `HisterIntegrationTest` |
+| Server switch cancels unsent captures; credentials bound to their server | Passed in unit tests | `HisterIntegrationTest`, `IntegrationsTest` |
+| Newer content supersedes unsent older content per document key | Passed in unit tests | `IntegrationsTest` |
+| Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
+| Test against a deployed Hister; cleanup of the test document | **Not run** | — |
 
 ### M4 — Personal-use hardening and handoff
 
@@ -429,19 +484,28 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Servo as engine | Confirmed | User explicitly required it |
 | Bottom UI and unified Recent | Confirmed | Core product requirements |
 | Karakeep / Hister / Kagi roles | Confirmed | Existing personal services |
-| Kotlin/Compose + Rust bridge | Proposed | Natural fit for Android shell and Servo; verify M0 |
-| Recent sheet initial layout | Proposed | Both concepts accepted in general; no exclusive final selection |
+| Kotlin/Compose + Rust bridge | Verified (M0 bridge, M1 app) | Own `cdylib`, one engine thread, JSON events; Compose BOM 2026.09.00 with Material 3 |
+| Recent sheet initial layout | Proposed; implemented as the sheet (M1) | Both concepts accepted in general; no exclusive final selection. Recent home remains possible: Recent is one composable over `BrowserCoordinator.recent()` |
+| Service settings in Room, not DataStore | Decided (M2) | A service row's fingerprint and generation bind outbox jobs; keeping it in the outbox's database makes configuration changes and job invalidation one transaction |
+| HTTP client: `HttpURLConnection` | Decided (M2) | No extra dependency; redirects are not followed (they could carry a credential or page text to another origin); bounded timeouts and response sizes |
+| Credentials bound to their server | Decided (M2 review) | Stored as Keystore AES-GCM ciphertext together with the server fingerprint; a credential is never sent to another server, even after a crash between two configuration writes |
+| Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Tune on the owner's device (M4) |
+| Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
+| Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |
+| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode |
 | Seven-day closed-history retention | Proposed | Bounded short-term memory; open tabs exempt |
 | Opt-in automatic Hister capture | Proposed | Owner controls content transfer and exclusions |
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
-| Engine revision/toolchain/packaging | Pending M0 | Must come from a working Android build |
-| Application ID and minSdk | Pending M0/M1 | Suggested API29 floor; owner's device and revision must agree |
+| Engine revision/toolchain/packaging | Decided (M0) | Servo v0.6.0 + `native/servo/patches/`, Rust 1.97.1, NDK r29; [ENGINE_SPIKE.md](ENGINE_SPIKE.md#2-servo-selection-and-integration-decision) |
+| Application ID and minSdk | Proposed (M1) | `ch.lkmc.combray` (`.debug` suffix for debug builds), minSdk 30 (the native library links with API 30 wrappers), targetSdk 36. Confirm the ID with the owner before signing a release: changing it later loses installed data |
 | Server auth/version and target sites | Pending owner/configuration | Fixture work can proceed without secrets |
 
 ### Principal risks and response
 
-**Android wrapper work:** multi-tab identity and extraction may require upstream changes. Resolve first, preserve a minimal patch and harness, and avoid building large product layers around an imagined API.
+**Android wrapper work:** multi-tab identity and extraction required upstream changes; M0 carries them as `native/servo/patches/0002` (document identity, crash fix). Keep the patch set small and offer it upstream; rebase it when moving to a later 0.6.x LTS release.
+
+**Engine defects found in M0:** a stale frame after creating views while a large page is visible (WebRender level, reproduced on SwiftShader only so far), cookies lost on process death (addressed by patch 0004 since: written on request, at most five minutes of foreground changes at risk), and no interruption for embedder scripts. Each needs an upstream report with the M0 reproduction; see [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
 
 **Engine security and compatibility:** Servo remains pre-1.0 and its demo wrapper has different maintenance scope from its library. Record real Android protections and critical target-site failures; keep an update path and avoid unsupported security promises.
 
@@ -461,19 +525,24 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
-## 12. First implementation session
+## 12. Next implementation session
 
-An implementation agent can begin with this brief:
+M0–M3 are implemented and their device checks pass on an x86_64 emulator (statuses in section 9). **Next task:** repeat the device checks on an arm64 phone, then start M4 with the owner.
 
-> Implement M0 from `docs/IMPLEMENTATION_PLAN.md`. Read `AGENTS.md` and integration evidence first. Preserve the existing license and icon. Use Servo only. Inspect the current tree and any work already completed; do not restart a passing spike. Pin an actual Servo revision, establish a reproducible Android build, and prove two independent native views plus bounded, correctly attributed rendered-text capture. Keep the harness minimal. Add `docs/ENGINE_SPIKE.md` and `docs/BUILDING.md` with exact commands, device/toolchain details, passed/failed/not-run checks and blockers. Do not declare success from mocks or desktop-only results. Follow the Junie delegation instructions for bounded suitable work. Do not change live personal services or push unless the active task authorizes it.
+1. On an arm64 phone: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
+2. Ask the owner for: the device, the Karakeep and Hister addresses and versions, sites that must work, hosts never to capture, and confirmation of the application ID `ch.lkmc.combray` before release signing.
+3. With the owner's consent, do one deliberate save and one capture on their services, then clean up the test items (M2 step 5, M3 step 5); try Kagi login and search in Servo.
+4. Set up release signing outside Git (M4 step 5) and build the first arm64 release with `scripts/release.sh`.
 
-Start by inspecting Git status and tracked files, running `python3 scripts/check_docs.py`, reading the handoff, and checking local JDK/Rust/Android tool availability. Use a task-owned ignored checkout or documented external workspace for Servo. A large upstream fetch/build may need network/space; establish those prerequisites before choosing a wrapper integration. Record the exact commit before editing upstream.
+> Read `AGENTS.md` first. Servo only; preserve the license and icon. Build with `scripts/build-native.sh` and Gradle exactly as `docs/BUILDING.md` describes; do not change the pinned Servo revision or patches without recording why. Report every check as passed, failed or not run with the device and commands used. Do not change live personal services or push unless the active task authorizes it.
+
+Before starting, run `python3 scripts/check_docs.py`, `./gradlew testDebugUnitTest lintDebug`, and `cd native && cargo test --lib`.
 
 At the end of each implementation session, update milestone status with evidence, state the next smallest task, list modified upstream files and known failures, and leave reproducible commands. Avoid a parallel unchecked TODO document that contradicts this plan. Link new detailed reports from here when they exist. A future LLM should be able to resume from repository files alone.
 
 ## 13. References and evidence limits
 
-Sources were inspected on **18 October 2026**. This plan is a design proposal informed by source inspection, not a record of running Servo or the user's services. The only bootstrap validation is repository/document/asset checking. Hister inspection was pinned to `dce14327638b4177fcaad7cd11827c26b6cd17cd`; Servo `main`/latest generated docs and Karakeep's versioned site were inspected without a locked product dependency. Revalidate the selected revisions during M0/M3.
+Sources were inspected on **18 October 2026**. The design was a proposal informed by source inspection; run evidence is recorded per milestone in section 9 and in [ENGINE_SPIKE.md](ENGINE_SPIKE.md). The user's services have not been contacted. Hister inspection was pinned to `dce14327638b4177fcaad7cd11827c26b6cd17cd`; Servo `main`/latest generated docs and Karakeep's versioned site were inspected without a locked product dependency. Revalidate the selected revisions during M0/M3.
 
 - [Servo Android build guide](https://book.servo.org/building/android.html), [Android architecture](https://book.servo.org/design-documentation/android.html), [embedding API](https://doc.servo.org/servo/), and [WebView methods/ownership](https://doc.servo.org/servo/struct.WebView.html).
 - [Inspected Android JNI wrapper](https://github.com/servo/servo/blob/main/support/android/apk/servoview/src/main/java/org/servo/servoview/JNIServo.kt), [Android progress report](https://servo.org/blog/2026/08/31/july-in-servo/), and [embedding LTS scope](https://book.servo.org/embedding/lts-release.html).

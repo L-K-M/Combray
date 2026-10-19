@@ -1,0 +1,5 @@
+# Must match the pinned Servo release (servo-checkout/servo-v0.6.0/rust-toolchain.toml).
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+targets = ["aarch64-linux-android", "x86_64-linux-android"]

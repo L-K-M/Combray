@@ -13,15 +13,15 @@ Combray connects to **Karakeep** for quick saves, **Hister** for long-term histo
 
 ## Status
 
-This repository contains the implementation handoff, design reference, icon, repository checks, and build and release tooling. **There is no Android application or Servo integration yet.** The next step is the Servo feasibility milestone, M0, in the plan. No Android build, service integration, or target-site compatibility has been demonstrated by this bootstrap.
+Combray runs on a pinned, patched Servo v0.6.0 through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**, and release signing is not set up. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
 
 ## Start here
 
 1. Read [AGENTS.md](AGENTS.md) for implementation constraints and working instructions.
 2. Read the [implementation plan](docs/IMPLEMENTATION_PLAN.md). It is the authoritative, self-contained handoff: requirements, architecture, data model, integration contracts, milestones, and acceptance checks.
-3. Consult [integration evidence](docs/INTEGRATIONS.md) before implementing the HTTP clients.
+3. Consult [integration evidence](docs/INTEGRATIONS.md) before changing the HTTP clients.
 4. Open the [design reference](docs/design/README.md) and its interactive HTML concept. Both Recent layouts are retained; the final layout has not been selected.
-5. Implement M0 and record the exact engine revision and working toolchain before starting the product shell.
+5. Read the [engine spike report](docs/ENGINE_SPIKE.md) and [build instructions](docs/BUILDING.md) before building the app or touching the engine.
 
 ## Repository check
 
@@ -32,11 +32,13 @@ python3 scripts/check_docs.py
 git diff --check
 ```
 
-These checks validate repository documentation and assets. The `checks.yml` workflow runs the documentation check on pushes and pull requests once committed and pushed. Native build and device checks will be added with the first implementation milestone.
+These checks validate repository documentation and assets. The `checks.yml` workflow runs the documentation check on pushes and pull requests once committed and pushed.
+
+The app's unit tests and lint run with `./gradlew testDebugUnitTest lintDebug` and need only a JDK and the Android SDK. Building the engine needs the pinned Servo tree and an Android NDK; device checks (`scripts/check-app.sh`) need a device or emulator. See [BUILDING.md](docs/BUILDING.md). The engine bridge's host unit tests run with `cd native && cargo test --lib` after `scripts/m0/fetch-servo.sh`.
 
 ## Build and release tooling
 
-Build, install, release, and CI tooling is in place ahead of the app. It stays inert until the Gradle project exists; see [AGENTS.md](AGENTS.md#build-and-release-tooling).
+Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). CI builds the Kotlin code only: its APKs contain no engine and say so. A usable APK needs `scripts/build-native.sh` first, and release paths stop until signing is set up (M4).
 
 ```sh
 scripts/build.sh                 # release APK -> dist/
@@ -52,6 +54,12 @@ scripts/release.sh X.Y.Z --push  # bump, tag vX.Y.Z, push; the tag publishes the
 | `docs/IMPLEMENTATION_PLAN.md` | Complete implementation brief and handoff |
 | `docs/INTEGRATIONS.md` | Source-backed API observations and compatibility caveats |
 | `docs/design/` | Existing UI concepts, sample interactions, and design guidance |
+| `docs/ENGINE_SPIKE.md`, `docs/BUILDING.md` | M0 results, decisions and reproducible build |
+| `app/`, `core/`, `engine/` | The Android app: Compose UI; logical tabs, history, outbox and service clients; Kotlin engine port |
+| `native/` | Combray's Rust bridge to Servo, with the pinned Servo patches |
+| `testing/fixtures/` | Synthetic pages and fake Karakeep/Hister servers for the device checks (`scripts/check-app.sh`) |
+| `spike/` | M0 engine harness app and fixture site (test tooling) |
+| `scripts/m0/` | Fetch, build, emulator and check scripts for M0 |
 | `media-sources/` | Original square icon and generation provenance |
 | `scripts/check_docs.py` | Dependency-free documentation and asset checks |
 | `scripts/build.sh`, `install.sh`, `release.sh` | Build, device install, and release helpers |

@@ -1,0 +1,33 @@
+{
+  "scenario": "resume-check",
+  "started_at_ms": 1792353595375,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "surface-background-foreground",
+      "status": "passed",
+      "detail": {
+        "unbound_event_index": 709,
+        "rebound_event_index": 710,
+        "tab1": {
+          "document": 4294967332,
+          "url": "http:\/\/localhost:8765\/b.html"
+        },
+        "expected": {
+          "tab1_document": 4294967332,
+          "tab1_url": "http:\/\/localhost:8765\/b.html"
+        },
+        "painted_after_resume": true,
+        "expected_swatch": "#8a5a2b",
+        "screen": "#8a5a2b"
+      }
+    }
+  ]
+}

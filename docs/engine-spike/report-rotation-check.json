@@ -1,0 +1,33 @@
+{
+  "scenario": "rotation-check",
+  "started_at_ms": 1792353657855,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "surface-rotation-recreation",
+      "status": "passed",
+      "detail": {
+        "unbound_event_index": 717,
+        "last_surface": {
+          "type": "surface_bound",
+          "width": 1208,
+          "height": 336,
+          "schema": 1
+        },
+        "viewport": [
+          604,
+          154
+        ],
+        "tab1_document": 4294967332,
+        "expected_document": 4294967332
+      }
+    }
+  ]
+}

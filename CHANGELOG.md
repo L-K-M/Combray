@@ -13,3 +13,21 @@ All notable changes to this project are documented here. The format follows
   documentation checks.
 - Repository tooling ahead of the app: build, install, and release scripts;
   CI and tag-triggered release workflows; GLM code review; Dependabot.
+- M0 engine spike: Servo v0.6.0 pinned with three patches, Combray's Rust
+  bridge (`native/`), an Android test harness and fixture site (`spike/`),
+  build and check scripts (`scripts/m0/`), and the results in
+  `docs/ENGINE_SPIKE.md` and `docs/BUILDING.md`.
+- The Combray app (`app`, `core`, `engine` Gradle modules): Servo tabs with
+  durable logical state, bottom bar, address and Kagi search, unified Recent
+  with local filter, retention and forgetting, external links, page-opened
+  windows, and recovery after process death.
+- Karakeep saves: protected credentials bound to their server, a durable
+  outbox with fenced claims, retries and honest pending/saved/failed states.
+- Hister: opt-in capture of rendered page text with exclusions, budgets and
+  per-document ordering, plus explicit long-term search in Recent.
+- Servo patch 0004: cookies and other profile state are written on request
+  (and atomically), so logins survive Android killing the app.
+- Device checks against the real engine (`scripts/check-app.sh`) with
+  synthetic pages and fake services (`testing/fixtures/`).
+- Internationalized host names show in Unicode only when they cannot
+  imitate another site; other hosts show as punycode.

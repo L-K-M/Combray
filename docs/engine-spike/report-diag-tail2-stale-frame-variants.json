@@ -1,0 +1,59 @@
+{
+  "scenario": "diag-tail2",
+  "started_at_ms": 1792353935564,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "dwell-only",
+      "status": "passed",
+      "detail": {
+        "screen_after_leaving_large_page": "#8a5a2b",
+        "screen_after_next_navigation": "#3b4f8a",
+        "recovered": true
+      }
+    },
+    {
+      "id": "dwell-timed-out-capture",
+      "status": "passed",
+      "detail": {
+        "screen_after_leaving_large_page": "#8a5a2b",
+        "screen_after_next_navigation": "#3b4f8a",
+        "recovered": true
+      }
+    },
+    {
+      "id": "dwell-reselect",
+      "status": "passed",
+      "detail": {
+        "screen_after_leaving_large_page": "#8a5a2b",
+        "screen_after_next_navigation": "#3b4f8a",
+        "recovered": true
+      }
+    },
+    {
+      "id": "dwell-throttled-timer-tab-closed",
+      "status": "passed",
+      "detail": {
+        "screen_after_leaving_large_page": "#8a5a2b",
+        "screen_after_next_navigation": "#3b4f8a",
+        "recovered": true
+      }
+    },
+    {
+      "id": "dwell-eight-hidden-tabs",
+      "status": "failed",
+      "detail": {
+        "screen_after_leaving_large_page": "#51864f",
+        "screen_after_next_navigation": "#51864f",
+        "recovered": false
+      }
+    }
+  ]
+}

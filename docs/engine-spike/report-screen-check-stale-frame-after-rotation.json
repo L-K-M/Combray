@@ -1,0 +1,25 @@
+{
+  "scenario": "screen-check",
+  "started_at_ms": 1792354515132,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "screen-matches-selected-tab-after-rotation",
+      "status": "passed",
+      "detail": {
+        "tab": 105,
+        "url": "http:\/\/localhost:8765\/c.html",
+        "expected": "#3b4f8a",
+        "screen": "#3b4f8a",
+        "surface_rebound_event_index": 726
+      }
+    }
+  ]
+}

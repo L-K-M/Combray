@@ -39,3 +39,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+
+# Native engine libraries staged by scripts/build-native.sh
+engine/jniLibs/

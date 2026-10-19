@@ -1,0 +1,4 @@
+# Same style as the pinned Servo release, whose API this crate embeds.
+match_block_trailing_comma = true
+reorder_imports = true
+style_edition = "2024"

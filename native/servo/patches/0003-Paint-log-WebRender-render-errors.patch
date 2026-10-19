@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Combray <combray@localhost>
+Date: Sun, 18 Oct 2026 14:56:57 +0000
+Subject: [PATCH] Paint: log WebRender render errors
+
+Painter::render discarded the result of webrender::Renderer::render
+(an upstream TODO). A failed render leaves the previous frame on
+screen while the embedder believes it painted the new one; logging
+the errors makes that state diagnosable.
+---
+ components/paint/painter.rs | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/components/paint/painter.rs b/components/paint/painter.rs
+index 827ce3f..8c13f00 100644
+--- a/components/paint/painter.rs
++++ b/components/paint/painter.rs
+@@ -425,11 +425,13 @@ impl Painter {
+                 }
+ 
+                 // Paint the scene.
+-                // TODO(gw): Take notice of any errors the renderer returns!
+                 self.clear_background();
+                 if let Some(renderer) = self.webrender_renderer.as_mut() {
+                     let size = self.rendering_context.size2d().to_i32();
+-                    renderer.render(size, 0 /* buffer_age */).ok();
++                    // A failed render leaves the previous frame on screen; make it visible.
++                    if let Err(errors) = renderer.render(size, 0 /* buffer_age */) {
++                        warn!("WebRender failed to render a frame: {errors:?}");
++                    }
+                 }
+             }
+         );

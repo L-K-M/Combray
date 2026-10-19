@@ -1,0 +1,143 @@
+# Building Combray
+
+This builds the Combray app (pinned, patched Servo, Combray's native bridge, the Kotlin app) and the M0 engine harness used for engine-level checks. Results and the reasoning behind engine choices are in [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
+
+```text
+servo-checkout/servo-v0.6.0   pinned release source + native/servo/patches  (ignored by Git)
+native/                       Rust cdylib libcombray_engine.so: JNI bridge, engine thread
+engine/  core/  app/          Gradle modules: engine port, logical state and integrations, Compose UI
+engine/jniLibs/<abi>/         native libraries staged by scripts/build-native.sh (ignored by Git)
+testing/fixtures/server.py    synthetic pages and fake Karakeep/Hister for the device checks
+scripts/                      build-native.sh, check-app.sh, generate-launcher-icons.py, build.sh, ...
+spike/android/                M0 harness app ch.lkmc.combray.enginespike (engine checks)
+spike/fixtures/server.py      M0 fixture site
+scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, run-checks.sh, smoke-upstream.sh
+```
+
+## Pinned inputs
+
+| Input | Version | Source of truth |
+| --- | --- | --- |
+| Servo | v0.6.0 release (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `scripts/m0/env.sh` |
+| Servo source tarball | `servo-v0.6.0-src-vendored.tar.gz`, SHA-256 `1d828f9956fcb0fccfd5af02e4c75bfb948344f04ba7af1765faff78d4aec0e6` | GitHub release asset; checked by `fetch-servo.sh` |
+| Servo patches | `0001` build fix, `0002` document identity, `0003` render-error logging, `0004` cookie persistence on request | `native/servo/patches/` |
+| Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
+| Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
+| SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |
+| Android NDK | r29, `29.0.14206865` | `env.sh`, which also rejects a `PATH` where the linker wrapper named in `native/.cargo/config.toml` resolves outside it; Servo's build rejects other majors |
+| Android SDK | platform `android-37` (compileSdk), build-tools 36.0.0 | `app/build.gradle.kts`, `spike/android/app/build.gradle.kts` |
+| App: Gradle / AGP / Kotlin | Gradle 9.7.1 (distribution SHA-256 pinned), AGP 9.4.1, Kotlin 2.4.20, KSP 2.3.12 | `gradle/wrapper/`, `gradle/libs.versions.toml` |
+| App libraries | Compose BOM 2026.09.00 (Material 3 1.4.0), Room 2.8.4, WorkManager 2.12.0, Lifecycle 2.11.0, kotlinx coroutines/serialization 1.11.0; tests: Robolectric 4.17, JUnit 4.13.2 | `gradle/libs.versions.toml` |
+| Harness: Gradle / AGP | Gradle 9.5.1 (distribution SHA-256 pinned), Android Gradle Plugin 9.2.1 | `spike/android/gradle/wrapper/`, `spike/android/build.gradle.kts` |
+| Maven artifacts | By version only: no Gradle dependency verification or lockfile yet | Google Maven, Maven Central. Checksum verification should be generated on each supported host OS before a release (M4) |
+| JDK | 21 (verified); Servo's CI uses 17 | host |
+| API levels | App: minSdk 30, targetSdk 36. Harness: minSdk 30, targetSdk 34 | the native library links with API 30 linker wrappers |
+
+## Host prerequisites
+
+Verified on Linux x86_64 (Debian 12 container, 16 cores, 125 GiB RAM). Plan for about **25 GB** of free disk: Servo source without `vendor/` (1.3 GB), Cargo registry (about 2 GB), shared build directory (about 5 GB per ABI and profile), Gradle cache, NDK (2.4 GB) and an emulator image.
+
+- JDK 17 or 21, `curl`, `make`, `cmake` (aws-lc-sys), `python3` ≥ 3.11 and [`uv`](https://docs.astral.sh/uv/) (mach and Servo's code generators).
+- `rustup`. Run Cargo through rustup's proxy (`~/.cargo/bin`); `env.sh` puts it first so cargo wrappers do not change the build.
+- Android SDK command-line tools, then:
+
+  ```sh
+  sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865"
+  rustup toolchain install 1.97.1 --target x86_64-linux-android,aarch64-linux-android
+  ```
+
+- A **host** C/C++ compiler for build scripts, `clang`/`clang++` by default. Set `COMBRAY_HOST_CC` and `COMBRAY_HOST_CXX` to use another; changing them recompiles every build script. The reference host has no system compiler; it used `zig cc` 0.17 through two wrapper scripts (`COMBRAY_HOST_CC=servo-checkout/hostbin/host-cc`, `COMBRAY_HOST_CXX=servo-checkout/hostbin/host-c++`, local and not in Git) that drop Cargo's `--target=` flag, pin `-target x86_64-linux-gnu.2.28` and add `-fno-sanitize=undefined`. Without that flag zig enables UBSan at `-O0`, and WebRender's build script aborts inside glsl-optimizer (`applying non-zero offset 1 to null pointer`).
+
+`scripts/m0/env.sh` reproduces mach's Android environment (compilers, `BINDGEN_EXTRA_CLANG_ARGS`, `ANDROID_API_LEVEL`, the x86_64 compiler-rt link argument) for the external `native/` crate. Override `ANDROID_SDK_ROOT`, `ANDROID_NDK_ROOT` and `COMBRAY_ABI` (`x86_64` default, `arm64`) as needed. The reference host used `ANDROID_SDK_ROOT=$HOME/android-sdk`.
+
+## Build the app
+
+```sh
+scripts/m0/fetch-servo.sh             # once: download, verify, extract, apply the patches
+scripts/build-native.sh               # cargo build + strip → engine/jniLibs/x86_64 (COMBRAY_ABI=arm64 for phones)
+./gradlew assembleDebug               # → app/build/outputs/apk/debug/app-debug.apk (ch.lkmc.combray.debug)
+```
+
+`scripts/build.sh [--debug] [--install]` runs the Gradle step and stages the APK in `dist/`. Without `build-native.sh` the APK still builds (CI does this) but contains no engine, and the app says so. The APK only offers the ABI the engine was built for. Unit tests and lint (the CI gate) need no engine:
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+```
+
+The release variant is unsigned until signing is set up (M4). To regenerate the launcher icon after changing `media-sources/icon.png`: `python3 scripts/generate-launcher-icons.py` (needs Pillow).
+
+## Build the M0 engine harness
+
+```sh
+scripts/m0/fetch-servo.sh             # download, verify, extract, apply the patches
+scripts/m0/build-harness.sh           # cargo build + strip + Gradle → app-debug.apk
+```
+
+Output: `spike/android/app/build/outputs/apk/debug/app-debug.apk` (x86_64, about 142 MB; the stripped native library is about 131 MB). The Rust code is built with Cargo's `release` profile; only the Android packaging is a debug variant, so `run-as` works for collecting reports. Use `COMBRAY_ABI=arm64` for devices.
+
+Upstream baseline (Servo's own shell, unmodified apart from the build fix):
+
+```sh
+scripts/m0/fetch-servo.sh upstream
+scripts/m0/build-upstream.sh          # servo-checkout/servo-v0.6.0/target/<triple>/release/servoapp.apk
+scripts/m0/smoke-upstream.sh emulator-5560
+```
+
+`smoke-upstream.sh` repeats mach's Android `smoketest`: it installs `servoapp.apk`, opens a `data:` URL whose script logs `SERVO_ANDROID_SMOKETEST_OK`, and passes when that marker reaches logcat before a crash marker. mach waits 30 seconds; the script waits up to `COMBRAY_SMOKE_TIMEOUT` (900 s default) for software emulation.
+
+`fetch-servo.sh` recreates the source tree from the tarball on every run (keeping `target/`), so switching between `upstream` and the default patch set is explicit.
+
+Host unit tests for the engine's pure modules (no Servo build needed):
+
+```sh
+cd native && cargo test --lib
+```
+
+## Emulator and checks
+
+App checks (instrumented tests against the real engine and `testing/fixtures/server.py`, then a process-death check across a killed process):
+
+```sh
+scripts/m0/emulator.sh
+./gradlew assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5560    # or: scripts/check-app.sh emulator-5560 ch.lkmc.combray.SaveTest
+```
+
+Evidence goes to `build/device-checks/<UTC time>/` (or `$COMBRAY_RESULTS`): raw instrumentation output per run, logcat and `summary.md`; the script exits 1 if a check failed or a run reported nothing. Fixture pages are reached at `localhost:8766` through `adb reverse`; the fake services at `10.0.2.2:8766` (the emulator's address for the host), because a service's own host is never captured for Hister. On a physical phone, use a host address the phone reaches and the debug network configuration allows.
+
+Engine-level checks of the M0 harness:
+
+```sh
+scripts/m0/emulator.sh                # creates and boots combray-m0-api30-x86_64
+scripts/m0/run-checks.sh emulator-5560
+```
+
+`emulator.sh` uses KVM when `/dev/kvm` is writable; otherwise it falls back to software emulation (`-accel off`). `run-checks.sh` serves the fixtures, installs the APK with fresh app data, runs the in-app `core` scenario, drives lifecycle phases from the host (Home and return, rotation, clean shutdown, force-stop) and finally runs the stale-frame reproduction. It takes 20–35 minutes on the software-emulated reference AVD. Evidence goes to `servo-checkout/results/<UTC time>/` (or `$COMBRAY_RESULTS`): one JSON report per phase, logcat, screenshots and `summary.md`. The script exits with status 1 when any check failed, a phase produced no report, or a report holds no results, so a run with the known defects ([stale frame](ENGINE_SPIKE.md#6-open-defect-stale-frame), cookies after a kill) exits 1. To run single scenarios: `scripts/m0/run-checks.sh emulator-5560 core diag-tail2:dwell-eight-hidden-tabs`.
+
+Under software emulation, Android's System UI often misses its ANR deadline and leaves a "System UI isn't responding" dialog over the app. It does not affect the M0 harness checks, which inject input into the harness view directly, but it spoils screenshots; `adb root && adb shell pkill -f com.android.systemui` clears it. For the app checks the dialog dims the screen and takes input focus (`screen shows` a darkened colour, `Failed to inject touch input`); `check-app.sh` and the tests close it with the `CLOSE_SYSTEM_DIALOGS` broadcast before each run, screen check and tap. The `hide_error_dialogs` setting does not prevent it on Android 11.
+
+For an arm64 device: `COMBRAY_ABI=arm64 scripts/m0/build-harness.sh`, then `scripts/m0/run-checks.sh <serial>`. M0 built and packaged arm64 (134 MB APK; 6–8 minutes on the 16-core host once host tools were cached) but **did not run** it: no arm64 device was available. Switching ABIs in one build directory triggers partial rebuilds, because some build scripts track ABI-specific environment variables; give each ABI its own `CARGO_TARGET_DIR` if you alternate often.
+
+## Problems met and their fixes
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `Servo currently only supports NDK r29.` | The Servo book still mentions NDK 28.2; v0.6.0's mach requires r29 | Install `ndk;29.0.14206865` |
+| `current package believes it's in a workspace when it's not` in `mozjs_*_glue` | Their build scripts run `cbindgen`, which runs `cargo metadata` inside `vendor/` | Patch 0001: no `vendor/`, crates from crates.io at the locked versions |
+| `failed to select a version ... encoding_rs (locked to 0.8.41)` | The same glue crates carry their own `Cargo.lock`; `vendor/` only has 0.8.35 | Patch 0001 |
+| WebRender build script `SIGABRT`, `applying non-zero offset 1 to null pointer` | zig's UBSan in host C++ code at `-O0` | Host compiler wrapper with `-fno-sanitize=undefined` |
+| `emulator: error while loading shared libraries: libX11.so.6` | Headless host without X11 libraries | Install them, or point `COMBRAY_EMULATOR_LIBS` at a directory that has them |
+| `cmd: Failure calling service package: Broken pipe`, then `Lost network stack` | Under software emulation and heavy host load, Android's framework watchdogs restart `system_server` during a 140-160 MB install | Boot without concurrent host builds, give the AVD 6 cores and 6 GB, disable install verification, retry after `sys.boot_completed` settles |
+| AGP 9: `You cannot add Provider instances to the Android SourceSet API` | AGP 9 source-set rules | Plain path in `jniLibs.directories` |
+| `emulator: error while loading shared libraries: libX11.so.6` with `-no-window` | The `emulator` launcher and the headless qemu both link libX11 | `COMBRAY_EMULATOR_BIN=$ANDROID_SDK_ROOT/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless` plus `COMBRAY_EMULATOR_LIBS` pointing at a user-space libX11 |
+| `unknown virtual device name` from the emulator although `avdmanager` lists the AVD | avdmanager keeps AVDs under `~/.config/.android` (XDG) when `~/.android` is absent; the emulator only reads `ANDROID_AVD_HOME` | `emulator.sh` resolves and exports `ANDROID_AVD_HOME` |
+| `adb install`: `cmd: Can't find service: package` after boot | system_server restarted under load (software emulation) | `check-app.sh` pushes the APK first, waits until `system_server` has run for three minutes and the package service answers, and retries up to three times |
+| Every page check fails with `screen shows 000000`; `screencap` of the launcher is black too | After hours of headless running, the emulator's compositor stops producing frames (seen once, after about 2.5 hours and several `system_server` restarts) | Restart the emulator. `check-app.sh` now checks a home-screen screenshot first and stops with this advice |
+| A screen check sees Combray's home screen or an old page although the coordinator has moved on | Under a Compose test rule the UI only recomposes when the test drives the test clock; checks that talk to the coordinator directly never do | `Device` advances the Compose clock by one frame before each screenshot |
+| `Injecting to another application requires INJECT_EVENTS` | A System UI ANR dialog has input focus | The tests close system dialogs before taps |
+| `Failed to inject touch input. Reason: Expected exactly '1' node ...` | Not an input problem: Compose prefixes a failed node lookup with this text. App data persists across the checks of one run, so a page an earlier check saved has "Saved to Karakeep" instead of a "Save" button | Each check that taps Save uses a page no earlier check saved |
+| Lint `NewApi`: `URLEncoder.encode(String, Charset)` | That overload is API 33; minSdk is 30 (it would crash on Android 11) | `URLEncoder.encode(value, "UTF-8")` |
+
+## Cleaning up
+
+Everything large is ignored by Git and local to the checkout: `servo-checkout/` (source, downloads, build directory, results), `native/target/` (host tests), `engine/jniLibs/`, Gradle `build/` directories (including `build/device-checks/`) and `spike/android/app/build/`. Remove them to reclaim space. The emulator image and AVD live in the Android SDK and `ANDROID_AVD_HOME`; delete the AVD with `avdmanager delete avd -n combray-m0-api30-x86_64`.

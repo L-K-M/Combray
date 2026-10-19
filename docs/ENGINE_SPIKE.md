@@ -1,0 +1,269 @@
+# M0 engine spike: Servo on Android
+
+**Date:** 18 October 2026. **Scope:** milestone M0 of the [implementation plan](IMPLEMENTATION_PLAN.md#m0--prove-servo-on-android). This report records what was built, how, and what ran on Android. Build commands are in [BUILDING.md](BUILDING.md).
+
+## Summary
+
+| Capability (M0) | Verdict | Evidence |
+| --- | --- | --- |
+| Servo builds and runs on Android | **Go** (x86_64 emulator). ARM64: builds and packages; **not run** (no device) | Upstream servoshell passed mach's smoke procedure (`scripts/m0/smoke-upstream.sh`, [log](engine-spike/upstream-smoke-logcat.txt)); the harness ran every check in section 5 except text selection |
+| Two independent views: switching, navigation, back/forward, close | **Go, one open defect** | All view checks pass; a reproducible stale frame appears when other views load or close while a large page is visible ([section 6](#6-open-defect-stale-frame)) |
+| Input: touch, scroll, keys, IME | **Go** for tap, scroll, keys, IME commit; selection and pinch zoom not run | Section 5 |
+| Surface lifecycle | **Go** | Resize, Home and return, rotation (Activity and surface recreated) keep tabs and documents |
+| Bounded, attributed text capture | **Go** | Document-guarded capture never attributed text to the wrong document in any check, including navigation and close during capture and same-URL reloads |
+| Profile persistence | **Blocked for process death** in M0; addressed after M0 by patch 0004 ([section 13](#13-after-m0-engine-changes-for-the-app)) | Cookies survive a clean engine shutdown but not a killed process; localStorage survives both |
+| Script interruption | **Not available** in Servo v0.6.0 | Deadlines abandon results; the script keeps running |
+
+The engine gate in the plan is met on the emulator: independent views and correctly identified capture pass on real Servo. Two problems must be solved or accepted before M1 relies on them: the stale frame and cookie loss on process death.
+
+## 1. Environment
+
+| Item | Value |
+| --- | --- |
+| Build host | Linux x86_64 container (Debian 12, kernel 7.0), 16 cores, 125 GiB RAM, shared with other workloads (load average 4–38 during the work) |
+| Device | Android Emulator 37.1.11, AVD `combray-m0-api30-x86_64`: system image `android-30;default;x86_64` r10 (Android 11, API 30), 6 vCPUs, 6 GiB RAM, 720×1440 at 320 dpi |
+| Acceleration | **None.** `/dev/kvm` is absent, so the emulator ran under software CPU emulation (`-accel off`). Boot took 7.6–17.5 minutes |
+| Graphics | `-gpu swiftshader_indirect`: `OpenGL ES 3.0 SwiftShader 4.0.0.1`, EGL 1.4 |
+| ABI | Runtime checks: x86_64 only. The arm64-v8a harness also builds (134 MB APK, AArch64 library with all 18 JNI exports) but was never run: no arm64 device or emulator was available |
+| Toolchain | Rust 1.97.1, NDK r29 (29.0.14206865), SDK platform 37 and build-tools 36.0.0, JDK 21.0.12, Gradle 9.5.1, AGP 9.2.1; host C/C++ through zig 0.17 `cc` |
+| Builds (SHA-256) | Upstream servoshell `servoapp.apk` x86_64 release: `552f76cb7def59914bd09287d7b59ca6a71117627a57e9671fab7eb9dd5876ae`; harness x86_64 (final run): `a0280b667f82c8047bfa3abec4472b348f6cdbb45a59b47b6cc0d66e8507bae7`; harness arm64-v8a (same sources): `854feff276acec6e1d9105bebcb85125baa3c1ac167c68ce90e1b050cd6e4640`. Debug-signed local builds; hashes identify them in this report only |
+
+Software emulation is slow and timing-sensitive: Android's own framework timed out and restarted `system_server` twice while a 160 MB APK installed under heavy host load. Absolute timings below are from this environment and say nothing about phone performance.
+
+## 2. Servo selection and integration decision
+
+**Pinned:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from the release's source tarball (SHA-256 `1d828f99…e0c6`, full value in [BUILDING.md](BUILDING.md#pinned-inputs)) with three small patches.
+
+- **Why v0.6.0:** it is the base of Servo's current long-term-support line (SpiderMonkey ESR 153); the LTS policy covers the `servo` library crate, which is what Combray embeds, and not servoshell. v0.7.0 (5 October) is newer but will be superseded monthly. Moving to a later 0.6.x LTS update means re-applying those patches.
+- **Why not upstream's Android shell:** servoshell's JNI layer drives one active WebView at a time, reports no tab or document identity, and has no JavaScript evaluation entry point (source inspection, confirmed by the research verification). Extending it would mean carrying a fork of a demo shell outside LTS scope.
+- **Chosen arrangement:** Combray's own Rust `cdylib` (`native/`) depends on `components/servo` from the pinned tree by path, uses servoshell's CI-tested Cargo feature set, and owns its JNI surface. A Kotlin harness (`spike/android/`) drives it. Servo itself is unmodified except for:
+  - `0001` (build only): the release tarball's `vendor/` directory cannot build the mozjs glue crates, because their build scripts run `cbindgen` → `cargo metadata` against each crate's own `Cargo.lock` (`encoding_rs` 0.8.41 is not vendored). The patch drops the vendor redirection; Cargo then downloads the same locked versions from crates.io and checks their checksums.
+  - `0002` (embedder API): document identity and a crash fix, described in [section 4](#4-servo-patch-0002-document-identity).
+  - `0003` (diagnostics): log WebRender render errors instead of discarding them.
+
+`native/Cargo.lock` starts from Servo's release lockfile, so every shared dependency stays at the release's versions.
+
+## 3. Engine bridge design
+
+```text
+ Kotlin (any thread)                  engine thread (owns Servo, all WebViews, GL context)
+ ───────────────────                  ──────────────────────────────────────────────────────
+ NativeEngine.createTab(tab, url) ─┐   loop:
+ navigate / select / close / input ├─▶   handle queued Commands
+ capture(tab, document, id, …)     │     Servo::spin_event_loop()
+ surfaceCreated (queued)           │     drain delegate queue → attribute → EngineEvent
+ surfaceDestroyed (waits)          ┘     finish / expire captures
+ EngineListener.onEngineEvent(json) ◀─   paint selected view, present
+       (tab, generation, document)
+```
+
+- **Ownership:** `Servo`, `WebView` and the rendering context are `Rc`-based and stay on one engine thread. JNI calls only enqueue commands. Servo's event-loop waker is another sender on the same channel. Delegates copy each notification into a queue; the engine processes the queue after the spin, so no callback re-enters Servo.
+- **Views:** one `WindowRenderingContext` bound to the visible `SurfaceView`; every tab is a separate `WebViewBuilder::build()` (a new constellation browsing context, not a cloned handle). Selecting shows and focuses one view and hides the others; only the selected view is painted. Hidden views keep running (measured in the results).
+- **Identity:** events carry the application's tab ID, an engine-wide **generation** per native view (recreating a tab yields a new generation; events from an older generation are dropped), and the **document ID** (Servo's top-level pipeline ID). A new document ID means a new document even at the same URL. Reports from a document that was replaced are marked `stale`; reports that overtake their document's commit (Servo delivers them on a different channel) are held until the commit.
+- **Surface lifecycle:** `surfaceDestroyed` first advances a surface epoch (painting stops at once), then waits for the engine to call `take_window()` and release its `ANativeWindow` reference. A new surface is bound with `set_window()`; Servo, tabs and documents survive.
+- **Panics:** a panic inside a surface operation (Servo and surfman `expect` on some surface errors) becomes an error and the engine continues. Any other panic on the engine thread aborts the process, so Android reports a crash and the app restarts with session recovery, rather than leaving a silently dead engine. Panics on Servo's own threads, and those Servo marks as handled, are left to Servo.
+- **Capture:** the engine asks Servo to run a bounded extraction script **in a named document**. Servo refuses if that document is no longer active. After the result returns, the engine re-checks that the document is still the tab's current one; otherwise the text is discarded (`stale_document`). The page-reported URL is only corroboration. Text is cut to 256 KiB of UTF-8 in the page and again natively, on a character boundary; title 4 KiB, URL 8 KiB; at most 50 000 nodes are visited.
+
+## 4. Servo patch 0002: document identity
+
+Source inspection of v0.6.0 (research verified by a second model, about 30 claims checked) showed that an embedder cannot attribute content to a document:
+
+- `WebView::evaluate_javascript` runs in whatever document is active when the constellation handles the request. The result does not say which document produced it.
+- No delegate notification carries a document identity. Title, load-status and status reports from an old document can still reach the embedder after a new document is active. Script-to-embedder messages bypass the constellation, so their order relative to history changes is not guaranteed.
+- `GlobalScope::evaluate_js_on_global` asserts `can_run_script()`. A navigation between routing and execution (or, for WebDriver and user scripts, an iframe deactivation or window close) makes the script thread panic, which closes every WebView on that script thread.
+
+Patch 0002 (131 added and 19 removed lines in 12 files; additive for existing embedders):
+
+| Change | Purpose |
+| --- | --- |
+| `pub use servo_base::id::PipelineId`; `WebView::active_document_id()` set from each history change | Embedders learn the current top-level document, including after same-URL reloads |
+| `PipelineId` in `HistoryChanged`, `NotifyLoadStatusChanged`, `ChangePageTitle` | Each report names its document |
+| `WebViewDelegate::notify_document_load_status_changed` / `notify_document_title_changed` (default no-op) | Every report, with its document, without deduplication |
+| `WebView::evaluate_javascript_in_document(document, …)`: constellation refuses with `DocumentNotFound` unless `document` is active | A result can only come from the named document |
+| `evaluate_js_on_global` returns `DocumentNotFound` instead of asserting when script cannot run | Removes the crash for every caller: embedder evaluation, WebDriver `ExecuteScript`, user scripts |
+
+Patch 0003 logs WebRender render errors, which `Painter::render` discarded (an upstream TODO); it was added to diagnose a stale-frame problem (section 6). The changes look suitable for upstream discussion; they have not been proposed upstream yet.
+
+## 5. Checks and results
+
+All checks ran against real Servo in the harness on the emulator described in section 1, with synthetic pages from `spike/fixtures/server.py` (no personal data, no live services). `scripts/m0/run-checks.sh` runs the in-app `core` scenario, then drives lifecycle phases from the host, then the stale-frame reproduction. The results below are from the final run (run9, 18 October 2026, 19:48–20:15 UTC) on the final sources; per-phase reports, a summary, device details and screenshots are in [engine-spike/](engine-spike/).
+
+<!-- CHECK-TABLE-START -->
+| Phase | Check | What it establishes | Result |
+| --- | --- | --- | --- |
+| core | `views-two-independent-webviews` | Two tabs are distinct core WebViews with their own documents and generations | passed |
+| core | `engine-renders-on-android` | Servo paints the selected tab into the Android surface (pixels match the page) | passed |
+| core | `views-switching` | Selecting a tab shows it (surface pixels match its page); no paint events for hidden tabs (by design) | passed |
+| core | `views-independent-navigation` | Navigating one tab leaves the other's document and URL unchanged; new page on screen | passed |
+| core | `views-back-forward` | Back and forward in one tab return cached documents without touching the other tab | passed |
+| core | `views-same-url-tabs-independent` | Same URL in two tabs: separate JS globals, nonces and capture attribution | passed |
+| core | `memory-baseline` | Process PSS with two and ten small tabs (measurement) | passed |
+| core | `navigation-taxonomy` | Fragment, pushState, replaceState and failed load produce the expected events; embedder fragment load is recorded | passed |
+| core | `input-touch-tap` | A touch tap clicks a page button | passed |
+| core | `input-keys-and-ime-visibility` | Tapping a field requests the IME; key events type into it | passed |
+| core | `input-ime-commit-unicode` | IME commit inserts multibyte text (é😀中) | passed |
+| core | `input-touch-scroll` | A touch swipe scrolls the page | passed |
+| core | `input-selection` | Text selection | not run |
+| core | `surface-resize` | Resizing the surface resizes the page viewport and back | passed |
+| core | `capture-js-rendered-text` | Capture includes text inserted by script after load | passed |
+| core | `capture-redirect-attribution` | A redirect commits once, with the final URL; capture is attributed to it | passed |
+| core | `capture-same-url-reload` | Reload creates a new document; captures naming the old one are refused by Servo | passed |
+| core | `capture-navigation-during-capture` | A capture racing a cross-site navigation runs in the old document and is discarded as stale (not run if no race occurs) | passed |
+| core | `capture-close-during-capture` | Closing a tab during capture settles it as tab_closed at close time, with no text | passed |
+| core | `capture-stale-title-ignored` | An old page's late title reports are marked stale; the new page keeps its title | passed |
+| core | `capture-shadow-dom` | Open shadow DOM and slotted text are captured; hidden shadow text is not | passed |
+| core | `capture-bounds-multibyte` | A 1,000-byte cap cuts multibyte text on a character boundary; hash matches | passed |
+| core | `capture-bounds-large` | A 1.6 MB page is cut to the 256 KiB budget | passed |
+| core | `capture-empty-document` | An empty body reports empty, not captured | passed |
+| core | `capture-hostile-page` | Pages that break built-ins, return huge strings or claim huge child lists yield an error or bounded text, never other documents' text | passed |
+| core | `capture-timeout-abandons-result` | A deadline reports timed_out once; the late result is ignored | passed |
+| core | `hidden-view-behaviour` | Timer rate in a hidden tab, normal and throttled (measurement) | passed |
+| core | `views-close-one-keeps-other` | Closing one tab leaves the other working and on screen; no events from the closed tab | passed |
+| core | `display-follows-navigation` | After each scripted navigation of the selected tab that changes the swatch color, the surface shows the new page | **failed** |
+| resume-check | `surface-background-foreground` | Home and return: surface released and rebound; tab and document unchanged; pixels show the page | passed |
+| rotation-check | `surface-rotation-recreation` | Rotation recreates Activity and surface; tab and document unchanged; landscape viewport | passed |
+| persist-set-clean | `persist-set` | Sets a cookie (echoed by the server) and a localStorage value (setup) | passed |
+| shutdown | `engine-clean-shutdown` | Servo shuts down cleanly and writes its profile | passed |
+| persist-check-clean-exit | `session-last-url-recovery-clean-exit` | After a clean exit, open tabs are restored at the URL committed last before it | passed |
+| persist-check-clean-exit | `profile-cookie-persists-clean-exit` | A cookie set before a clean shutdown is sent after restart | passed |
+| persist-check-clean-exit | `profile-localstorage-persists-clean-exit` | localStorage set before a clean shutdown is present after restart | passed |
+| persist-set-kill | `persist-set` | Sets a cookie (echoed by the server) and a localStorage value (setup) | passed |
+| persist-check-after-kill | `session-last-url-recovery-after-kill` | After the process is killed, open tabs are restored at the URL committed last before it | passed |
+| persist-check-after-kill | `profile-cookie-persists-after-kill` | A cookie set before the process is killed is sent after restart | **failed** |
+| persist-check-after-kill | `profile-localstorage-persists-after-kill` | localStorage set before the process is killed is present after restart | passed |
+| diag-tail2-stale-frame-variants | `dwell-only` | Stale-frame variant: keep a large page visible for 30 s, then navigate | passed |
+| diag-tail2-stale-frame-variants | `dwell-timed-out-capture` | Stale-frame variant: timed-out capture on the large page, then navigate | passed |
+| diag-tail2-stale-frame-variants | `dwell-reselect` | Stale-frame variant: reselect the tab showing the large page, then navigate | passed |
+| diag-tail2-stale-frame-variants | `dwell-throttled-timer-tab-closed` | Stale-frame variant: hidden timer tab created, throttled and closed, then navigate | passed |
+| diag-tail2-stale-frame-variants | `dwell-eight-hidden-tabs` | Stale-frame reproduction: create and close eight hidden tabs while a large page is shown, then navigate | **failed** |
+| screen-check-stale-frame-after-home | `screen-matches-selected-tab-after-home` | After the reproduction, Home and return: does the surface show the tab's page? | **failed** |
+| screen-check-stale-frame-after-rotation | `screen-matches-selected-tab-after-rotation` | After the reproduction, rotation: does the surface show the tab's page? | passed |
+
+Totals: 42 passed, 4 failed, 1 not run.
+<!-- CHECK-TABLE-END -->
+
+| Tab 1 selected | Tab 2 selected | After rotation |
+| --- | --- | --- |
+| ![Tab 1 showing fixture page A](engine-spike/tab1-a.png) | ![Tab 2 showing fixture page B](engine-spike/tab2-b.png) | ![Landscape after Activity recreation](engine-spike/rotation-landscape.png) |
+
+What the checks establish, beyond pass or fail:
+
+- **Independence.** Each tab is a separate `WebViewBuilder::build()`: distinct `WebViewId`s, documents and generations. With the same URL in two tabs, a global set in one tab is `undefined` in the other, and simultaneous captures return each tab's own per-load nonce.
+- **Switching paints the right tab.** After selection the harness reads the surface back (`PixelCopy`) and compares it with the selected page's swatch color. Hidden tabs produce no paint events, by design: only the selected view is painted. The same pixel comparison follows each scripted navigation of the selected tab whose swatch color differs from what was on screen (`display-follows-navigation`) and the return from Home.
+- **Capture identity.** Across a same-URL reload the document ID changes. A capture naming the old document is refused by Servo itself (`document_not_found`, tested with the engine's local shortcut disabled). An unguarded evaluation in the same situation silently returns the new document's nonce, which is exactly the misattribution the patch prevents. A capture racing a cross-site navigation ran in the old document and was discarded as `stale_document`. Closing a tab settles its pending capture as `tab_closed`. Late results after a deadline are reported and dropped.
+- **Stale titles.** The old page sets `document.title` in `pagehide`/`unload`. Its reports arrive after the new document committed and are attributed `stale`. Upstream's unattributed `notify_page_title_changed` received the stale title too, and names no document, so only arrival order decides which title an embedder relying on it shows. In run 9 the stale title arrived last (`null`, empty, `M0-C`, `M0-STALE-FROM-A`), leaving the old page's title on the new page; in run 8 it arrived before `M0-C`.
+- **Bounds.** A 1.6 MB page is cut to 261,996 bytes at a character boundary (`truncated_in_page`); a page whose text getter returns 5 MiB is cut to 262,144 bytes; a 1,000-byte cap on multibyte text yields 998 valid UTF-8 bytes; an empty body reports `empty`; a page that breaks `getComputedStyle` yields `script_error` rather than partial text; a page that claims a billion children per node yields `script_error` within 0.3 s instead of exhausting memory (the traversal never queues more children than its node budget can visit). Open shadow roots and slots are captured; `hidden` content inside them is not.
+
+## 6. Open defect: stale frame
+
+**Symptom.** After certain activity in *other* views while the visible view shows a long page (`large.html`, 1.6 MB of text), later navigations of the visible view reach Servo but not the screen. History, titles, load events and captures all report the new document; the surface keeps showing the old page. In the minimal reproduction the screen does not recover after a second navigation, nor after Home and return, which releases and rebinds the surface at the same size. It does recover after rotation, which recreates the Activity and a differently sized surface (runs 7 to 9).
+
+**Reproduction** (`diag-tail2:dwell-eight-hidden-tabs`, failing in runs 5 to 9): open a tab, select it, navigate to `large.html`; create eight hidden tabs on a small page and close them; navigate the visible tab to `b.html`. The variants that only dwell on the page, reselect it, or run a timed-out capture pass. In the full scenario, a hidden tab navigating, being throttled and closing while `large.html` was visible also triggered it; there the screen caught up later (after 15–45 seconds in runs 5 and 6), which is why `views-close-one-keeps-other` passes while `display-follows-navigation` fails on the same navigation.
+
+| After Home and return | After rotation |
+| --- | --- |
+| ![Tab header at c.html while the surface still shows the large page](engine-spike/stale-frame.png) | ![After rotation the surface shows page C](engine-spike/stale-frame-recovered-after-rotation.png) |
+
+**What is known.**
+
+- Temporary logging in `components/paint/painter.rs` (not in the patch set) showed the paint layer's bookkeeping is correct: after the navigation, the root display list contains exactly one visible WebView whose root pipeline is the new document.
+- WebRender reported no render error (patch 0003 logs them).
+- The problem needs the large page; the same operations with small pages are fine.
+- It was seen only with SwiftShader under software emulation. No GPU device was available.
+
+**Next steps.** Run the reproduction on an arm64 phone. Test whether a resize alone clears it, since rotation does and a same-size surface rebind does not; that would also be a cheap workaround. If it persists, capture WebRender state (`WebView::capture_webrender`, debug flags) and report upstream with the harness reproduction. Candidate workarounds to evaluate, not yet tested: one `OffscreenRenderingContext` per tab composited into the window context, or rebuilding the shared painter after view churn.
+
+## 7. Navigation event taxonomy
+
+Observed through the patched delegate on the device (`navigation-taxonomy`, other checks) and from source inspection where noted:
+
+| Navigation | Engine event | Document ID |
+| --- | --- | --- |
+| Embedder `load` of a new URL | `navigation_requested` (with the caller's request ID), then `document_committed` | New |
+| Redirect | One `document_committed` with the final URL | New |
+| Same-URL reload | `document_committed`, same URL | New |
+| Back/forward to a cached document | `document_committed` | The **earlier** ID again (bfcache) |
+| Page-initiated fragment change | `same_document_navigation` | Unchanged |
+| `history.pushState` | `same_document_navigation` | Unchanged |
+| `history.replaceState`, same URL | `history_updated` | Unchanged |
+| Embedder `load` of a URL differing only in its fragment | `document_committed` | **New**: the embedder path reloads instead of scrolling |
+| Network failure (connection refused) | `document_committed` for Servo's error page ("Error loading page"), load `complete` | New; indistinguishable from success except by title (source: no load-failure notification exists) |
+| Load status, title | Tagged with the reporting document; `stale` after replacement; held until commit when they overtake it | Not applicable |
+
+Requests and commits are separate events. Servo does not tie a commit to the embedder's request, so Combray cannot correlate them beyond ordering.
+
+## 8. Measurements
+
+Emulator under software emulation; useful for relative comparisons only.
+
+| Measurement | Value |
+| --- | --- |
+| Process PSS, two tabs with small pages | 141 MiB |
+| Process PSS, ten tabs with small pages | 156 MiB |
+| Process PSS after the full `core` scenario (about 15 cached documents, two 1.6 MB pages) | 840 MiB in the final run, mostly anonymous memory Android cannot attribute (jemalloc, SpiderMonkey) |
+| Hidden tab, page timer at 10 Hz | 9.4 ticks per second; with `set_throttled(true)`: 1 per second |
+| Clean engine shutdown (persists cookies) | 80 s in the final run; 15–157 s in earlier runs on this host (logs not kept) |
+| Capture of a 1.6 MB page | 1.1–6.0 s; 20,000-node page 10–20 s (runs 8 and 9, under varying host load) |
+| Emulator boot / harness APK install | 7.6–17.5 min / 1–7 min (142 MB APK, 131 MB native library), measured during this work (logs not kept) |
+| Upstream servoshell APK / library | 160 MB / 180 MB unstripped (x86_64 release) |
+
+## 9. Security and process model
+
+- **One process.** v0.6.0 runs everything in the app process on Android (`Opts::multiprocess` defaults to false, and servoshell's Android port does not support content processes). There is no content sandbox beyond Android's app sandbox. Web content shares the address space with the native bridge.
+- **No page-to-native bridge.** Page scripts cannot call the engine; the only JavaScript Combray runs is the capture script and the harness's test evaluations, both issued natively.
+- **Hostile pages.** A page can redefine any built-in the capture script uses. That changes only its own reported text; it cannot attach text to another document, because document identity comes from the engine. It can make the script run forever: there is no interruption (section 10).
+- **Permissions** are denied; popups (`request_create_new`) are refused; dialogs, select and file pickers fall back to Servo's default response.
+- The harness's network security configuration is a statement of intent only: Servo has its own network stack and does not consult Android's policy.
+
+## 10. Limitations and checks not run
+
+- **Not run:** physical devices, arm64 at runtime, real GPUs, Android versions other than 11, text selection, pinch zoom, external `VIEW` intents, downloads, permissions UI, Kagi or any live site, login flows, TLS sites (fixtures are plain HTTP on loopback).
+- **Script interruption:** Servo's interrupt callback only serves shutdown. A capture deadline abandons the result; the page script keeps running and can hang its script thread and every tab sharing it.
+- **Cookies** are written only on clean shutdown (`components/net/resource_thread.rs`, `CoreResourceMsg::Exit`). Android may kill a backgrounded app without warning, so logins set since the last clean shutdown are lost, as the after-kill check shows. A clean shutdown took 15–157 seconds here. M1 needs an upstream change (flush the cookie jar on change or on request) or must accept the loss. *After M0:* patch 0004 adds the write on request ([section 13](#13-after-m0-engine-changes-for-the-app)); cookies changed in the last five minutes of foreground use can still be lost to a kill.
+- **Session recovery** is URL-level only: after a kill the harness restores each tab's last committed URL. Back/forward lists, scroll positions and form state are lost; Servo has no session export API.
+- **Capture eligibility** filters `hidden`, `aria-hidden`, `inert`, editable content, form controls, `display: none`, `visibility: hidden/collapse` and `content-visibility: hidden`. It still includes text hidden by zero size, clipping, opacity or off-screen positioning, and it cannot read closed shadow roots or cross-origin frames.
+- **The harness is not the product.** It has no bottom chrome, persistence model, settings or integrations; its manual UI exists for debugging. The application ID `ch.lkmc.combray.enginespike` is for the harness only.
+- **Build features** mirror servoshell's (including WebGPU, WebXR, Bluetooth and test bindings) because that combination is CI-tested upstream; trimming them is an M1 decision.
+
+## 11. Reproduce
+
+```sh
+scripts/m0/fetch-servo.sh
+scripts/m0/build-harness.sh
+scripts/m0/emulator.sh
+scripts/m0/run-checks.sh emulator-5560
+```
+
+[BUILDING.md](BUILDING.md) lists prerequisites and the problems met. Single scenarios run with `scripts/m0/run-checks.sh <serial> core` or `diag-tail2:dwell-eight-hidden-tabs`.
+
+## 12. Next steps
+
+1. Run the harness on an arm64 phone (the owner's device if possible) and record the same checks there.
+2. Narrow the stale-frame defect on a real GPU; report it upstream with the reproduction.
+3. Report cookie persistence and embedder-script interruption upstream; decide whether Combray carries a cookie-flush patch.
+4. Offer patch 0002 (document identity and the crash fix) and patch 0003 upstream.
+5. Done: M1 started from `native/` and kept the engine thread, identity model and capture path ([section 13](#13-after-m0-engine-changes-for-the-app)).
+6. Offer patch 0004 upstream with the cookie-loss reproduction.
+
+## 13. After M0: engine changes for the app
+
+The app (M1–M3) uses the same bridge, thread model and capture path. Changes since the M0 report:
+
+| Change | Why | Where |
+| --- | --- | --- |
+| Patch 0004: `CoreResourceMsg::PersistState` and `SiteDataManager::persist_to_disk` write the cookie jar, HSTS list and HTTP auth cache on request; profile files are written to a temporary file and renamed, and a failed write is logged instead of panicking | Servo wrote cookies only at a clean exit, which Android rarely allows, so logins were lost (section 10). A kill during an in-place write could truncate a profile file | `native/servo/patches/0004-*` (4 files, 64 insertions, 20 deletions) |
+| `persistProfile` command and `profile_persisted {ok}` event | The app persists when it leaves the foreground and every five minutes while in use; each write briefly holds the engine thread | `native/src/engine.rs`, `CombrayApplication.kt` |
+| `selectNone` command | The app's home screen shows no page: no view is painted under it | `native/src/engine.rs` |
+| `tab_opened {view, opener}` for `request_create_new`, only from the focused view | Page-opened windows (`target=_blank`, `window.open`) become focused tabs instead of being refused; background tabs cannot open windows | `native/src/delegate.rs`, `engine.rs` |
+| `tab_closed` for `window.close()` (`notify_closed`) | A page closing its own window closes the logical tab like a user close | `native/src/delegate.rs` |
+| `ime_shown {kind}` from Servo's `InputMethodType` | The keyboard matches the field: password fields disable suggestions and personalized learning | `native/src/delegate.rs`, `EngineSurfaceView.kt` |
+| Log filter: Servo `error` only, Combray `info` | Servo's warnings often name page URLs | `native/src/jni_api.rs` |
+
+Evidence on the emulator (`scripts/check-app.sh`, [BUILDING.md](BUILDING.md#emulator-and-checks)): after the app went to the background, the cookie jar on disk contained a cookie set moments earlier (`ProcessDeathTest#prepare`, passed), and after a forced stop and relaunch Servo sent that cookie again (`ProcessDeathTest#verify`, passed in run `run9`).
+
+Limitations found while building the app:
+
+- **Servo error lines can contain page URLs.** The log filter keeps Servo's `error` level because engine failures must stay diagnosable; some of those lines name the page. Combray's own log lines carry no page text or addresses.
+- **Screen density is read once.** The HiDPI factor passed to Servo at startup is not updated when the density changes in the same process (display size setting, moving between screens); pages then render at the old scale until the app restarts.
+- **Profile writes block the engine thread** for the duration of three small file writes; the five-minute interval keeps that rare.
+- **Emulator compositor.** After about 2.5 hours of headless running, the reference emulator's screenshots turned all black, the launcher included, while the app kept working. This was an emulator problem, not an engine one; `check-app.sh` now detects it before running checks.

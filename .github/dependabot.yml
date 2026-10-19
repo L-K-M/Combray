@@ -6,5 +6,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-  # Add a `gradle` entry (directory: /) once the Gradle project lands — with
-  # no build files yet it would fail every scheduled run.
+  # App, core and engine modules. gradle/libs.versions.toml is a verified set: check each bump
+  # with the unit tests, lint and scripts/check-app.sh on a device. No cargo entry on purpose:
+  # native/Cargo.lock mirrors the pinned Servo release's lockfile (docs/BUILDING.md), and Servo
+  # updates go through scripts/m0/fetch-servo.sh and the patch series.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

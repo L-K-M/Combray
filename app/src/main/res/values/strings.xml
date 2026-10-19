@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Combray</string>
+
+    <!-- Bottom bar and More sheet -->
+    <string name="action_back">Back</string>
+    <string name="action_forward">Forward</string>
+    <string name="action_reload">Reload</string>
+    <string name="action_new_tab">New tab</string>
+    <string name="action_share">Share</string>
+    <string name="action_page_info">Page info</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_save">Save</string>
+    <string name="action_recent">Recent</string>
+    <plurals name="action_recent_with_count">
+        <item quantity="one">Recent, %1$d open tab</item>
+        <item quantity="other">Recent, %1$d open tabs</item>
+    </plurals>
+    <string name="action_more">More</string>
+    <string name="action_close">Close</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_undo">Undo</string>
+    <string name="loading">Loading</string>
+
+    <!-- Address -->
+    <string name="address_placeholder">Search or enter address</string>
+    <string name="address_edit">Edit address</string>
+    <string name="address_secure">Encrypted connection (HTTPS)</string>
+    <string name="address_insecure">Not encrypted (HTTP)</string>
+    <string name="address_go">Go to %1$s</string>
+    <string name="address_search">Search Kagi for “%1$s”</string>
+    <string name="address_external">Open in another app: %1$s</string>
+    <string name="address_reject_empty">Type an address or a search.</string>
+    <string name="address_reject_scheme">Combray does not open this kind of address.</string>
+    <string name="address_reject_credentials">Addresses that contain a user name or password are not opened.</string>
+    <string name="address_reject_malformed">This is not a valid web address.</string>
+    <string name="address_instead">Instead: %1$s</string>
+    <string name="address_load_failed">Page did not load</string>
+    <string name="no_app_for_link">No app on this device can open this link.</string>
+    <string name="save_not_set_up">Saving needs Karakeep. Set it up in Settings.</string>
+    <string name="save_not_saveable">This page cannot be saved.</string>
+    <string name="save_sensitive">Not saved: this address looks like it contains a login or session token.</string>
+    <string name="save_already_queued">Already saving this page.</string>
+    <string name="save_needs_attention">Saving this page is paused. Check Karakeep in Settings.</string>
+    <string name="save_state_saved">Saved to Karakeep</string>
+    <string name="save_state_pending">Saving to Karakeep</string>
+    <string name="save_state_attention">Saving needs attention</string>
+    <string name="action_open_settings">Settings</string>
+
+    <!-- Recent -->
+    <string name="recent_title">Recent</string>
+    <string name="recent_filter_all">All</string>
+    <string name="recent_filter_open">Open tabs</string>
+    <string name="recent_filter_hint">Filter tabs and history on this device</string>
+    <string name="recent_open_marker">Open</string>
+    <string name="recent_active_marker">Current tab</string>
+    <string name="recent_close_tab">Close tab: %1$s</string>
+    <string name="recent_row_actions">Actions for %1$s</string>
+    <string name="recent_remove">Remove from Recent</string>
+    <string name="recent_forget_site">Forget %1$s</string>
+    <string name="recent_forget_site_title">Forget %1$s?</string>
+    <string name="recent_forget_site_body">Removes this site’s pages from Recent on this device. Open tabs stay open on their current page. Hister and Karakeep are not changed.</string>
+    <string name="recent_forget_subdomains">Include subdomains</string>
+    <string name="recent_forget_confirm">Forget</string>
+    <string name="recent_empty">No open tabs or recent pages yet.</string>
+    <string name="recent_no_matches">Nothing in Recent matches.</string>
+    <string name="recent_today">Today</string>
+    <string name="recent_yesterday">Yesterday</string>
+    <string name="recent_new_tab_row">New tab</string>
+
+    <!-- Notices and states -->
+    <string name="notice_tab_closed">Tab closed</string>
+    <string name="notice_address_not_opened">Combray could not open this address.</string>
+    <string name="engine_missing">This build has no browser engine. Build it with scripts/build-native.sh, then rebuild the app.</string>
+    <string name="engine_failed">The browser engine could not start.</string>
+    <string name="engine_starting">Starting the browser engine…</string>
+    <string name="page_crashed">This page stopped working.</string>
+    <string name="home_title">New tab</string>
+    <string name="home_body">Search with Kagi or open an address.</string>
+
+    <!-- Page info -->
+    <string name="page_info_address">Address</string>
+    <string name="page_info_connection">Connection</string>
+    <string name="page_info_https">HTTPS: the connection to this site is encrypted. Certificate details are not available from the engine yet.</string>
+    <string name="page_info_http">HTTP: the connection is not encrypted. Others on the network can read and change this page.</string>
+    <string name="share_chooser">Share page</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="karakeep_title">Karakeep</string>
+    <string name="karakeep_explanation">Save sends the page’s address and title to your Karakeep server. Nothing is sent until you tap Save.</string>
+    <string name="karakeep_url">Server address</string>
+    <string name="karakeep_url_hint">https://karakeep.example.org</string>
+    <string name="karakeep_key">API key</string>
+    <string name="karakeep_key_saved">A key is saved. Enter a new one to replace it.</string>
+    <string name="action_save_settings">Save settings</string>
+    <string name="action_check_connection">Check connection</string>
+    <string name="action_remove">Remove</string>
+    <string name="settings_saved">Settings saved.</string>
+    <string name="settings_root_invalid">Enter the server’s web address, like https://karakeep.example.org.</string>
+    <string name="settings_root_cleartext">Use an https:// address. Plain HTTP would expose the API key.</string>
+    <string name="settings_root_invalid_hister">Enter the server’s web address, like https://hister.example.org.</string>
+    <string name="settings_root_cleartext_hister">Use an https:// address. Plain HTTP would expose the access token.</string>
+    <string name="settings_key_invalid">This API key contains characters a key cannot have, such as a line break. Paste it again on one line.</string>
+    <string name="settings_credential_not_stored">This device could not store the credential, so nothing was changed. Try again; if it keeps failing, restart the device.</string>
+    <string name="settings_token_invalid">This access token contains characters a token cannot have, such as a line break. Paste it again on one line.</string>
+    <string name="settings_root_query">Enter only the server address, without a user name, password or ? part.</string>
+    <string name="settings_key_missing">Enter an API key. A new server address needs its own key.</string>
+    <string name="settings_token_missing">Enter an access token. A new server address needs its own token.</string>
+    <string name="check_key_not_stored">No API key is stored on this device. Enter it again.</string>
+    <string name="check_token_not_stored">No access token is stored on this device. Enter it again.</string>
+    <string name="check_token_unauthorized">The server rejected the access token.</string>
+    <string name="check_wrong_address_hister">The server answered, but not like Hister (HTTP %1$d). Check the address.</string>
+    <string name="remove_service_title">Remove %1$s?</string>
+    <plurals name="karakeep_remove_body">
+        <item quantity="one">The server address and API key are forgotten. %1$d unsent save is cancelled.</item>
+        <item quantity="other">The server address and API key are forgotten. %1$d unsent saves are cancelled.</item>
+    </plurals>
+    <plurals name="hister_remove_body">
+        <item quantity="one">The server address and access token are forgotten. %1$d unsent capture is cancelled.</item>
+        <item quantity="other">The server address and access token are forgotten. %1$d unsent captures are cancelled.</item>
+    </plurals>
+    <string name="check_connected">Connected.</string>
+    <string name="check_unauthorized">The server rejected the API key.</string>
+    <string name="check_wrong_address">The server answered, but not like Karakeep (HTTP %1$d). Check the address.</string>
+    <string name="check_unreachable">Could not reach the server (%1$s).</string>
+    <string name="check_running">Checking…</string>
+    <string name="queue_title">Unfinished saves</string>
+    <string name="queue_empty">Nothing waiting.</string>
+    <string name="queue_pending">Waiting to be sent</string>
+    <string name="queue_retry">Will retry (%1$s)</string>
+    <string name="queue_paused">Paused: the key was rejected or changed (%1$s)</string>
+    <string name="queue_paused_hister">Paused: the token was rejected or changed (%1$s)</string>
+    <string name="queue_failed">Stopped (%1$s)</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_discard">Discard</string>
+    <string name="action_resume_all">Send paused saves with the current key</string>
+    <string name="action_resume_captures">Send paused captures with the current token</string>
+
+    <!-- Hister -->
+    <string name="hister_title">Hister</string>
+    <string name="hister_explanation">Hister keeps your long-term history. Searching all history sends your query to your Hister server.</string>
+    <string name="hister_url_hint">https://hister.example.org</string>
+    <string name="hister_token">Access token</string>
+    <string name="hister_token_saved">A token is saved. Enter a new one to replace it.</string>
+    <string name="hister_capture">Send page text to Hister</string>
+    <string name="hister_capture_explanation">When on, Combray sends the address, title and readable text of pages you open to your Hister server, a few seconds after they load. Off until you switch it on. Excluded sites, the services’ own pages and addresses that look like they contain a login token are never sent. Page text can still contain personal information.</string>
+    <string name="hister_capture_paused_budget">Capture is paused: %1$s of page text is waiting to be sent (the limit is 20 MB).</string>
+    <string name="hister_queue_size">Waiting to be sent: %1$s</string>
+    <string name="hister_exclusions">Never send these sites</string>
+    <string name="hister_exclusion_hint">example.org</string>
+    <string name="hister_exclusion_add">Exclude</string>
+    <string name="hister_exclusion_subdomains">and subdomains</string>
+    <string name="hister_exclusion_remove">Remove exclusion for %1$s</string>
+    <string name="hister_exclusion_invalid">Enter a site name, like example.org.</string>
+    <string name="hister_queue_title">Unfinished captures</string>
+    <string name="action_pause_capture">Pause history capture</string>
+    <string name="action_resume_capture">Resume history capture</string>
+
+    <!-- Search all history -->
+    <string name="search_all_history">Search all history</string>
+    <string name="search_local_history">Back to Recent</string>
+    <string name="search_all_hint">Search your Hister history</string>
+    <string name="search_all_not_configured">Connect Hister in Settings to search all history.</string>
+    <string name="search_all_empty">No results in Hister.</string>
+    <plurals name="search_all_count">
+        <item quantity="one">%1$d result</item>
+        <item quantity="other">%1$d results</item>
+    </plurals>
+    <string name="search_all_unauthorized">Hister rejected the token. Check it in Settings.</string>
+    <string name="search_all_unreachable">Could not reach Hister (%1$s). Recent still works on this device.</string>
+    <string name="search_all_error">Hister could not search (HTTP %1$d).</string>
+    <string name="search_all_malformed">Hister’s answer could not be read. Check the address in Settings.</string>
+    <string name="search_all_more">More results</string>
+    <string name="search_all_from_history">From your history</string>
+    <string name="settings_history_title">Local history</string>
+    <plurals name="settings_history_body">
+        <item quantity="one">Closed tabs and visited pages stay in Recent for %1$d day after you last used them. Open tabs stay until you close them. This only affects this device.</item>
+        <item quantity="other">Closed tabs and visited pages stay in Recent for %1$d days after you last used them. Open tabs stay until you close them. This only affects this device.</item>
+    </plurals>
+    <string name="settings_about_title">About</string>
+    <string name="settings_version">Combray %1$s</string>
+    <string name="settings_engine">Browser engine: Servo %1$s</string>
+</resources>

@@ -1,0 +1,34 @@
+{
+  "scenario": "persist-set",
+  "started_at_ms": 1792353868494,
+  "device": {
+    "model": "Android SDK built for x86_64",
+    "sdk": 30,
+    "abis": [
+      "x86_64",
+      "x86"
+    ]
+  },
+  "results": [
+    {
+      "id": "persist-set",
+      "status": "passed",
+      "detail": {
+        "value": "kill2726",
+        "cookie_page": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967300,
+          "url": "http:\/\/localhost:8765\/cookie-set?v=kill2726"
+        },
+        "storage_page": {
+          "tab": 1,
+          "generation": 1,
+          "document": 4294967301,
+          "url": "http:\/\/localhost:8765\/storage.html?set=kill2726"
+        },
+        "cookie_header_seen_by_server": "COOKIE-HEADER[m0cookie=kill2726]"
+      }
+    }
+  ]
+}
