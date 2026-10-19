@@ -29,7 +29,7 @@ Proactively delegate suitable work to available free or cheaper subagents runnin
 
 ## Identity
 
-- Proposed application id and Kotlin namespace: **`ch.lkmc.combray`** (fleet rule: GitHub repos use `ch.lkmc.*`, lowercase on Android). The app uses it since M1; it is still a proposal: confirm it with the owner before signing a release (changing it later loses installed data). The debug build adds `applicationIdSuffix = ".debug"`, so both variants install side by side; `scripts/install.sh` launches by these ids.
+- Confirmed application id and Kotlin namespace: **`ch.lkmc.combray`** (owner confirmed 19 October 2026). The debug build adds `applicationIdSuffix = ".debug"`, so both variants install side by side; `scripts/install.sh` launches by these ids.
 - Launcher icons derive from `media-sources/icon.png` and are committed; document the generator next to them.
 
 ## Build and release tooling
@@ -48,7 +48,7 @@ The family's build, install, release, and CI tooling is in place ahead of the ap
 
 `scripts/release.sh` is a stub over the shared `lkm-release` engine (`gradle-android` kind, https://github.com/L-K-M/release-tool): it bumps `versionName`, increments `versionCode`, updates the README version marker, commits, and tags `vX.Y.Z`; `--push` pushes branch and tag, and the tag runs `.github/workflows/release.yml` (tag/versionName gate, tests and lint, release APK, GitHub Release).
 
-Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`: `combray-v0.1.0-android-arm64.apk` plus its `.sha256`. The arch is `arm64` because Servo ships per-ABI native libraries and M0 starts with arm64; update `ARCH` in `scripts/build.sh` and `release.yml` when M0 settles the ABIs.
+Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`: `combray-v0.1.0-android-arm64.apk` plus its `.sha256`. `scripts/build.sh` derives the architecture from the APK's native libraries; `release.yml` requires arm64. Both check native ELF headers and Gradle output metadata with `scripts/verify-apk.py` before staging.
 
 ## Gradle project
 
@@ -56,7 +56,7 @@ The Gradle project exists at the repo root (`app`, `core`, `engine`), with the w
 
 1. Done: `namespace`/`applicationId` `ch.lkmc.combray`, debug suffix `.debug`, `versionName = "0.1.0"` and `versionCode = 1` as plain literals (the release engine and CI tag gate rewrite them with `sed`).
 2. Open: CI and `release.yml` build Kotlin only (JDK 17, plain Gradle). The native engine (`scripts/build-native.sh`: pinned Servo, NDK r29, Rust 1.97.1) is not built in CI, so CI APKs have no engine and the app says so. A released APK needs `COMBRAY_ABI=arm64 scripts/build-native.sh` first.
-3. Open (M4): release signing before the first release tag. Keep signing keys out of Git; `release.yml` expects a signed `app/build/outputs/apk/release/app-release.apk`. Until then the release paths stop at the missing signed APK; use the debug build.
+3. Local release signing is supported through four environment variables ([BUILDING.md](docs/BUILDING.md#local-release-signing)), verified with a disposable key. The personal signing key and CI signing configuration remain pending. `release.yml` also needs a native build before a release tag can publish a usable APK. Keep signing keys out of Git.
 4. Done: a `gradle` Dependabot entry. No `cargo` entry on purpose: `native/Cargo.lock` mirrors the pinned Servo release's lockfile.
 5. Done: launcher icons generated from `media-sources/icon.png` by `scripts/generate-launcher-icons.py` (rerun it after changing the artwork).
 

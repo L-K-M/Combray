@@ -1,8 +1,8 @@
 # Release: a pushed v* tag builds, verifies, and publishes the release APK.
 #
-# Signing: not configured yet. The plan keeps signing keys out of Git and
-# sets up release signing with M4; until then the stage step fails for want
-# of a signed app-release.apk, so do not tag before signing exists.
+# Native build and CI signing are still pending M4. Local signing is documented
+# in docs/BUILDING.md. Until CI builds Servo and receives signing material, the
+# artifact gate fails; do not cut a release tag yet.
 #
 # Hardening (family contract): least-privilege permissions, no cancellation
 # (a half-cancelled publish is worse than a slow one), timeout, wrapper
@@ -68,6 +68,8 @@ jobs:
       - name: Stage release artifacts
         run: |
           ARCH="arm64"
+          python3 -I scripts/verify-apk.py app/build/outputs/apk/release/app-release.apk \
+            --expected-arch "$ARCH" --variant release --version "${GITHUB_REF_NAME#v}"
           APK="combray-${GITHUB_REF_NAME}-android-${ARCH}.apk"
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk "dist/$APK"
