@@ -7,12 +7,24 @@ plugins {
 // engine was not built for: Android would pick it and find no engine.
 val engineAbis = rootProject.file("engine/jniLibs").listFiles()?.filter { it.isDirectory }?.map { it.name }.orEmpty()
 
+// Signing is opt-in and local. CI may still assemble an unsigned APK to check Kotlin.
+val signingVariables = listOf("COMBRAY_KEYSTORE_FILE", "COMBRAY_KEYSTORE_PASSWORD", "COMBRAY_KEY_ALIAS", "COMBRAY_KEY_PASSWORD")
+val signingValues = signingVariables.associateWith { providers.environmentVariable(it).orNull }
+val releaseSigningConfigured = signingValues.values.any { it != null }
+if (releaseSigningConfigured) {
+    val missing = signingVariables.filter { signingValues[it].isNullOrBlank() }
+    require(missing.isEmpty()) { "Incomplete release signing configuration: ${missing.joinToString()}" }
+    require(rootProject.file(signingValues.getValue("COMBRAY_KEYSTORE_FILE")!!).isFile) {
+        "COMBRAY_KEYSTORE_FILE must name an existing keystore"
+    }
+}
+
 android {
     namespace = "ch.lkmc.combray"
     compileSdk = 37
 
     defaultConfig {
-        // Proposed ID (AGENTS.md "Identity"); confirm before signing or before real data relies on it.
+        // Confirmed by the owner for the personal release (AGENTS.md "Identity").
         applicationId = "ch.lkmc.combray"
         // The native engine links with API 30 linker wrappers (docs/BUILDING.md).
         minSdk = 30
@@ -28,6 +40,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("personalRelease") {
+                storeFile = rootProject.file(signingValues.getValue("COMBRAY_KEYSTORE_FILE")!!)
+                storePassword = signingValues.getValue("COMBRAY_KEYSTORE_PASSWORD")
+                keyAlias = signingValues.getValue("COMBRAY_KEY_ALIAS")
+                keyPassword = signingValues.getValue("COMBRAY_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".debug"
@@ -35,6 +58,7 @@ android {
         getByName("release") {
             // R8 needs keep rules for the JNI bridge first (M4).
             isMinifyEnabled = false
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("personalRelease")
         }
     }
 

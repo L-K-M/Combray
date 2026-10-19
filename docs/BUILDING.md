@@ -58,13 +58,46 @@ scripts/build-native.sh               # cargo build + strip → engine/jniLibs/x
 ./gradlew assembleDebug               # → app/build/outputs/apk/debug/app-debug.apk (ch.lkmc.combray.debug)
 ```
 
-`scripts/build.sh [--debug] [--install]` runs the Gradle step and stages the APK in `dist/`. Without `build-native.sh` the APK still builds (CI does this) but contains no engine, and the app says so. The APK only offers the ABI the engine was built for. Unit tests and lint (the CI gate) need no engine:
+`scripts/build.sh [--debug] [--install]` runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
+
+Plain Gradle still builds without `build-native.sh` (CI does this); that APK contains no engine and the app says so. `scripts/build.sh` refuses to stage it. Unit tests and lint need no engine:
 
 ```sh
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
 
-The release variant is unsigned until signing is set up (M4). To regenerate the launcher icon after changing `media-sources/icon.png`: `python3 scripts/generate-launcher-icons.py` (needs Pillow).
+Build-script regression checks need Python 3.10+ and no SDK:
+
+```sh
+python3 -I -m unittest discover -s scripts/tests
+```
+
+To regenerate the launcher icon after changing `media-sources/icon.png`: `python3 scripts/generate-launcher-icons.py` (needs Pillow).
+
+### Local release signing
+
+The owner confirmed `ch.lkmc.combray` as the release ID on 19 October 2026. Supply an existing personal keystore through environment variables; keep it outside Git and back it up for future app updates:
+
+| Variable | Value |
+| --- | --- |
+| `COMBRAY_KEYSTORE_FILE` | Keystore path, absolute or relative to the repository root |
+| `COMBRAY_KEYSTORE_PASSWORD` | Keystore password |
+| `COMBRAY_KEY_ALIAS` | Signing key alias |
+| `COMBRAY_KEY_PASSWORD` | Signing key password |
+
+Set passwords through your local secret manager or hidden shell input. All four variables are required together; incomplete settings fail without printing their values. Then run:
+
+```sh
+COMBRAY_ABI=arm64 scripts/build-native.sh
+scripts/build.sh
+"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+```
+
+Without signing variables, `./gradlew assembleRelease` produces an unsigned APK for CI checks. `scripts/build.sh` requires explicit signing settings for release staging. Debug signing is unchanged.
+
+Local verification on 19 October 2026 used a disposable RSA key: the x86_64 release built, APK Signature Scheme v2 verified, and its certificate matched that key. After an unsigned rebuild, the verifier rejected the leftover signed APK because the current metadata selected the unsigned file. The disposable key and staged test-signed APK were removed. This was a signing/build test, not device acceptance.
+
+Before publishing: finish the dependency notices and source-availability bundle, supply the personal signing key, and wire native compilation and signing into `release.yml`. Its arm64 artifact check already rejects missing or incorrectly labelled native libraries. No release tag has been cut.
 
 ## Build the M0 engine harness
 

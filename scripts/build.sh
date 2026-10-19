@@ -2,8 +2,9 @@
 # Build the Combray APK from the command line and stage it into dist/.
 #
 # Release build by default; --debug builds the debug-variant APK instead.
-# The staged APK is named after the committed versionName. Release signing
-# is not configured yet (M4 in docs/IMPLEMENTATION_PLAN.md).
+# The staged APK is named after the committed versionName and its verified native ABI.
+# Release builds require the COMBRAY_KEYSTORE_* / COMBRAY_KEY_* environment variables
+# documented in docs/BUILDING.md. An engine-less Kotlin CI APK is never staged.
 #
 #   scripts/build.sh                  # incremental release build -> dist/
 #   scripts/build.sh --debug          # debug build -> dist/
@@ -12,7 +13,7 @@
 #   scripts/build.sh --check          # print resolved config; build nothing
 #
 # Usage: scripts/build.sh [--debug] [--install] [--clean] [--check]
-# Requirements: the toolchain M0 pins (AGENTS.md); the Android SDK (local.properties, ANDROID_HOME, or a
+# Requirements: Python 3.10+, the toolchain M0 pins (AGENTS.md); the Android SDK (local.properties, ANDROID_HOME, or a
 #               standard SDK location, which is detected); adb for --install.
 set -euo pipefail
 
@@ -47,6 +48,9 @@ fi
 
 # AGP needs the SDK location. Without local.properties or ANDROID_HOME, try
 # the places Android Studio and the command-line tools install it.
+if [ -z "${ANDROID_HOME:-}" ] && [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+    export ANDROID_HOME="$ANDROID_SDK_ROOT"
+fi
 if [ ! -f local.properties ] && [ -z "${ANDROID_HOME:-}" ]; then
     for sdk in "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" "/opt/android-sdk"; do
         if [ -d "$sdk/platforms" ]; then
@@ -59,17 +63,14 @@ fi
 VERSION="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]*)".*$/\1/p' app/build.gradle.kts | head -n 1)"
 [ -n "$VERSION" ] || { echo "!! could not read versionName from app/build.gradle.kts" >&2; exit 1; }
 
-# Asset names say what they contain: <base>-<vX.Y.Z>-<os>-<arch>. Servo
-# ships per-ABI native libraries and M0 starts with arm64.
-ARCH="arm64"
 if [ "$VARIANT" = "release" ]; then
     TASK="assembleRelease"
     APK="app/build/outputs/apk/release/app-release.apk"
-    OUT="dist/combray-v${VERSION}-android-${ARCH}.apk"
+    BASE="combray"
 else
     TASK="assembleDebug"
     APK="app/build/outputs/apk/debug/app-debug.apk"
-    OUT="dist/combray-debug-v${VERSION}-android-${ARCH}.apk"
+    BASE="combray-debug"
 fi
 
 if [ "$CHECK" -eq 1 ]; then
@@ -77,10 +78,19 @@ if [ "$CHECK" -eq 1 ]; then
     echo "-- variant:  $VARIANT"
     echo "-- version:  $VERSION"
     echo "-- task:     ./gradlew $TASK"
-    echo "-- staged:   $OUT"
+    echo "-- staged:   dist/${BASE}-v${VERSION}-android-<verified APK arch>.apk"
     echo "-- sdk:      $(if [ -f local.properties ]; then echo local.properties; else echo "${ANDROID_HOME:-not found}"; fi)"
     echo "-- install:  $([ "$INSTALL" -eq 1 ] && echo "yes (scripts/install.sh --$VARIANT)" || echo no)"
     exit 0
+fi
+
+if [ "$VARIANT" = "release" ]; then
+    for name in COMBRAY_KEYSTORE_FILE COMBRAY_KEYSTORE_PASSWORD COMBRAY_KEY_ALIAS COMBRAY_KEY_PASSWORD; do
+        if [ -z "${!name:-}" ]; then
+            echo "!! release signing needs $name; see docs/BUILDING.md (Local release signing)." >&2
+            exit 1
+        fi
+    done
 fi
 
 if [ "$CLEAN" -eq 1 ]; then
@@ -93,8 +103,23 @@ echo "==> ./gradlew $TASK"
 
 [ -f "$APK" ] || { echo "!! expected APK not found: $APK" >&2; exit 1; }
 
+# Check the produced APK, not the staging directory: Gradle packaging can be stale.
+ARCH="$(python3 -I scripts/verify-apk.py "$APK" --variant "$VARIANT" --version "$VERSION")"
+OUT="dist/${BASE}-v${VERSION}-android-${ARCH}.apk"
 mkdir -p dist
 cp "$APK" "$OUT"
+python3 -I - "$OUT" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+artifact = Path(sys.argv[1])
+digest = hashlib.sha256()
+with artifact.open("rb") as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+artifact.with_suffix(".apk.sha256").write_text(f"{digest.hexdigest()}  {artifact.name}\n")
+PY
 echo "==> staged $OUT"
 
 if [ "$INSTALL" -eq 1 ]; then

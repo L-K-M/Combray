@@ -13,7 +13,7 @@ Combray connects to **Karakeep** for quick saves, **Hister** for long-term histo
 
 ## Status
 
-Combray runs on a pinned, patched Servo v0.6.0 through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**, and release signing is not set up. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
+Combray runs on a pinned, patched Servo v0.6.0 through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging and local signing support; personal signing, release CI and dependency notices remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
 
 ## Start here
 
@@ -38,7 +38,7 @@ The app's unit tests and lint run with `./gradlew testDebugUnitTest lintDebug` a
 
 ## Build and release tooling
 
-Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). CI builds the Kotlin code only: its APKs contain no engine and say so. A usable APK needs `scripts/build-native.sh` first, and release paths stop until signing is set up (M4).
+Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). CI builds the Kotlin code only: its APKs contain no engine and say so. A usable APK needs `scripts/build-native.sh` first. `scripts/build.sh` checks the packaged engine and architecture before staging. Local release signing uses environment variables; see [BUILDING.md](docs/BUILDING.md#local-release-signing). Publishing still needs native/signing CI and dependency notices (M4).
 
 ```sh
 scripts/build.sh                 # release APK -> dist/

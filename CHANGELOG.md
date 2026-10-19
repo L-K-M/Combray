@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Local release signing through environment variables, with explicit validation
+  of incomplete configuration and no committed signing material.
+- APK build-script regressions in CI and SHA-256 sidecars for local builds.
 - App icon master (`media-sources/icon.png`).
 - Implementation plan, integration evidence, design reference, and
   documentation checks.
@@ -31,3 +34,10 @@ All notable changes to this project are documented here. The format follows
   synthetic pages and fake services (`testing/fixtures/`).
 - Internationalized host names show in Unicode only when they cannot
   imitate another site; other hosts show as punycode.
+
+### Fixed
+
+- Local APK names now use the packaged architecture instead of always saying
+  arm64. Staging rejects missing native libraries, wrong ELF architectures and
+  stale APKs that do not match Gradle output metadata. Release CI applies the
+  same checks before staging an arm64 artifact.

@@ -300,7 +300,7 @@ For a usable personal release, assess target sites including authenticated pages
 
 ### M0 established the engine build; the product build is M1
 
-M0 added a verified engine build: `native/` (Rust bridge against the pinned Servo tree), `spike/android/` (Gradle harness) and `scripts/m0/` ([BUILDING.md](BUILDING.md)). There is still no product app module. Do not add a fake build that only renders the HTML prototype.
+M0 added the engine build: `native/` (Rust bridge against pinned Servo), `spike/android/` (Gradle harness) and `scripts/m0/`. M1 added the product modules `app/`, `core/` and `engine/` ([BUILDING.md](BUILDING.md)). The design HTML remains a reference.
 
 Use an exact Servo commit or verified release branch, record its upstream URL and license, and document any patch set. The current Rust docs and Android book are mutable; their latest APIs may differ from that commit. For a fork, keep a small patch series and document how to rebase/update it. Do not commit a huge generated engine build or native binary without a deliberate reproducibility/artifact decision.
 
@@ -324,7 +324,7 @@ The provided launcher source is a 1254×1254 opaque square bitmap. Keep it as th
 
 ## 9. Milestones and implementation tasks
 
-M0 is done with open blockers; M1–M3 are implemented and checked on an emulator with fixtures, with the gaps listed in their status; M4 is **not started** (statuses below). Track progress by replacing status with concrete evidence and referencing commits or local reports. A blocked engine requirement is not “complete with a fallback.” Tasks may be split among bounded workers, but keep architecture, native ownership, privacy and cross-thread correctness under a single accountable review.
+M0 is done with open blockers; M1–M3 are implemented and checked on an emulator with fixtures, with the gaps listed in their status; M4 is **in progress** (statuses below). Track progress by replacing status with concrete evidence and referencing commits or local reports. A blocked engine requirement is not “complete with a fallback.” Tasks may be split among bounded workers, but keep architecture, native ownership, privacy and cross-thread correctness under a single accountable review.
 
 ### M0 — Prove Servo on Android
 
@@ -441,6 +441,18 @@ Not done: text selection, pinch zoom, file upload, downloads, permissions UI and
 
 **Gate:** the owner can execute the core workflows on their device, and no known critical data-loss, wrong-account upload or native lifecycle failure remains undisclosed. The app does not claim private browsing or a feature whose storage/isolation behavior has not been proven.
 
+**Status (19 October 2026): in progress.** The owner confirmed the release application ID and chose emulator validation for now.
+
+| Check | Result |
+| --- | --- |
+| Release ID | Confirmed: `ch.lkmc.combray`; debug retains `.debug` |
+| Local signing configuration | Passed on Linux/JDK 21 with a disposable key; `apksigner verify` confirmed the produced release certificate and v2 signature |
+| Artifact naming and native packaging | Passed: actual x86_64 debug/release APKs; 12 script regressions cover arm64/x86_64 naming, missing libraries, malformed/truncated inputs, wrong architecture, stale metadata and missing signing settings |
+| Personal signing key, native/signing release CI, dependency notices | Pending; signed test output is not a distributable personal release |
+| Physical phone, essential sites and deployed services | Not run; emulator-only validation selected for now, fixture-only service testing retained |
+
+Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). This build-tool slice changes no app runtime or Servo code; M1–M3 device evidence remains the earlier `run9`.
+
 ## 10. Acceptance and verification
 
 Use policy/unit tests for deterministic state transitions and URL classification; Room/outbox integration tests for atomicity, migrations and worker claims; native fixtures and Android device tests for actual engine behavior; contract tests against a pinned local service version for HTTP semantics. Mock HTTP is useful for failures, but cannot prove a deployed API, auth mode or engine capability. Prefer small fixture sites and unique fake content over real personal data.
@@ -498,7 +510,9 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
 | Engine revision/toolchain/packaging | Decided (M0) | Servo v0.6.0 + `native/servo/patches/`, Rust 1.97.1, NDK r29; [ENGINE_SPIKE.md](ENGINE_SPIKE.md#2-servo-selection-and-integration-decision) |
-| Application ID and minSdk | Proposed (M1) | `ch.lkmc.combray` (`.debug` suffix for debug builds), minSdk 30 (the native library links with API 30 wrappers), targetSdk 36. Confirm the ID with the owner before signing a release: changing it later loses installed data |
+| Application ID | Confirmed (19 October 2026) | Owner confirmed `ch.lkmc.combray`; `.debug` suffix for debug builds |
+| API levels | Proposed (M1) | minSdk 30 (the native library links with API 30 wrappers), targetSdk 36 |
+| M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |
 | Server auth/version and target sites | Pending owner/configuration | Fixture work can proceed without secrets |
 
 ### Principal risks and response
@@ -527,12 +541,12 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
-M0–M3 are implemented and their device checks pass on an x86_64 emulator (statuses in section 9). **Next task:** repeat the device checks on an arm64 phone, then start M4 with the owner.
+M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 has started; the owner confirmed the application ID and selected emulator validation for now. **Next task:** finish third-party notices/source availability and the native/signing release path, then validate the resulting build on the emulator.
 
-1. On an arm64 phone: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
-2. Ask the owner for: the device, the Karakeep and Hister addresses and versions, sites that must work, hosts never to capture, and confirmation of the application ID `ch.lkmc.combray` before release signing.
+1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
+2. When live acceptance is authorized, obtain the Karakeep and Hister addresses and versions, sites that must work and hosts never to capture. Configure credentials in the app, not in chat.
 3. With the owner's consent, do one deliberate save and one capture on their services, then clean up the test items (M2 step 5, M3 step 5); try Kagi login and search in Servo.
-4. Set up release signing outside Git (M4 step 5) and build the first arm64 release with `scripts/release.sh`.
+4. Supply a persistent signing key outside Git, complete native/signing CI and notices, and verify the personal APK before cutting a release tag. Local signing support is implemented; see [BUILDING.md](BUILDING.md#local-release-signing).
 
 > Read `AGENTS.md` first. Servo only; preserve the license and icon. Build with `scripts/build-native.sh` and Gradle exactly as `docs/BUILDING.md` describes; do not change the pinned Servo revision or patches without recording why. Report every check as passed, failed or not run with the device and commands used. Do not change live personal services or push unless the active task authorizes it.
 
