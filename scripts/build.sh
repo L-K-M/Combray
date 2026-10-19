@@ -107,19 +107,25 @@ echo "==> ./gradlew $TASK"
 ARCH="$(python3 -I scripts/verify-apk.py "$APK" --variant "$VARIANT" --version "$VERSION")"
 OUT="dist/${BASE}-v${VERSION}-android-${ARCH}.apk"
 mkdir -p dist
-cp "$APK" "$OUT"
-python3 -I - "$OUT" <<'PY'
+# Keep any previous complete artifact intact if copying or hashing fails.
+PARTIAL_APK="$(mktemp "${OUT}.XXXXXX")"
+trap 'rm -f "$PARTIAL_APK" "$PARTIAL_APK.sha256"' EXIT
+cp "$APK" "$PARTIAL_APK"
+python3 -I - "$PARTIAL_APK" "$OUT" <<'PY'
 import hashlib
 from pathlib import Path
 import sys
 
 artifact = Path(sys.argv[1])
+destination = Path(sys.argv[2])
 digest = hashlib.sha256()
 with artifact.open("rb") as stream:
     for chunk in iter(lambda: stream.read(1024 * 1024), b""):
         digest.update(chunk)
-artifact.with_suffix(".apk.sha256").write_text(f"{digest.hexdigest()}  {artifact.name}\n")
+Path(str(artifact) + ".sha256").write_text(f"{digest.hexdigest()}  {destination.name}\n")
 PY
+mv "$PARTIAL_APK" "$OUT"
+mv "$PARTIAL_APK.sha256" "$OUT.sha256"
 echo "==> staged $OUT"
 
 if [ "$INSTALL" -eq 1 ]; then

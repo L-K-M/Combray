@@ -5,8 +5,8 @@
         [--variant debug|release --version <versionName>]
 
 Uses the standard library. Checks packaging, ELF headers and CRCs, not runtime support
-or signing. --variant also checks the adjacent Gradle output-metadata.json so an old
-signed APK cannot be staged after a new unsigned build.
+or signing. --variant cross-checks the adjacent Gradle output-metadata.json for the
+variant, application ID, output filename and version; it does not bind source content.
 """
 
 import argparse

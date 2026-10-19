@@ -85,7 +85,7 @@ The owner confirmed `ch.lkmc.combray` as the release ID on 19 October 2026. Supp
 | `COMBRAY_KEY_ALIAS` | Signing key alias |
 | `COMBRAY_KEY_PASSWORD` | Signing key password |
 
-Set passwords through your local secret manager or hidden shell input. All four variables are required together; incomplete settings fail without printing their values. Then run:
+Set passwords through your local secret manager or hidden shell input. All four variables are required together. An incomplete set fails every Gradle invocation, including debug builds, tests and IDE sync; unset all four or complete the set. Values are not printed. Then run:
 
 ```sh
 COMBRAY_ABI=arm64 scripts/build-native.sh
@@ -96,6 +96,8 @@ scripts/build.sh
 Without signing variables, `./gradlew assembleRelease` produces an unsigned APK for CI checks. `scripts/build.sh` requires explicit signing settings for release staging. Debug signing is unchanged.
 
 Local verification on 19 October 2026 used a disposable RSA key: the x86_64 release built, APK Signature Scheme v2 verified, and its certificate matched that key. After an unsigned rebuild, the verifier rejected the leftover signed APK because the current metadata selected the unsigned file. The disposable key and staged test-signed APK were removed. This was a signing/build test, not device acceptance.
+
+The current arm64 engine also built and packaged successfully: `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=8 scripts/build-native.sh` (8m47s on the reference Linux host, Rust 1.97.1/NDK r29), then `scripts/build.sh --debug`. `verify-apk.py --expected-arch arm64` passed against that APK. No arm64 runtime was exercised. Interrupted-copy regression coverage verifies that a failed stage preserves the previous APK and checksum.
 
 Before publishing: finish the dependency notices and source-availability bundle, supply the personal signing key, and wire native compilation and signing into `release.yml`. Its arm64 artifact check already rejects missing or incorrectly labelled native libraries. No release tag has been cut.
 

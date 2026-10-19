@@ -25,8 +25,7 @@ class ApkBuildTest(unittest.TestCase):
         (self.root / "scripts").mkdir()
         (self.root / "app").mkdir()
         shutil.copy2(SCRIPTS / "build.sh", self.root / "scripts/build.sh")
-        if (SCRIPTS / "verify-apk.py").exists():
-            shutil.copy2(SCRIPTS / "verify-apk.py", self.root / "scripts/verify-apk.py")
+        shutil.copy2(SCRIPTS / "verify-apk.py", self.root / "scripts/verify-apk.py")
         (self.root / "app/build.gradle.kts").write_text('versionName = "0.1.0"\n')
         # Keep the build boundary real: the script stages the APK produced by its build command.
         gradle = self.root / "gradlew"
@@ -155,6 +154,32 @@ class ApkBuildTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("contains x86_64, expected arm64", result.stderr)
+
+    def test_failed_copy_preserves_the_previous_artifact(self):
+        self.fixture()
+        dist = self.root / "dist"
+        dist.mkdir()
+        artifact = dist / "combray-debug-v0.1.0-android-x86_64.apk"
+        checksum = artifact.with_suffix(".apk.sha256")
+        artifact.write_bytes(b"previous complete APK")
+        checksum.write_text("previous checksum")
+
+        binaries = self.root / "bin"
+        binaries.mkdir()
+        real_cp = shutil.which("cp")
+        self.assertIsNotNone(real_cp)
+        failing_cp = binaries / "cp"
+        failing_cp.write_text(
+            '#!/bin/sh\ncase "$2" in dist/*) printf truncated > "$2"; exit 1;; esac\n'
+            f'exec "{real_cp}" "$@"\n'
+        )
+        failing_cp.chmod(0o755)
+        self.env["PATH"] = str(binaries) + os.pathsep + self.env["PATH"]
+        result = self.build("--debug")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(artifact.read_bytes(), b"previous complete APK")
+        self.assertEqual(checksum.read_text(), "previous checksum")
+        self.assertEqual(set(dist.iterdir()), {artifact, checksum})
 
 
 if __name__ == "__main__":

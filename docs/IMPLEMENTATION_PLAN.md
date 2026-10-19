@@ -447,7 +447,7 @@ Not done: text selection, pinch zoom, file upload, downloads, permissions UI and
 | --- | --- |
 | Release ID | Confirmed: `ch.lkmc.combray`; debug retains `.debug` |
 | Local signing configuration | Passed on Linux/JDK 21 with a disposable key; `apksigner verify` confirmed the produced release certificate and v2 signature |
-| Artifact naming and native packaging | Passed: actual x86_64 debug/release APKs; 12 script regressions cover arm64/x86_64 naming, missing libraries, malformed/truncated inputs, wrong architecture, stale metadata and missing signing settings |
+| Artifact naming and native packaging | Passed: actual arm64 debug and x86_64 debug/release APKs; 13 script regressions cover architecture, missing libraries, malformed/truncated inputs, stale metadata, signing settings and interrupted staging |
 | Personal signing key, native/signing release CI, dependency notices | Pending; signed test output is not a distributable personal release |
 | Physical phone, essential sites and deployed services | Not run; emulator-only validation selected for now, fixture-only service testing retained |
 
