@@ -18,6 +18,8 @@ All notable changes to this project are documented here. The format follows
   address.
 - HTTP sign-in: a dialog naming the server asks for a username and
   password, warns on unencrypted connections and stores nothing.
+- Device check that the bottom bar and More menu keep 48dp, labeled touch
+  targets at the narrowest width and largest font size.
 - Local release signing through environment variables, with explicit validation
   of incomplete configuration and no committed signing material.
 - APK build-script regressions in CI and SHA-256 sidecars for local builds.

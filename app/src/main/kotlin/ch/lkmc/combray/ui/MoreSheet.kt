@@ -41,24 +41,40 @@ fun MoreSheet(
     onPauseCapture: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val url = tab?.url
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(bottom = 16.dp)) {
-            if (tab?.canGoForward == true) MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
-            if (url != null) MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
-            MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
-            if (url != null) {
-                MoreRow(Icons.Filled.Share, R.string.action_share) { onShare(url) }
-                MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
-            }
-            // Pausing is one tap; switching capture on goes through Settings, which explains it.
-            when (captureEnabled) {
-                true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)
-                false -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
-                null -> Unit
-            }
-            MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
+        MoreActions(tab, onForward, onReload, onNewTab, onShare, onPageInfo, onSettings, captureEnabled, onPauseCapture)
+    }
+}
+
+/** The sheet's rows, apart from the sheet so a device test can check them without its window. */
+@Composable
+internal fun MoreActions(
+    tab: ActiveTab?,
+    onForward: () -> Unit,
+    onReload: () -> Unit,
+    onNewTab: () -> Unit,
+    onShare: (String) -> Unit,
+    onPageInfo: () -> Unit,
+    onSettings: () -> Unit,
+    captureEnabled: Boolean?,
+    onPauseCapture: () -> Unit,
+) {
+    val url = tab?.url
+    Column(Modifier.padding(bottom = 16.dp)) {
+        if (tab?.canGoForward == true) MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
+        if (url != null) MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
+        MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
+        if (url != null) {
+            MoreRow(Icons.Filled.Share, R.string.action_share) { onShare(url) }
+            MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
         }
+        // Pausing is one tap; switching capture on goes through Settings, which explains it.
+        when (captureEnabled) {
+            true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)
+            false -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
+            null -> Unit
+        }
+        MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
     }
 }
 
