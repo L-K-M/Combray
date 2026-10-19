@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
+  naming the asking site (with a way to block a page's repeated dialogs),
+  and file upload through Android's document picker.
 - Local release signing through environment variables, with explicit validation
   of incomplete configuration and no committed signing material.
 - APK build-script regressions in CI and SHA-256 sidecars for local builds.

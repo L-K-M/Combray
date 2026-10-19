@@ -58,6 +58,49 @@ class EngineEventTest {
         assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"type":"default_handled","request":"x"}"""))
     }
 
+    @Test
+    fun parsesPageControls() {
+        val select = EngineEvent.parse(
+            """{"type":"control_shown","control":5,"kind":"select","multiple":false,"selected":[2],""" +
+                """"options":[{"id":1,"label":"One","disabled":true,"group":null},{"id":2,"label":"Two","disabled":false,"group":"G"}],""" +
+                """"tab":1,"generation":2,"schema":1}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(5L, select.control)
+        assertEquals(
+            PageControlContent.Select(listOf(SelectEntry(1, "One", true, null), SelectEntry(2, "Two", false, "G")), listOf(2), false),
+            select.content,
+        )
+
+        val prompt = EngineEvent.parse(
+            """{"type":"control_shown","control":6,"kind":"prompt","message":"Name?","default":"Zoë","tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(PageControlContent.Prompt("Name?", "Zoë"), prompt.content)
+
+        val files = EngineEvent.parse(
+            """{"type":"control_shown","control":7,"kind":"files","multiple":true,"extensions":["png","pdf"],"tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(PageControlContent.Files(true, listOf("png", "pdf")), files.content)
+
+        assertEquals(
+            EngineEvent.ControlHidden(ViewRef(1, 2), 7),
+            EngineEvent.parse("""{"type":"control_hidden","control":7,"tab":1,"generation":2}"""),
+        )
+    }
+
+    @Test
+    fun controlResponsesSerializeAsNativeExpects() {
+        assertEquals("""{"type":"select","ids":[1,3]}""", ControlResponse.Select(listOf(1, 3)).toJson())
+        assertEquals("""{"type":"accept"}""", ControlResponse.Accept.toJson())
+        assertEquals("""{"type":"text","value":"a\"b"}""", ControlResponse.Text("a\"b").toJson())
+        assertEquals("""{"type":"files","paths":["/x/a.png"]}""", ControlResponse.Files(listOf("/x/a.png")).toJson())
+        assertEquals("""{"type":"dismiss"}""", ControlResponse.Dismiss.toJson())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnknownControlKind() {
+        EngineEvent.parse("""{"type":"control_shown","control":1,"kind":"launch","tab":1,"generation":2}""")
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsKnownTypeWithMissingFields() {
         EngineEvent.parse("""{"type":"tab_created","tab":1}""")

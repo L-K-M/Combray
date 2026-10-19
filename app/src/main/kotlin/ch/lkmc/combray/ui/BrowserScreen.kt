@@ -255,6 +255,17 @@ fun BrowserScreen(graph: AppGraph) {
         Sheet.SETTINGS -> SettingsSheet(integrations = graph.integrations, onDismiss = dismiss)
         Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
     }
+
+    // Shown over any sheet: the page is blocked until it gets an answer.
+    state.pageControl?.let { control ->
+        PageControlDialog(
+            control = control,
+            staging = graph.uploads,
+            uploadScope = graph.scope,
+            onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
+            onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
+        )
+    }
 }
 
 /** What covers the page area when there is no page to show, or the page cannot be shown. */

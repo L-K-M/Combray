@@ -80,6 +80,9 @@ object NativeEngine {
 
     @JvmStatic external fun imeCommit(text: String)
 
+    /** [response] is [ControlResponse.toJson]. */
+    @JvmStatic external fun respondToControl(control: Long, response: String)
+
     /**
      * Capture readable text from [document] of [tab]. Servo refuses to run the script if the
      * document is no longer current. [skipLocalCheck] is for tests of that refusal only.

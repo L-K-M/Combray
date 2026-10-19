@@ -17,6 +17,7 @@ path = "src/lib.rs"
 # trimming them is an M1 decision that needs its own build and size measurements.
 [dependencies]
 log = { version = "=0.4.33", features = ["release_max_level_info"] }
+serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.10.9"
 

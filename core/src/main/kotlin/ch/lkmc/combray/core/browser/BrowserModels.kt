@@ -1,5 +1,7 @@
 package ch.lkmc.combray.core.browser
 
+import ch.lkmc.combray.engine.PageControlContent
+
 /** Wall-clock time in UTC milliseconds; injectable for retention tests. */
 fun interface Clock {
     fun now(): Long
@@ -57,6 +59,27 @@ sealed interface KeyboardRequest {
     data object Hide : KeyboardRequest
 }
 
+/**
+ * Something the focused page asks: a `<select>` choice, a script dialog or files to upload.
+ * Its text is page content and must not pass for the browser's own UI.
+ */
+data class PageControl(
+    val id: Long,
+    /** Display host of the asking page, or null when the page has no address yet. */
+    val site: String?,
+    val content: PageControlContent,
+    /** The page already showed a dialog: offer to suppress further ones until it navigates. */
+    val offerBlocking: Boolean,
+)
+
+/** Whether answering a dialog also suppresses the page's further dialogs. */
+enum class DialogBlocking {
+    KEEP_SHOWING,
+
+    /** Later dialogs of the same document are dismissed without being shown. */
+    BLOCK_FOR_PAGE,
+}
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
     /** Null: no tab is focused, the internal home is shown. */
@@ -64,6 +87,8 @@ data class BrowserState(
     val openTabCount: Int = 0,
     /** The page focused (or left) an editable element: show or hide the keyboard. */
     val keyboard: KeyboardRequest? = null,
+    /** The focused page's oldest unanswered control. */
+    val pageControl: PageControl? = null,
     val notice: Notice? = null,
 )
 

@@ -7,6 +7,8 @@
 
 use serde_json::{Value, json};
 
+use crate::controls::ControlDescription;
+
 /// One native incarnation of a logical tab.
 ///
 /// Recreating a view for the same tab yields a new generation, so late callbacks from the old
@@ -247,6 +249,17 @@ pub enum EngineEvent {
         view: ViewKey,
         reason: String,
     },
+    /// A page control waits for an answer; `control` names it in `respondToControl`.
+    ControlShown {
+        view: ViewKey,
+        control: u64,
+        description: ControlDescription,
+    },
+    /// The page withdrew the control, or its tab closed; any answer is ignored.
+    ControlHidden {
+        view: ViewKey,
+        control: u64,
+    },
     /// A request was refused or an operation failed. `tab` and `request` identify the
     /// request when there is one (capture ID for captures).
     Error {
@@ -388,6 +401,20 @@ impl EngineEvent {
             EngineEvent::Crashed { view, reason } => {
                 with_view(view, json!({ "type": "crashed", "reason": reason }))
             },
+            EngineEvent::ControlShown {
+                view,
+                control,
+                description,
+            } => {
+                let mut value = description.to_json();
+                value["type"] = json!("control_shown");
+                value["control"] = json!(control);
+                with_view(view, value)
+            },
+            EngineEvent::ControlHidden { view, control } => with_view(
+                view,
+                json!({ "type": "control_hidden", "control": control }),
+            ),
             EngineEvent::Error {
                 message,
                 tab,
@@ -441,4 +468,37 @@ fn capture_json(report: &CaptureReport) -> Value {
             "detail": report.detail,
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_shown_carries_view_id_and_description() {
+        let event = EngineEvent::ControlShown {
+            view: ViewKey {
+                tab: 3,
+                generation: 9,
+            },
+            control: 7,
+            description: ControlDescription::Confirm {
+                message: "Leave?".into(),
+            },
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "control_shown",
+                "control": 7,
+                "kind": "confirm",
+                "message": "Leave?",
+                "tab": 3,
+                "generation": 9,
+            })
+        );
+    }
 }

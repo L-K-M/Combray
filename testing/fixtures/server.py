@@ -13,6 +13,10 @@ Pages
   /opener.html               link with target=_blank to /solid/3b4f8a.html
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /private.html              page for exclusion checks
+  /select.html               page-filling <select>; title SELECT:<value> after a change
+  /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
+  /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  (the three control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
   POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks; key "fixture-key"
@@ -53,6 +57,34 @@ def page(title, body, head=""):
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>{html.escape(title)}</title>{head}</head><body>{body}</body></html>"
     )
+
+
+# Each control fills the page except a left margin, so a tap in the middle reaches it and a pixel
+# in the margin shows the page has painted.
+CONTROL_STYLE = ("<style>html,body{margin:0;background:#1f6f78}"
+                 ".c{display:block;box-sizing:border-box;margin-left:12vw;width:80vw;height:90vh;font-size:40px}</style>")
+CONTROL_PAGES = {
+    "/select.html": (
+        "SELECT",
+        "<select class='c' id='s' onchange=\"document.title='SELECT:'+this.value\">"
+        "<option value='a'>Alpha</option><optgroup label='Later'><option value='b'>Bravo</option>"
+        "<option value='c'>Charlie</option><option value='d' disabled>Delta</option></optgroup></select>",
+        "",
+    ),
+    "/dialogs.html": (
+        "DIALOGS",
+        "<button class='c' onclick=\"var r=confirm('Proceed?');var p=prompt('Name?','Zo\u00eb');"
+        "alert('Done');document.title='DIALOGS:'+r+':'+p\">ask</button>",
+        "",
+    ),
+    "/upload.html": (
+        "UPLOAD",
+        "<input class='c' type='file' accept='.txt' id='f'>",
+        "<script>addEventListener('load',function(){var f=document.getElementById('f');"
+        "f.onchange=function(){var file=f.files[0];var r=new FileReader();"
+        "r.onload=function(){document.title='FILE:'+file.name+':'+r.result};r.readAsText(file)}})</script>",
+    ),
+}
 
 
 def take_fault(service):
@@ -123,6 +155,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             phrase = "".join(c for c in query.get("p", ["x"])[0] if c.isascii() and c.isalnum())[:40][::-1]
             script = f"<script>addEventListener('load',function(){{document.getElementById('t').textContent='RENDERED-{phrase}';}});</script>"
             return self.send(200, page("RENDERED", "<p id='t'>static placeholder</p>", script))
+        if path in CONTROL_PAGES:
+            title, control, script = CONTROL_PAGES[path]
+            return self.send(200, page(title, control, CONTROL_STYLE + script))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
 

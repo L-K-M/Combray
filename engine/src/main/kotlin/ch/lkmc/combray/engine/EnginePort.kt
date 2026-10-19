@@ -32,6 +32,9 @@ interface EnginePort {
     /** Writes cookies and other profile state now, so logins survive a killed process. */
     fun persistProfile()
 
+    /** Answers a [EngineEvent.ControlShown]; ignored once the control was hidden. */
+    fun respondToControl(control: Long, response: ControlResponse)
+
     /** Reads bounded text from [document] only; the result names the document it came from. */
     fun capture(tab: Long, document: Long, capture: Long, maxTextBytes: Int, timeoutMs: Int)
 }

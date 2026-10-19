@@ -992,6 +992,7 @@ dependencies = [
  "log",
  "raw-window-handle",
  "rustls",
+ "serde",
  "serde_json",
  "servo",
  "servo-allocator",

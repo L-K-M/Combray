@@ -11,11 +11,13 @@ import ch.lkmc.combray.core.data.VisitKind
 import ch.lkmc.combray.core.policy.HostNames
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.CaptureStatus
+import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
+import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -259,6 +261,17 @@ class BrowserCoordinator(
         if (engineReady) engine.persistProfile()
     }
 
+    /** Answers [control]; ignored if the page withdrew it or its tab closed meanwhile. */
+    fun answerPageControl(control: Long, response: ControlResponse, blocking: DialogBlocking = DialogBlocking.KEEP_SHOWING) = submit {
+        val view = liveByTab.values.firstOrNull { live -> live.controls.any { it.id == control } } ?: return@submit
+        val answered = view.controls.first { it.id == control }
+        view.controls.remove(answered)
+        // Only where the dialog offered it: a stray request must not silence the page's dialogs.
+        if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
+        engine.respondToControl(control, response)
+        publish()
+    }
+
     /** Clears [notice] (or an equal duplicate); a different one posted while the UI showed it is kept. */
     fun noticeShown(notice: Notice) = state.update { if (it.notice == notice) it.copy(notice = null) else it }
 
@@ -296,11 +309,35 @@ class BrowserCoordinator(
                 Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
                 it.crashed = true
                 it.loading = false
+                it.controls.clear()
+                it.dialogDocument = null
+                it.dialogCount = 0
+                it.dialogsBlocked = false
             }
+            is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
+            is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
             is EngineEvent.EngineError -> onEngineError(event)
             else -> Unit
         }
         publish()
+    }
+
+    private fun onControlShown(view: LiveView, event: EngineEvent.ControlShown) {
+        val dialog = event.content !is PageControlContent.Select && event.content !is PageControlContent.Files
+        if (dialog) {
+            // Counting restarts with each document, so a page that navigated may ask again.
+            if (view.dialogDocument != view.currentDocument) {
+                view.dialogDocument = view.currentDocument
+                view.dialogCount = 0
+                view.dialogsBlocked = false
+            }
+            if (view.dialogsBlocked) {
+                engine.respondToControl(event.control, ControlResponse.Dismiss)
+                return
+            }
+            view.dialogCount++
+        }
+        view.controls.addLast(ShownControl(event.control, event.content, offerBlocking = dialog && view.dialogCount > 1))
     }
 
     private suspend fun onHistory(view: LiveView, event: EngineEvent.HistoryChanged) {
@@ -627,7 +664,8 @@ class BrowserCoordinator(
         if (liveByTab.size <= keep) return
         val recency = dao.openTabs().mapIndexed { index, tab -> tab.id to index }.toMap()
         liveByTab.values
-            .filter { it.nativeTab != selectedNative && dao.tab(it.tabId)?.url != null }
+            // A page waiting for an answer would lose it: keep its renderer.
+            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && dao.tab(it.tabId)?.url != null }
             .sortedByDescending { recency[it.tabId] ?: Int.MAX_VALUE }
             .take(liveByTab.size - keep)
             .forEach { closeView(it) }
@@ -670,6 +708,9 @@ class BrowserCoordinator(
                         loadFailed = view?.currentDocument?.let { it in view.errorDocuments } ?: false,
                     )
                 },
+                pageControl = view?.controls?.firstOrNull()?.let { shown ->
+                    PageControl(shown.id, tab.url?.let(HostNames::of)?.let(HostNames::forDisplay), shown.content, shown.offerBlocking)
+                },
                 openTabCount = openCount,
             )
         }
@@ -702,7 +743,15 @@ class BrowserCoordinator(
 
         /** Documents that reloaded the same address and kept the earlier visit. */
         val reloadedDocuments = HashSet<Long>()
+
+        /** Unanswered page controls, oldest first. */
+        val controls = ArrayDeque<ShownControl>()
+        var dialogDocument: Long? = null
+        var dialogCount = 0
+        var dialogsBlocked = false
     }
+
+    private class ShownControl(val id: Long, val content: PageControlContent, val offerBlocking: Boolean)
 
     /** A capture request and everything its result must still match. */
     private data class PendingCapture(

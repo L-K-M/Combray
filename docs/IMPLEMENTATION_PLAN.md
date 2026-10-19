@@ -377,7 +377,7 @@ Blockers to resolve before relying on them in M1: the stale-frame defect (multi-
 | No state depends on an Activity or native pointer | Passed by design and unit tests: native views are a cache of logical tabs with generation checks | `BrowserCoordinatorTest` |
 | Fresh install browses fixture sites without services | Passed: every device run starts from cleared app data | `check-app.sh` |
 
-Not done: text selection, pinch zoom, file upload, downloads, permissions UI and a Recent home layout. Stop is missing (Servo 0.6.0 has no API for it).
+Not done: text selection, downloads, permissions UI and a Recent home layout. Pinch zoom is Servo's own two-finger handling of the forwarded touches and has not been checked on a device. Stop is missing (Servo 0.6.0 has no API for it). `<select>`, script dialogs and file upload were added in M4 (below).
 
 ### M2 — Karakeep saves and Kagi search
 
@@ -450,6 +450,7 @@ Not done: text selection, pinch zoom, file upload, downloads, permissions UI and
 | Artifact naming and native packaging | Passed: actual arm64 debug and x86_64 debug/release APKs; 13 script regressions cover architecture, missing libraries, malformed/truncated inputs, stale metadata, signing settings and interrupted staging |
 | Personal signing key, native/signing release CI, dependency notices | Pending; signed test output is not a distributable personal release |
 | Physical phone, essential sites and deployed services | Not run; emulator-only validation selected for now, fixture-only service testing retained |
+| Page controls: `<select>`, `alert`/`confirm`/`prompt`, file upload | Passed on the emulator against real Servo (`PageControlsTest`, run `controls2`): a choice from the app's picker changed the page's `<select>`; confirm, prompt and alert answers reached the page in order under a "localhost says" title; the page read a staged upload with `FileReader`. Android's document picker itself (another app) and pinch zoom were not exercised |
 
 Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). This build-tool slice changes no app runtime or Servo code; M1–M3 device evidence remains the earlier `run9`.
 

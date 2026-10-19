@@ -34,6 +34,8 @@ class CombrayApplication : Application(), OutboxHost {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        // Uploads picked in an earlier process are no longer referenced by any page.
+        graph.scope.launch(Dispatchers.IO) { graph.uploads.clear() }
         // Before any Activity: the engine must run before the first surface is created.
         graph.browser.start()
         persistProfileWhileRunning()
@@ -104,6 +106,7 @@ class AppGraph(application: Application) {
         scheduler = WorkManagerScheduler(application),
     )
     val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister)
+    val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
 
     fun engineRunning(): Boolean = browser.browserState.value.engine.let {
         it == EngineStatus.STARTING || it == EngineStatus.READY
