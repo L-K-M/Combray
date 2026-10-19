@@ -22,11 +22,16 @@ FIXTURE_PORT=8766
 RESULTS="${COMBRAY_RESULTS:-$ROOT/build/device-checks/$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$RESULTS"
 
-[ -f "$APK" ] && [ -f "$TEST_APK" ] || { echo "!! build the APKs first (see the header)" >&2; exit 1; }
+if [ ! -f "$APK" ] || [ ! -f "$TEST_APK" ]; then
+    echo "!! build the APKs first (see the header)" >&2
+    exit 1
+fi
 
 PIDS=()
 # The device's own "stay awake while charging" setting, restored on exit.
 STAY_ON_ORIGINAL=""
+# Called by the EXIT trap, which shellcheck does not follow.
+# shellcheck disable=SC2317,SC2329
 cleanup() {
     for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
     "${ADB[@]}" reverse --remove "tcp:$FIXTURE_PORT" 2>/dev/null || true

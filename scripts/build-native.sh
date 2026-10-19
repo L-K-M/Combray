@@ -9,6 +9,7 @@
 # scripts/build.sh (or ./gradlew assembleDebug); without this step the app reports a missing engine.
 set -euo pipefail
 
+# shellcheck source=m0/env.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/m0/env.sh"
 
 echo "==> cargo build ($COMBRAY_RUST_TARGET, release)"
