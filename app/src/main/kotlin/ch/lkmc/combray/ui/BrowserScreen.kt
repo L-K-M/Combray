@@ -252,7 +252,7 @@ fun BrowserScreen(graph: AppGraph) {
             },
             onDismiss = dismiss,
         )
-        Sheet.SETTINGS -> SettingsSheet(integrations = graph.integrations, onDismiss = dismiss)
+        Sheet.SETTINGS -> SettingsSheet(integrations = graph.integrations, notices = graph.notices, onDismiss = dismiss)
         Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
     }
 

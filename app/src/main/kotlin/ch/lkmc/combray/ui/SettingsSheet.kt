@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.BuildConfig
 import ch.lkmc.combray.R
+import ch.lkmc.combray.ThirdPartyNotices
 import ch.lkmc.combray.core.browser.Retention
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
@@ -69,15 +70,17 @@ import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
-/** Pinned engine release (docs/BUILDING.md); shown so reports can name it. */
-private const val SERVO_VERSION = "0.6.0"
+/** Where the source of this build, including the engine patches, is published (MPL-2.0 §3.2). */
+private const val SOURCE_URL = "https://github.com/L-K-M/Combray"
 
 /** Queue states the user can retry or discard one by one. */
 private val ACTIONABLE_STATES = setOf(JobState.FAILED, JobState.RETRY_WAIT, JobState.AUTH_REQUIRED)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSheet(integrations: Integrations, onDismiss: () -> Unit) {
+fun SettingsSheet(integrations: Integrations, notices: ThirdPartyNotices, onDismiss: () -> Unit) {
+    var showNotices by rememberSaveable { mutableStateOf(false) }
+    if (showNotices) NoticesDialog(notices) { showNotices = false }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
@@ -142,7 +145,11 @@ fun SettingsSheet(integrations: Integrations, onDismiss: () -> Unit) {
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
             SectionTitle(R.string.settings_about_title)
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
-            Text(stringResource(R.string.settings_engine, SERVO_VERSION))
+            Text(stringResource(R.string.settings_engine, BuildConfig.SERVO_VERSION))
+            SelectionContainer { Text(stringResource(R.string.settings_source, SOURCE_URL)) }
+            OutlinedButton(onClick = { showNotices = true }, modifier = Modifier.padding(top = 8.dp)) {
+                Text(stringResource(R.string.notices_title))
+            }
         }
     }
 }

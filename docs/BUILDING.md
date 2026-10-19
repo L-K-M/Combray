@@ -74,6 +74,23 @@ python3 -I -m unittest discover -s scripts/tests
 
 To regenerate the launcher icon after changing `media-sources/icon.png`: `python3 scripts/generate-launcher-icons.py` (needs Pillow).
 
+### Third-party notices
+
+Settings › About lists every third-party component in the APK with its license texts and links to this repository for the source, including the Servo patches.
+
+| Part | Source | When it updates |
+| --- | --- | --- |
+| Rust crates linked into the engine | `cargo about` (0.9.2) with `native/about.toml` | Regenerate after changing `native/Cargo.lock` |
+| C/C++ code compiled into the engine (SpiderMonkey and its ICU, ANGLE, FreeType, HarfBuzz, …) and libc++ | `native/bundled-notices.toml`, read from the crates' sources and the pinned NDK | Recheck the list after changing the Servo pin; it was found by listing the linked archives' members and symbols |
+| Java/Kotlin libraries | Licensee Gradle plugin, at build time | Automatic; the build fails on a license other than Apache-2.0 |
+
+```sh
+cargo install cargo-about --version 0.9.2 --locked   # once
+ANDROID_SDK_ROOT=... scripts/generate-notices.py     # needs a native build's registry sources
+```
+
+The script writes `app/src/main/assets/notices/native.json` with hashes of its inputs; `scripts/tests/test_notices.py` fails CI when an input changed without regenerating. The cargo-about target filter keeps a few crates the Android build does not link (for example `wayland-sys`); listing extra is harmless. This inventory is not a legal review.
+
 ### Local release signing
 
 The owner confirmed `ch.lkmc.combray` as the release ID on 19 October 2026. Supply an existing personal keystore through environment variables; keep it outside Git and back it up for future app updates:
@@ -99,7 +116,7 @@ Local verification on 19 October 2026 used a disposable RSA key: the x86_64 rele
 
 The current arm64 engine also built and packaged successfully: `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=8 scripts/build-native.sh` (8m47s on the reference Linux host, Rust 1.97.1/NDK r29), then `scripts/build.sh --debug`. `verify-apk.py --expected-arch arm64` passed against that APK. No arm64 runtime was exercised. Interrupted-copy regression coverage verifies that a failed stage preserves the previous APK and checksum.
 
-Before publishing: finish the dependency notices and source-availability bundle, supply the personal signing key, and wire native compilation and signing into `release.yml`. Its arm64 artifact check already rejects missing or incorrectly labelled native libraries. No release tag has been cut.
+Before publishing: supply the personal signing key, and wire native compilation and signing into `release.yml`. Its arm64 artifact check already rejects missing or incorrectly labelled native libraries. No release tag has been cut.
 
 ## Build the M0 engine harness
 
@@ -170,6 +187,7 @@ For an arm64 device: `COMBRAY_ABI=arm64 scripts/m0/build-harness.sh`, then `scri
 | Every page check fails with `screen shows 000000`; `screencap` of the launcher is black too | After hours of headless running, the emulator's compositor stops producing frames (seen once, after about 2.5 hours and several `system_server` restarts) | Restart the emulator. `check-app.sh` now checks a home-screen screenshot first and stops with this advice |
 | A screen check sees Combray's home screen or an old page although the coordinator has moved on | Under a Compose test rule the UI only recomposes when the test drives the test clock; checks that talk to the coordinator directly never do | `Device` advances the Compose clock by one frame before each screenshot |
 | `Injecting to another application requires INJECT_EVENTS` | A System UI ANR dialog has input focus | The tests close system dialogs before taps |
+| A check ends with `keyDispatchingTimedOut` (`Waited 5000ms for FocusEvent`) when it opens a sheet or dialog in the browser | Under software emulation and host load, the browser's main thread needs over 5 s to take a new window's focus (ANR traces showed it busy in Compose layout, not blocked) | `AboutTest` hosts the notices dialog on a plain Compose activity; retry when the host is less loaded. Device checks still do not open the browser's bottom sheets |
 | `Failed to inject touch input. Reason: Expected exactly '1' node ...` | Not an input problem: Compose prefixes a failed node lookup with this text. App data persists across the checks of one run, so a page an earlier check saved has "Saved to Karakeep" instead of a "Save" button | Each check that taps Save uses a page no earlier check saved |
 | Lint `NewApi`: `URLEncoder.encode(String, Charset)` | That overload is API 33; minSdk is 30 (it would crash on Android 11) | `URLEncoder.encode(value, "UTF-8")` |
 

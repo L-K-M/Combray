@@ -448,7 +448,8 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Release ID | Confirmed: `ch.lkmc.combray`; debug retains `.debug` |
 | Local signing configuration | Passed on Linux/JDK 21 with a disposable key; `apksigner verify` confirmed the produced release certificate and v2 signature |
 | Artifact naming and native packaging | Passed: actual arm64 debug and x86_64 debug/release APKs; 13 script regressions cover architecture, missing libraries, malformed/truncated inputs, stale metadata, signing settings and interrupted staging |
-| Personal signing key, native/signing release CI, dependency notices | Pending; signed test output is not a distributable personal release |
+| Personal signing key, native/signing release CI | Pending; signed test output is not a distributable personal release |
+| Third-party notices and source link | Implemented: Settings › About lists 637 engine components (crates plus hand-checked bundled C/C++ libraries and libc++) and 113 Java/Kotlin libraries with license texts, and names the source repository. Device check `AboutTest` passed on the emulator (run `about3`). Not a legal review |
 | Physical phone, essential sites and deployed services | Not run; emulator-only validation selected for now, fixture-only service testing retained |
 | Page controls: `<select>`, `alert`/`confirm`/`prompt`, file upload | Passed on the emulator against real Servo (`PageControlsTest`, run `controls2`): a choice from the app's picker changed the page's `<select>`; confirm, prompt and alert answers reached the page in order under a "localhost says" title; the page read a staged upload with `FileReader`. Android's document picker itself (another app) and pinch zoom were not exercised |
 
@@ -542,12 +543,12 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
-M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 has started; the owner confirmed the application ID and selected emulator validation for now. **Next task:** finish third-party notices/source availability and the native/signing release path, then validate the resulting build on the emulator.
+M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 has started; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, then validate the resulting build on the emulator.
 
 1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
 2. When live acceptance is authorized, obtain the Karakeep and Hister addresses and versions, sites that must work and hosts never to capture. Configure credentials in the app, not in chat.
 3. With the owner's consent, do one deliberate save and one capture on their services, then clean up the test items (M2 step 5, M3 step 5); try Kagi login and search in Servo.
-4. Supply a persistent signing key outside Git, complete native/signing CI and notices, and verify the personal APK before cutting a release tag. Local signing support is implemented; see [BUILDING.md](BUILDING.md#local-release-signing).
+4. Supply a persistent signing key outside Git, complete native/signing CI, and verify the personal APK before cutting a release tag. Local signing support is implemented; see [BUILDING.md](BUILDING.md#local-release-signing).
 
 > Read `AGENTS.md` first. Servo only; preserve the license and icon. Build with `scripts/build-native.sh` and Gradle exactly as `docs/BUILDING.md` describes; do not change the pinned Servo revision or patches without recording why. Report every check as passed, failed or not run with the device and commands used. Do not change live personal services or push unless the active task authorizes it.
 

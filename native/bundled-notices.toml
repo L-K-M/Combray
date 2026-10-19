@@ -1,0 +1,144 @@
+# C and C++ code compiled into the engine library that cargo-about cannot see: it reads crate
+# metadata, not the sources a crate's build script compiles or the archive it downloads.
+# scripts/generate-notices.py reads each `files` entry from the named crate's registry source.
+#
+# Found by listing the members and symbols of the linked static archives (SpiderMonkey's
+# prebuilt libjs_static.a, the build-script outputs under target/<abi>/release/build). Recheck
+# after changing the Servo pin or Cargo.lock. zlib is not listed: Android provides libz.so.
+
+[[library]]
+name = "SpiderMonkey"
+crate = "mozjs_sys"
+license = "MPL-2.0"
+# Points to Firefox's license.html, which the crate does not ship; the MPL text follows it.
+files = ["mozjs/LICENSE"]
+spdx-text = "MPL-2.0"
+
+[[library]]
+name = "ICU"
+crate = "mozjs_sys"
+license = "Unicode-3.0"
+# The prebuilt archive contains ICU4C; the crate ships no ICU license file.
+spdx-text = "Unicode-3.0"
+
+[[library]]
+name = "double-conversion"
+crate = "mozjs_sys"
+license = "BSD-3-Clause"
+files = ["mozjs/mfbt/double-conversion/LICENSE"]
+
+[[library]]
+name = "fdlibm"
+crate = "mozjs_sys"
+license = "BSD-2-Clause"
+files = ["mozjs/modules/fdlibm/src/LICENSE"]
+
+[[library]]
+name = "irregexp (V8)"
+crate = "mozjs_sys"
+license = "BSD-3-Clause"
+files = ["mozjs/js/src/irregexp/LICENSE.v8"]
+
+[[library]]
+name = "LZ4 (SpiderMonkey)"
+crate = "mozjs_sys"
+license = "BSD-2-Clause"
+files = ["mozjs/mozglue/static/lz4/LICENSE"]
+
+[[library]]
+name = "{fmt}"
+crate = "mozjs_sys"
+license = "MIT"
+files = ["mozjs/third_party/fmt/LICENSE"]
+
+[[library]]
+name = "gemmology"
+crate = "mozjs_sys"
+license = "MIT"
+files = ["mozjs/third_party/gemmology/LICENSE"]
+
+[[library]]
+name = "xsimd"
+crate = "mozjs_sys"
+license = "BSD-3-Clause"
+files = ["mozjs/third_party/xsimd/LICENSE"]
+
+[[library]]
+name = "xsum"
+crate = "mozjs_sys"
+license = "MIT"
+files = ["mozjs/js/src/xsum/LICENSE"]
+
+[[library]]
+name = "ANGLE"
+crate = "mozangle"
+license = "BSD-3-Clause"
+files = ["gfx/angle/checkout/LICENSE"]
+
+[[library]]
+name = "FreeType"
+crate = "freetype-sys"
+license = "FTL"
+files = ["freetype2/LICENSE.TXT", "freetype2/docs/FTL.TXT"]
+
+[[library]]
+name = "libpng"
+crate = "freetype-sys"
+license = "libpng-2.0"
+files = ["libpng/LICENSE"]
+
+[[library]]
+name = "HarfBuzz"
+crate = "harfbuzz-sys"
+license = "MIT-Modern-Variant"
+files = ["harfbuzz/COPYING"]
+
+[[library]]
+name = "SQLite"
+crate = "libsqlite3-sys"
+license = "blessing"
+text = """
+The author disclaims copyright to this source code. In place of a legal notice, here is a
+blessing:
+
+    May you do good and not evil.
+    May you find forgiveness for yourself and forgive others.
+    May you share freely, never taking more than you give.
+"""
+
+[[library]]
+name = "jemalloc"
+crate = "tikv-jemalloc-sys"
+license = "BSD-2-Clause"
+files = ["jemalloc/COPYING"]
+
+[[library]]
+name = "Zstandard"
+crate = "zstd-sys"
+license = "BSD-3-Clause"
+files = ["zstd/LICENSE"]
+
+[[library]]
+name = "AWS-LC"
+crate = "aws-lc-sys"
+license = "ISC AND (Apache-2.0 OR ISC) AND OpenSSL"
+files = ["aws-lc/LICENSE", "aws-lc/third_party/fiat/LICENSE"]
+
+# Shipped next to the engine as libc++_shared.so. The text is the LLVM section of the pinned
+# NDK's NOTICE.toolchain.
+[[library]]
+name = "LLVM libc++"
+ndk-notice = "The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:"
+license = "Apache-2.0 WITH LLVM-exception"
+
+[[library]]
+name = "OpenType Sanitizer"
+crate = "fontsan"
+license = "BSD-3-Clause"
+files = ["src/deps/ots/LICENSE"]
+
+[[library]]
+name = "LZ4 (OpenType Sanitizer)"
+crate = "fontsan"
+license = "BSD-2-Clause"
+files = ["src/deps/lz4/lib/LICENSE"]

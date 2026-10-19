@@ -107,6 +107,7 @@ class AppGraph(application: Application) {
     )
     val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister)
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
+    val notices = ThirdPartyNotices(application.assets)
 
     fun engineRunning(): Boolean = browser.browserState.value.engine.let {
         it == EngineStatus.STARTING || it == EngineStatus.READY
