@@ -45,7 +45,8 @@ data class Notices(val components: List<Notice>, val texts: List<String>) {
                 Notice(
                     name = "${artifact.string("groupId")}:${artifact.string("artifactId")}",
                     version = artifact.string("version"),
-                    license = licenses.joinToString(" AND "),
+                    // Neutral: a POM listing several licenses does not say whether all apply.
+                    license = licenses.joinToString(", "),
                     texts = licenses.map { spdx[it] ?: throw IllegalArgumentException("no text for $it") },
                 )
             }

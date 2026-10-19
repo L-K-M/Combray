@@ -29,7 +29,7 @@ ENV_SCRIPT = ROOT / "scripts/m0/env.sh"
 REGISTRY = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registry/src"
 
 # Inputs whose change requires regenerating; the test recomputes these.
-HASHED_INPUTS = ["native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml"]
+HASHED_INPUTS = ["native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml", "scripts/generate-notices.py"]
 
 # Text the JVM libraries (all Apache-2.0, checked by Licensee) are shown with.
 JVM_LICENSES = ["Apache-2.0"]
@@ -81,6 +81,13 @@ def cargo_about() -> dict:
     return json.loads(result.stdout)
 
 
+def spdx_text(spdx: dict[str, int], identifier: str) -> int:
+    """Index of the canonical text for [identifier]; 0 is a valid index."""
+    if identifier not in spdx:
+        sys.exit(f"no {identifier} text from cargo-about")
+    return spdx[identifier]
+
+
 class Texts:
     """License texts, each stored once; components refer to them by index."""
 
@@ -129,7 +136,7 @@ def main() -> None:
             source = crate_source(library["crate"], version)
             indices += [texts.add((source / file).read_text(errors="replace")) for file in library.get("files", [])]
         if "spdx-text" in library:
-            indices.append(spdx.get(library["spdx-text"]) or sys.exit(f"no {library['spdx-text']} text from cargo-about"))
+            indices.append(spdx_text(spdx, library["spdx-text"]))
         if "text" in library:
             indices.append(texts.add(library["text"]))
         if "ndk-notice" in library:

@@ -9,7 +9,7 @@ plugins {
 val engineAbis = rootProject.file("engine/jniLibs").listFiles()?.filter { it.isDirectory }?.map { it.name }.orEmpty()
 
 // The engine's Servo release, as locked for the native build: shown in Settings › About.
-val servoVersion = Regex("\\[\\[package]]\\nname = \"servo\"\\nversion = \"([^\"]+)\"")
+val servoVersion = Regex("\\[\\[package]]\\Rname = \"servo\"\\Rversion = \"([^\"]+)\"")
     .find(rootProject.file("native/Cargo.lock").readText())?.groupValues?.get(1)
     ?: error("no servo package in native/Cargo.lock")
 
