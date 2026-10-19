@@ -39,6 +39,6 @@ All notable changes to this project are documented here. The format follows
 
 - Local APK names now use the packaged architecture instead of always saying
   arm64. Staging rejects missing native libraries, wrong ELF architectures and
-  stale APKs that do not match Gradle output metadata. Interrupted staging
-  preserves the previous APK and checksum. Release CI applies the same
+  stale APKs that do not match Gradle output metadata. Failed copying or
+  hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
