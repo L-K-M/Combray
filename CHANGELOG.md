@@ -18,8 +18,8 @@ All notable changes to this project are documented here. The format follows
   address.
 - HTTP sign-in: a dialog naming the server asks for a username and
   password, warns on unencrypted connections and stores nothing.
-- Device check that the bottom bar and More menu keep 48dp, labeled touch
-  targets at the narrowest width and largest font size.
+- Device check that the bottom bar, More menu and page dialogs keep 48dp,
+  labeled touch targets at the narrowest width and largest font size.
 - Local release signing through environment variables, with explicit validation
   of incomplete configuration and no committed signing material.
 - APK build-script regressions in CI and SHA-256 sidecars for local builds.
@@ -53,6 +53,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page's prompt dialog labels its text field, so TalkBack names it.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.
