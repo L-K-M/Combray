@@ -3,9 +3,9 @@
 
     python3 -I scripts/summarize-instrumentation.py build/device-checks/<run>
 
-Exits with status 1 when a test failed or errored, a run reported no test at all, or a run
-stopped early (its process crashed or was killed as not responding): the test in progress shows
-as crashed and the tests it never reached are counted as not run.
+Exits with status 1 when a test failed or errored, there was no run or a run reported no test,
+or a run stopped early (its process crashed or was killed as not responding): the test in
+progress shows as crashed and the tests it never reached are counted as not run.
 """
 
 import pathlib
@@ -83,7 +83,7 @@ def main():
     if stopped:
         print(f"runs that stopped early: {', '.join(stopped)}")
     bad = any(status in ("failed", "error", CRASHED) for *_, status in rows)
-    return 1 if bad or empty or stopped or not_run else 0
+    return 1 if bad or empty or stopped or not_run or not rows else 0
 
 
 if __name__ == "__main__":
