@@ -3,6 +3,7 @@ package ch.lkmc.combray
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -11,7 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -31,8 +34,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Every tappable element of the browser chrome is at least 48dp each way and has a label TalkBack
- * reads, at the narrowest common phone width and at Android's largest font size.
+ * Every element of the browser chrome with a click action is at least 48dp each way and has a
+ * label TalkBack reads, at the narrowest common phone width and at Android's largest font size.
  *
  * Checked on Compose semantics: Android's Accessibility Test Framework skips Compose content on
  * this emulator ("Composable content is not evaluated in this environment"). The chrome runs on a
@@ -59,7 +62,7 @@ class AccessibilityTest {
 
     @Test
     fun theBottomBarOnANewTabIsAccessible() {
-        show(DEFAULT_FONT) {
+        show(LARGE_FONT) {
             BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
@@ -78,10 +81,24 @@ class AccessibilityTest {
         compose.onNodeWithText("Settings").assertIsDisplayed()
     }
 
-    /** The check itself: a small target without a label must fail it. */
+    /** The check itself: a target without a label fails it. */
     @Test
-    fun aSmallUnlabeledTargetFails() {
-        show(DEFAULT_FONT) { Box(Modifier.size(20.dp).clickable {}) }
+    fun anUnlabeledTargetFails() {
+        show(DEFAULT_FONT) { Box(Modifier.size(MIN_TARGET).clickable {}) }
+
+        assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
+    }
+
+    /** The check itself: small targets side by side fail it, since neither gets 48dp to itself. */
+    @Test
+    fun crowdedSmallTargetsFail() {
+        show(DEFAULT_FONT) {
+            Row {
+                for (label in listOf("One", "Two")) {
+                    Box(Modifier.size(SMALL_TARGET).clickable {}.semantics { contentDescription = label })
+                }
+            }
+        }
 
         assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
     }
@@ -98,19 +115,33 @@ class AccessibilityTest {
     private fun assertTargetsAreAccessible() {
         val targets = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
         if (targets.isEmpty()) throw AssertionError("nothing to tap")
-        val problems = targets.mapNotNull(::problem)
+        val crowded = targets.flatMapIndexed { index, target ->
+            targets.drop(index + 1)
+                .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
+                .map { "\"${name(target)}\" and \"${name(it)}\" share touch area" }
+        }
+        val problems = targets.mapNotNull(::problem) + crowded
         if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
     }
 
-    /** What is wrong with one tappable element, or null. Its touch area counts, not its drawing. */
+    /**
+     * What is wrong with one tappable element, or null. Its touch bounds count, not its drawing:
+     * Compose stretches a small target's hit area to 48dp (a 40dp Material icon button relies on
+     * it), which is why overlapping touch bounds are checked as well.
+     */
     private fun problem(node: SemanticsNode): String? {
-        val label = node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() +
-            node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
         val bounds = node.touchBoundsInRoot
         val (width, height) = with(compose.density) { bounds.width.toDp() to bounds.height.toDp() }
-        if (label.none { it.isNotBlank() }) return "unlabeled target at $bounds"
-        if (width < MIN_TARGET || height < MIN_TARGET) return "\"${label.first()}\" is ${width}x$height"
+        val name = name(node) ?: return "unlabeled target at $bounds"
+        if (width < MIN_TARGET || height < MIN_TARGET) return "\"$name\" is ${width}x$height"
         return null
+    }
+
+    /** What TalkBack reads for [node], or null when it reads nothing. */
+    private fun name(node: SemanticsNode): String? {
+        val label = node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() +
+            node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+        return label.firstOrNull { it.isNotBlank() }
     }
 
     private companion object {
@@ -124,6 +155,8 @@ class AccessibilityTest {
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp
+
+        val SMALL_TARGET = 40.dp
 
         val PAGE = ActiveTab(
             id = "tab",
