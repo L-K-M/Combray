@@ -53,6 +53,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Device-check summaries no longer pass a run whose app process crashed or
+  was killed as not responding after some checks passed: the check in
+  progress shows as crashed and the unreached ones as not run.
 - Local APK names now use the packaged architecture instead of always saying
   arm64. Staging rejects missing native libraries, wrong ELF architectures and
   stale APKs that do not match Gradle output metadata. Failed copying or
