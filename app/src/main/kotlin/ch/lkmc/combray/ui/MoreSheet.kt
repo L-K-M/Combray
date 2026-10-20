@@ -37,10 +37,12 @@ fun MoreSheet(
     /** Null when Hister is not set up; otherwise whether capture is on. */
     captureEnabled: Boolean?,
     onPauseCapture: () -> Unit,
+    readerOpen: Boolean,
+    onReader: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture)
+        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
     }
 }
 
@@ -55,6 +57,9 @@ internal fun MoreActions(
     onSettings: () -> Unit,
     captureEnabled: Boolean?,
     onPauseCapture: () -> Unit,
+    /** Reader view is open over the page: the row leaves it. */
+    readerOpen: Boolean,
+    onReader: () -> Unit,
 ) {
     val url = tab?.url
     Column(Modifier.padding(bottom = 16.dp)) {
@@ -62,7 +67,10 @@ internal fun MoreActions(
         if (url != null) MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
         MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
         // Share is in the bottom bar.
-        if (url != null) MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
+        if (url != null) {
+            MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
+            MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
+        }
         // Pausing is one tap; switching capture on goes through Settings, which explains it.
         when (captureEnabled) {
             true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)

@@ -2,7 +2,7 @@
 """Generate the engine's third-party notices for the About screen.
 
     crates linked into the engine ──cargo about──┐
-    native/bundled-notices.toml (C/C++ code) ────┼──▶ app/src/main/assets/notices/native.json
+    native/bundled-notices.toml (C/C++, JS) ─────┼──▶ app/src/main/assets/notices/native.json
     LLVM section of the pinned NDK's notices ────┘
 
 The output records hashes of its inputs; scripts/tests/test_notices.py fails CI when an input
@@ -29,7 +29,10 @@ ENV_SCRIPT = ROOT / "scripts/m0/env.sh"
 REGISTRY = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registry/src"
 
 # Inputs whose change requires regenerating; the test recomputes these.
-HASHED_INPUTS = ["native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml", "scripts/generate-notices.py"]
+HASHED_INPUTS = [
+    "native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml", "native/src/vendor/Readability.LICENSE.md",
+    "scripts/generate-notices.py",
+]
 
 # Text the JVM libraries (all Apache-2.0, checked by Licensee) are shown with.
 JVM_LICENSES = ["Apache-2.0"]
@@ -130,11 +133,12 @@ def main() -> None:
     bundled = tomllib.loads((NATIVE / "bundled-notices.toml").read_text())["library"]
     for library in bundled:
         indices = []
-        version = None
+        version = library.get("version")
         if "crate" in library:
             version = locked_version(library["crate"])
             source = crate_source(library["crate"], version)
             indices += [texts.add((source / file).read_text(errors="replace")) for file in library.get("files", [])]
+        indices += [texts.add((ROOT / file).read_text()) for file in library.get("repo-files", [])]
         if "spdx-text" in library:
             indices.append(spdx_text(spdx, library["spdx-text"]))
         if "text" in library:

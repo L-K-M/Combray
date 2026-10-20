@@ -76,6 +76,10 @@ class BrowserCoordinator(
     private var selectedNative: Long? = null
     private var engineReady = false
     private val pendingCaptures = HashMap<Long, PendingCapture>()
+    private val pendingArticles = HashMap<Long, PendingArticle>()
+
+    /** Reader view, while open; shown only over the tab it was opened for. */
+    private var reader: ReaderState? = null
 
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
@@ -297,6 +301,34 @@ class BrowserCoordinator(
         if (engineReady) engine.persistProfile()
     }
 
+    /**
+     * Opens reader view for the focused tab: the engine reads the main article of the document
+     * shown now, in that document only.
+     */
+    fun openReader() = submit {
+        val tab = activeTab() ?: return@submit
+        val view = liveByTab[tab.id]
+        val document = view?.currentDocument
+        val generation = view?.generation
+        val url = tab.url
+        if (view == null || view.crashed || document == null || generation == null || url == null || document in view.errorDocuments) {
+            reader = ReaderState.Unavailable(tab.id)
+            publish()
+            return@submit
+        }
+        val id = nextRequest++
+        pendingArticles[id] = PendingArticle(tab.id, ViewRef(view.nativeTab, generation), document, url)
+        engine.captureArticle(view.nativeTab, document, id, MAX_ARTICLE_BYTES, ARTICLE_TIMEOUT_MS)
+        reader = ReaderState.Loading(tab.id)
+        publish()
+    }
+
+    /** Leaves reader view; an article still being read is dropped when it arrives. */
+    fun closeReader() = submit {
+        reader = null
+        publish()
+    }
+
     /** Answers [control]; ignored if the page withdrew it or its tab closed meanwhile. */
     fun answerPageControl(control: Long, response: ControlResponse, blocking: DialogBlocking = DialogBlocking.KEEP_SHOWING) = submit {
         val view = liveByTab.values.firstOrNull { live -> live.controls.any { it.id == control } } ?: return@submit
@@ -333,7 +365,7 @@ class BrowserCoordinator(
                     if (event.phase == LoadPhase.COMPLETE) scheduleCapture(it, event.document, captureTiming.settleMs)
                 }
             }
-            is EngineEvent.CaptureResult -> onCaptureResult(event)
+            is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
             is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 state.update { it.copy(keyboard = KeyboardRequest.Show(event.kind)) }
@@ -556,6 +588,17 @@ class BrowserCoordinator(
         )
     }
 
+    /** Shows the article if reader view still waits for it and the page is still the one asked. */
+    private fun onArticleResult(event: EngineEvent.CaptureResult) {
+        val pending = pendingArticles.remove(event.capture) ?: return
+        if (reader != ReaderState.Loading(pending.tabId)) return
+        val content = event.content?.takeIf {
+            event.status == CaptureStatus.CAPTURED && event.view == pending.view && event.document == pending.document
+        }
+        val article = content?.let { ArticleJson.parse(it.text, it.truncated) }
+        reader = article?.let { ReaderState.Ready(pending.tabId, pending.url, it) } ?: ReaderState.Unavailable(pending.tabId)
+    }
+
     private fun view(ref: ViewRef): LiveView? =
         liveByNative[ref.tab]?.takeIf { it.generation == ref.generation }
 
@@ -756,6 +799,8 @@ class BrowserCoordinator(
 
     private suspend fun publish() {
         val tab = activeTab()
+        // Reader view belongs to the tab it was opened for: moving to another tab leaves it.
+        if (reader != null && reader?.tabId != tab?.id) reader = null
         val view = tab?.let { liveByTab[it.id] }
         val openCount = dao.openTabs().size
         state.update {
@@ -778,6 +823,7 @@ class BrowserCoordinator(
                     PageControl(shown.id, tab.url?.let(HostNames::of)?.let(HostNames::forDisplay), shown.content, shown.offerBlocking)
                 },
                 openTabCount = openCount,
+                reader = reader,
             )
         }
     }
@@ -819,6 +865,9 @@ class BrowserCoordinator(
 
     private class ShownControl(val id: Long, val content: PageControlContent, val offerBlocking: Boolean)
 
+    /** A reader-view request and what its result must still match. */
+    private data class PendingArticle(val tabId: String, val view: ViewRef, val document: Long, val url: String)
+
     /** A capture request and everything its result must still match. */
     private data class PendingCapture(
         val tabId: String,
@@ -838,6 +887,10 @@ class BrowserCoordinator(
 
         /** Proposed default until measured on the owner's phone (M4). */
         const val MAX_LIVE_VIEWS = 6
+
+        /** Reader view budget: the article's JSON (native/src/reader.js); longer ones are cut. */
+        const val MAX_ARTICLE_BYTES = 512 * 1024
+        const val ARTICLE_TIMEOUT_MS = 15_000
     }
 }
 

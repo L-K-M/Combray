@@ -1,6 +1,7 @@
 # C and C++ code compiled into the engine library that cargo-about cannot see: it reads crate
 # metadata, not the sources a crate's build script compiles or the archive it downloads.
-# scripts/generate-notices.py reads each `files` entry from the named crate's registry source.
+# scripts/generate-notices.py reads each `files` entry from the named crate's registry source,
+# and each `repo-files` entry from this repository (code vendored here, with its `version`).
 #
 # Found by listing the members and symbols of the linked static archives (SpiderMonkey's
 # prebuilt libjs_static.a, the build-script outputs under target/<abi>/release/build). Recheck
@@ -136,6 +137,13 @@ name = "OpenType Sanitizer"
 crate = "fontsan"
 license = "BSD-3-Clause"
 files = ["src/deps/ots/LICENSE"]
+
+# Run inside pages for reader view (native/src/reader.js), embedded in the engine library.
+[[library]]
+name = "Readability.js"
+version = "0.6.0"
+license = "Apache-2.0"
+repo-files = ["native/src/vendor/Readability.LICENSE.md"]
 
 [[library]]
 name = "LZ4 (OpenType Sanitizer)"

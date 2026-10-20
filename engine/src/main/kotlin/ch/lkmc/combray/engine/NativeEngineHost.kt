@@ -67,6 +67,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
     override fun capture(tab: Long, document: Long, capture: Long, maxTextBytes: Int, timeoutMs: Int) =
         NativeEngine.capture(tab, document, capture, maxTextBytes, timeoutMs, false)
 
+    override fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int) =
+        NativeEngine.captureArticle(tab, document, capture, maxBytes, timeoutMs)
+
     private companion object {
         const val LOG_TAG = "CombrayEngine"
     }

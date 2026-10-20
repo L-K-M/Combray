@@ -9,6 +9,12 @@
     <string name="action_new_tab">New tab</string>
     <string name="action_share">Share</string>
     <string name="action_page_info">Page info</string>
+    <string name="action_reader_view">Reader view</string>
+    <string name="action_leave_reader_view">Leave reader view</string>
+    <string name="action_show_page">Show the page</string>
+    <string name="reader_loading">Preparing reader view…</string>
+    <string name="reader_unavailable">Reader view found no article on this page.</string>
+    <string name="reader_truncated">The article continues on the page: reader view shows only its first part.</string>
     <string name="action_settings">Settings</string>
     <string name="action_save">Save</string>
     <string name="action_recent">Recent</string>

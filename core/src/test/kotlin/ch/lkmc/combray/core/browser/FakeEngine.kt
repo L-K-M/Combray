@@ -90,4 +90,11 @@ class FakeEngine : EnginePort {
     override fun capture(tab: Long, document: Long, capture: Long, maxTextBytes: Int, timeoutMs: Int) {
         captures += document to capture
     }
+
+    /** (document, capture ID) per article request. */
+    val articleCaptures = mutableListOf<Pair<Long, Long>>()
+
+    override fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int) {
+        articleCaptures += document to capture
+    }
 }

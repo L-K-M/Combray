@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
+use crate::capture::CaptureKind;
 use crate::native_window::NativeWindow;
 
 /// Acknowledgement channel for requests the caller must wait for.
@@ -52,6 +53,7 @@ pub struct CaptureRequest {
     pub tab: i64,
     pub document: u64,
     pub capture: i64,
+    pub kind: CaptureKind,
     pub max_text_bytes: usize,
     pub timeout: Duration,
     pub local_check: LocalDocumentCheck,

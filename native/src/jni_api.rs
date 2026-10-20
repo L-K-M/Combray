@@ -20,6 +20,7 @@ use jni::sys::{jboolean, jfloat, jint, jlong};
 use jni::{Env, EnvUnowned, JavaVM, jni_sig, jni_str};
 use log::{LevelFilter, error, info};
 
+use crate::capture::CaptureKind;
 use crate::commands::{
     ACK_TIMEOUT, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
     Throttling, TouchPhase,
@@ -468,9 +469,33 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_capture<'local>(
         tab,
         document: document as u64,
         capture,
+        kind: CaptureKind::PageText,
         max_text_bytes: max_text_bytes.max(0) as usize,
         timeout: Duration::from_millis(timeout_ms.max(0) as u64),
         local_check,
+    }));
+}
+
+/// Like `capture`, for reader view: the result's text is the article as JSON (`reader.js`).
+/// A separate entry point keeps `capture`'s signature, which the M0 harness also binds.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_captureArticle<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    document: jlong,
+    capture: jlong,
+    max_bytes: jint,
+    timeout_ms: jint,
+) {
+    send(Command::Capture(CaptureRequest {
+        tab,
+        document: document as u64,
+        capture,
+        kind: CaptureKind::Article,
+        max_text_bytes: max_bytes.max(0) as usize,
+        timeout: Duration::from_millis(timeout_ms.max(0) as u64),
+        local_check: LocalDocumentCheck::Enabled,
     }));
 }
 

@@ -1,8 +1,9 @@
-//! Bounded rendered-text capture.
+//! Bounded rendered-text capture, and the reader view's article extraction.
 //!
 //! The script runs inside the page, in the document named by the engine (see
 //! `WebView::evaluate_javascript_in_document`), and returns the document URL, title and
-//! readable text in one snapshot:
+//! readable text in one snapshot (for an article, the text is the article as JSON blocks; see
+//! `reader.js`):
 //!
 //! ```text
 //!   engine thread                     Servo (constellation)            page script thread
@@ -30,6 +31,15 @@ use sha2::{Digest, Sha256};
 #[cfg(target_os = "android")]
 use crate::events::{CaptureStatus, CapturedContent};
 
+/// What a capture reads from the document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureKind {
+    /// The rendered text, for Hister.
+    PageText,
+    /// The main article as structured blocks, for reader view (`reader.js`).
+    Article,
+}
+
 /// Proposed first limits from the implementation plan (section 5).
 pub const DEFAULT_MAX_TEXT_BYTES: usize = 256 * 1024;
 pub const MAX_TITLE_BYTES: usize = 4 * 1024;
@@ -38,12 +48,31 @@ pub const MAX_URL_BYTES: usize = 8 * 1024;
 pub const MAX_NODES: u32 = 50_000;
 
 const SCRIPT_TEMPLATE: &str = include_str!("capture.js");
+const READER_TEMPLATE: &str = include_str!("reader.js");
+/// Mozilla Readability 0.6.0 (Apache-2.0), from the npm package `@mozilla/readability`.
+const READABILITY: &str = include_str!("vendor/Readability.js");
+
+/// The script for [`CaptureKind`] with its budgets filled in.
+pub fn script(kind: CaptureKind, max_text_bytes: usize) -> String {
+    match kind {
+        CaptureKind::PageText => capture_script(max_text_bytes),
+        CaptureKind::Article => article_script(max_text_bytes),
+    }
+}
 
 /// The capture script with its budgets filled in.
 pub fn capture_script(max_text_bytes: usize) -> String {
     SCRIPT_TEMPLATE
         .replace("__MAX_TEXT_BYTES__", &max_text_bytes.to_string())
         .replace("__MAX_NODES__", &MAX_NODES.to_string())
+}
+
+/// The reader script: budgets first, then Readability, so its source is never rewritten.
+pub fn article_script(max_text_bytes: usize) -> String {
+    READER_TEMPLATE
+        .replace("__MAX_TEXT_BYTES__", &max_text_bytes.to_string())
+        .replace("__MAX_NODES__", &MAX_NODES.to_string())
+        .replacen("__READABILITY__", READABILITY, 1)
 }
 
 #[cfg(target_os = "android")]
@@ -193,5 +222,17 @@ mod tests {
         let script = capture_script(DEFAULT_MAX_TEXT_BYTES);
         assert!(!script.contains("__MAX_"));
         assert!(script.contains("262144"));
+    }
+
+    #[test]
+    fn article_script_embeds_readability_inside_its_function() {
+        let script = script(CaptureKind::Article, DEFAULT_MAX_TEXT_BYTES);
+        assert!(!script.contains("__MAX_"));
+        assert!(!script.contains("__READABILITY__"));
+        assert!(script.contains("function Readability(doc, options)"));
+        // Readability is declared inside the wrapping function, not as a page global.
+        let wrapper = script.find("(function (maxBytes, maxNodes) {").unwrap();
+        assert!(wrapper < script.find("function Readability(doc, options)").unwrap());
+        assert!(script.trim_end().ends_with("})(262144, 50000)"));
     }
 }
