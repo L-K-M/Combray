@@ -272,6 +272,27 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun closingTheTabInUseForDaysKeepsItsPageInHistory() {
+        ready()
+        browser.openUrl("https://other.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://other.test/")
+        browser.openUrl("https://long-read.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://long-read.test/")
+        now += 8 * DAY
+
+        browser.closeTab(state().activeTab!!.id); idle()
+        browser.runMaintenance(); idle()
+        // It was in use until it closed; the tab focused next is in use from now.
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://long-read.test/" })
+        unusedTabs = UnusedTabs.CLOSE
+        browser.runMaintenance(); idle()
+        assertEquals("https://other.test/", state().activeTab?.url)
+        browser.newTab(); idle()
+        browser.runMaintenance(); idle()
+        assertEquals(2, state().openTabCount)
+    }
+
+    @Test
     fun unusedTabsCloseOnlyWhenChosenAndNeverTheFocusedOne() {
         ready()
         browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()

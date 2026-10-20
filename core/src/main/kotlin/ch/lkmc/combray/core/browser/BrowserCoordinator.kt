@@ -626,19 +626,23 @@ class BrowserCoordinator(
 
     /**
      * Close and successor selection in one transaction (invariant 5). The closed page takes its
-     * place in history by when the tab was last used, not by when it closed: closing an old tab
-     * does not move it to the top of Recent, and retention counts from that last use.
+     * place in history by when the tab was last used, not by when it closed: closing a tab left
+     * long ago does not move it to the top of Recent, and retention counts from that last use.
+     * The focused tab was in use until now, like a tab focus leaves ([activate]); the successor
+     * is in use from now.
      */
     private suspend fun closeLogically(tab: TabEntity) {
         val now = clock.now()
         database.withTransaction {
+            val focused = dao.session()?.activeTabId == tab.id
+            val lastUse = if (focused) now - 1 else tab.lastFocusedAt
             tab.currentVisitId?.let { id ->
-                dao.visit(id)?.let { dao.updateVisit(it.copy(lastSeenAt = maxOf(it.lastSeenAt, tab.lastFocusedAt))) }
+                dao.visit(id)?.let { dao.updateVisit(it.copy(lastSeenAt = maxOf(it.lastSeenAt, lastUse))) }
             }
             dao.updateTab(tab.copy(state = TabState.CLOSED, closedAt = now))
-            val session = dao.session()
-            if (session?.activeTabId == tab.id) {
+            if (focused) {
                 val successor = dao.openTabs().firstOrNull()
+                successor?.let { dao.updateTab(it.copy(lastFocusedAt = now)) }
                 dao.setSession(SessionEntity(activeTabId = successor?.id))
             }
         }
