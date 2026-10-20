@@ -118,7 +118,7 @@ class AccessibilityTest {
         val crowded = targets.flatMapIndexed { index, target ->
             targets.drop(index + 1)
                 .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
-                .map { "\"${name(target)}\" and \"${name(it)}\" share touch area" }
+                .map { "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
         }
         val problems = targets.mapNotNull(::problem) + crowded
         if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
@@ -146,6 +146,8 @@ class AccessibilityTest {
 
     private companion object {
         const val DEFAULT_FONT = 1f
+
+        const val UNLABELED = "(unlabeled)"
 
         /** Android's largest font size setting. */
         const val LARGE_FONT = 2f

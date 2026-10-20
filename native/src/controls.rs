@@ -316,6 +316,11 @@ mod tests {
         let overlong = format!("https://a.test/{}", "x".repeat(MAX_URL_CHARS));
         assert_eq!(link_menu(Some(&overlong), None), None);
         assert_eq!(link_menu(None, None), None);
+
+        // The limit itself is allowed.
+        let longest = format!("https://a.test/{}", "x".repeat(MAX_URL_CHARS - 15));
+        assert_eq!(longest.chars().count(), MAX_URL_CHARS);
+        assert!(link_menu(Some(&longest), None).is_some());
     }
 
     #[test]

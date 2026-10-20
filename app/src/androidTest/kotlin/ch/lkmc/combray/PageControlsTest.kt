@@ -145,7 +145,7 @@ class PageControlsTest {
         device.awaitState { it.activeTab?.title == "AUTH-REQUIRED" && it.activeTab?.loading == false }
 
         device.browser.openUrl(protected, Placement.CURRENT_TAB)
-        awaitControl()
+        assertEquals(PageControlContent.SignIn(Fixtures.BASE, proxy = false), awaitControl().content)
         awaitText("Sign in to ${Fixtures.BASE}")
         val fields = compose.onAllNodes(hasSetTextAction())
         fields[0].performTextReplacement("ada")
