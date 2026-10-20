@@ -49,10 +49,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `scripts/build.sh` builds the engine first: it installs the pinned NDK
+  and Rust toolchain when missing and fetches, verifies and patches Servo
+  whenever the tree is missing or was prepared with other patches. Builds
+  default to arm64; set `COMBRAY_ABI=x86_64` for the emulator. The build
+  and check scripts also select the NDK's macOS tools and fall back to
+  `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
 
 ### Fixed
 
+- `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
+  clone of this repository: `git apply` skipped their files and still
+  succeeded, so the engine failed to compile (`no PipelineId in the root`).
+  Each patch is now checked to have landed.
 - A page's prompt dialog labels its text field, so TalkBack names it.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in

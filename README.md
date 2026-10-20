@@ -38,7 +38,7 @@ The app's unit tests and lint run with `./gradlew testDebugUnitTest lintDebug` a
 
 ## Build and release tooling
 
-Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). CI builds the Kotlin code only: its APKs contain no engine and say so. A usable APK needs `scripts/build-native.sh` first. `scripts/build.sh` checks the packaged engine and architecture before staging. Local release signing uses environment variables; see [BUILDING.md](docs/BUILDING.md#local-release-signing). Publishing still needs native/signing CI and dependency notices (M4).
+Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). CI builds the Kotlin code only: its APKs contain no engine and say so. `scripts/build.sh` builds the engine first (fetching and patching Servo as needed; the first run takes an hour or more), then checks the packaged engine and architecture before staging. Local release signing uses environment variables; see [BUILDING.md](docs/BUILDING.md#local-release-signing). Publishing still needs native/signing CI and dependency notices (M4).
 
 ```sh
 scripts/build.sh                 # release APK -> dist/

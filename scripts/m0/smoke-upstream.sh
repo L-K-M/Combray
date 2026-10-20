@@ -22,8 +22,8 @@ RESULTS="${COMBRAY_RESULTS:-$COMBRAY_WORK/results/upstream-smoke-$(date -u +%Y%m
 LOGCAT="$RESULTS/logcat.txt"
 mkdir -p "$RESULTS"
 
-echo "==> installing $(basename "$APK") ($(sha256sum "$APK" | cut -d' ' -f1))"
-sha256sum "$APK" > "$RESULTS/apk.sha256"
+echo "==> installing $(basename "$APK") ($(combray_sha256 "$APK" | cut -d' ' -f1))"
+combray_sha256 "$APK" > "$RESULTS/apk.sha256"
 "${ADB[@]}" install -r "$APK"
 "${ADB[@]}" shell am force-stop "$PACKAGE"
 "${ADB[@]}" logcat -c

@@ -11,4 +11,4 @@ cd "$COMBRAY_SERVO_SRC"
 ./mach build --locked --target "$COMBRAY_RUST_TARGET" --release
 
 APK="$CARGO_TARGET_DIR/$COMBRAY_RUST_TARGET/release/servoapp.apk"
-sha256sum "$APK"
+combray_sha256 "$APK"

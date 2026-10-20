@@ -111,8 +111,10 @@ if ! display_works; then
     exit 1
 fi
 
-echo "==> installing $(basename "$APK") ($(sha256sum "$APK" | cut -d' ' -f1)) and the test APK"
-sha256sum "$APK" "$TEST_APK" > "$RESULTS/apk.sha256"
+# sha256sum, or shasum on macOS: the same output.
+sha256() { if command -v sha256sum > /dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+echo "==> installing $(basename "$APK") ($(sha256 "$APK" | cut -d' ' -f1)) and the test APK"
+sha256 "$APK" "$TEST_APK" > "$RESULTS/apk.sha256"
 install "$APK"
 install "$TEST_APK"
 # Fresh app data: empty database, credentials and Servo profile.

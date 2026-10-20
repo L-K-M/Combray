@@ -13,7 +13,7 @@ cargo build --locked --release --target "$COMBRAY_RUST_TARGET"
 
 LIBRARY="$CARGO_TARGET_DIR/$COMBRAY_RUST_TARGET/release/libcombray_engine.so"
 JNI_DIR="$COMBRAY_ROOT/spike/android/app/build/combray-jni/$COMBRAY_ANDROID_ABI"
-LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+LLVM="$COMBRAY_NDK_LLVM"
 
 echo "==> staging native libraries in $JNI_DIR"
 rm -rf "$COMBRAY_ROOT/spike/android/app/build/combray-jni"
@@ -32,4 +32,4 @@ cd "$COMBRAY_ROOT/spike/android"
 ./gradlew --no-daemon assembleDebug
 
 ls -l "$APK"
-sha256sum "$APK"
+combray_sha256 "$APK"
