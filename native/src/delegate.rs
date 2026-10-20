@@ -9,8 +9,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use servo::{
-    CreateNewWebViewRequest, EmbedderControl, EmbedderControlId, InputMethodType, LoadStatus,
-    NavigationRequest, PermissionRequest, PipelineId, WebView, WebViewDelegate,
+    AuthenticationRequest, CreateNewWebViewRequest, EmbedderControl, EmbedderControlId,
+    InputMethodType, LoadStatus, NavigationRequest, PermissionRequest, PipelineId, WebView,
+    WebViewDelegate,
 };
 use url::Url;
 
@@ -59,6 +60,11 @@ pub enum DelegateEvent {
     PageControl {
         view: ViewKey,
         control: EmbedderControl,
+    },
+    /// A navigation's server asks for HTTP credentials; the load waits for the answer.
+    SignIn {
+        view: ViewKey,
+        request: AuthenticationRequest,
     },
     /// The page closed its own window (`window.close()`); Servo has discarded the view.
     ClosedByPage {
@@ -169,6 +175,13 @@ impl WebViewDelegate for TabDelegate {
         // Building the view here would re-enter Servo; the engine does it after the spin.
         self.push(DelegateEvent::CreateNew {
             opener: self.view,
+            request,
+        });
+    }
+
+    fn request_authentication(&self, _webview: WebView, request: AuthenticationRequest) {
+        self.push(DelegateEvent::SignIn {
+            view: self.view,
             request,
         });
     }

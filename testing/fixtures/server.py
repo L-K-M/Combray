@@ -16,6 +16,8 @@ Pages
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
+                             title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   (the three control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -30,6 +32,7 @@ Admin (for the checks)
 """
 
 import argparse
+import base64
 import html
 import http.server
 import json
@@ -39,6 +42,7 @@ import urllib.parse
 
 DEFAULT_PORT = 8766
 KARAKEEP_KEY = "fixture-key"
+SIGN_IN = ("ada", "lovelace")
 HISTER_TOKEN = "fixture-token"
 HANG_SECONDS = 20
 COOKIE_NAME = "combray"
@@ -160,6 +164,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page(title, control, CONTROL_STYLE + script))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
+        if path == "/auth.html":
+            expected = "Basic " + base64.b64encode(":".join(SIGN_IN).encode()).decode()
+            if self.headers.get("Authorization") == expected:
+                return self.send(200, page(f"AUTH:{SIGN_IN[0]}", "<p>signed in</p>"))
+            return self.send(401, page("AUTH-REQUIRED", "<p>sign-in required</p>"),
+                             headers=[("WWW-Authenticate", 'Basic realm="fixture"')])
 
         if path == "/keep/api/v1/bookmarks":
             if self.headers.get("Authorization") != f"Bearer {KARAKEEP_KEY}":

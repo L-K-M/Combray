@@ -1,6 +1,7 @@
 package ch.lkmc.combray.engine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -86,6 +87,11 @@ class EngineEventTest {
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.LinkMenu("https://a.test/", null), menu.content)
 
+        val signIn = EngineEvent.parse(
+            """{"type":"control_shown","control":9,"kind":"sign_in","origin":"https://a.test:8443","proxy":false,"tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(PageControlContent.SignIn("https://a.test:8443", proxy = false), signIn.content)
+
         assertEquals(
             EngineEvent.ControlHidden(ViewRef(1, 2), 7),
             EngineEvent.parse("""{"type":"control_hidden","control":7,"tab":1,"generation":2}"""),
@@ -99,6 +105,18 @@ class EngineEventTest {
         assertEquals("""{"type":"text","value":"a\"b"}""", ControlResponse.Text("a\"b").toJson())
         assertEquals("""{"type":"files","paths":["/x/a.png"]}""", ControlResponse.Files(listOf("/x/a.png")).toJson())
         assertEquals("""{"type":"dismiss"}""", ControlResponse.Dismiss.toJson())
+        assertEquals(
+            """{"type":"credentials","username":"ada","password":"p\"w"}""",
+            ControlResponse.Credentials("ada", "p\"w").toJson(),
+        )
+    }
+
+    /** Responses may end up in logs or crash reports; a password must not. */
+    @Test
+    fun credentialsHideThePasswordWhenPrinted() {
+        val credentials = ControlResponse.Credentials("ada", "hunter2")
+        assertFalse(credentials.toString().contains("hunter2"))
+        assertTrue(credentials.toString().contains("ada"))
     }
 
     @Test(expected = IllegalArgumentException::class)

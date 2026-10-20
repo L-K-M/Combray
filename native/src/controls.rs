@@ -1,5 +1,5 @@
 //! Page controls Servo asks the embedder to present: `<select>` pickers, script dialogs
-//! (`alert`, `confirm`, `prompt`) and file pickers.
+//! (`alert`, `confirm`, `prompt`), file pickers, link menus and HTTP sign-in.
 //!
 //! The engine keeps each control's Servo handle until the application answers or the page hides
 //! the control. Only a bounded description crosses JNI; the answer comes back as JSON:
@@ -15,9 +15,11 @@
 //!
 //! Dropping a handle without an answer makes Servo use its default (dismiss, keep selection).
 
+use std::fmt;
 use std::path::PathBuf;
 
 use serde::Deserialize;
+use serde_json::error::Category;
 use serde_json::{Value, json};
 
 /// Page-chosen strings are shown in a dialog, not stored: keep them readable and bounded.
@@ -65,6 +67,12 @@ pub enum ControlDescription {
     LinkMenu {
         link: Option<String>,
         image: Option<String>,
+    },
+    /// HTTP authentication for a navigation. `origin` is the server asking (scheme, host and
+    /// port), which may differ from the page that linked to it.
+    SignIn {
+        origin: String,
+        proxy: bool,
     },
 }
 
@@ -130,6 +138,9 @@ impl ControlDescription {
             ControlDescription::LinkMenu { link, image } => {
                 json!({ "kind": "link_menu", "link": link, "image": image })
             },
+            ControlDescription::SignIn { origin, proxy } => {
+                json!({ "kind": "sign_in", "origin": bounded(origin, MAX_LABEL_CHARS), "proxy": proxy })
+            },
         }
     }
 }
@@ -148,8 +159,8 @@ pub fn link_menu(link: Option<&str>, image: Option<&str>) -> Option<ControlDescr
     Some(ControlDescription::LinkMenu { link, image })
 }
 
-/// The application's answer to a control.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+/// The application's answer to a control. Debug output leaves out passwords.
+#[derive(PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlResponse {
     /// `<select>`: the chosen option IDs.
@@ -160,12 +171,49 @@ pub enum ControlResponse {
     Text { value: String },
     /// Files the application copied into its upload directory.
     Files { paths: Vec<PathBuf> },
+    /// HTTP sign-in.
+    Credentials { username: String, password: String },
     /// Cancel, Back, or no selection: Servo's default response.
     Dismiss,
 }
 
+impl fmt::Debug for ControlResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ControlResponse::Select { ids } => {
+                formatter.debug_struct("Select").field("ids", ids).finish()
+            },
+            ControlResponse::Accept => formatter.write_str("Accept"),
+            ControlResponse::Text { value } => formatter
+                .debug_struct("Text")
+                .field("value", value)
+                .finish(),
+            ControlResponse::Files { paths } => formatter
+                .debug_struct("Files")
+                .field("paths", paths)
+                .finish(),
+            ControlResponse::Credentials { username, .. } => formatter
+                .debug_struct("Credentials")
+                .field("username", username)
+                .field("password", &"<redacted>")
+                .finish(),
+            ControlResponse::Dismiss => formatter.write_str("Dismiss"),
+        }
+    }
+}
+
+/// Errors name the kind and position of the problem only: serde quotes offending values, and an
+/// answer may carry a password.
 pub fn parse_response(json: &str) -> Result<ControlResponse, String> {
-    serde_json::from_str(json).map_err(|error| format!("invalid control response: {error}"))
+    serde_json::from_str(json).map_err(|error| match error.classify() {
+        // Data errors quote the offending value, which may be a password.
+        Category::Data => format!(
+            "invalid control response: data error at column {}",
+            error.column()
+        ),
+        // The others name only what the parser expected and where.
+        _ => format!("invalid control response: {error}"),
+    })
 }
 
 /// Keeps at most `max` characters, marking the cut with an ellipsis.
@@ -299,9 +347,52 @@ mod tests {
     }
 
     #[test]
+    fn sign_in_names_the_origin_asking() {
+        let json = ControlDescription::SignIn {
+            origin: "https://a.test:8443".into(),
+            proxy: false,
+        }
+        .to_json();
+
+        assert_eq!(
+            json,
+            json!({ "kind": "sign_in", "origin": "https://a.test:8443", "proxy": false })
+        );
+    }
+
+    #[test]
+    fn credentials_parse_but_never_show_the_password() {
+        let response =
+            parse_response(r#"{"type":"credentials","username":"ada","password":"hunter2"}"#)
+                .unwrap();
+        assert_eq!(
+            response,
+            ControlResponse::Credentials {
+                username: "ada".into(),
+                password: "hunter2".into()
+            }
+        );
+        assert!(!format!("{response:?}").contains("hunter2"));
+
+        // serde quotes offending values in its messages; ours must not.
+        let error =
+            parse_response(r#"{"type":"credentials","username":"ada","password":["hunter2"]}"#)
+                .unwrap_err();
+        assert!(!error.contains("hunter2"), "{error}");
+        let error = parse_response(r#"{"type":"select","ids":"hunter2"}"#).unwrap_err();
+        assert!(!error.contains("hunter2"), "{error}");
+    }
+
+    #[test]
     fn malformed_responses_are_rejected() {
         assert!(parse_response(r#"{"type":"select"}"#).is_err());
         assert!(parse_response(r#"{"type":"launch"}"#).is_err());
         assert!(parse_response("not json").is_err());
+    }
+
+    #[test]
+    fn syntax_errors_say_what_is_wrong() {
+        let error = parse_response("not json").unwrap_err();
+        assert!(error.contains("expected"), "{error}");
     }
 }

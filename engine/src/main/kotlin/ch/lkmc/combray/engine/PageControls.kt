@@ -23,6 +23,12 @@ sealed interface PageControlContent {
 
     /** A long-press on a link and/or image; answer with [ControlResponse.Dismiss] after acting. */
     data class LinkMenu(val link: String?, val image: String?) : PageControlContent
+
+    /**
+     * HTTP authentication for a navigation. [origin] is the server asking (scheme, host, port),
+     * which may not be the page that linked there. The load waits for the answer.
+     */
+    data class SignIn(val origin: String, val proxy: Boolean) : PageControlContent
 }
 
 /** The answer to a page control. */
@@ -37,6 +43,11 @@ sealed interface ControlResponse {
 
     /** Absolute paths of files the app copied for upload. */
     data class Files(val paths: List<String>) : ControlResponse
+
+    /** HTTP sign-in. Printing it leaves out the password. */
+    data class Credentials(val username: String, val password: String) : ControlResponse {
+        override fun toString() = "Credentials(username=$username, password=<redacted>)"
+    }
 
     /** Cancel or Back: Servo's default response. */
     data object Dismiss : ControlResponse
@@ -55,6 +66,11 @@ sealed interface ControlResponse {
             is Files -> {
                 put("type", "files")
                 put("paths", JsonArray(paths.map { JsonPrimitive(it) }))
+            }
+            is Credentials -> {
+                put("type", "credentials")
+                put("username", username)
+                put("password", password)
             }
             Dismiss -> put("type", "dismiss")
         }
