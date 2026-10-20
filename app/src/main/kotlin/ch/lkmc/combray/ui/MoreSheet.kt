@@ -10,7 +10,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,7 +32,6 @@ fun MoreSheet(
     onForward: () -> Unit,
     onReload: () -> Unit,
     onNewTab: () -> Unit,
-    onShare: (String) -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
     /** Null when Hister is not set up; otherwise whether capture is on. */
@@ -42,7 +40,7 @@ fun MoreSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        MoreActions(tab, onForward, onReload, onNewTab, onShare, onPageInfo, onSettings, captureEnabled, onPauseCapture)
+        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture)
     }
 }
 
@@ -53,7 +51,6 @@ internal fun MoreActions(
     onForward: () -> Unit,
     onReload: () -> Unit,
     onNewTab: () -> Unit,
-    onShare: (String) -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
     captureEnabled: Boolean?,
@@ -64,10 +61,8 @@ internal fun MoreActions(
         if (tab?.canGoForward == true) MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
         if (url != null) MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
         MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
-        if (url != null) {
-            MoreRow(Icons.Filled.Share, R.string.action_share) { onShare(url) }
-            MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
-        }
+        // Share is in the bottom bar.
+        if (url != null) MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
         // Pausing is one tap; switching capture on goes through Settings, which explains it.
         when (captureEnabled) {
             true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)

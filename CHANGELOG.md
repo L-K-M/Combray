@@ -49,6 +49,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Share is in the bottom bar, next to Save, instead of the More menu.
+
 - `scripts/build.sh` builds the engine first: it installs the pinned NDK
   and Rust toolchain when missing and fetches, verifies and patches Servo
   whenever the tree is missing or was prepared with other patches. Builds
