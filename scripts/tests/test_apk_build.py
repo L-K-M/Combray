@@ -37,6 +37,10 @@ class ApkBuildTest(unittest.TestCase):
             'cp fixture-metadata.json "$dir/output-metadata.json"\n'
         )
         gradle.chmod(0o755)
+        # The engine build is its own script; record the ABI it was asked for.
+        self.engine = self.root / "scripts/build-native.sh"
+        self.engine.write_text('#!/bin/sh\necho "$COMBRAY_ABI" >> engine-builds\n')
+        self.engine.chmod(0o755)
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("COMBRAY_")}
 
     def fixture(self, abi="x86_64", libraries=LIBRARIES, machine=None, variant="debug", output=None):
@@ -80,6 +84,46 @@ class ApkBuildTest(unittest.TestCase):
         result = self.build("--debug")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((self.root / "dist/combray-debug-v0.1.0-android-arm64.apk").is_file())
+
+    def engine_builds(self):
+        path = self.root / "engine-builds"
+        return path.read_text().split() if path.exists() else []
+
+    def test_the_engine_is_built_for_phones_by_default(self):
+        self.fixture(abi="arm64-v8a")
+        result = self.build("--debug")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.engine_builds(), ["arm64"])
+
+    def test_the_engine_is_built_for_the_requested_abi(self):
+        self.fixture()
+        self.env["COMBRAY_ABI"] = "x86_64"
+        result = self.build("--debug")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.engine_builds(), ["x86_64"])
+
+    def test_an_unknown_abi_is_rejected_before_building(self):
+        self.fixture()
+        self.env["COMBRAY_ABI"] = "armv7"
+        result = self.build("--debug")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("COMBRAY_ABI", result.stderr)
+        self.assertEqual(self.engine_builds(), [])
+
+    def test_a_failed_engine_build_stops_before_gradle(self):
+        self.fixture()
+        self.engine.write_text("#!/bin/sh\nexit 3\n")
+        result = self.build("--debug")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "app/build").exists())
+        self.assertFalse((self.root / "dist").exists())
+
+    def test_check_builds_nothing(self):
+        self.fixture()
+        result = self.build("--check", "--debug")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("COMBRAY_ABI=arm64 scripts/build-native.sh", result.stdout)
+        self.assertEqual(self.engine_builds(), [])
 
     def test_missing_servo_is_rejected(self):
         self.fixture(libraries=("libc++_shared.so",))

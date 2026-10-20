@@ -10,6 +10,10 @@ set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
+combray_require curl "install curl"
+combray_require git "install git (patches are applied with git apply)"
+combray_require uv "Servo's mach needs it: https://docs.astral.sh/uv/ (macOS: brew install uv)"
+
 MODE="${1:-harness}"
 case "$MODE" in
     harness) PATCHES=("$COMBRAY_ROOT"/native/servo/patches/*.patch) ;;
@@ -24,13 +28,25 @@ TARBALL="$DOWNLOADS/$TARBALL_NAME"
 
 mkdir -p "$DOWNLOADS"
 if [ ! -f "$TARBALL" ]; then
-    echo "==> downloading $TARBALL_URL"
+    echo "==> downloading $TARBALL_URL (about 390 MB)"
     curl -fL --retry 3 -o "$TARBALL.partial" "$TARBALL_URL"
     mv "$TARBALL.partial" "$TARBALL"
 fi
 
 echo "==> verifying $TARBALL_NAME"
-echo "$COMBRAY_SERVO_TARBALL_SHA256  $TARBALL" | sha256sum -c -
+# Python rather than sha256sum, which macOS lacks.
+python3 -I - "$TARBALL" "$COMBRAY_SERVO_TARBALL_SHA256" <<'PY'
+import hashlib
+import sys
+
+path, expected = sys.argv[1:]
+digest = hashlib.sha256()
+with open(path, "rb") as stream:
+    for chunk in iter(lambda: stream.read(1 << 20), b""):
+        digest.update(chunk)
+if digest.hexdigest() != expected:
+    sys.exit(f"!! {path}: SHA-256 {digest.hexdigest()}, expected {expected}")
+PY
 
 # Keep the build cache (target/) across re-extractions; it is large and still valid.
 if [ -d "$COMBRAY_SERVO_SRC/target" ]; then
@@ -54,12 +70,12 @@ fi
 rm -rf "$COMBRAY_SERVO_SRC/vendor"
 
 cd "$COMBRAY_SERVO_SRC"
-for patch in "${PATCHES[@]}"; do
-    echo "==> applying $(basename "$patch")"
-    git apply "$patch"
-done
+"$COMBRAY_ROOT/scripts/m0/apply-patches.sh" "$COMBRAY_SERVO_SRC" "${PATCHES[@]}"
 
 echo "==> preparing mach's Python environment"
 ./mach --help > /dev/null
+
+# Last, so an interrupted run is prepared again next time.
+combray_servo_stamp "$MODE" "${PATCHES[@]}" > "$COMBRAY_SERVO_STAMP"
 
 echo "Servo v$COMBRAY_SERVO_VERSION ($revision) ready at $COMBRAY_SERVO_SRC ($MODE patches)"

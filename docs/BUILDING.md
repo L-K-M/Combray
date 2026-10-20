@@ -35,16 +35,11 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 ## Host prerequisites
 
-Verified on Linux x86_64 (Debian 12 container, 16 cores, 125 GiB RAM). Plan for about **25 GB** of free disk: Servo source without `vendor/` (1.3 GB), Cargo registry (about 2 GB), shared build directory (about 5 GB per ABI and profile), Gradle cache, NDK (2.4 GB) and an emulator image.
+Verified on Linux x86_64 (Debian 12 container, 16 cores, 125 GiB RAM). The scripts also select the NDK's macOS tools, but no macOS build has been verified yet. Plan for about **25 GB** of free disk: Servo source without `vendor/` (1.3 GB), Cargo registry (about 2 GB), shared build directory (about 5 GB per ABI and profile), Gradle cache, NDK (2.4 GB) and an emulator image.
 
-- JDK 17 or 21, `curl`, `make`, `cmake` (aws-lc-sys), `python3` ≥ 3.11 and [`uv`](https://docs.astral.sh/uv/) (mach and Servo's code generators).
-- `rustup`. Run Cargo through rustup's proxy (`~/.cargo/bin`); `env.sh` puts it first so cargo wrappers do not change the build.
-- Android SDK command-line tools, then:
-
-  ```sh
-  sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865"
-  rustup toolchain install 1.97.1 --target x86_64-linux-android,aarch64-linux-android
-  ```
+- JDK 17 or 21, `curl`, `git`, `make`, `cmake` (aws-lc-sys), `python3` ≥ 3.11 and [`uv`](https://docs.astral.sh/uv/) (mach and Servo's code generators). On macOS: `xcode-select --install`, then `brew install cmake uv`.
+- `rustup`. Run Cargo through rustup's proxy (`~/.cargo/bin`); `env.sh` puts it first so cargo wrappers do not change the build. The build installs Rust 1.97.1 and the Android target it needs.
+- The Android SDK with its command-line tools (Android Studio's SDK Manager: "Android SDK Command-line Tools"). It is found through `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `local.properties` or the default locations (`~/Library/Android/sdk`, `~/Android/Sdk`). The build installs NDK 29.0.14206865 with `sdkmanager` when it is missing; Gradle installs the platform and build tools.
 
 - A **host** C/C++ compiler for build scripts, `clang`/`clang++` by default. Set `COMBRAY_HOST_CC` and `COMBRAY_HOST_CXX` to use another; changing them recompiles every build script. The reference host has no system compiler; it used `zig cc` 0.17 through two wrapper scripts (`COMBRAY_HOST_CC=servo-checkout/hostbin/host-cc`, `COMBRAY_HOST_CXX=servo-checkout/hostbin/host-c++`, local and not in Git) that drop Cargo's `--target=` flag, pin `-target x86_64-linux-gnu.2.28` and add `-fno-sanitize=undefined`. Without that flag zig enables UBSan at `-O0`, and WebRender's build script aborts inside glsl-optimizer (`applying non-zero offset 1 to null pointer`).
 
@@ -53,12 +48,20 @@ Verified on Linux x86_64 (Debian 12 container, 16 cores, 125 GiB RAM). Plan for 
 ## Build the app
 
 ```sh
-scripts/m0/fetch-servo.sh             # once: download, verify, extract, apply the patches
+scripts/build.sh --debug                       # arm64 (phones) → dist/combray-debug-v<version>-android-arm64.apk
+COMBRAY_ABI=x86_64 scripts/build.sh --debug    # for the emulator
+scripts/build.sh --debug --install             # then install and launch on the connected device
+```
+
+`scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and fetches, verifies and patches Servo (`scripts/m0/fetch-servo.sh`) whenever the tree is missing or was prepared with other patches. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes (Servo source, crates and, when missing, the NDK) and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
+
+```sh
+scripts/m0/fetch-servo.sh             # download, verify, extract, apply the patches
 scripts/build-native.sh               # cargo build + strip → engine/jniLibs/x86_64 (COMBRAY_ABI=arm64 for phones)
 ./gradlew assembleDebug               # → app/build/outputs/apk/debug/app-debug.apk (ch.lkmc.combray.debug)
 ```
 
-`scripts/build.sh [--debug] [--install]` runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
+`scripts/build.sh [--debug] [--install]` then runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
 
 Plain Gradle still builds without `build-native.sh` (CI does this); that APK contains no engine and the app says so. `scripts/build.sh` refuses to stage it. Unit tests and lint need no engine:
 
@@ -105,7 +108,6 @@ The owner confirmed `ch.lkmc.combray` as the release ID on 19 October 2026. Supp
 Set passwords through your local secret manager or hidden shell input. All four variables are required together. An incomplete set fails every Gradle invocation, including debug builds, tests and IDE sync; unset all four or complete the set. Values are not printed. Then run:
 
 ```sh
-COMBRAY_ABI=arm64 scripts/build-native.sh
 scripts/build.sh
 "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 ```
@@ -137,7 +139,7 @@ scripts/m0/smoke-upstream.sh emulator-5560
 
 `smoke-upstream.sh` repeats mach's Android `smoketest`: it installs `servoapp.apk`, opens a `data:` URL whose script logs `SERVO_ANDROID_SMOKETEST_OK`, and passes when that marker reaches logcat before a crash marker. mach waits 30 seconds; the script waits up to `COMBRAY_SMOKE_TIMEOUT` (900 s default) for software emulation.
 
-`fetch-servo.sh` recreates the source tree from the tarball on every run (keeping `target/`), so switching between `upstream` and the default patch set is explicit.
+`fetch-servo.sh` recreates the source tree from the tarball on every run (keeping `target/`), so switching between `upstream` and the default patch set is explicit. It records what it prepared in `servo-checkout/servo-v0.6.0/.combray-prepared` (mode, revision, hashes of the patches and of the scripts applying them); `build-native.sh` prepares the tree again whenever that record differs.
 
 Host unit tests for the engine's pure modules (no Servo build needed):
 

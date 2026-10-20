@@ -2,6 +2,9 @@
 # Build the Combray APK from the command line and stage it into dist/.
 #
 # Release build by default; --debug builds the debug-variant APK instead.
+# Builds the Servo engine first (scripts/build-native.sh, which also fetches and patches Servo
+# and installs the pinned NDK and Rust toolchain when missing) for COMBRAY_ABI: arm64 (phones)
+# by default, x86_64 for the emulator. The first run takes an hour or more.
 # The staged APK is named after the committed versionName and its verified native ABI.
 # Release builds require the COMBRAY_KEYSTORE_* / COMBRAY_KEY_* environment variables
 # documented in docs/BUILDING.md. An engine-less Kotlin CI APK is never staged.
@@ -11,10 +14,12 @@
 #   scripts/build.sh --install        # build, then install + launch on the connected device
 #   scripts/build.sh --clean          # wipe Gradle build output first
 #   scripts/build.sh --check          # print resolved config; build nothing
+#   COMBRAY_ABI=x86_64 scripts/build.sh --debug   # for the emulator
 #
 # Usage: scripts/build.sh [--debug] [--install] [--clean] [--check]
-# Requirements: Python 3.10+, the toolchain M0 pins (AGENTS.md); the Android SDK (local.properties, ANDROID_HOME, or a
-#               standard SDK location, which is detected); adb for --install.
+# Requirements: Python 3.11+, a JDK, the Android SDK (local.properties, ANDROID_HOME, or a standard SDK
+#               location, which is detected), rustup, uv, CMake, make and clang (docs/BUILDING.md);
+#               adb for --install.
 set -euo pipefail
 
 # Absolute self-path first: usage() re-opens the script, which a relative $0
@@ -60,6 +65,12 @@ if [ ! -f local.properties ] && [ -z "${ANDROID_HOME:-}" ]; then
     done
 fi
 
+ABI="${COMBRAY_ABI:-arm64}"
+case "$ABI" in
+    arm64|x86_64) ;;
+    *) echo "!! COMBRAY_ABI must be arm64 or x86_64, not $ABI" >&2; exit 2 ;;
+esac
+
 VERSION="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]*)".*$/\1/p' app/build.gradle.kts | head -n 1)"
 [ -n "$VERSION" ] || { echo "!! could not read versionName from app/build.gradle.kts" >&2; exit 1; }
 
@@ -77,6 +88,7 @@ if [ "$CHECK" -eq 1 ]; then
     echo "==> config"
     echo "-- variant:  $VARIANT"
     echo "-- version:  $VERSION"
+    echo "-- engine:   COMBRAY_ABI=$ABI scripts/build-native.sh"
     echo "-- task:     ./gradlew $TASK"
     echo "-- staged:   dist/${BASE}-v${VERSION}-android-<verified APK arch>.apk"
     echo "-- sdk:      $(if [ -f local.properties ]; then echo local.properties; else echo "${ANDROID_HOME:-not found}"; fi)"
@@ -92,6 +104,9 @@ if [ "$VARIANT" = "release" ]; then
         fi
     done
 fi
+
+echo "==> scripts/build-native.sh ($ABI)"
+COMBRAY_ABI="$ABI" "$(dirname "$SELF")/build-native.sh"
 
 if [ "$CLEAN" -eq 1 ]; then
     echo "==> ./gradlew clean"
