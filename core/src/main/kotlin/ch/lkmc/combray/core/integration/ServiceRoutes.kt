@@ -18,7 +18,11 @@ internal class ServiceRoutes(private val transport: HttpTransport) {
     /** Destination fingerprint -> the root that last answered. Process memory only. */
     private val lastAnswered = ConcurrentHashMap<String, String>()
 
-    /** Runs [request] with a root of [service] and a transport for it; returns the last attempt's result. */
+    /**
+     * Runs [request] with a root of [service] and a transport for it; returns the last attempt's
+     * result. [request] must make exactly one HTTP request: a failure to connect anywhere in it
+     * runs all of it again on the next root.
+     */
     fun <T> call(service: ServiceEntity, request: (HttpTransport, String) -> T): T {
         val roots = ordered(service)
         for ((index, root) in roots.withIndex()) {
