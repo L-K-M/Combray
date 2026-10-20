@@ -53,7 +53,8 @@ All notable changes to this project are documented here. The format follows
   and Rust toolchain when missing and fetches, verifies and patches Servo
   whenever the tree is missing or was prepared with other patches. Builds
   default to arm64; set `COMBRAY_ABI=x86_64` for the emulator. The build
-  scripts also select the NDK's macOS tools (not yet verified on macOS).
+  and check scripts also select the NDK's macOS tools and fall back to
+  `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
 
 ### Fixed

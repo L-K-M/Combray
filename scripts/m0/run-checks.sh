@@ -57,8 +57,8 @@ echo "==> device"
     "${ADB[@]}" shell dumpsys SurfaceFlinger | grep -E '^GLES:' || true
 } | tee "$RESULTS/device.txt"
 
-echo "==> installing $(basename "$APK") ($(sha256sum "$APK" | cut -d' ' -f1))"
-sha256sum "$APK" > "$RESULTS/apk.sha256"
+echo "==> installing $(basename "$APK") ($(combray_sha256 "$APK" | cut -d' ' -f1))"
+combray_sha256 "$APK" > "$RESULTS/apk.sha256"
 "${ADB[@]}" push "$APK" /data/local/tmp/combray-m0.apk > /dev/null
 "${ADB[@]}" shell pm install -r -t /data/local/tmp/combray-m0.apk
 "${ADB[@]}" shell rm /data/local/tmp/combray-m0.apk

@@ -10,6 +10,7 @@ set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
+combray_require python3 "install Python 3.11+ (macOS: xcode-select --install)"
 combray_require curl "install curl"
 combray_require git "install git (patches are applied with git apply)"
 combray_require uv "Servo's mach needs it: https://docs.astral.sh/uv/ (macOS: brew install uv)"
@@ -50,6 +51,8 @@ PY
 
 # Keep the build cache (target/) across re-extractions; it is large and still valid.
 if [ -d "$COMBRAY_SERVO_SRC/target" ]; then
+    # A cache left by an interrupted run is older; moving onto it would nest this one inside.
+    rm -rf "$COMBRAY_WORK/target.keep"
     mv "$COMBRAY_SERVO_SRC/target" "$COMBRAY_WORK/target.keep"
 fi
 rm -rf "$COMBRAY_SERVO_SRC"

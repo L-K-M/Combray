@@ -85,6 +85,9 @@ esac
 _llvm="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/$_host_tag"
 # Only the SDK's own NDK directory is installed into; an explicit ANDROID_NDK_ROOT is left alone.
 _sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+if [ ! -x "$_sdkmanager" ]; then
+    _sdkmanager="$(command -v sdkmanager || true)"
+fi
 if [ ! -x "$_llvm/bin/clang" ] && [ "$ANDROID_NDK_ROOT" = "$_ndk_default" ] && [ -x "$_sdkmanager" ]; then
     echo "==> installing NDK $COMBRAY_NDK_VERSION with sdkmanager (about 2.4 GB)"
     "$_sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" "ndk;$COMBRAY_NDK_VERSION" || return 1
@@ -168,6 +171,15 @@ print(mode, revision)
 for path in inputs:
     print(hashlib.sha256(Path(path).read_bytes()).hexdigest(), Path(path).name)
 PY
+}
+
+# SHA-256 lines like sha256sum's; macOS has only shasum.
+combray_sha256() {
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$@"
+    else
+        shasum -a 256 "$@"
+    fi
 }
 
 # Fails with how to get TOOL when it is not on PATH.

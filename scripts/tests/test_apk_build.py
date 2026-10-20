@@ -39,7 +39,7 @@ class ApkBuildTest(unittest.TestCase):
         gradle.chmod(0o755)
         # The engine build is its own script; record the ABI it was asked for.
         self.engine = self.root / "scripts/build-native.sh"
-        self.engine.write_text('#!/bin/sh\necho "$COMBRAY_ABI" >> engine-builds\n')
+        self.engine.write_text('#!/bin/sh\necho "${COMBRAY_ABI:-unset}" >> engine-builds\n')
         self.engine.chmod(0o755)
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("COMBRAY_")}
 

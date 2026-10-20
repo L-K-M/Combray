@@ -15,6 +15,7 @@ set -euo pipefail
 # shellcheck source=m0/env.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/m0/env.sh"
 
+combray_require python3 "install Python 3.11+ (macOS: xcode-select --install)"
 combray_require rustup "install it from https://rustup.rs"
 combray_require cmake "install CMake (macOS: brew install cmake)"
 combray_require make "install make (macOS: xcode-select --install)"
@@ -29,7 +30,9 @@ fi
 
 # Servo must be the pinned release with exactly the current patches.
 PATCHES=("$COMBRAY_ROOT"/native/servo/patches/*.patch)
-if [ "$(cat "$COMBRAY_SERVO_STAMP" 2> /dev/null)" != "$(combray_servo_stamp harness "${PATCHES[@]}")" ]; then
+# Assigned, not compared inline: a failure inside [ "$(...)" ] would read as an empty, matching stamp.
+expected="$(combray_servo_stamp harness "${PATCHES[@]}")"
+if [ "$(cat "$COMBRAY_SERVO_STAMP" 2> /dev/null)" != "$expected" ]; then
     echo "==> the Servo tree is missing or was not prepared with the current patches; preparing it"
     "$COMBRAY_ROOT/scripts/m0/fetch-servo.sh"
     # Again, for the Python environment fetch-servo.sh just created.

@@ -9,11 +9,14 @@
 # patch tool again; checking that each patch now reverses cleanly proves it landed.
 set -euo pipefail
 
-TREE="$(cd "$1" && pwd)"
+# Physical path: Git compares the ceiling with its real working directory, not a symlinked one.
+TREE="$(cd "$1" && pwd -P)"
 shift
 cd "$TREE"
 GIT_CEILING_DIRECTORIES="$(dirname "$TREE")"
 export GIT_CEILING_DIRECTORIES
+# An inherited repository would bypass the search the ceiling stops.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 for patch in "$@"; do
     echo "==> applying $(basename "$patch")"
