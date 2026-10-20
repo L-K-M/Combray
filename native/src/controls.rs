@@ -19,6 +19,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use serde::Deserialize;
+use serde_json::error::Category;
 use serde_json::{Value, json};
 
 /// Page-chosen strings are shown in a dialog, not stored: keep them readable and bounded.
@@ -204,12 +205,14 @@ impl fmt::Debug for ControlResponse {
 /// Errors name the kind and position of the problem only: serde quotes offending values, and an
 /// answer may carry a password.
 pub fn parse_response(json: &str) -> Result<ControlResponse, String> {
-    serde_json::from_str(json).map_err(|error| {
-        format!(
-            "invalid control response: {:?} error at column {}",
-            error.classify(),
+    serde_json::from_str(json).map_err(|error| match error.classify() {
+        // Data errors quote the offending value, which may be a password.
+        Category::Data => format!(
+            "invalid control response: data error at column {}",
             error.column()
-        )
+        ),
+        // The others name only what the parser expected and where.
+        _ => format!("invalid control response: {error}"),
     })
 }
 
@@ -385,5 +388,11 @@ mod tests {
         assert!(parse_response(r#"{"type":"select"}"#).is_err());
         assert!(parse_response(r#"{"type":"launch"}"#).is_err());
         assert!(parse_response("not json").is_err());
+    }
+
+    #[test]
+    fn syntax_errors_say_what_is_wrong() {
+        let error = parse_response("not json").unwrap_err();
+        assert!(error.contains("expected"), "{error}");
     }
 }

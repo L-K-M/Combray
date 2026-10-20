@@ -199,13 +199,15 @@ struct PendingControl {
 }
 
 /// Servo's handle for a control: an embedder control, or a sign-in request, which Servo models
-/// separately. Dropping a sign-in request loads the server's 401 response.
+/// separately. Dropping a sign-in request loads the server's 401 (or the proxy's 407) response.
 enum ControlHandle {
     Embedder(EmbedderControl),
     SignIn(AuthenticationRequest),
 }
 
 impl ControlHandle {
+    /// None for sign-ins: Servo never hides them, so they end only when answered or when their
+    /// view closes.
     fn embedder_id(&self) -> Option<EmbedderControlId> {
         match self {
             ControlHandle::Embedder(control) => Some(control.id()),
@@ -1192,7 +1194,7 @@ impl Engine {
                     ControlResponse::Credentials { username, password } => {
                         request.authenticate(username, password)
                     },
-                    // Dropped: the navigation shows the server's 401 page.
+                    // Dropped: the navigation shows the 401 (or the proxy's 407) response.
                     ControlResponse::Dismiss => {},
                     response => self.error(format!(
                         "response {response:?} does not fit sign-in {id}; the sign-in was cancelled"

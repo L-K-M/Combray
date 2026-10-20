@@ -45,11 +45,7 @@ sealed interface ControlResponse {
     data class Files(val paths: List<String>) : ControlResponse
 
     /** HTTP sign-in. Printing it leaves out the password. */
-    class Credentials(val username: String, val password: String) : ControlResponse {
-        override fun equals(other: Any?) = other is Credentials && other.username == username && other.password == password
-
-        override fun hashCode() = 31 * username.hashCode() + password.hashCode()
-
+    data class Credentials(val username: String, val password: String) : ControlResponse {
         override fun toString() = "Credentials(username=$username, password=<redacted>)"
     }
 
