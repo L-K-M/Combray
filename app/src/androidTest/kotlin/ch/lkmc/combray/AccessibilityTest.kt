@@ -23,15 +23,22 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.integration.SaveStatus
+import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.SelectEntry
 import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
+import ch.lkmc.combray.ui.PageControlDialog
+import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /**
  * Every element of the browser chrome with a click action is at least 48dp each way and has a
@@ -81,6 +88,32 @@ class AccessibilityTest {
         compose.onNodeWithText("Settings").assertIsDisplayed()
     }
 
+    @Test
+    fun aRepeatedConfirmIsAccessible() = assertControlIsAccessible(PageControlContent.Confirm("Leave this page?"), offerBlocking = true)
+
+    @Test
+    fun aPromptIsAccessible() = assertControlIsAccessible(PageControlContent.Prompt("Your name?", "Ada"))
+
+    @Test
+    fun aSignInIsAccessible() = assertControlIsAccessible(PageControlContent.SignIn("http://intranet.test", proxy = false))
+
+    @Test
+    fun aSelectIsAccessible() = assertControlIsAccessible(
+        PageControlContent.Select(
+            listOf(
+                SelectEntry(0, "Red", disabled = false, group = "Warm"),
+                SelectEntry(1, "Orange", disabled = true, group = "Warm"),
+                SelectEntry(2, "Blue", disabled = false, group = null),
+            ),
+            selected = listOf(2),
+            multiple = false,
+        ),
+    )
+
+    @Test
+    fun aLinkMenuIsAccessible() =
+        assertControlIsAccessible(PageControlContent.LinkMenu("https://example.org/a", "https://example.org/a.png"))
+
     /** The check itself: a target without a label fails it. */
     @Test
     fun anUnlabeledTargetFails() {
@@ -101,6 +134,18 @@ class AccessibilityTest {
         }
 
         assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
+    }
+
+    /** A page's dialog, as the browser shows it, at the largest font size. */
+    private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val staging = UploadStaging(File(context.cacheDir, "accessibility-uploads"), context.contentResolver)
+        val control = PageControl(id = 1, site = "example.org", content = content, offerBlocking = offerBlocking)
+        show(LARGE_FONT) {
+            PageControlDialog(control, staging, MainScope(), { _, _ -> }, {}, canOpenInNewTab = { true }, {}, {})
+        }
+
+        assertTargetsAreAccessible()
     }
 
     private fun show(fontScale: Float, content: @Composable () -> Unit) {

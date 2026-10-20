@@ -172,7 +172,14 @@ private fun ScriptDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (message.isNotEmpty()) Text(message)
                 if (prompt != null) {
-                    OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    // A label of its own: the page's message above may be long, or empty.
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text(stringResource(R.string.page_dialog_answer)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 if (control.offerBlocking) {
                     Row(
