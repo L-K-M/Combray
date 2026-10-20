@@ -47,6 +47,10 @@ All notable changes to this project are documented here. The format follows
 - Internationalized host names show in Unicode only when they cannot
   imitate another site; other hosts show as punycode.
 
+### Changed
+
+- Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+
 ### Fixed
 
 - Local APK names now use the packaged architecture instead of always saying
