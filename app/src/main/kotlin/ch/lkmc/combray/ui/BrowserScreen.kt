@@ -193,6 +193,7 @@ fun BrowserScreen(graph: AppGraph) {
                         }
                     }
                 },
+                onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser)) } },
                 onRecent = { sheet = Sheet.RECENT },
                 onMore = { sheet = Sheet.MORE },
                 // Clear of the navigation bar and, in landscape, of a display cutout.
@@ -242,7 +243,6 @@ fun BrowserScreen(graph: AppGraph) {
             onForward = { dismiss(); browser.goForward() },
             onReload = { dismiss(); browser.reload() },
             onNewTab = editNewTab,
-            onShare = { url -> dismiss(); share(context, url, resources.getString(R.string.share_chooser)) },
             onPageInfo = { sheet = Sheet.PAGE_INFO },
             onSettings = { sheet = Sheet.SETTINGS },
             captureEnabled = histerService?.captureEnabled,

@@ -57,11 +57,11 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnAPageIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(PAGE, openTabs = 3, SaveStatus.Pending, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            BottomBar(PAGE, openTabs = 3, SaveStatus.Pending, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()
-        for (label in listOf("Back", "Saving to Karakeep", "Recent, 3 open tabs", "More")) {
+        for (label in listOf("Back", "Saving to Karakeep", "Share", "Recent, 3 open tabs", "More")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
@@ -70,7 +70,7 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnANewTabIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()
@@ -80,7 +80,7 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, captureEnabled = true, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {})
             }
         }
 

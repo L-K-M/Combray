@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
@@ -46,7 +47,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.integration.SaveStatus
 
-/** Back, address, Save, Recent and More: every routine action within thumb reach. */
+/** Back, address, Save, Share, Recent and More: every routine action within thumb reach. */
 @Composable
 fun BottomBar(
     tab: ActiveTab?,
@@ -55,6 +56,7 @@ fun BottomBar(
     onBack: () -> Unit,
     onAddress: () -> Unit,
     onSave: () -> Unit,
+    onShare: () -> Unit,
     onRecent: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
@@ -70,6 +72,9 @@ fun BottomBar(
                 }
                 AddressChip(tab, onAddress, Modifier.weight(1f))
                 SaveButton(saveStatus, enabled = tab?.url != null, onSave)
+                IconButton(onClick = onShare, enabled = tab?.url != null) {
+                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                }
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                 IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
                     BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
