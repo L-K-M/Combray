@@ -30,6 +30,7 @@ class KarakeepClient(private val transport: HttpTransport) {
             // Sent without an answer: the bookmark may exist. Retrying is safe (200 existing).
             HttpOutcome.Timeout -> DispatchResult.Retry("timeout")
             is HttpOutcome.Failure -> DispatchResult.Retry(outcome.category)
+            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category)
             is HttpOutcome.Response -> when (outcome.status) {
                 201, 200 -> {
                     val id = bookmarkId(outcome.body)
@@ -53,6 +54,7 @@ class KarakeepClient(private val transport: HttpTransport) {
         return when (outcome) {
             HttpOutcome.Timeout -> ConnectionCheck.Unreachable("timeout")
             is HttpOutcome.Failure -> ConnectionCheck.Unreachable(outcome.category)
+            is HttpOutcome.NotConnected -> ConnectionCheck.Unreachable(outcome.category)
             is HttpOutcome.Response -> when (outcome.status) {
                 200 -> ConnectionCheck.Connected(null)
                 401, 403 -> ConnectionCheck.Unauthorized

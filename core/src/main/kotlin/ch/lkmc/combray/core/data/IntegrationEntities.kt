@@ -8,8 +8,9 @@ enum class ServiceKind { KARAKEEP, HISTER }
 
 /**
  * A configured service. The secret (API key, token) is not here: it lives in the protected
- * credential store. [fingerprint] is a non-secret identity of the destination; [generation]
- * changes with every URL or credential change, and jobs carry the generation they were made for.
+ * credential store. [fingerprint] is a non-secret identity of the destination (its main address);
+ * [generation] changes with every URL or credential change, and jobs carry the generation they
+ * were made for.
  */
 @Entity(tableName = "services")
 data class ServiceEntity(
@@ -20,7 +21,12 @@ data class ServiceEntity(
     /** Hister only: the user switched automatic page capture on. */
     val captureEnabled: Boolean,
     val updatedAt: Long,
-)
+    /** Another address of the same server, tried when [baseUrl] cannot be reached (or the reverse). */
+    val alternateUrl: String? = null,
+) {
+    /** Every address of the server, main first. */
+    val roots get() = listOfNotNull(baseUrl, alternateUrl)
+}
 
 enum class JobKind { KARAKEEP_SAVE, HISTER_ADD }
 

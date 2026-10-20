@@ -234,7 +234,7 @@ Tag attachment and list membership use separate endpoints; implement only after 
 
 ### Hister ingestion and search
 
-Configure a reachable Hister server URL. `localhost` on Android refers to the phone/emulator, not the user's desktop. Prefer HTTPS or a trusted private network arrangement; do not disable certificate validation or enable all cleartext to make setup pass. A development-only scoped configuration can support a fixture server. The deployed server's authentication mode must be established: single-user access token, per-user token/session, or authenticated reverse proxy.
+Configure a reachable Hister server URL. `localhost` on Android refers to the phone/emulator, not the user's desktop. Prefer HTTPS or a trusted private network arrangement; do not disable certificate validation to make setup pass. Plain HTTP service addresses are allowed at the owner's request (20 October 2026), with a warning in Settings; this applies only to Combray's own service clients, not to Servo. A development-only scoped configuration can support a fixture server. The deployed server's authentication mode must be established: single-user access token, per-user token/session, or authenticated reverse proxy.
 
 At the inspected Hister revision, `POST {root}/api/add` accepts JSON:
 
@@ -505,7 +505,9 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Recent sheet initial layout | Proposed; implemented as the sheet (M1) | Both concepts accepted in general; no exclusive final selection. Recent home remains possible: Recent is one composable over `BrowserCoordinator.recent()` |
 | Service settings in Room, not DataStore | Decided (M2) | A service row's fingerprint and generation bind outbox jobs; keeping it in the outbox's database makes configuration changes and job invalidation one transaction |
 | HTTP client: `HttpURLConnection` | Decided (M2) | No extra dependency; redirects are not followed (they could carry a credential or page text to another origin); bounded timeouts and response sizes |
-| Credentials bound to their server | Decided (M2 review) | Stored as Keystore AES-GCM ciphertext together with the server fingerprint; a credential is never sent to another server, even after a crash between two configuration writes |
+| Credentials bound to their server | Decided (M2 review) | Stored as Keystore AES-GCM ciphertext together with the server fingerprint; a credential is never sent to another server, even after a crash between two configuration writes. A new alternate address also needs the credential entered again |
+| Plain HTTP service addresses | Confirmed (owner request, 20 October 2026) | Home servers often have no certificate. Settings warns that the credential and what Combray sends can be read on the network. Only Combray's own service clients are affected |
+| Alternate service address | Confirmed (owner choice, 20 October 2026) | One optional second address per service (for example Tailscale away from home). The address that last answered goes first; the other is tried only when no connection could be made, never after a request may have arrived. The main address remains the server's identity, so queued work survives adding one |
 | Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Tune on the owner's device (M4) |
 | Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
 | Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |

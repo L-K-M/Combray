@@ -44,6 +44,7 @@ class HisterClient(private val transport: HttpTransport) {
             // Hister updates a document key in place, so resending the same content is harmless.
             HttpOutcome.Timeout -> DispatchResult.Retry("timeout")
             is HttpOutcome.Failure -> DispatchResult.Retry(outcome.category)
+            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category)
             is HttpOutcome.Response -> if (outcome.status in 200..299) {
                 DispatchResult.Done(null)
             } else {
@@ -61,6 +62,7 @@ class HisterClient(private val transport: HttpTransport) {
         return when (outcome) {
             HttpOutcome.Timeout -> HisterSearch.Unreachable("timeout")
             is HttpOutcome.Failure -> HisterSearch.Unreachable(outcome.category)
+            is HttpOutcome.NotConnected -> HisterSearch.Unreachable(outcome.category)
             is HttpOutcome.Response -> when (outcome.status) {
                 200 -> parseResults(outcome.body)
                 401, 403 -> HisterSearch.Unauthorized

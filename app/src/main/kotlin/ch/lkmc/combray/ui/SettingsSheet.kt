@@ -61,11 +61,13 @@ import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.data.ServiceKind
+import ch.lkmc.combray.core.integration.AddressField
 import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.ConnectionCheck
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.SecretName
 import ch.lkmc.combray.core.integration.ServiceRootProblem
+import ch.lkmc.combray.core.integration.ServiceUrls
 import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -98,7 +100,7 @@ fun SettingsSheet(integrations: Integrations, notices: ThirdPartyNotices, onDism
                     secretInvalid = R.string.settings_key_invalid,
                     secretNotStored = R.string.check_key_not_stored,
                     rootInvalid = R.string.settings_root_invalid,
-                    rootCleartext = R.string.settings_root_cleartext,
+                    cleartextWarning = R.string.settings_root_cleartext,
                     unauthorized = R.string.check_unauthorized,
                     wrongAddress = R.string.check_wrong_address,
                     removeBody = R.plurals.karakeep_remove_body,
@@ -125,7 +127,7 @@ fun SettingsSheet(integrations: Integrations, notices: ThirdPartyNotices, onDism
                     secretInvalid = R.string.settings_token_invalid,
                     secretNotStored = R.string.check_token_not_stored,
                     rootInvalid = R.string.settings_root_invalid_hister,
-                    rootCleartext = R.string.settings_root_cleartext_hister,
+                    cleartextWarning = R.string.settings_root_cleartext_hister,
                     unauthorized = R.string.check_token_unauthorized,
                     wrongAddress = R.string.check_wrong_address_hister,
                     removeBody = R.plurals.hister_remove_body,
@@ -165,7 +167,7 @@ private data class ServiceLabels(
     val secretInvalid: Int,
     val secretNotStored: Int,
     val rootInvalid: Int,
-    val rootCleartext: Int,
+    val cleartextWarning: Int,
     val unauthorized: Int,
     val wrongAddress: Int,
     val removeBody: Int,
@@ -185,7 +187,8 @@ private fun ServiceSettings(
     kind: ServiceKind,
     secret: SecretName,
     service: Flow<ServiceEntity?>,
-    configure: suspend (String, String?) -> Configured,
+    /** Address, credential (null keeps the stored one), alternate address. */
+    configure: suspend (String, String?, String?) -> Configured,
     check: suspend () -> ConnectionCheck?,
     remove: suspend () -> Unit,
     extra: @Composable (ServiceEntity) -> Unit = {},
@@ -195,6 +198,8 @@ private fun ServiceSettings(
     // Null until edited: the field shows the stored address, and an edit survives rotation.
     var editedAddress by rememberSaveable { mutableStateOf<String?>(null) }
     val address = editedAddress ?: current?.baseUrl.orEmpty()
+    var editedAlternate by rememberSaveable { mutableStateOf<String?>(null) }
+    val alternate = editedAlternate ?: current?.alternateUrl.orEmpty()
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -215,6 +220,16 @@ private fun ServiceSettings(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
     )
     OutlinedTextField(
+        value = alternate,
+        onValueChange = { editedAlternate = it },
+        label = { Text(stringResource(R.string.settings_alternate_url)) },
+        placeholder = { Text(stringResource(R.string.settings_alternate_url_hint)) },
+        supportingText = { Text(stringResource(R.string.settings_alternate_url_help)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
         value = credential,
         onValueChange = { credential = it },
         label = { Text(stringResource(labels.secret)) },
@@ -228,9 +243,12 @@ private fun ServiceSettings(
         Button(
             onClick = {
                 scope.launch {
-                    val result = configure(address, credential.ifBlank { null })
+                    val result = configure(address, credential.ifBlank { null }, alternate)
                     message = describe(resources, labels, result)
-                    if (result == Configured.Saved) editedAddress = null
+                    if (result == Configured.Saved) {
+                        editedAddress = null
+                        editedAlternate = null
+                    }
                     credential = ""
                 }
             },
@@ -258,6 +276,7 @@ private fun ServiceSettings(
                 TextButton(onClick = {
                     confirmRemove = false
                     editedAddress = null
+                    editedAlternate = null
                     scope.launch { remove(); message = null }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
@@ -265,6 +284,9 @@ private fun ServiceSettings(
         )
     }
     message?.let { Text(it, modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
+    if (current?.roots?.any(ServiceUrls::isCleartext) == true) {
+        Text(stringResource(labels.cleartextWarning), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp))
+    }
     current?.let { extra(it) }
 
     Text(stringResource(labels.queue), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
@@ -372,10 +394,10 @@ private fun describe(resources: Resources, labels: ServiceLabels, result: Config
     Configured.InvalidCredential -> resources.getString(labels.secretInvalid)
     Configured.CredentialNotStored -> resources.getString(R.string.settings_credential_not_stored)
     is Configured.InvalidRoot -> resources.getString(
-        when (result.problem) {
-            ServiceRootProblem.CLEARTEXT_NOT_ALLOWED -> labels.rootCleartext
-            ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY -> R.string.settings_root_query
-            ServiceRootProblem.NOT_A_URL, ServiceRootProblem.UNSUPPORTED_SCHEME -> labels.rootInvalid
+        when {
+            result.problem == ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY -> R.string.settings_root_query
+            result.field == AddressField.ALTERNATE -> R.string.settings_alternate_invalid
+            else -> labels.rootInvalid
         },
     )
 }

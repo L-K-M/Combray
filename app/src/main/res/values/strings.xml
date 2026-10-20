@@ -110,6 +110,10 @@
     <string name="karakeep_explanation">Save sends the page’s address and title to your Karakeep server. Nothing is sent until you tap Save.</string>
     <string name="karakeep_url">Server address</string>
     <string name="karakeep_url_hint">https://karakeep.example.org</string>
+    <string name="settings_alternate_url">Other address (optional)</string>
+    <string name="settings_alternate_url_hint">https://server.tailnet.ts.net</string>
+    <string name="settings_alternate_url_help">The same server from elsewhere, like a Tailscale address. Combray uses whichever address answers.</string>
+    <string name="settings_alternate_invalid">Enter the other address as a web address, like https://server.tailnet.ts.net.</string>
     <string name="karakeep_key">API key</string>
     <string name="karakeep_key_saved">A key is saved. Enter a new one to replace it.</string>
     <string name="action_save_settings">Save settings</string>
@@ -117,9 +121,9 @@
     <string name="action_remove">Remove</string>
     <string name="settings_saved">Settings saved.</string>
     <string name="settings_root_invalid">Enter the server’s web address, like https://karakeep.example.org.</string>
-    <string name="settings_root_cleartext">Use an https:// address. Plain HTTP would expose the API key.</string>
+    <string name="settings_root_cleartext">This server is reached over plain HTTP: anyone on the same network can read the API key and the pages you save.</string>
     <string name="settings_root_invalid_hister">Enter the server’s web address, like https://hister.example.org.</string>
-    <string name="settings_root_cleartext_hister">Use an https:// address. Plain HTTP would expose the access token.</string>
+    <string name="settings_root_cleartext_hister">This server is reached over plain HTTP: anyone on the same network can read the access token, your searches and the pages Combray sends.</string>
     <string name="settings_key_invalid">This API key contains characters a key cannot have, such as a line break. Paste it again on one line.</string>
     <string name="settings_credential_not_stored">This device could not store the credential, so nothing was changed. Try again; if it keeps failing, restart the device.</string>
     <string name="settings_token_invalid">This access token contains characters a token cannot have, such as a line break. Paste it again on one line.</string>

@@ -100,8 +100,6 @@ class AppGraph(application: Application) {
         transport = UrlConnectionTransport(),
         clock = { System.currentTimeMillis() },
         newId = { UUID.randomUUID().toString() },
-        // Debug builds may reach fixture services on the emulator's loopback or the host (10.0.2.2).
-        cleartextHosts = if (BuildConfig.DEBUG) setOf("localhost", "127.0.0.1", "10.0.2.2") else emptySet(),
         scope = scope,
         scheduler = WorkManagerScheduler(application),
     )

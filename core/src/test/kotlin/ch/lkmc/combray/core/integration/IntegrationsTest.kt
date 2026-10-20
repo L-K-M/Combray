@@ -14,6 +14,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.net.ServerSocket
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +36,10 @@ class IntegrationsTest {
     private lateinit var scope: CoroutineScope
     private lateinit var integrations: Integrations
     private val server = FakeKarakeep()
+    private val alternateServer = FakeKarakeep()
+
+    /** Every request's address, in order. */
+    private val sent = CopyOnWriteArrayList<String>()
     private val secrets = MemorySecrets()
     private var now = 1_760_000_000_000L
     private var ids = 0
@@ -46,10 +52,9 @@ class IntegrationsTest {
         integrations = Integrations(
             database = database,
             secrets = secrets,
-            transport = UrlConnectionTransport(timeoutMs = 500),
+            transport = UrlConnectionTransport(timeoutMs = 500).let { http -> HttpTransport { sent += it.url; http.execute(it) } },
             clock = { now },
             newId = { "job${ids++}" },
-            cleartextHosts = setOf("127.0.0.1"),
             scope = scope,
             scheduler = { scheduled = it },
         )
@@ -60,10 +65,11 @@ class IntegrationsTest {
         scope.cancel()
         database.close()
         server.close()
+        alternateServer.close()
     }
 
-    private fun configure(root: String = server.root, key: String? = FakeKarakeep.KEY) =
-        runBlocking { integrations.configureKarakeep(root, key) }
+    private fun configure(root: String = server.root, key: String? = FakeKarakeep.KEY, alternate: String? = null) =
+        runBlocking { integrations.configureKarakeep(root, key, alternate) }
 
     private fun save(url: String = URL, title: String? = "Article") = runBlocking { integrations.save(url, title) }
 
@@ -395,6 +401,89 @@ class IntegrationsTest {
         }
         assertEquals(JobState.CANCELLED, job().state)
         assertEquals("", job().payload)
+    }
+
+    @Test
+    fun anUnreachableAddressFallsBackToTheAlternateWhichIsThenTriedFirst() {
+        val home = unreachableRoot()
+        assertEquals(Configured.Saved, configure(root = home, alternate = alternateServer.root))
+        save()
+        drain()
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals(1, alternateServer.bookmarks.size)
+        assertTrue(sent.first().startsWith(home))
+
+        // Remembered: the next save goes straight to the address that answered.
+        sent.clear()
+        save("https://news.example/second")
+        drain()
+        assertEquals(2, alternateServer.bookmarks.size)
+        assertTrue(sent.single().startsWith(alternateServer.root))
+    }
+
+    @Test
+    fun aRequestThatMayHaveArrivedIsNotSentToTheAlternate() {
+        configure(alternate = alternateServer.root)
+        server.fault = FakeKarakeep.Fault.STORE_THEN_HANG
+        server.faultCount = 1
+        save()
+        drain()
+        assertEquals(JobState.RETRY_WAIT, job().state)
+        assertTrue(alternateServer.requests.isEmpty())
+    }
+
+    @Test
+    fun theConnectionCheckUsesTheAlternateToo() {
+        configure(root = unreachableRoot(), alternate = server.root)
+        assertEquals(ConnectionCheck.Connected(null), runBlocking { integrations.checkKarakeep() })
+    }
+
+    @Test
+    fun aNewAlternateNeedsTheKeyAgainButKeepsQueuedSaves() {
+        configure()
+        server.fault = FakeKarakeep.Fault.SERVER_ERROR
+        server.faultCount = 1
+        save()
+        drain()
+        assertEquals(JobState.RETRY_WAIT, job().state)
+
+        // The key must not reach an address it was not entered for.
+        assertEquals(Configured.MissingCredential, configure(key = null, alternate = alternateServer.root))
+        assertNull(service().alternateUrl)
+
+        assertEquals(Configured.Saved, configure(alternate = alternateServer.root))
+        assertEquals(alternateServer.root, service().alternateUrl)
+        // Same server: the save is kept, paused like after any key change, until resumed.
+        assertEquals(JobState.AUTH_REQUIRED, job().state)
+        runBlocking { integrations.resume(ServiceKind.KARAKEEP).join() }
+        now += 10 * 60_000
+        drain()
+        assertEquals(JobState.SUCCEEDED, job().state)
+    }
+
+    @Test
+    fun droppingTheAlternateKeepsTheKeyAndQueuedSaves() {
+        configure(alternate = alternateServer.root)
+        val before = service()
+        assertEquals(Configured.Saved, configure(key = null, alternate = " "))
+        assertNull(service().alternateUrl)
+        assertEquals(before.generation, service().generation)
+        assertEquals(before.fingerprint, service().fingerprint)
+    }
+
+    @Test
+    fun anInvalidAlternateIsReportedForThatField() {
+        assertEquals(
+            Configured.InvalidRoot(ServiceRootProblem.UNSUPPORTED_SCHEME, AddressField.ALTERNATE),
+            configure(alternate = "ftp://keep.example"),
+        )
+        assertNull(runBlocking { database.integrations().service(ServiceKind.KARAKEEP) })
+    }
+
+    /** An address nothing listens on: connecting fails at once, before anything is sent. */
+    private fun unreachableRoot(): String {
+        val port = ServerSocket(0).use { it.localPort }
+        return "http://127.0.0.1:$port/keep"
     }
 
     private fun service() = runBlocking { database.integrations().service(ServiceKind.KARAKEEP) }!!

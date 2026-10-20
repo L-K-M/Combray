@@ -52,7 +52,6 @@ class HisterIntegrationTest {
             transport = UrlConnectionTransport(timeoutMs = 2_000),
             clock = { now },
             newId = { "job${ids++}" },
-            cleartextHosts = setOf("127.0.0.1"),
             scope = scope,
             scheduler = {},
         )
@@ -189,6 +188,23 @@ class HisterIntegrationTest {
         assertNull(wants("https://kagi.com/search?q=private+question"))
         assertNotNull(wants("https://notkagi.com/"))
         assertNull(wants("http://127.0.0.1:1/other"))
+    }
+
+    @Test
+    fun theAlternateAddressesHostIsNeverCapturedEither() {
+        runBlocking { assertEquals(Configured.Saved, hister.configure(server.root, FakeHister.TOKEN, "https://hister.tailnet.ts.net")) }
+        enable()
+        assertNull(wants("https://hister.tailnet.ts.net/settings"))
+        assertNotNull(wants("https://a.example/"))
+    }
+
+    @Test
+    fun searchFallsBackToTheAlternateWhenTheMainAddressCannotBeReached() {
+        val port = java.net.ServerSocket(0).use { it.localPort }
+        runBlocking { assertEquals(Configured.Saved, hister.configure("http://127.0.0.1:$port/h", FakeHister.TOKEN, server.root)) }
+        server.searchBody = """{"documents":[{"url":"https://a.example/","title":"A"}],"history":[],"total":1}"""
+        val result = runBlocking { hister.search("phrase") } as HisterSearch.Results
+        assertEquals("https://a.example/", result.hits.single().url)
     }
 
     @Test

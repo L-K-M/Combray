@@ -63,7 +63,7 @@ sealed interface SaveRequest {
 sealed interface Configured {
     data object Saved : Configured
 
-    data class InvalidRoot(val problem: ServiceRootProblem) : Configured
+    data class InvalidRoot(val problem: ServiceRootProblem, val field: AddressField = AddressField.MAIN) : Configured
 
     /** No credential given and none stored. */
     data object MissingCredential : Configured
@@ -91,20 +91,18 @@ class Integrations(
     transport: HttpTransport,
     private val clock: Clock,
     private val newId: () -> String,
-    /** Hosts allowed over plain HTTP: the fixture loopback in debug builds, none in release. */
-    private val cleartextHosts: Set<String>,
     private val scope: CoroutineScope,
     scheduler: WakeupScheduler,
 ) {
     private val dao = database.integrations()
-    private val karakeep = KarakeepClient(transport)
+    private val routes = ServiceRoutes(transport)
 
     /** Configuration changes and dispatch read/write the service row and its secret together. */
     private val karakeepConfig = Mutex()
     val outbox = Outbox(database, clock, newId)
 
     /** Hister settings, capture (the browser's [ch.lkmc.combray.core.browser.CaptureSink]) and search. */
-    val hister = HisterIntegration(database, secrets, transport, clock, outbox, cleartextHosts, ::kick)
+    val hister = HisterIntegration(database, secrets, transport, clock, outbox, ::kick)
     private val credentials = ServiceCredentials(secrets)
 
     val dispatcher = OutboxDispatcher(
@@ -131,37 +129,45 @@ class Integrations(
     }
 
     /**
-     * Saves the Karakeep root and, if given, a new API key. Any change starts a new generation:
-     * unfinished saves for another server are cancelled; saves for this server pause until resumed.
+     * Saves the Karakeep root, an optional alternate address and, if given, a new API key. Any
+     * change starts a new generation: unfinished saves for another server are cancelled; saves
+     * for this server pause until resumed.
      */
-    suspend fun configureKarakeep(rootInput: String, apiKey: String?): Configured {
-        val root = when (val checked = ServiceUrls.normalizeRoot(rootInput, KARAKEEP_SUFFIXES, cleartextHosts)) {
-            is ServiceRoot.Invalid -> return Configured.InvalidRoot(checked.reason)
-            is ServiceRoot.Valid -> checked.root
+    suspend fun configureKarakeep(rootInput: String, apiKey: String?, alternateInput: String? = null): Configured {
+        val addresses = when (val checked = ServiceUrls.normalizeAddresses(rootInput, alternateInput, KARAKEEP_SUFFIXES)) {
+            is ServiceAddresses.Invalid -> return Configured.InvalidRoot(checked.problem, checked.field)
+            is ServiceAddresses.Valid -> checked
         }
         val key = apiKey?.trim()?.takeIf { it.isNotEmpty() }
         if (key != null && !isHeaderSafe(key)) return Configured.InvalidCredential
-        val fingerprint = ServiceUrls.fingerprint(root)
+        val fingerprint = addresses.fingerprint
         // Not cancellable: leaving the screen must not stop between the key and the configuration.
         return withContext(NonCancellable) {
             karakeepConfig.withLock {
                 val previous = dao.service(ServiceKind.KARAKEEP)
-                // A stored key belongs to the server it was entered for, never to a new one.
+                // A stored key belongs to the addresses it was entered for, never to a new one.
                 val keepsServer = previous != null && previous.fingerprint == fingerprint
-                if (key == null && !(keepsServer && credentials.read(SecretName.KARAKEEP_API_KEY, fingerprint) != null)) {
+                val knownAddresses = keepsServer && (addresses.alternate == null || addresses.alternate == previous?.alternateUrl)
+                if (key == null && !(knownAddresses && credentials.read(SecretName.KARAKEEP_API_KEY, fingerprint) != null)) {
                     return@withLock Configured.MissingCredential
                 }
-                // Same server, stored key kept: nothing changed, and queued saves keep going.
-                if (key == null) return@withLock Configured.Saved
+                // Same server, stored key kept: queued saves keep going. At most the alternate was dropped.
+                if (key == null) {
+                    if (previous != null && previous.alternateUrl != addresses.alternate) {
+                        dao.setService(previous.copy(alternateUrl = addresses.alternate, updatedAt = clock.now()))
+                    }
+                    return@withLock Configured.Saved
+                }
                 if (!credentials.write(SecretName.KARAKEEP_API_KEY, fingerprint, key)) return@withLock Configured.CredentialNotStored
                 database.withTransaction {
                     val current = ServiceEntity(
                         kind = ServiceKind.KARAKEEP,
-                        baseUrl = root,
+                        baseUrl = addresses.root,
                         fingerprint = fingerprint,
                         generation = outbox.nextGeneration(ServiceKind.KARAKEEP, previous),
                         captureEnabled = false,
                         updatedAt = clock.now(),
+                        alternateUrl = addresses.alternate,
                     )
                     dao.setService(current)
                     outbox.onServiceChanged(previous, current)
@@ -189,7 +195,9 @@ class Integrations(
             service to credentials.read(SecretName.KARAKEEP_API_KEY, service.fingerprint)
         }
         if (key == null) return ConnectionCheck.CredentialMissing
-        return withContext(Dispatchers.IO) { karakeep.checkConnection(service.baseUrl, key) }
+        return withContext(Dispatchers.IO) {
+            routes.call(service) { transport, root -> KarakeepClient(transport).checkConnection(root, key) }
+        }
     }
 
     /** One tap on Save: durable before this returns, then sent in the background. */
@@ -265,7 +273,7 @@ class Integrations(
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
         key ?: return DispatchResult.AuthRequired("credential_missing")
         val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        return karakeep.createLink(service.baseUrl, key, payload.url, payload.title)
+        return routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
     }
 
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {

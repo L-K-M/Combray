@@ -19,6 +19,9 @@ sealed interface HttpOutcome {
     /** Sent, but no answer: the server may or may not have acted on it. */
     data object Timeout : HttpOutcome
 
+    /** No connection was made, so nothing was sent: another address of the server may work. */
+    data class NotConnected(val category: String) : HttpOutcome
+
     /** Not sent, or the connection broke: [category] is safe to show and log. */
     data class Failure(val category: String) : HttpOutcome
 }
@@ -34,6 +37,7 @@ fun interface HttpTransport {
 class UrlConnectionTransport(
     private val timeoutMs: Int = REQUEST_TIMEOUT_MS,
     private val maxResponseBytes: Int = MAX_RESPONSE_BYTES,
+    private val connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
 ) : HttpTransport {
     override fun execute(request: HttpRequest): HttpOutcome {
         val connection = try {
@@ -43,7 +47,7 @@ class UrlConnectionTransport(
         }
         return try {
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = timeoutMs
+            connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = timeoutMs
             connection.useCaches = false
             connection.requestMethod = request.method
@@ -56,8 +60,17 @@ class UrlConnectionTransport(
             request.body?.let { body ->
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(body.size)
-                connection.outputStream.use { it.write(body) }
             }
+            // Connecting first separates "never reached" (safe to try another address) from
+            // a broken exchange, where the server may have acted.
+            try {
+                connection.connect()
+            } catch (timeout: SocketTimeoutException) {
+                return HttpOutcome.NotConnected("timeout")
+            } catch (failure: IOException) {
+                return HttpOutcome.NotConnected("network")
+            }
+            request.body?.let { body -> connection.outputStream.use { it.write(body) } }
             val status = connection.responseCode
             val stream = if (status >= HttpURLConnection.HTTP_BAD_REQUEST) connection.errorStream else connection.inputStream
             val headers = connection.headerFields.filterKeys { it != null }.mapValues { it.value.joinToString(",") }
@@ -86,6 +99,9 @@ class UrlConnectionTransport(
     companion object {
         /** Combray policy (docs/IMPLEMENTATION_PLAN.md section 6), not an API limit. */
         const val REQUEST_TIMEOUT_MS = 15_000
+
+        /** Shorter: an address unreachable from this network (home server, outside) fails fast. */
+        const val CONNECT_TIMEOUT_MS = 8_000
         const val MAX_RESPONSE_BYTES = 256 * 1024
     }
 }
