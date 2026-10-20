@@ -98,6 +98,7 @@
     function visit() {
       if (++visited <= maxNodes) return true;
       result.nodeBudgetExhausted = true;
+      result.truncated = true;
       stopped = true;
       return false;
     }

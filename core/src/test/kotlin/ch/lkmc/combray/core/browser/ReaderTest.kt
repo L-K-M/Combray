@@ -121,6 +121,30 @@ class ReaderTest {
     }
 
     @Test
+    fun onlyTheNewestRequestDecidesWhatReaderViewShows() {
+        openPage()
+        browser.openReader(); idle()
+        val first = engine.articleCaptures.last().second
+        browser.closeReader(); idle()
+        browser.openReader(); idle()
+        val second = engine.articleCaptures.last().second
+
+        article(1, 10, first, "", CaptureStatus.TIMED_OUT)
+        assertTrue(state().reader is ReaderState.Loading)
+        article(1, 10, second, ARTICLE)
+        assertTrue(state().reader is ReaderState.Ready)
+    }
+
+    @Test
+    fun aNewPageInTheSameTabLeavesReaderView() {
+        openPage()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+        commit(1, 11, "https://news.test/next")
+        assertNull(state().reader)
+    }
+
+    @Test
     fun aTabWithoutAPageHasNoReaderView() {
         browser.newTab(); idle()
         browser.openReader(); idle()

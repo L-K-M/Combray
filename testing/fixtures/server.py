@@ -73,8 +73,9 @@ ARTICLE_PARAGRAPH = ("Readers keep coming back to this story because it explains
 ARTICLE_BODY = (
     "<nav><a href='/'>READER-NAV-TEXT</a> <a href='/solid/112233.html'>Section</a></nav>"
     "<article><h1>Reader fixture</h1>"
-    f"<p>READER-BODY-ONE {ARTICLE_PARAGRAPH * 3}</p>"
-    f"<p>{ARTICLE_PARAGRAPH * 2} <a id='inner' href='/solid/2f6b3c.html'>READER-LINK</a> {ARTICLE_PARAGRAPH}</p>"
+    # The link comes first, so reader view shows it without scrolling.
+    f"<p>READER-BODY-ONE <a id='inner' href='/solid/2f6b3c.html'>READER-LINK</a> {ARTICLE_PARAGRAPH * 3}</p>"
+    f"<p>{ARTICLE_PARAGRAPH * 3}</p>"
     "<h2>READER-HEADING</h2>"
     f"<p>READER-BODY-TWO {ARTICLE_PARAGRAPH * 3}</p>"
     "<ul><li>READER-ITEM-ONE</li><li>READER-ITEM-TWO</li></ul></article>"
@@ -179,6 +180,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/article.html":
             # Reader view keeps the article and drops the navigation, aside and footer around it.
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
+        if path == "/empty.html":
+            # Nothing to read: reader view finds no article.
+            return self.send(200, page("EMPTY", ""))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
         if path == "/auth.html":

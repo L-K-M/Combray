@@ -81,6 +81,9 @@ class BrowserCoordinator(
     /** Reader view, while open; shown only over the tab it was opened for. */
     private var reader: ReaderState? = null
 
+    /** The article request reader view waits for; an older one's late result is ignored. */
+    private var readerRequest: Long? = null
+
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
@@ -319,6 +322,7 @@ class BrowserCoordinator(
         val id = nextRequest++
         pendingArticles[id] = PendingArticle(tab.id, ViewRef(view.nativeTab, generation), document, url)
         engine.captureArticle(view.nativeTab, document, id, MAX_ARTICLE_BYTES, ARTICLE_TIMEOUT_MS)
+        readerRequest = id
         reader = ReaderState.Loading(tab.id)
         publish()
     }
@@ -421,6 +425,8 @@ class BrowserCoordinator(
             val visit = when (event.kind) {
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.currentDocument = event.document
+                    // Reader view shows the page it was opened on, never the next one.
+                    if (reader?.tabId == view.tabId) reader = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
@@ -591,7 +597,9 @@ class BrowserCoordinator(
     /** Shows the article if reader view still waits for it and the page is still the one asked. */
     private fun onArticleResult(event: EngineEvent.CaptureResult) {
         val pending = pendingArticles.remove(event.capture) ?: return
-        if (reader != ReaderState.Loading(pending.tabId)) return
+        if (event.capture != readerRequest || reader != ReaderState.Loading(pending.tabId)) return
+        // Status only: the detail can quote page script errors.
+        Log.i(LOG_TAG, "reader article: ${event.status}")
         val content = event.content?.takeIf {
             event.status == CaptureStatus.CAPTURED && event.view == pending.view && event.document == pending.document
         }
