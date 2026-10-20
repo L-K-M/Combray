@@ -155,7 +155,7 @@ scripts/m0/emulator.sh
 scripts/check-app.sh emulator-5560    # or: scripts/check-app.sh emulator-5560 ch.lkmc.combray.SaveTest
 ```
 
-Evidence goes to `build/device-checks/<UTC time>/` (or `$COMBRAY_RESULTS`): raw instrumentation output per run, logcat and `summary.md`; the script exits 1 if a check failed or a run reported nothing. Fixture pages are reached at `localhost:8766` through `adb reverse`; the fake services at `10.0.2.2:8766` (the emulator's address for the host), because a service's own host is never captured for Hister. On a physical phone, use a host address the phone reaches and the debug network configuration allows.
+Evidence goes to `build/device-checks/<UTC time>/` (or `$COMBRAY_RESULTS`): raw instrumentation output per run, logcat and `summary.md`; the script exits 1 if a check failed, a run reported nothing, or a run stopped early (a crash or not-responding kill marks the test in progress as crashed and counts the rest as not run). Fixture pages are reached at `localhost:8766` through `adb reverse`; the fake services at `10.0.2.2:8766` (the emulator's address for the host), because a service's own host is never captured for Hister. On a physical phone, use a host address the phone reaches and the debug network configuration allows.
 
 Engine-level checks of the M0 harness:
 
