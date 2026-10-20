@@ -38,7 +38,8 @@ class EngineSurfaceView(
     private var pressX = 0f
     private var pressY = 0f
     private val longPressCheck = Runnable {
-        if (!longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
+        // The engine may have stopped since the press.
+        if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
         longPressed = true
         NativeEngine.touch(NativeEngine.TOUCH_CANCEL, pressPointer, pressX, pressY)
         NativeEngine.contextClick(pressX, pressY)
@@ -70,6 +71,11 @@ class EngineSurfaceView(
         // Blocks until the engine released the surface, as SurfaceHolder.Callback requires.
         val released = NativeEngine.surfaceDestroyed()
         Log.i(LOG_TAG, "surfaceDestroyed released=$released")
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(longPressCheck)
+        super.onDetachedFromWindow()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
