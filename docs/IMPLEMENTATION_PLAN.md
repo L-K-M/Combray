@@ -366,7 +366,7 @@ Blockers to resolve before relying on them in M1: the stale-frame defect (multi-
 
 **Gate:** A→B navigation, two same-URL tabs, close/reopen, failed loads, ten-tab switching, old closed-history expiry with old open tabs retained, rotation/surface recreation, and process-kill recovery pass. No state depends on keeping an Activity or native pointer alive. A fresh install can browse at least public fixture sites without configured services.
 
-**Status (19 October 2026): implemented; gate passed on an x86_64 emulator.** Unit tests (Robolectric, fake engine and fake clock) cover the coordinator's state rules; device checks run the real engine on the emulator (Android 11, API 30) against `testing/fixtures/server.py` (`scripts/check-app.sh`, evidence in `build/device-checks/<run>/`, not committed). Run `run9` passed all 18 device checks of M1–M3 with the current code. No physical device has been tried.
+**Status (19 October 2026): implemented; gate passed on an x86_64 emulator.** Unit tests (Robolectric, fake engine and fake clock) cover the coordinator's state rules; device checks run the real engine on the emulator (Android 11, API 30) against `testing/fixtures/server.py` (`scripts/check-app.sh`, evidence in `build/device-checks/<run>/`, not committed). Run `run9` passed all 18 device checks of M1–M3. The whole suite was rerun on 20 October 2026 at commit `7085902` (M4 features, Kotlin 2.4.21, Room 2.8.5): run `full11` passed 28 checks and `AboutTest` crashed on the emulator's input-focus timeout (see [BUILDING.md](BUILDING.md)); its rerun `about4` passed. No physical device has been tried.
 
 | Gate check | Result | Evidence |
 | --- | --- | --- |
@@ -456,7 +456,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Link menu on long-press | Passed on the emulator (`PageControlsTest.aLongPressOnALinkOffersToOpenItInANewTab`, runs `controls4` and `controls5`): a long-press on a link opened Combray's menu without following the link, and "Open in new tab" opened the link's page in a second tab. Full suite `full10` (same feature, before rebasing onto #9's final fixes): 21 of 22 passed; the select check failed once on a Compose idling timeout under host load and passed in both later runs. A tap misread as a long-press under emulator stalls failed the upload check in `controls6`; with the hold timed from when the app handled the press, all four checks passed (`controls7`) and `BrowsingTest` passed 9 of 9 (`browsing11`). Copy, share and image entries were not exercised on the device |
 | HTTP sign-in (Basic/Digest) | Passed on the emulator (`PageControlsTest.aSignInFromTheDialogReachesTheServer`, runs `signin1`, `signin2` and `signin3`, with the other four page-control checks): the dialog named `http://localhost:8766`, Cancel showed the server's 401 page, and the fixture's username and password loaded the protected page. The password appeared in neither logcat nor the test output. Proxy sign-in and Digest were not exercised |
 
-Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). This build-tool slice changes no app runtime or Servo code; M1–M3 device evidence remains the earlier `run9`.
+Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). Latest whole-suite device evidence: `full11` and `about4` (M1 status above).
 
 ## 10. Acceptance and verification
 
@@ -546,7 +546,7 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
-M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 has started; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, then validate the resulting build on the emulator.
+M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, which needs the owner's signing key and a decision on building Servo in CI (hours of build time and tens of gigabytes per run). Without the owner, extend `AccessibilityTest` to Recent, Settings and page dialogs, and check dark mode and landscape.
 
 1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
 2. When live acceptance is authorized, obtain the Karakeep and Hister addresses and versions, sites that must work and hosts never to capture. Configure credentials in the app, not in chat.
