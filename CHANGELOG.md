@@ -52,11 +52,15 @@ All notable changes to this project are documented here. The format follows
   away from home. Combray tries the address that last answered and
   switches only when the other cannot be reached, so a request is never
   sent twice.
+- Settings › Local history: an option to close tabs unused for seven days.
 
 ### Changed
 
 - Share is in the bottom bar, next to Save, instead of the More menu.
-
+- A closed tab's page keeps its place in Recent, ordered by when the tab
+  was last used rather than moved to the top.
+- Back on a page another app's link opened returns to that app; the page
+  stays in history only, unless you switched tabs meanwhile.
 - `scripts/build.sh` builds the engine first: it installs the pinned NDK
   and Rust toolchain when missing and fetches, verifies and patches Servo
   whenever the tree is missing or was prepared with other patches. Builds

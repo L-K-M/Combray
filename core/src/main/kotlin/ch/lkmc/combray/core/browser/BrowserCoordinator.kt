@@ -61,6 +61,8 @@ class BrowserCoordinator(
     private val captureTiming: CaptureTiming = CaptureTiming(),
     /** Renderers kept alive; beyond this the least recently focused hidden tabs release theirs. */
     private val maxLiveViews: Int = MAX_LIVE_VIEWS,
+    /** Read at each maintenance: whether open tabs unused for the retention period close. */
+    private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -74,6 +76,9 @@ class BrowserCoordinator(
     private var selectedNative: Long? = null
     private var engineReady = false
     private val pendingCaptures = HashMap<Long, PendingCapture>()
+
+    /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
+    private var otherAppTab: String? = null
 
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
@@ -131,6 +136,30 @@ class BrowserCoordinator(
     fun openUrl(url: String, placement: Placement) = submit {
         val active = activeTab()
         if (placement == Placement.NEW_TAB || active == null) createTab(url) else navigateTab(active, url)
+        reconcile()
+        publish()
+    }
+
+    /**
+     * Opens a link from another app in a new tab. Until the user moves to another tab, Back on
+     * its first page returns to that app and leaves the page in history only
+     * ([returnToOtherApp]).
+     */
+    fun openFromOtherApp(url: String) = submit {
+        otherAppTab = createTab(url)
+        reconcile()
+        publish()
+    }
+
+    /**
+     * Back on the first page of the tab another app opened: the tab closes without an Undo
+     * notice (the user is leaving), and its page stays in Recent as history.
+     */
+    fun returnToOtherApp(tabId: String) = submit {
+        if (otherAppTab != tabId) return@submit
+        otherAppTab = null
+        val tab = dao.tab(tabId)?.takeIf { it.state == TabState.OPEN } ?: return@submit
+        closeLogically(tab)
         reconcile()
         publish()
     }
@@ -194,7 +223,7 @@ class BrowserCoordinator(
         val now = clock.now()
         database.withTransaction {
             dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null, lastFocusedAt = now))
-            dao.setSession(SessionEntity(activeTabId = tab.id))
+            activate(tab.id, now)
         }
         reconcile()
         publish()
@@ -253,8 +282,15 @@ class BrowserCoordinator(
         capture?.forgetHost(site, includeSubdomains)
     }
 
-    /** Expires closed history past the retention window. Open tabs never expire. */
-    fun runMaintenance() = submit { maintain() }
+    /**
+     * Expires history past the retention window and, when the user chose so, closes tabs unused
+     * for as long. The focused tab is never closed this way.
+     */
+    fun runMaintenance() = submit {
+        maintain()
+        reconcile()
+        publish()
+    }
 
     /** Writes cookies and profile state, so logins survive Android killing the process. */
     fun persistProfile() = submit {
@@ -561,26 +597,44 @@ class BrowserCoordinator(
         )
         database.withTransaction {
             dao.insertTab(tab)
-            dao.setSession(SessionEntity(activeTabId = tab.id))
+            activate(tab.id, now)
         }
         return tab.id
     }
 
     private suspend fun focus(tab: TabEntity) {
+        val now = clock.now()
         database.withTransaction {
-            dao.updateTab(tab.copy(lastFocusedAt = clock.now()))
-            dao.setSession(SessionEntity(activeTabId = tab.id))
+            dao.updateTab(tab.copy(lastFocusedAt = now))
+            activate(tab.id, now)
         }
     }
 
     /**
-     * Close and successor selection in one transaction (invariant 5). The closed page stays
-     * recoverable for the retention period from now.
+     * Makes [tabId] the focused tab. The tab losing focus was in use until now: its
+     * [TabEntity.lastFocusedAt] moves to just before [now], so a tab read for days is not
+     * "unused" the moment the user switches away, and keeps its place right after the new one.
+     */
+    private suspend fun activate(tabId: String, now: Long) {
+        val previous = dao.session()?.activeTabId
+        if (previous != null && previous != tabId) {
+            dao.tab(previous)?.takeIf { it.state == TabState.OPEN }?.let { dao.updateTab(it.copy(lastFocusedAt = now - 1)) }
+        }
+        dao.setSession(SessionEntity(activeTabId = tabId))
+        if (tabId != otherAppTab) otherAppTab = null
+    }
+
+    /**
+     * Close and successor selection in one transaction (invariant 5). The closed page takes its
+     * place in history by when the tab was last used, not by when it closed: closing an old tab
+     * does not move it to the top of Recent, and retention counts from that last use.
      */
     private suspend fun closeLogically(tab: TabEntity) {
         val now = clock.now()
         database.withTransaction {
-            tab.currentVisitId?.let { id -> dao.visit(id)?.let { dao.updateVisit(it.copy(lastSeenAt = now)) } }
+            tab.currentVisitId?.let { id ->
+                dao.visit(id)?.let { dao.updateVisit(it.copy(lastSeenAt = maxOf(it.lastSeenAt, tab.lastFocusedAt))) }
+            }
             dao.updateTab(tab.copy(state = TabState.CLOSED, closedAt = now))
             val session = dao.session()
             if (session?.activeTabId == tab.id) {
@@ -589,6 +643,7 @@ class BrowserCoordinator(
             }
         }
         liveByTab[tab.id]?.let { closeView(it) }
+        if (otherAppTab == tab.id) otherAppTab = null
     }
 
     private fun closeView(view: LiveView) {
@@ -685,6 +740,10 @@ class BrowserCoordinator(
 
     private suspend fun maintain() {
         val cutoff = clock.now() - retention.closedHistoryMillis
+        if (unusedTabs() == UnusedTabs.CLOSE) {
+            val active = dao.session()?.activeTabId
+            dao.openTabs().filter { it.id != active && it.lastFocusedAt < cutoff }.forEach { closeLogically(it) }
+        }
         database.withTransaction {
             dao.deleteVisitsSeenBefore(cutoff)
             dao.deleteEmptyClosedTabs()
@@ -708,6 +767,7 @@ class BrowserCoordinator(
                         crashed = view?.crashed ?: false,
                         hasView = view != null,
                         loadFailed = view?.currentDocument?.let { it in view.errorDocuments } ?: false,
+                        openedByOtherApp = active.id == otherAppTab,
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->
@@ -776,6 +836,9 @@ class BrowserCoordinator(
         const val MAX_LIVE_VIEWS = 6
     }
 }
+
+/** Whether open tabs the user has not used for the retention period close by themselves. */
+enum class UnusedTabs { KEEP, CLOSE }
 
 /** Proposed default: closed history kept seven days after its last interaction. */
 data class Retention(val closedHistoryDays: Int = 7) {

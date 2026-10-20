@@ -75,7 +75,9 @@ The UI may group repeated visits to the same page for readability, but grouping 
 
 Closing releases the native view and marks the logical tab closed while preserving eligible visits. Choose the most recently focused remaining open tab; if none remains, show the internal home/Recent screen. Never leave the closed page painted underneath the chrome. Opening an old history item creates a new logical tab identity. A short Undo close affordance may restore a recently closed logical tab, but it must not promise native back-stack restoration after resources were released.
 
-The proposed seven-day retention applies to closed/local history, measured from the visit's last interaction. Closing an old open tab refreshes its current visit's last-seen timestamp so that the newly closed page remains recoverable for seven days; it does not refresh every older visit in that tab. An open tab's current recoverable record does not expire because of age. Purge on startup and periodic maintenance, rather than relying on an exact-time Android alarm. Explain that local expiry does not remove Hister content or Karakeep bookmarks.
+A link from another app opens a new tab. Until the user moves to another tab, Back on that tab's first page closes it without an Undo notice and returns to the other app; its page stays in Recent as history only (owner request, 20 October 2026).
+
+The proposed seven-day retention applies to closed/local history, measured from the visit's last interaction. A closed tab's page takes its place in history by when the tab was last used (in focus, or its last navigation), not by when it closed, so closing does not move it to the top of Recent (owner request, 20 October 2026); a tab unused for longer than the retention period therefore leaves history at the next maintenance. An open tab's current recoverable record does not expire because of age, unless the owner turns on "Close tabs unused for 7 days" in Settings: then open tabs not in focus for the retention period close at maintenance, and their pages expire with them. The focused tab never closes this way, and a tab counts as used until focus leaves it. Purge on startup and periodic maintenance, rather than relying on an exact-time Android alarm. Explain that local expiry does not remove Hister content or Karakeep bookmarks.
 
 “Remove from Recent” removes local records under a defined scope. For an open tab, offer an explicit close-and-forget action, rather than erasing its only recovery record invisibly. “Forget this site” removes matching local history and pending captures, optionally adds an exclusion, and clearly describes whether it affects open tabs. Remote deletion is a separate action only if the installed API supports and verifies it. Never claim “deleted everywhere” from a local database transaction.
 
@@ -512,7 +514,9 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
 | Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |
 | IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode |
-| Seven-day closed-history retention | Proposed | Bounded short-term memory; open tabs exempt |
+| Seven-day closed-history retention | Proposed | Bounded short-term memory, counted from last use; open tabs exempt unless the owner turns on closing unused tabs |
+| Closing unused tabs | Confirmed (owner choice, 20 October 2026) | A Settings switch, off by default; uses the history retention period; the focused tab stays |
+| Browser preferences in SharedPreferences | Decided | One switch so far, with nothing bound to it transactionally; DataStore can replace it when preferences grow |
 | Opt-in automatic Hister capture | Proposed | Owner controls content transfer and exclusions |
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |

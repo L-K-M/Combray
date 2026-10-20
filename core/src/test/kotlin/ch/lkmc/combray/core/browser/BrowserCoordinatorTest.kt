@@ -39,6 +39,7 @@ class BrowserCoordinatorTest {
     private lateinit var browser: BrowserCoordinator
     private var now = START
     private var ids = 0
+    private var unusedTabs = UnusedTabs.KEEP
 
     @Before
     fun setUp() {
@@ -55,7 +56,7 @@ class BrowserCoordinatorTest {
 
     private fun newCoordinator(): BrowserCoordinator {
         engine = FakeEngine()
-        return BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }).also { it.start() }
+        return BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs }).also { it.start() }
     }
 
     private fun idle() = runBlocking { browser.awaitIdle() }
@@ -250,6 +251,94 @@ class BrowserCoordinatorTest {
         assertTrue(items.any { it is RecentItem.OpenTab && it.url == "https://old-open.test/" })
         assertTrue(items.none { it.url == "https://old-closed.test/" })
         assertEquals(1, runBlocking { database.browser().openTabs() }.size)
+    }
+
+    @Test
+    fun aClosedTabTakesItsPlaceInHistoryByLastUseNotByClosing() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = state().activeTab!!.id
+        now += DAY
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        now += DAY
+
+        browser.closeTab(tabA); idle()
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single { it.url == "https://a.test/" }
+        // A was in use until B took focus, not until it closed.
+        assertEquals(START + DAY - 1, visit.time)
+        assertTrue(recent().first() is RecentItem.OpenTab)
+    }
+
+    @Test
+    fun unusedTabsCloseOnlyWhenChosenAndNeverTheFocusedOne() {
+        ready()
+        browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://old.test/")
+        browser.openUrl("https://focused.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://focused.test/")
+        now += 8 * DAY
+
+        browser.runMaintenance(); idle()
+        assertEquals(2, state().openTabCount)
+
+        unusedTabs = UnusedTabs.CLOSE
+        browser.runMaintenance(); idle()
+        assertEquals(1, state().openTabCount)
+        assertEquals("https://focused.test/", state().activeTab?.url)
+        assertTrue(1L in engine.closed)
+        // Its page was last used as long ago: it leaves history too.
+        assertTrue(recent().none { it.url == "https://old.test/" })
+        assertNull(state().notice)
+    }
+
+    @Test
+    fun aTabInUseForDaysIsNotUnusedWhenTheUserSwitchesAway() {
+        unusedTabs = UnusedTabs.CLOSE
+        ready()
+        browser.openUrl("https://long-read.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://long-read.test/")
+        now += 8 * DAY
+        browser.openUrl("https://next.test/", Placement.NEW_TAB); idle()
+
+        browser.runMaintenance(); idle()
+        assertEquals(2, state().openTabCount)
+    }
+
+    @Test
+    fun backFromAnotherAppsLinkLeavesItsPageInHistoryOnly() {
+        ready()
+        browser.openUrl("https://mine.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://mine.test/")
+        val mine = state().activeTab!!.id
+
+        browser.openFromOtherApp("https://link.test/"); idle()
+        commit(2, 20, "https://link.test/")
+        val linked = state().activeTab!!
+        assertTrue(linked.openedByOtherApp)
+
+        browser.returnToOtherApp(linked.id); idle()
+        assertEquals(mine, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+        // No Undo: the user left for the other app.
+        assertNull(state().notice)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://link.test/" })
+    }
+
+    @Test
+    fun anotherAppsLinkBecomesAnOrdinaryTabOnceTheUserSwitchesTabs() {
+        ready()
+        browser.openUrl("https://mine.test/", Placement.NEW_TAB); idle()
+        val mine = state().activeTab!!.id
+        browser.openFromOtherApp("https://link.test/"); idle()
+        val linked = state().activeTab!!.id
+
+        browser.selectTab(mine); idle()
+        browser.selectTab(linked); idle()
+        assertFalse(state().activeTab!!.openedByOtherApp)
+        browser.returnToOtherApp(linked); idle()
+        assertEquals(2, state().openTabCount)
     }
 
     @Test

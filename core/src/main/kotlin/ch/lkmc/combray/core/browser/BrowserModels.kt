@@ -37,6 +37,8 @@ data class ActiveTab(
     val hasView: Boolean,
     /** The page shown is Servo's error page for this address (network or certificate failure). */
     val loadFailed: Boolean = false,
+    /** Another app's link opened this tab and the user has not moved to another tab since. */
+    val openedByOtherApp: Boolean = false,
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView
