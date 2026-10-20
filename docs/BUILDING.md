@@ -26,8 +26,8 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |
 | Android NDK | r29, `29.0.14206865` | `env.sh`, which also rejects a `PATH` where the linker wrapper named in `native/.cargo/config.toml` resolves outside it; Servo's build rejects other majors |
 | Android SDK | platform `android-37` (compileSdk), build-tools 36.0.0 | `app/build.gradle.kts`, `spike/android/app/build.gradle.kts` |
-| App: Gradle / AGP / Kotlin | Gradle 9.7.1 (distribution SHA-256 pinned), AGP 9.4.1, Kotlin 2.4.20, KSP 2.3.12 | `gradle/wrapper/`, `gradle/libs.versions.toml` |
-| App libraries | Compose BOM 2026.09.00 (Material 3 1.4.0), Room 2.8.4, WorkManager 2.12.0, Lifecycle 2.11.0, kotlinx coroutines/serialization 1.11.0; tests: Robolectric 4.17, JUnit 4.13.2 | `gradle/libs.versions.toml` |
+| App: Gradle / AGP / Kotlin | Gradle 9.8.1 (distribution SHA-256 pinned), AGP 9.4.1, Kotlin 2.4.21, KSP 2.3.12 | `gradle/wrapper/`, `gradle/libs.versions.toml` |
+| App libraries | Compose BOM 2026.09.00 (Material 3 1.4.0), Room 2.8.5, WorkManager 2.12.0, Lifecycle 2.11.0, kotlinx coroutines/serialization 1.11.0; tests: Robolectric 4.17, JUnit 4.13.2 | `gradle/libs.versions.toml` |
 | Harness: Gradle / AGP | Gradle 9.5.1 (distribution SHA-256 pinned), Android Gradle Plugin 9.2.1 | `spike/android/gradle/wrapper/`, `spike/android/build.gradle.kts` |
 | Maven artifacts | By version only: no Gradle dependency verification or lockfile yet | Google Maven, Maven Central. Checksum verification should be generated on each supported host OS before a release (M4) |
 | JDK | 21 (verified); Servo's CI uses 17 | host |
