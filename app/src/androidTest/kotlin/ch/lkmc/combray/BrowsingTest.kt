@@ -178,14 +178,19 @@ class BrowsingTest {
         open(Device.GREEN)
         val url = Fixtures.solid(Device.OCHRE)
         compose.activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName))
-        device.awaitPage(url)
+        // The title comes from the engine, so the page has committed (a new tab has its address before).
+        device.awaitState { it.activeTab?.url == url && it.activeTab?.title == Fixtures.title(Device.OCHRE) }
         assertTrue(device.browser.browserState.value.activeTab!!.openedByOtherApp)
+        // The UI enables its Back handling once it has drawn that state, as it has long before a
+        // person presses Back.
+        compose.waitForIdle()
 
         // The system Back key, as the user presses it.
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         val state = device.awaitState { it.openTabCount == 1 }
         assertEquals(Fixtures.solid(Device.GREEN), state.activeTab?.url)
-        assertTrue(device.recent().any { it is RecentItem.Visit && it.url == url })
+        val recent = device.recent()
+        assertTrue("$url not in history: ${recent.take(5)}", recent.any { it is RecentItem.Visit && it.url == url })
         awaitActivityStopped()
     }
 
