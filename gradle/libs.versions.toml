@@ -2,7 +2,7 @@
 # the unit tests, lint and the device checks.
 [versions]
 agp = "9.4.1"
-kotlin = "2.4.20"
+kotlin = "2.4.21"
 ksp = "2.3.12"
 composeBom = "2026.09.00"
 activity = "1.13.0"
