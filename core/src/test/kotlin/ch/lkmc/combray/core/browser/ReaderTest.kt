@@ -54,8 +54,8 @@ class ReaderTest {
 
     private fun state() = browser.browserState.value
 
-    private fun commit(native: Long, document: Long, url: String) {
-        engine.emit(EngineEvent.HistoryChanged(engine.view(native), HistoryKind.DOCUMENT_COMMITTED, document, url, 0, 1))
+    private fun commit(native: Long, document: Long, url: String, kind: HistoryKind = HistoryKind.DOCUMENT_COMMITTED) {
+        engine.emit(EngineEvent.HistoryChanged(engine.view(native), kind, document, url, 0, 1))
         idle()
     }
 
@@ -145,6 +145,72 @@ class ReaderTest {
     }
 
     @Test
+    fun aSameDocumentNavigationLeavesReaderView() {
+        openPage()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+
+        commit(1, 10, NEXT_URL, HistoryKind.SAME_DOCUMENT)
+
+        assertEquals(NEXT_URL, state().activeTab?.url)
+        assertNull(state().reader)
+    }
+
+    @Test
+    fun aPendingArticleCannotArriveUnderAnEarlierSpaAddress() {
+        openPage()
+        browser.openReader(); idle()
+        val capture = engine.articleCaptures.single().second
+
+        commit(1, 10, NEXT_URL, HistoryKind.SAME_DOCUMENT)
+        assertNull(state().reader)
+        article(1, 10, capture, ARTICLE)
+
+        assertNull(state().reader)
+        assertEquals(NEXT_URL, state().activeTab?.url)
+    }
+
+    @Test
+    fun anAddressChangingHistoryUpdateLeavesReaderView() {
+        openPage()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+
+        commit(1, 10, NEXT_URL, HistoryKind.LIST_UPDATED)
+
+        assertNull(state().reader)
+    }
+
+    @Test
+    fun aListOnlyUpdateAtTheSameAddressKeepsReaderView() {
+        openPage()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+        val reader = state().reader
+
+        commit(1, 10, URL, HistoryKind.LIST_UPDATED)
+
+        assertEquals(reader, state().reader)
+    }
+
+    @Test
+    fun aHiddenTabsAddressChangeDoesNotDismissReaderView() {
+        openPage()
+        val first = state().activeTab!!.id
+        browser.openUrl("https://other.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://other.test/")
+        browser.selectTab(first); idle()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+        val reader = state().reader
+
+        commit(2, 20, "https://other.test/next", HistoryKind.SAME_DOCUMENT)
+
+        assertEquals(reader, state().reader)
+        assertEquals(URL, state().activeTab?.url)
+    }
+
+    @Test
     fun aTabWithoutAPageHasNoReaderView() {
         browser.newTab(); idle()
         browser.openReader(); idle()
@@ -177,6 +243,7 @@ class ReaderTest {
     private companion object {
         const val START = 1_760_000_000_000L
         const val URL = "https://news.test/story"
+        const val NEXT_URL = "https://news.test/next"
         const val ARTICLE = """{"title":"Story","byline":null,"site":null,"rtl":false,"blocks":[{"k":"p","s":[["Body"]]}]}"""
     }
 }

@@ -422,11 +422,13 @@ class BrowserCoordinator(
 
         database.withTransaction {
             val current = tab.currentVisitId?.let { dao.visit(it) }
+            // A single-page app can replace the article without replacing its document.
+            if (reader?.tabId == view.tabId && (event.kind == HistoryKind.DOCUMENT_COMMITTED || event.url != tab.url)) {
+                reader = null
+            }
             val visit = when (event.kind) {
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.currentDocument = event.document
-                    // Reader view shows the page it was opened on, never the next one.
-                    if (reader?.tabId == view.tabId) reader = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
