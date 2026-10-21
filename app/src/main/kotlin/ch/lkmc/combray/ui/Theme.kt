@@ -48,6 +48,8 @@ internal val LightColors = lightColorScheme(
     outline = Color(0xFF727970),
     outlineVariant = Color(0xFFC2C8BE),
     scrim = Color(0xFF000000),
+    surfaceDim = Color(0xFFE7E0D4),
+    surfaceBright = Color(0xFFFFFFFF),
     // Warm surface ladder: low steps lift toward white, high steps deepen the ivory.
     surfaceContainerLowest = Color(0xFFFFFEFB),
     surfaceContainerLow = Color(0xFFFFFCF7),
@@ -86,6 +88,8 @@ internal val DarkColors = darkColorScheme(
     outline = Color(0xFF8A938A),
     outlineVariant = Color(0xFF414941),
     scrim = Color(0xFF000000),
+    surfaceDim = Color(0xFF0A0E0C),
+    surfaceBright = Color(0xFF2E3833),
     // Dark elevation is lighter than the page: sheets and the bottom bar rise.
     surfaceContainerLowest = Color(0xFF0A0E0C),
     surfaceContainerLow = Color(0xFF151B17),

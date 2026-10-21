@@ -39,11 +39,13 @@ class ThemeContrastTest {
     @Test
     fun lightSurfaceLadderDarkensWithElevation() {
         val order = listOf(
+            LightColors.surfaceBright,
             LightColors.surfaceContainerLowest,
             LightColors.surfaceContainerLow,
             LightColors.surfaceContainer,
             LightColors.surfaceContainerHigh,
             LightColors.surfaceContainerHighest,
+            LightColors.surfaceDim,
         )
         assertLuminanceOrder(order, descending = true, name = "light ladder")
         // Sheet containers must be a real step away from the page background, not a token
@@ -55,12 +57,14 @@ class ThemeContrastTest {
     @Test
     fun darkSurfaceLadderLightensWithElevation() {
         val order = listOf(
+            DarkColors.surfaceDim,
             DarkColors.surfaceContainerLowest,
             DarkColors.surface,
             DarkColors.surfaceContainerLow,
             DarkColors.surfaceContainer,
             DarkColors.surfaceContainerHigh,
             DarkColors.surfaceContainerHighest,
+            DarkColors.surfaceBright,
         )
         assertLuminanceOrder(order, descending = false, name = "dark ladder")
     }
@@ -81,11 +85,12 @@ class ThemeContrastTest {
             Triple("onErrorContainer/errorContainer", scheme.onErrorContainer, scheme.errorContainer),
             Triple("inverseOnSurface/inverseSurface", scheme.inverseOnSurface, scheme.inverseSurface),
             Triple("inversePrimary/inverseSurface", scheme.inversePrimary, scheme.inverseSurface),
-            // Supporting text on the sheet containers the bottom bar and sheets use,
-            // plus label text on surfaceVariant/surfaceContainer fills (text fields,
-            // chips, nav bar destinations).
+            // Supporting text on the sheet containers the bottom bar and sheets use, plus
+            // labels on the fills M3 components resolve to: surfaceVariant and containers
+            // (nav destinations, dropdowns), highest (filled text fields, unselected chips).
             Triple("onSurface/low", scheme.onSurface, scheme.surfaceContainerLow),
             Triple("onSurface/high", scheme.onSurface, scheme.surfaceContainerHigh),
+            Triple("onSurface/highest", scheme.onSurface, scheme.surfaceContainerHighest),
             Triple("onSurfaceVariant/surfaceVariant", scheme.onSurfaceVariant, scheme.surfaceVariant),
             Triple("onSurfaceVariant/container", scheme.onSurfaceVariant, scheme.surfaceContainer),
         )
