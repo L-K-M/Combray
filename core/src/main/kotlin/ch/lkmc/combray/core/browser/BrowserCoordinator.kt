@@ -729,7 +729,19 @@ class BrowserCoordinator(
      */
     private suspend fun onEngineError(event: EngineEvent.EngineError) {
         Log.w(LOG_TAG, "engine refused a request: ${event.message}")
-        val view = event.tab?.let { liveByNative[it] } ?: return
+        val view = event.tab?.let { liveByNative[it] }
+        if (view == null) {
+            // Engine-level failure (EGL, profile directory, ...): while the app still waits
+            // for engine_ready, "starting" would never resolve — fail into the overlay that
+            // already renders it. Errors for a forgotten view or a refused request are not
+            // engine-level and leave the status alone.
+            if (event.tab == null && event.request == null) {
+                state.update { current ->
+                    if (current.engine == EngineStatus.STARTING) current.copy(engine = EngineStatus.FAILED) else current
+                }
+            }
+            return
+        }
         if (view.generation != null) {
             if (event.request != null) state.update { it.copy(notice = Notice.AddressNotOpened) }
             return

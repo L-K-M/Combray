@@ -732,6 +732,36 @@ class BrowserCoordinatorTest {
         assertTrue(1L !in engine.closed)
     }
 
+    @Test
+    fun engineLevelErrorBeforeReadyFailsInsteadOfStartingForever() {
+        assertEquals(EngineStatus.STARTING, state().engine)
+
+        engine.emit(EngineEvent.EngineError("EGL init failed", tab = null, request = null))
+        idle()
+
+        assertEquals(EngineStatus.FAILED, state().engine)
+    }
+
+    @Test
+    fun engineLevelErrorAfterReadyLeavesTheEngineRunning() {
+        ready()
+
+        engine.emit(EngineEvent.EngineError("transient", tab = null, request = null))
+        idle()
+
+        assertEquals(EngineStatus.READY, state().engine)
+    }
+
+    @Test
+    fun anErrorForAnUnknownViewDoesNotFailTheEngine() {
+        ready()
+
+        engine.emit(EngineEvent.EngineError("stale view", tab = 99, request = null))
+        idle()
+
+        assertEquals(EngineStatus.READY, state().engine)
+    }
+
     private companion object {
         const val NONE = FakeEngine.NONE
         const val PAGE_TAB = 1L shl 52
