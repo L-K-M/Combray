@@ -96,3 +96,7 @@ All notable changes to this project are documented here. The format follows
   stale APKs that do not match Gradle output metadata. Failed copying or
   hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
+- A `data:` page could make the address chip, Recent and its dialog titles
+  name another site by putting `://` and that site's name in its own
+  address. Pages without a host now show only their scheme ("data:",
+  "about:blank", "file:"), and their dialogs say "This page says".

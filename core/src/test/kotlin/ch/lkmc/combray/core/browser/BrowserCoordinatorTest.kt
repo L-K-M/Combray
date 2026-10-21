@@ -621,6 +621,17 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aDialogFromAPageWithoutAHostNamesNoSite() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        // The page moved itself to a data: address that mentions another site.
+        commit(1, 10, "data:text/html,<!--://accounts.example.com/-->")
+
+        showControl(1, 5, PageControlContent.Alert("Sign in again"))
+        assertNull(state().pageControl!!.site)
+    }
+
+    @Test
     fun aWithdrawnControlDisappearsAndClosingTheTabDropsItsControls() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
