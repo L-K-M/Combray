@@ -389,9 +389,23 @@ class BrowserCoordinator(
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
             is EngineEvent.EngineError -> onEngineError(event)
-            // Painted (1/s while painting), TabSelected, SurfaceBound and friends cannot change
-            // browser state: publishing would only spend Room reads on the serialized queue.
-            else -> return@submit
+            // Pure notifications that cannot change browser state: skip the publish, which would
+            // only spend Room reads on the serialized queue. Painted arrives once per second per
+            // tab while painting. TabSelected only ever echoes a selection the coordinator made:
+            // the engine emits it solely from its SelectTab command handler (engine.rs). Every
+            // subtype is listed, so a new EngineEvent kind fails to compile until handled.
+            is EngineEvent.Painted,
+            is EngineEvent.TabSelected,
+            is EngineEvent.SurfaceBound,
+            is EngineEvent.SurfaceUnbound,
+            is EngineEvent.NavigationRequested,
+            is EngineEvent.PageNavigationRequested,
+            is EngineEvent.EvaluationResult,
+            is EngineEvent.LateCaptureResult,
+            is EngineEvent.ProfilePersisted,
+            is EngineEvent.ShutdownComplete,
+            is EngineEvent.Other,
+            -> return@submit
         }
         publish()
     }
