@@ -19,6 +19,8 @@ class FormattingTest {
         assertEquals("about:blank", displayHost("about:blank#top"))
         assertEquals("file:", displayHost("file:///sdcard/a.html"))
         assertEquals("javascript:", displayHost("javascript:alert(1)"))
+        // Surrounding space is ignored, as HostNames.of ignores it.
+        assertEquals("data:", displayHost("  data:text/html,x"))
         assertEquals("…", displayHost("accounts.example.com:x"))
         assertEquals("example.org", displayHost("https://www.example.org/a"))
         // A blob: page shows the site that made it.

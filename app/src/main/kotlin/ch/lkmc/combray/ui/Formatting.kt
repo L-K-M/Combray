@@ -8,7 +8,8 @@ import ch.lkmc.combray.core.policy.HostNames
  * by its scheme alone, never by text from its address, which the page itself can choose.
  */
 fun displayHost(url: String): String {
-    val host = HostNames.of(url) ?: return HostlessPage.of(url).label(url)
+    val address = url.trim()
+    val host = HostNames.of(address) ?: return HostlessPage.of(address).label(address)
     return HostNames.forDisplay(host).removePrefix("www.")
 }
 
