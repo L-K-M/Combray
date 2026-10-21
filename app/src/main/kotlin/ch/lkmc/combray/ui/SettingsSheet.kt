@@ -3,6 +3,7 @@ package ch.lkmc.combray.ui
 import android.content.res.Resources
 import android.text.format.Formatter
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +60,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.BuildConfig
 import ch.lkmc.combray.R
 import ch.lkmc.combray.ThirdPartyNotices
+import ch.lkmc.combray.core.browser.Appearance
+import ch.lkmc.combray.core.browser.ReaderTextSize
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.Retention
 import ch.lkmc.combray.core.browser.UnusedTabs
@@ -160,6 +164,9 @@ fun SettingsSheet(
             val days = Retention().closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
             UnusedTabsSetting(settings, days, onUnusedTabsChanged)
+            SectionTitle(R.string.settings_display_title)
+            AppearanceSetting(settings)
+            ReaderSizeSetting(settings)
             SectionTitle(R.string.settings_about_title)
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
             Text(stringResource(R.string.settings_engine, BuildConfig.SERVO_VERSION))
@@ -190,6 +197,56 @@ private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: (
     }
     Text(stringResource(R.string.settings_close_unused_tabs_body), style = MaterialTheme.typography.bodySmall)
 }
+
+/** The app's colors: follow the system, or one theme whatever the system says. */
+@Composable
+private fun AppearanceSetting(settings: BrowserSettings) {
+    val choice by settings.appearance.collectAsStateWithLifecycle()
+    ChoiceSetting(stringResource(R.string.settings_appearance), Appearance.entries.map { appearanceLabel(it) }, choice.ordinal) {
+        settings.setAppearance(Appearance.entries[it])
+    }
+}
+
+/** Reader view's own type: the owner picks the size once, in Settings. */
+@Composable
+private fun ReaderSizeSetting(settings: BrowserSettings) {
+    val choice by settings.readerTextSize.collectAsStateWithLifecycle()
+    ChoiceSetting(stringResource(R.string.settings_reader_size), ReaderTextSize.entries.map { readerSizeLabel(it) }, choice.ordinal) {
+        settings.setReaderTextSize(ReaderTextSize.entries[it])
+    }
+}
+
+/** A labeled row of choices; the chips announce their own state, like Recent's scopes. */
+@Composable
+private fun ChoiceSetting(label: String, options: List<String>, selected: Int, onChoose: (Int) -> Unit) {
+    Text(label, modifier = Modifier.padding(top = 8.dp))
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+    ) {
+        options.forEachIndexed { index, option ->
+            FilterChip(selected = index == selected, onClick = { onChoose(index) }, label = { Text(option) })
+        }
+    }
+}
+
+@Composable
+private fun appearanceLabel(appearance: Appearance): String = stringResource(
+    when (appearance) {
+        Appearance.SYSTEM -> R.string.appearance_system
+        Appearance.LIGHT -> R.string.appearance_light
+        Appearance.DARK -> R.string.appearance_dark
+    },
+)
+
+@Composable
+private fun readerSizeLabel(size: ReaderTextSize): String = stringResource(
+    when (size) {
+        ReaderTextSize.SMALL -> R.string.reader_size_small
+        ReaderTextSize.DEFAULT -> R.string.reader_size_default
+        ReaderTextSize.LARGE -> R.string.reader_size_large
+    },
+)
 
 /** Each service's own wording: an API key for Karakeep, an access token for Hister. */
 private data class ServiceLabels(

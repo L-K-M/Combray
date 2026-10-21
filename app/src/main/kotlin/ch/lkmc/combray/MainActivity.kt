@@ -5,6 +5,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.ui.BrowserScreen
@@ -21,7 +23,9 @@ class MainActivity : ComponentActivity() {
         val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromRecents) openLink(intent)
         setContent {
-            CombrayTheme {
+            // The owner's choice in Settings, or the system's.
+            val appearance by graph.settings.appearance.collectAsStateWithLifecycle()
+            CombrayTheme(appearance) {
                 // Back from a page another app opened returns to that app.
                 BrowserScreen(graph, onLeave = { moveTaskToBack(true) })
             }

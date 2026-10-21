@@ -52,6 +52,7 @@ import ch.lkmc.combray.core.browser.Article
 import ch.lkmc.combray.core.browser.ArticleBlock
 import ch.lkmc.combray.core.browser.BlockKind
 import ch.lkmc.combray.core.browser.ReaderState
+import ch.lkmc.combray.core.browser.ReaderTextSize
 
 /** Readable line length for body text. */
 private val MAX_TEXT_WIDTH = 680.dp
@@ -62,7 +63,7 @@ private val QUOTE_BAR_WIDTH = 3.dp
  * Page content is never rendered as markup here; links go through [onOpenLink].
  */
 @Composable
-fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
+fun ReaderView(state: ReaderState, readerSize: ReaderTextSize, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
             is ReaderState.Loading -> ReaderMessage(stringResource(R.string.reader_loading)) { CircularProgressIndicator() }
@@ -72,7 +73,7 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
             is ReaderState.Ready -> {
                 val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
                 CompositionLocalProvider(LocalLayoutDirection provides direction) {
-                    ArticleText(state.article, onOpenLink)
+                    ArticleText(state.article, readerSize, onOpenLink)
                 }
             }
         }
@@ -80,7 +81,7 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
 }
 
 @Composable
-private fun ArticleText(article: Article, onOpenLink: (String) -> Unit) {
+private fun ArticleText(article: Article, readerSize: ReaderTextSize, onOpenLink: (String) -> Unit) {
     // Selectable, so a passage can be copied; links stay tappable inside the selection.
     SelectionContainer {
         LazyColumn(
@@ -89,7 +90,7 @@ private fun ArticleText(article: Article, onOpenLink: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { ArticleHeader(article) }
-            items(article.blocks) { block -> Block(block, onOpenLink) }
+            items(article.blocks) { block -> Block(block, readerSize, onOpenLink) }
             if (article.truncated) {
                 item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
             }
@@ -111,9 +112,9 @@ private fun ArticleHeader(article: Article) {
 }
 
 @Composable
-private fun Block(block: ArticleBlock, onOpenLink: (String) -> Unit) {
+private fun Block(block: ArticleBlock, readerSize: ReaderTextSize, onOpenLink: (String) -> Unit) {
     val text = annotated(block, onOpenLink)
-    val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 28.sp)
+    val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp * readerSize.scale, lineHeight = 28.sp * readerSize.scale)
     when (block.kind) {
         BlockKind.HEADING -> Text(
             text,
@@ -142,7 +143,7 @@ private fun Block(block: ArticleBlock, onOpenLink: (String) -> Unit) {
         }
         BlockKind.PREFORMATTED -> Text(
             text,
-            style = body.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp),
+            style = body.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp * readerSize.scale, lineHeight = 20.sp * readerSize.scale),
             softWrap = false,
             modifier = Modifier.articleWidth().horizontalScroll(rememberScrollState()),
         )

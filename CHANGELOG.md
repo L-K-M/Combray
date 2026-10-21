@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Settings › Display: appearance (follow the system, light or dark) and
+  reader text size (small, default, large), applied at once.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

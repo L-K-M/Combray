@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import ch.lkmc.combray.core.browser.Appearance
 
 // Pine green and ivory from the launcher artwork (media-sources/icon.png).
 private val Pine = Color(0xFF0E452E)
@@ -29,6 +30,11 @@ private val DarkColors = darkColorScheme(
 )
 
 @Composable
-fun CombrayTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors, content = content)
+fun CombrayTheme(appearance: Appearance = Appearance.SYSTEM, content: @Composable () -> Unit) {
+    val dark = when (appearance) {
+        Appearance.SYSTEM -> isSystemInDarkTheme()
+        Appearance.LIGHT -> false
+        Appearance.DARK -> true
+    }
+    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
 }

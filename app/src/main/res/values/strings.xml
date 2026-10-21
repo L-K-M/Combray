@@ -104,6 +104,15 @@
     <string name="page_crashed">This page stopped working.</string>
     <string name="home_title">New tab</string>
     <string name="home_body">Search with Kagi or open an address.</string>
+    <string name="settings_display_title">Display</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="appearance_system">Follow system</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="settings_reader_size">Reader text size</string>
+    <string name="reader_size_small">Small</string>
+    <string name="reader_size_default">Default</string>
+    <string name="reader_size_large">Large</string>
 
     <!-- Page info -->
     <string name="page_info_address">Address</string>

@@ -80,6 +80,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val tab = state.activeTab
+    val readerSize by graph.settings.readerTextSize.collectAsStateWithLifecycle()
     val saveStatus by remember(tab?.url) { graph.integrations.saveStatus(tab?.url) }
         .collectAsStateWithLifecycle(SaveStatus.Unsaved)
     val histerService by graph.integrations.hister.service.collectAsStateWithLifecycle(null)
@@ -163,6 +164,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 state.reader?.let { reader ->
                     ReaderView(
                         state = reader,
+                        readerSize = readerSize,
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
                             browser.closeReader()
