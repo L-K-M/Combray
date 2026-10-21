@@ -1,18 +1,20 @@
 package ch.lkmc.combray
 
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.espresso.IdlingPolicies
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.data.ServiceKind
 import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.KarakeepRead
 import ch.lkmc.combray.core.integration.SaveStatus
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -141,6 +143,10 @@ class SaveTest {
         tapSave()
         awaitSaveStatus(url) { it == SaveStatus.Saved }
 
+        // Under software emulation, Recent's first opening in a process keeps Compose busy for
+        // longer than Espresso's 26 s idle limit.
+        IdlingPolicies.setIdlingResourceTimeout(Device.LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        IdlingPolicies.setMasterPolicyTimeout(Device.LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         device.dismissSystemDialogs()
         compose.onNodeWithContentDescription("Recent", substring = true).performClick()
         compose.onNode(hasText("Open tabs") and isSelected()).assertExists()
@@ -149,6 +155,8 @@ class SaveTest {
         // The bookmark row: in this scope no tab row shows the page's title.
         val title = "SOLID-%06x".format(SHOWN_IN_RECENT)
         compose.waitUntilAtLeastOneExists(hasText(title), Device.LOAD_TIMEOUT_MS)
+        // setUp's "Tab closed" notice shows in the sheet over its last row until it times out.
+        compose.waitUntilDoesNotExist(hasText("Undo"), Device.LOAD_TIMEOUT_MS)
         compose.onNodeWithText(title).performClick()
         // Two steps, so a failure says which one: the tap closes Recent, then a new tab shows the page.
         compose.waitUntilDoesNotExist(hasText(title), Device.LOAD_TIMEOUT_MS)
