@@ -281,7 +281,15 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             notices = graph.notices,
             onDismiss = dismiss,
         )
-        Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
+        Sheet.PAGE_INFO -> {
+            val url = tab?.url
+            if (url != null) {
+                PageInfoDialog(url = url, onDismiss = dismiss)
+            } else {
+                // Dismissing during composition writes state while Compose is building the tree.
+                LaunchedEffect(Unit) { dismiss() }
+            }
+        }
     }
 
     // Shown over any sheet: the page is blocked until it gets an answer.
