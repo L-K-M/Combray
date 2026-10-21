@@ -59,6 +59,7 @@ class ReaderTest {
 
         compose.onNodeWithText("READER-BODY-ONE", substring = true).assertIsDisplayed()
         // The system Back key leaves reader view, on the same page.
+        device.dismissSystemDialogs()
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         val state = device.awaitState { it.reader == null }
         assertEquals(Fixtures.ARTICLE, state.activeTab?.url)

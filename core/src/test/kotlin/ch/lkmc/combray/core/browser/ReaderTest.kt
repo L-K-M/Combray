@@ -157,6 +157,17 @@ class ReaderTest {
     }
 
     @Test
+    fun aHashRoutedArticleChangeLeavesReaderView() {
+        openPage()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+
+        commit(1, 10, "$URL#/next-article", HistoryKind.SAME_DOCUMENT)
+
+        assertNull(state().reader)
+    }
+
+    @Test
     fun aPendingArticleCannotArriveUnderAnEarlierSpaAddress() {
         openPage()
         browser.openReader(); idle()
@@ -188,9 +199,10 @@ class ReaderTest {
         article(1, 10, engine.articleCaptures.single().second, ARTICLE)
         val reader = state().reader
 
-        commit(1, 10, URL, HistoryKind.LIST_UPDATED)
-
-        assertEquals(reader, state().reader)
+        for (kind in listOf(HistoryKind.LIST_UPDATED, HistoryKind.SAME_DOCUMENT)) {
+            commit(1, 10, URL, kind)
+            assertEquals(reader, state().reader)
+        }
     }
 
     @Test
