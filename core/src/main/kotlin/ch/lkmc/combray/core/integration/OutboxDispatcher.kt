@@ -70,9 +70,10 @@ class OutboxDispatcher(
 
         /**
          * Longer than the slowest live dispatch: a Karakeep save-with-list is two requests, and
-         * each may try both configured roots at up to 8 s connect + 15 s read. That bounds a
-         * dispatch near a minute before DNS; the lease stays comfortably above it so a live
-         * claim never expires under a second dispatcher.
+         * each retries the second root only when the first never connected. That bounds a
+         * request at ~8 s failed connect + ~23 s successful one (8 s connect + 15 s read), so
+         * ~62 s per dispatch before DNS, which the timeouts do not bound. The lease stays above
+         * it so a live claim never expires under a second dispatcher.
          */
         const val LEASE_MS = 150_000L
         const val MAX_JOBS_PER_DRAIN = 50
