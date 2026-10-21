@@ -11,3 +11,7 @@ fun displayHost(url: String): String {
 
 fun relativeTime(time: Long, now: Long): String =
     DateUtils.getRelativeTimeSpanString(time, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
+
+/** What a share carries: the title as the first line (when there is one), then the address. */
+fun shareText(url: String, title: String?): String =
+    listOfNotNull(title?.takeIf { it.isNotBlank() }, url).joinToString("\n")
