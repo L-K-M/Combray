@@ -78,6 +78,9 @@ sealed interface EngineEvent {
 
     data class PageNavigationRequested(val view: ViewRef, val url: String) : EngineEvent
 
+    /** The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed. */
+    data class ExternalLink(val view: ViewRef, val url: String) : EngineEvent
+
     /** [index] and [length] describe the view's session history after the change. */
     data class HistoryChanged(
         val view: ViewRef,
@@ -167,6 +170,7 @@ sealed interface EngineEvent {
                 "tab_opened" -> TabOpened(event.view(), ViewRef(event.long("opener_tab"), event.long("opener_generation")))
                 "navigation_requested" -> NavigationRequested(event.view(), event.long("request"), event.string("url"))
                 "page_navigation_requested" -> PageNavigationRequested(event.view(), event.string("url"))
+                "external_link" -> ExternalLink(event.view(), event.string("url"))
                 "document_committed" -> event.history(HistoryKind.DOCUMENT_COMMITTED)
                 "same_document_navigation" -> event.history(HistoryKind.SAME_DOCUMENT)
                 "history_updated" -> event.history(HistoryKind.LIST_UPDATED)

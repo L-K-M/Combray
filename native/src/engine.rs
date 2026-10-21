@@ -27,10 +27,11 @@ use servo::CreateNewWebViewRequest;
 use servo::{
     AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
     EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
-    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts,
-    PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
-    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType,
-    TouchId, TouchPointerType, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
+    NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
+    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog,
+    TouchEvent, TouchEventType, TouchId, TouchPointerType, WebView, WebViewBuilder, WebViewPoint,
+    WindowRenderingContext,
 };
 use url::Url;
 
@@ -45,6 +46,7 @@ use crate::events::{
     Attribution, CaptureReport, CaptureStatus, EngineEvent, HistoryChange, LoadPhase, ViewKey,
 };
 use crate::native_window::NativeWindow;
+use crate::navigation::{self, PageNavigation};
 use crate::panic_policy;
 
 /// Receives engine events on the engine thread.
@@ -69,6 +71,9 @@ const PAINT_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_COMMANDS_PER_ITERATION: usize = 64;
 /// Nesting limit when converting test evaluation results to JSON.
 const MAX_JSON_DEPTH: usize = 64;
+/// How long a tap or key press lets the page hand one link to another app (as Chromium's
+/// transient user activation).
+const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// First tab ID for views that pages open (`window.open`). Applications number their own tabs
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
@@ -255,6 +260,8 @@ struct Engine {
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// The user's last tap or key press: in which tab and when.
+    last_activation: Option<(i64, Instant)>,
 }
 
 impl Engine {
@@ -279,6 +286,7 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            last_activation: None,
         }
     }
 
@@ -761,6 +769,26 @@ impl Engine {
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        if phase == TouchPhase::Up {
+            self.note_activation();
+        }
+    }
+
+    fn note_activation(&mut self) {
+        self.last_activation = self.active.map(|tab| (tab, Instant::now()));
+    }
+
+    /// Whether the user tapped or pressed a key in `tab`, the visible one, moments ago. Using it
+    /// up means one tap hands at most one link to another app.
+    fn take_activation(&mut self, tab: i64) -> bool {
+        let recent = self.active == Some(tab)
+            && self.last_activation.is_some_and(|(activated, at)| {
+                activated == tab && at.elapsed() <= USER_ACTIVATION_WINDOW
+            });
+        if recent {
+            self.last_activation = None;
+        }
+        recent
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
@@ -777,6 +805,9 @@ impl Engine {
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             state, key,
         )));
+        if action == KeyAction::Press {
+            self.note_activation();
+        }
     }
 
     /// A long-press: a secondary-button click, which makes Servo fire `contextmenu` and, unless
@@ -1072,14 +1103,7 @@ impl Engine {
                     self.emit(EngineEvent::UnattributedTitle { view, title });
                 }
             },
-            DelegateEvent::PageNavigationRequested { view, url } => {
-                if self.live_tab(view).is_some() {
-                    self.emit(EngineEvent::PageNavigationRequested {
-                        view,
-                        url: url.into(),
-                    });
-                }
-            },
+            DelegateEvent::PageNavigation { view, request } => self.page_navigation(view, request),
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
@@ -1128,6 +1152,44 @@ impl Engine {
             DelegateEvent::Crashed { view, reason } => {
                 error!("view {view:?} crashed: {reason}");
                 self.emit(EngineEvent::Crashed { view, reason });
+            },
+        }
+    }
+
+    /// Web addresses load. A link for another app goes to the application only right after the
+    /// user's own tap or key press in the visible tab, so a page or an embedded ad cannot open
+    /// apps by itself; the page stays either way. Anything else (`file:` ...) is refused.
+    fn page_navigation(&mut self, view: ViewKey, request: NavigationRequest) {
+        let url = request.url.clone();
+        match navigation::classify(url.scheme()) {
+            PageNavigation::Allow => {
+                request.allow();
+                if self.live_tab(view).is_some() {
+                    self.emit(EngineEvent::PageNavigationRequested {
+                        view,
+                        url: url.into(),
+                    });
+                }
+            },
+            PageNavigation::Deny => request.deny(),
+            PageNavigation::External => {
+                request.deny();
+                let bounded = url.as_str().chars().count() <= controls::MAX_URL_CHARS;
+                if self.live_tab(view).is_none() || !bounded {
+                    return;
+                }
+                if !self.take_activation(view.tab) {
+                    // No address: it is the page's. The scheme says what kind of app it wanted.
+                    info!(
+                        "{} link without the user's tap in the visible tab: refused",
+                        url.scheme()
+                    );
+                    return;
+                }
+                self.emit(EngineEvent::ExternalLink {
+                    view,
+                    url: url.into(),
+                });
             },
         }
     }

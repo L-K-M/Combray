@@ -95,6 +95,12 @@ sealed interface ReaderState {
     data class Unavailable(override val tabId: String) : ReaderState
 }
 
+/**
+ * A link the user tapped on the shown page that another app opens (mail, phone, maps, app
+ * links). [id] tells two taps on the same address apart.
+ */
+data class ExternalLink(val id: Long, val url: String)
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
     /** Null: no tab is focused, the internal home is shown. */
@@ -102,6 +108,8 @@ data class BrowserState(
     val openTabCount: Int = 0,
     /** The page focused (or left) an editable element: show or hide the keyboard. */
     val keyboard: KeyboardRequest? = null,
+    /** A link for another app, until the UI hands it to Android. */
+    val externalLink: ExternalLink? = null,
     /** The focused page's oldest unanswered control. */
     val pageControl: PageControl? = null,
     /** Reader view over the focused tab, while it is open. */

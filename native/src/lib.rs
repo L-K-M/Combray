@@ -17,6 +17,7 @@
 pub mod capture;
 pub mod controls;
 pub mod events;
+pub mod navigation;
 mod panic_policy;
 
 #[cfg(target_os = "android")]

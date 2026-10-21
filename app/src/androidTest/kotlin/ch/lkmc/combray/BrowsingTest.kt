@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -219,6 +220,71 @@ class BrowsingTest {
         assertEquals(INTERSECTION_VISIBLE, state.activeTab?.title)
     }
 
+    @Test
+    fun aLinkForAnotherAppKeepsThePageAndSaysWhenNoAppTakesIt() {
+        openExternal("market")
+
+        // No app takes market: links on the emulator. Combray says so; the page stays as it was.
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("market"), state.activeTab?.url)
+        assertFalse(state.activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun anAppLinkWithoutItsAppOpensItsFallbackPageInTheSameTab() {
+        val tab = openExternal("intent")
+        tapLinkUntil { device.browser.browserState.value.activeTab?.url == Fixtures.solid(Device.GREEN) }
+
+        val state = device.awaitPage(Fixtures.solid(Device.GREEN))
+        assertEquals(tab, state.activeTab?.id)
+        assertScreen(Device.GREEN)
+    }
+
+    @Test
+    fun pagesCannotOpenFilesOrHandLinksToAppsByThemselves() {
+        openExternal("file")
+        // The title changes only after the page's own click handler ran and the page stayed.
+        tapLinkUntil { device.browser.browserState.value.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        var state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("file"), state.activeTab?.url)
+
+        // Without a tap, the page's own script cannot send the user to another app.
+        val scripted = Fixtures.external("market", LinkTrigger.SCRIPT)
+        device.browser.openUrl(scripted, Placement.CURRENT_TAB)
+        state = device.awaitState { it.activeTab?.url == scripted && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertFalse(state.activeTab!!.loadFailed)
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        assertTrue(compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * Taps the page-filling fixture link until [done]. Under software emulation a tap right after
+     * the first paint can arrive before the page can hit-test it, and is then lost.
+     */
+    private fun tapLinkUntil(done: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + Device.LOAD_TIMEOUT_MS
+        while (SystemClock.uptimeMillis() < deadline) {
+            tapPageCenter()
+            val waitUntil = SystemClock.uptimeMillis() + TAP_OUTCOME_MS
+            while (SystemClock.uptimeMillis() < waitUntil) {
+                compose.waitForIdle()
+                if (done()) return
+                SystemClock.sleep(POLL_MS)
+            }
+        }
+        throw AssertionError("tapping the link had no effect")
+    }
+
+    /** Opens an external-link fixture and waits until it is painted; returns its tab. */
+    private fun openExternal(to: String): String {
+        device.browser.openUrl(Fixtures.external(to), Placement.CURRENT_TAB)
+        val state = device.awaitPage(Fixtures.external(to))
+        assertScreen(Device.OCHRE)
+        return state.activeTab!!.id
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -232,6 +298,9 @@ class BrowsingTest {
 
     private companion object {
         const val STOP_TIMEOUT_MS = 10_000L
+        /** How long one tap may take to show its effect before the next try. */
+        const val TAP_OUTCOME_MS = 15_000L
+        const val POLL_MS = 500L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"
     }

@@ -80,6 +80,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Tapping a `mailto:`, `tel:`, map or app link on a page replaced the page
+  with an error. Such links now open in the app that handles them, or say
+  that none can; an `intent:` link's fallback page opens instead. Pages can
+  no longer open apps without a tap, nor `file:` addresses at all.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

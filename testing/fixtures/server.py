@@ -16,6 +16,10 @@ Pages
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /external.html?to=market|intent|file[&auto=1]
+                             page-filling #8a5a2b link (or, with auto, a script on load) to another
+                             app's link or a file; the title turns EXTERNAL:still-here 3 s later if
+                             the page is still shown
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   (the three control pages have a #1f6f78 margin on the left for paint checks)
@@ -99,6 +103,27 @@ INTERSECTION_PAGE = page(
     "  if (entries.some(function (e) { return e.isIntersecting; })) document.title = 'IO:visible';"
     " }).observe(document.getElementById('target')); }</script>",
 )
+
+# Links a page may not follow inside Combray: no app on the emulator takes the market: link, the
+# intent: link names a fallback page (/solid/2e6b4f.html), and file: is refused.
+EXTERNAL_LINKS = {
+    "market": "market://details?id=ch.lkmc.combray.fixture",
+    "intent": "intent://fixture#Intent;scheme=combray-fixture;"
+              "S.browser_fallback_url=http%3A%2F%2Flocalhost%3A8766%2Fsolid%2F2e6b4f.html;end",
+    "file": "file:///system/etc/hosts",
+}
+STILL_HERE = "setTimeout(function(){document.title='EXTERNAL:still-here';},3000);"
+
+
+def external_page(to, automatic):
+    href = json.dumps(EXTERNAL_LINKS[to])
+    if automatic:
+        body = f"<p>external</p><script>addEventListener('load',function(){{location.href={href};{STILL_HERE}}});</script>"
+    else:
+        body = (f"<a id='l' href='{html.escape(EXTERNAL_LINKS[to])}' onclick=\"{STILL_HERE}\" "
+                "style='display:block;height:100vh;font-size:48px;color:#fff'>other app</a>")
+    return page("EXTERNAL", body, "<style>html,body{margin:0;background:#8a5a2b}</style>")
+
 
 CONTROL_PAGES = {
     "/select.html": (
@@ -200,6 +225,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/external.html":
+            to = query.get("to", [""])[0]
+            if to not in EXTERNAL_LINKS:
+                return self.send(400, page("bad link", ""))
+            return self.send(200, external_page(to, query.get("auto", [""])[0] == "1"))
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

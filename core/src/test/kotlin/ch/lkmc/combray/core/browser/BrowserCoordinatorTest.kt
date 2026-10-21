@@ -82,6 +82,41 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aLinkForAnotherAppFromTheShownPageIsHandedOnOnce() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+        val link = state().externalLink!!
+        assertEquals("mailto:ada@example.org", link.url)
+        assertEquals("https://a.test/", state().activeTab?.url)
+
+        browser.externalLinkHandled(link)
+        assertNull(state().externalLink)
+
+        // The same address again is a new request, not the one already handled.
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+        assertNotEquals(link, state().externalLink)
+    }
+
+    @Test
+    fun aHiddenTabCannotHandALinkToAnotherApp() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB)
+        idle()
+
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "tel:+41000000000"))
+        idle()
+        assertNull(state().externalLink)
+    }
+
+    @Test
     fun viewsAreCreatedOnlyOnceTheEngineIsReady() {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
