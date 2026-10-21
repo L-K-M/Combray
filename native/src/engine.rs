@@ -34,7 +34,7 @@ use servo::{
 };
 use url::Url;
 
-use crate::capture::{self, ScriptOutcome};
+use crate::capture::{self, CaptureKind, ScriptOutcome, Visibility};
 use crate::commands::{
     CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
     TouchPhase,
@@ -255,6 +255,13 @@ struct Engine {
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// Fingers on the page now, and when the last touch event came: captures of the page on
+    /// screen wait while the user scrolls or taps.
+    pointers_down: u32,
+    last_touch: Option<Instant>,
+    /// Page-text captures of the page on screen waiting for a quiet moment, with when each
+    /// first had to wait.
+    deferred_captures: Vec<(CaptureRequest, Instant)>,
 }
 
 impl Engine {
@@ -279,6 +286,9 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            pointers_down: 0,
+            last_touch: None,
+            deferred_captures: Vec::new(),
         }
     }
 
@@ -386,6 +396,7 @@ impl Engine {
             runtime.servo.spin_event_loop();
         }
         self.drain_delegate_events();
+        self.start_deferred_captures();
         self.drain_capture_results();
         self.drain_evaluations();
         self.expire_captures();
@@ -746,6 +757,12 @@ impl Engine {
     // --- Input (always to the active view) ---------------------------------------------------
 
     fn touch(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) {
+        self.last_touch = Some(Instant::now());
+        self.pointers_down = match phase {
+            TouchPhase::Down => self.pointers_down.saturating_add(1),
+            TouchPhase::Up | TouchPhase::Cancel => self.pointers_down.saturating_sub(1),
+            TouchPhase::Move => self.pointers_down,
+        };
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -819,7 +836,42 @@ impl Engine {
 
     // --- Capture -------------------------------------------------------------------------------
 
+    /// Captures of page text for the page on screen wait while the user touches it: the
+    /// script holds the page's script thread, so the page would stop responding under the
+    /// finger. Other captures (hidden tabs, reader view) start at once.
     fn start_capture(&mut self, request: CaptureRequest) {
+        if self.waits_for_quiet(&request, Duration::ZERO) {
+            self.deferred_captures.push((request, Instant::now()));
+            return;
+        }
+        self.run_capture(request);
+    }
+
+    fn waits_for_quiet(&self, request: &CaptureRequest, waited: Duration) -> bool {
+        request.kind == CaptureKind::PageText
+            && self.active == Some(request.tab)
+            && capture::defer_while_touched(
+                self.pointers_down > 0,
+                self.last_touch.map(|at| at.elapsed()),
+                waited,
+            )
+    }
+
+    fn start_deferred_captures(&mut self) {
+        if self.deferred_captures.is_empty() {
+            return;
+        }
+        let deferred = std::mem::take(&mut self.deferred_captures);
+        for (request, since) in deferred {
+            if self.waits_for_quiet(&request, since.elapsed()) {
+                self.deferred_captures.push((request, since));
+            } else {
+                self.run_capture(request);
+            }
+        }
+    }
+
+    fn run_capture(&mut self, request: CaptureRequest) {
         let started = Instant::now();
         let refuse = |view: ViewKey, status: CaptureStatus, detail: &str| {
             EngineEvent::Capture(CaptureReport {
@@ -870,11 +922,17 @@ impl Engine {
             return;
         }
 
+        let visibility = if self.active == Some(request.tab) {
+            Visibility::Shown
+        } else {
+            Visibility::Hidden
+        };
+        let time_budget = capture::time_budget(visibility, request.timeout);
         let results = self.capture_results.clone();
         let (capture_id, expected_document) = (request.capture, request.document);
         tab.webview.evaluate_javascript_in_document(
             document,
-            capture::script(request.kind, request.max_text_bytes),
+            capture::script(request.kind, request.max_text_bytes, time_budget),
             move |result| {
                 results
                     .borrow_mut()

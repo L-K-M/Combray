@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- With Hister capture on, a large page could stop responding for seconds
+  after it loaded while Combray read its text. Reading now stops in time
+  and keeps what it has, and waits while you scroll or tap.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

@@ -140,6 +140,8 @@ pub struct CapturedContent {
     pub truncated_natively: bool,
     pub nodes_visited: u64,
     pub node_budget_exhausted: bool,
+    /// The page script stopped at its time budget; the text is what it read until then.
+    pub time_budget_exhausted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -452,6 +454,7 @@ fn capture_json(report: &CaptureReport) -> Value {
             "truncated_natively": content.truncated_natively,
             "nodes_visited": content.nodes_visited,
             "node_budget_exhausted": content.node_budget_exhausted,
+            "time_budget_exhausted": content.time_budget_exhausted,
         })
     });
 
