@@ -98,6 +98,7 @@
     <string name="recent_open_empty">No open tabs.</string>
     <string name="recent_open_no_matches">No open tab matches, but recent pages do.</string>
     <string name="recent_show_all">Show all recent pages</string>
+    <string name="recent_show_matching">Show matching recent pages</string>
     <string name="recent_today">Today</string>
     <string name="recent_yesterday">Yesterday</string>
     <string name="recent_new_tab_row">New tab</string>

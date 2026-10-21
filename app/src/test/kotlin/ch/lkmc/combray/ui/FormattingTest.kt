@@ -29,8 +29,16 @@ class FormattingTest {
 
     @Test
     fun aDecomposedAccentIsMarkedWithItsLetter() {
-        val decomposed = "Café noir"
-        assertEquals(listOf("Café"), marked(decomposed, "cafe"))
+        // "e" followed by U+0301 COMBINING ACUTE ACCENT, written out so no editor composes it.
+        val decomposed = "Cafe\u0301 noir"
+        assertEquals(listOf("Cafe\u0301"), marked(decomposed, "cafe"))
+    }
+
+    @Test
+    fun oneHanOrKanaCharacterIsAWordButOneLatinLetterIsNot() {
+        assertEquals(listOf("東"), marked("東京", "東"))
+        assertEquals(listOf("カ"), marked("カフェ", "カ"))
+        assertEquals(emptyList<String>(), marked("a cat", "a"))
     }
 
     @Test

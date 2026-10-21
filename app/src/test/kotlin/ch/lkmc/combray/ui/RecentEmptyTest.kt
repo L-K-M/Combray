@@ -11,26 +11,31 @@ class RecentEmptyTest {
 
     @Test
     fun rowsShownMeanNoEmptyMessage() {
-        assertNull(recentEmpty(query = "", all = listOf(tab, visit), shown = listOf(tab)))
+        assertNull(recentEmpty(query = "", matching = listOf(tab, visit), shown = listOf(tab)))
+    }
+
+    @Test
+    fun rowsShownForAFilterMeanNoEmptyMessage() {
+        assertNull(recentEmpty(query = "old", matching = listOf(visit), shown = listOf(visit)))
     }
 
     @Test
     fun anEmptyRecentSaysSo() {
-        assertEquals(RecentEmpty.NOTHING, recentEmpty(query = "", all = emptyList(), shown = emptyList()))
-        assertEquals(RecentEmpty.NO_MATCHES, recentEmpty(query = "kagi", all = emptyList(), shown = emptyList()))
+        assertEquals(RecentEmpty.NOTHING, recentEmpty(query = "", matching = emptyList(), shown = emptyList()))
+        assertEquals(RecentEmpty.NO_MATCHES, recentEmpty(query = "kagi", matching = emptyList(), shown = emptyList()))
     }
 
     @Test
     fun openTabsWithoutTabsPointToTheRecentPages() {
         // The last tab was closed: its page is under All, so Recent is not empty.
-        val empty = recentEmpty(query = "", all = listOf(visit), shown = emptyList())
+        val empty = recentEmpty(query = "", matching = listOf(visit), shown = emptyList())
         assertEquals(RecentEmpty.NO_OPEN_TABS, empty)
         assertEquals(true, empty?.offersAll)
     }
 
     @Test
     fun openTabsWithoutMatchesPointToMatchingRecentPages() {
-        val empty = recentEmpty(query = "old", all = listOf(visit), shown = emptyList())
+        val empty = recentEmpty(query = "old", matching = listOf(visit), shown = emptyList())
         assertEquals(RecentEmpty.NO_OPEN_TAB_MATCHES, empty)
         assertEquals(true, empty?.offersAll)
         assertEquals(false, RecentEmpty.NOTHING.offersAll)

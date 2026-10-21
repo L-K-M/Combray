@@ -57,7 +57,7 @@ internal fun dayName(day: Long, today: Long): DayName = when (today - day) {
  * almost every word. The text stays plain: nothing in it is read as markup.
  */
 internal fun highlightMatches(text: String, query: String, style: SpanStyle): AnnotatedString {
-    val terms = query.split(WHITESPACE).map { FoldedText(it).value }.filter { it.length >= MIN_HIGHLIGHT_TERM }.distinct()
+    val terms = query.split(WHITESPACE).map { FoldedText(it).value }.filter(::worthMarking).distinct()
     if (terms.isEmpty()) return AnnotatedString(text)
 
     val folded = FoldedText(text)
@@ -67,6 +67,20 @@ internal fun highlightMatches(text: String, query: String, style: SpanStyle): An
         ranges.forEach { addStyle(style, it.first, it.last + 1) }
     }
 }
+
+/**
+ * A term long enough to mean something. One Han, kana or Hangul character is a whole word in
+ * Chinese, Japanese and Korean; one Latin letter would mark almost every word.
+ */
+private fun worthMarking(term: String): Boolean =
+    term.length >= MIN_HIGHLIGHT_TERM || term.any { Character.UnicodeScript.of(it.code) in WORD_SCRIPTS }
+
+private val WORD_SCRIPTS = setOf(
+    Character.UnicodeScript.HAN,
+    Character.UnicodeScript.HIRAGANA,
+    Character.UnicodeScript.KATAKANA,
+    Character.UnicodeScript.HANGUL,
+)
 
 /** How a remembered word stands out in a result: bolder, on a marker-pen background. */
 @Composable

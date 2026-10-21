@@ -97,10 +97,13 @@ internal enum class RecentEmpty(val message: Int, val offersAll: Boolean) {
     NO_OPEN_TAB_MATCHES(R.string.recent_open_no_matches, offersAll = true),
 }
 
-/** Null while [shown] has rows. [all] is the same filter's rows in every scope. */
-internal fun recentEmpty(query: String, all: List<RecentItem>, shown: List<RecentItem>): RecentEmpty? = when {
+/**
+ * Null while [shown] has rows. [matching] is every row [query] matches, in every scope (what
+ * Recent's projection returned for it); [shown] is the part of it the scope shows.
+ */
+internal fun recentEmpty(query: String, matching: List<RecentItem>, shown: List<RecentItem>): RecentEmpty? = when {
     shown.isNotEmpty() -> null
-    all.isEmpty() -> if (query.isBlank()) RecentEmpty.NOTHING else RecentEmpty.NO_MATCHES
+    matching.isEmpty() -> if (query.isBlank()) RecentEmpty.NOTHING else RecentEmpty.NO_MATCHES
     // Rows exist but none is shown: only Open tabs hides rows, so they are pages under All.
     query.isBlank() -> RecentEmpty.NO_OPEN_TABS
     else -> RecentEmpty.NO_OPEN_TAB_MATCHES
@@ -122,11 +125,13 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
+    // Null until the first answer: an empty list before it would flash an empty-state message.
     val rows by remember(query) { browser.recent(query).map { LocalRows(query, it) } }
-        .collectAsStateWithLifecycle(LocalRows(query, emptyList()))
+        .collectAsStateWithLifecycle(null)
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
     val shown = remember(rows, scope) {
-        if (scope == RecentScope.OPEN) rows.items.filterIsInstance<RecentItem.OpenTab>() else rows.items
+        val items = rows?.items.orEmpty()
+        if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
     }
     // Relative times and day headers stay right while the sheet stays open.
     val now by produceState(System.currentTimeMillis()) {
@@ -138,7 +143,7 @@ fun RecentSheet(
 
     // A new filter or scope shows its best matches first, once its rows are there.
     val listState = rememberLazyListState()
-    LaunchedEffect(rows.query, scope) { listState.scrollToItem(0) }
+    LaunchedEffect(rows?.query, scope) { listState.scrollToItem(0) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         // The sheet is its own window: the Undo for a tab closed here must be shown inside it.
@@ -193,17 +198,19 @@ fun RecentSheet(
                 when (scope) {
                     RecentScope.HISTER -> HisterSearchPanel(integrations.hister, initialQuery = query, onOpen = onOpenUrl)
                     RecentScope.KARAKEEP -> KarakeepPanel(integrations, initialQuery = query, onOpen = onOpenUrl)
-                    RecentScope.OPEN, RecentScope.ALL -> LocalRecent(
-                        browser = browser,
-                        shown = shown,
-                        empty = recentEmpty(rows.query, rows.items, shown),
-                        query = rows.query,
-                        now = now,
-                        listState = listState,
-                        onShowAll = { scope = RecentScope.ALL },
-                        onDismiss = onDismiss,
-                        onForgetSite = { forgetting = it },
-                    )
+                    RecentScope.OPEN, RecentScope.ALL -> rows?.let { answered ->
+                        LocalRecent(
+                            browser = browser,
+                            shown = shown,
+                            empty = recentEmpty(answered.query, answered.items, shown),
+                            query = answered.query,
+                            now = now,
+                            listState = listState,
+                            onShowAll = { scope = RecentScope.ALL },
+                            onDismiss = onDismiss,
+                            onForgetSite = { forgetting = it },
+                        )
+                    }
                 }
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
@@ -278,7 +285,8 @@ private fun EmptyRecent(empty: RecentEmpty, onShowAll: () -> Unit) {
         Text(stringResource(empty.message))
         if (empty.offersAll) {
             TextButton(onClick = onShowAll, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.recent_show_all))
+                // With a filter, All shows the matching pages, not every page.
+                Text(stringResource(if (empty == RecentEmpty.NO_OPEN_TAB_MATCHES) R.string.recent_show_matching else R.string.recent_show_all))
             }
         }
     }
@@ -319,8 +327,9 @@ private fun RecentRow(
     ListItem(
         leadingContent = { SiteTile(monogram(item.url)) },
         headlineContent = {
+            val style = matchStyle()
             Text(
-                highlightMatches(title, query, matchStyle()),
+                remember(title, query, style) { highlightMatches(title, query, style) },
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
