@@ -75,6 +75,9 @@ class BrowserCoordinator(
     private var nextRequest = 1L
     private var selectedNative: Long? = null
     private var engineReady = false
+
+    /** Process visibility; conservatively backgrounded until Android reports onStart. */
+    private var appForeground = false
     private val pendingCaptures = HashMap<Long, PendingCapture>()
     private val pendingArticles = HashMap<Long, PendingArticle>()
 
@@ -302,6 +305,16 @@ class BrowserCoordinator(
     /** Writes cookies and profile state, so logins survive Android killing the process. */
     fun persistProfile() = submit {
         if (engineReady) engine.persistProfile()
+    }
+
+    /**
+     * Process visibility from the lifecycle owner: while backgrounded the shown renderer is
+     * throttled too (hidden ones already are). Purely a hint; no logical state changes.
+     */
+    fun setAppForeground(foreground: Boolean) = submit {
+        if (foreground == appForeground) return@submit
+        appForeground = foreground
+        selectedNative?.let { engine.setThrottled(it, !foreground) }
     }
 
     /**
@@ -760,7 +773,7 @@ class BrowserCoordinator(
         }
         if (selectedNative != view.nativeTab) {
             selectedNative?.let { engine.setThrottled(it, true) }
-            engine.setThrottled(view.nativeTab, false)
+            engine.setThrottled(view.nativeTab, !appForeground)
             engine.selectView(view.nativeTab)
             selectedNative = view.nativeTab
         }
