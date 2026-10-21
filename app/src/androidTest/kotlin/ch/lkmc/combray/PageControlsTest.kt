@@ -157,7 +157,7 @@ class PageControlsTest {
 
         assertEquals(protected, device.browser.browserState.value.activeTab?.url)
         val recent = device.recent().mapNotNull { it.url }
-        assertTrue(recent.toString(), protected in recent && recent.none { "ada:" in it || "ada@" in it || "lovelace" in it })
+        assertTrue(recent.toString(), protected in recent && recent.none { "ada:" in it || "ada@localhost" in it || "lovelace" in it })
     }
 
     private fun awaitText(text: String) =

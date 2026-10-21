@@ -470,7 +470,9 @@ impl Engine {
         match profile::forget_saved_sign_ins(&self.config.profile_dir) {
             Ok(0) => {},
             Ok(_) => info!("deleted the sign-ins saved by an earlier run"),
-            Err(error) => self.error(format!("deleting saved sign-ins failed: {error}")),
+            Err(error) => self.error(format!(
+                "deleting saved sign-ins failed, so a proxy sign-in saved by an earlier run may be sent again: {error}"
+            )),
         }
         let mut opts = Opts::default();
         opts.config_dir = Some(self.config.profile_dir.clone());
