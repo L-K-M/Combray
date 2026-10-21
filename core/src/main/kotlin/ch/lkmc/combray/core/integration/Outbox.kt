@@ -77,6 +77,7 @@ class Outbox(
         }
 
         val now = clock.now()
+        val payloadBytes = payload.toByteArray(Charsets.UTF_8).size
         val active = dao.activeJobs(kind, service.fingerprint, dedupeKey)
         if (!supersede && active.isNotEmpty()) return@withTransaction Enqueued.AlreadyQueued(active.first())
         val failed = dao.failedJobs(kind, service.fingerprint, dedupeKey)
@@ -84,6 +85,8 @@ class Outbox(
             // Asking again after a failure retries that job, so no stale failure outlives a save.
             val retried = failed.maxBy { it.sequence }.copy(
                 state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
+                // The user saved this page again: its current title travels, not the stale one.
+                payload = payload, payloadBytes = payloadBytes,
             )
             dao.updateJob(retried)
             failed.filter { it.id != retried.id }.forEach { dao.updateJob(it.copy(state = JobState.SUPERSEDED, error = "superseded", updatedAt = now)) }
@@ -104,7 +107,7 @@ class Outbox(
             dedupeKey = dedupeKey,
             sequence = dao.lastSequence() + 1,
             payload = payload,
-            payloadBytes = payload.toByteArray(Charsets.UTF_8).size,
+            payloadBytes = payloadBytes,
             state = JobState.PENDING,
             attempts = 0,
             nextAttemptAt = now,
@@ -124,7 +127,15 @@ class Outbox(
     /** Claims the next due job under a lease of [leaseMs], or returns null. */
     suspend fun claim(owner: String, leaseMs: Long): Claim? = database.withTransaction {
         val now = clock.now()
-        val due = dao.nextDue(now) ?: return@withTransaction null
+        // Skip jobs whose attempts ran out (crashed workers kept reclaiming them): they need
+        // the user now, and must not be re-run at every wakeup forever.
+        var due = dao.nextDue(now)
+        while (due != null && due.attempts >= retry.maxAttempts) {
+            Log.w(LOG_TAG, "giving up on job ${due.id} after ${due.attempts} attempts")
+            dao.updateJob(due.copy(state = JobState.FAILED, error = "abandoned_after_${due.attempts}_attempts", updatedAt = now, leaseOwner = null, leaseUntil = null))
+            due = dao.nextDue(now)
+        }
+        if (due == null) return@withTransaction null
         if (due.state == JobState.RUNNING) {
             // The previous claimant's request may still have reached the server: ambiguous.
             Log.w(LOG_TAG, "reclaiming job ${due.id} after an expired lease")
@@ -234,7 +245,8 @@ class Outbox(
         val now = clock.now()
         for (job in dao.unfinishedJobs(service.kind)) {
             if (job.state != JobState.AUTH_REQUIRED || job.fingerprint != service.fingerprint) continue
-            dao.updateJob(job.copy(state = JobState.PENDING, generation = service.generation, nextAttemptAt = now, error = null, updatedAt = now))
+            // Like retryNow: the user's action starts the attempt budget over.
+            dao.updateJob(job.copy(state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now))
         }
     }
 
