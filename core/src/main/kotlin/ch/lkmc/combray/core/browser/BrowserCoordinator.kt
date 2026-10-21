@@ -283,6 +283,7 @@ class BrowserCoordinator(
     fun forgetSite(host: String, includeSubdomains: Boolean) = submit {
         val site = HostNames.normalize(host) ?: return@submit
         database.withTransaction {
+            dao.detachVisitsForHost(site, if (includeSubdomains) ".$site" else null)
             dao.deleteVisitsForHost(site, if (includeSubdomains) ".$site" else null)
             dao.deleteEmptyClosedTabs()
         }

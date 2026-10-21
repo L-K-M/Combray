@@ -74,13 +74,24 @@ interface BrowserDao {
     suspend fun deleteVisit(id: String): Int
 
     /**
-     * Local history for [host] (and its subdomains when [subdomainSuffix] is ".host"), except
-     * pages open tabs currently show.
+     * An open tab may still be showing a page of a forgotten site. Keep that address on the
+     * tab, but stop pointing at the visit so the page cannot return to Recent later.
      */
     @Query(
         """
-        DELETE FROM visits WHERE (host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix))
-          AND id NOT IN (SELECT currentVisitId FROM tabs WHERE state = 'OPEN' AND currentVisitId IS NOT NULL)
+        UPDATE tabs SET currentVisitId = NULL
+        WHERE currentVisitId IN (
+            SELECT id FROM visits
+            WHERE host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
+        )
+        """,
+    )
+    suspend fun detachVisitsForHost(host: String, subdomainSuffix: String?)
+
+    /** Removes history for a host, including the page an open tab is showing. */
+    @Query(
+        """
+        DELETE FROM visits WHERE host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
         """,
     )
     suspend fun deleteVisitsForHost(host: String, subdomainSuffix: String?): Int
