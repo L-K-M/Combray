@@ -40,6 +40,9 @@ object Fixtures {
     /** Titled `IO:visible` once IntersectionObserver reports its text on screen, `IO:missing` without it. */
     const val INTERSECTION = "$BASE/intersection.html"
 
+    /** Titled `SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth>` as the page reads them. */
+    const val SCREEN = "$BASE/screen.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

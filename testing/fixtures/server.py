@@ -13,6 +13,7 @@ Pages
   /opener.html               link with target=_blank to /solid/3b4f8a.html
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /private.html              page for exclusion checks
+  /screen.html               title SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth> (CSS px)
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
@@ -98,6 +99,14 @@ INTERSECTION_PAGE = page(
     " new IntersectionObserver(function (entries) {"
     "  if (entries.some(function (e) { return e.isIntersecting; })) document.title = 'IO:visible';"
     " }).observe(document.getElementById('target')); }</script>",
+)
+
+# Reports in its title the widths a page reads for its screen and window. Servo answers 0 for the
+# screen and outer window unless the engine provides them.
+SCREEN_PAGE = page(
+    "SCREEN",
+    "<script>document.title = ['SCREEN', screen.width, screen.availWidth, outerWidth, innerWidth]"
+    ".join(':');</script>",
 )
 
 CONTROL_PAGES = {
@@ -200,6 +209,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/screen.html":
+            return self.send(200, SCREEN_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

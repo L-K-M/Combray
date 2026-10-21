@@ -83,6 +83,10 @@ All notable changes to this project are documented here. The format follows
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
+- Pages read a real screen and window size: `screen.width`,
+  `screen.availWidth` and `outerWidth` (and their heights) were 0, which
+  broke sites that size images or layouts from them. The screen is the
+  page area.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).

@@ -9,9 +9,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use servo::{
-    AuthenticationRequest, CreateNewWebViewRequest, EmbedderControl, EmbedderControlId,
-    InputMethodType, LoadStatus, NavigationRequest, PermissionRequest, PipelineId, WebView,
-    WebViewDelegate,
+    AuthenticationRequest, CreateNewWebViewRequest, DeviceIntRect, EmbedderControl,
+    EmbedderControlId, InputMethodType, LoadStatus, NavigationRequest, PermissionRequest,
+    PipelineId, ScreenGeometry, WebView, WebViewDelegate,
 };
 use url::Url;
 
@@ -103,6 +103,20 @@ impl TabDelegate {
 }
 
 impl WebViewDelegate for TabDelegate {
+    /// Answers `screen.width`/`availWidth` and `outerWidth`, which Servo 0.6.0 reports as 0 when
+    /// this returns `None`. As in servoshell's Android port, the screen is the page area (the
+    /// shared rendering context), with the window filling it at the origin. Servo asks
+    /// synchronously, so this reads the size instead of queueing; a shared borrow of the view is
+    /// safe even inside `WebViewBuilder::build`, which holds one while asking.
+    fn screen_geometry(&self, webview: WebView) -> Option<ScreenGeometry> {
+        let size = webview.size().round().to_i32();
+        Some(ScreenGeometry {
+            size,
+            available_size: size,
+            window_rect: DeviceIntRect::from_size(size),
+        })
+    }
+
     fn notify_history_changed(&self, webview: WebView, entries: Vec<Url>, current: usize) {
         // `active_document_id` is updated before this notification (Combray Servo patch).
         self.push(DelegateEvent::History {
