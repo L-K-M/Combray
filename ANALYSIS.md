@@ -46,6 +46,7 @@ This session, not merged:
 - #49 engine refusal and crash logs are a category only. The message can be the
   page URL.
 - #50 below 400 dp the address sits on its own row. Share stays in the bar.
+- #40 key KarakeepPanel pagination LaunchedEffect on service identity (fingerprint/generation) so background sync or list changes do not reset pagination, wipe bookmarks, or jump back to page 1.
 
 ## Correctness still open
 
@@ -74,9 +75,10 @@ This session, not merged:
 5. **The coordinator command channel is unbounded** (`Channel<suspend () -> Unit>`).
    A burst queues stale work. Bound it, or conflate publish work, and name the
    overflow policy.
-6. **`KarakeepPanel` refetches when any service row changes.**
-   `LaunchedEffect(query, service)` restarts pagination when `updatedAt` bumps
-   (choosing a save list). Key on fingerprint or generation, not the whole row.
+6. **`KarakeepPanel` refetches when any service row changes.** (Addressed in PR #40
+   `gemini/karakeep-panel-refetch`: keyed `LaunchedEffect` on `service?.fingerprint, service?.generation`).
+   `LaunchedEffect(query, service)` previously restarted pagination when `updatedAt` bumped
+   (choosing a save list).
 7. **`Retention()` is built again in `SettingsSheet` for the history-days label.**
    Pass the configured instance from `AppGraph`, or the label will drift when
    retention becomes a setting.
@@ -91,6 +93,19 @@ This session, not merged:
     uploads into an app directory. Rust forwards the returned `PathBuf`s to
     Servo. Reject a path outside that directory. Files: `PageControls.kt`,
     `native/src/controls.rs`.
+11. **Native `TouchMove` throttling lacks periodic coordinate flushing**:
+    In `native/src/engine.rs`, touch move events are throttled; dropping the tail
+    coordinates of rapid gestures without a timer-based flush can cause pointer
+    jumps during continuous pinch-zoom or drag operations.
+12. **Database missing composite index on `visits(failed, lastSeenAt)`**:
+    In `core/src/main/kotlin/ch/lkmc/combray/core/data/BrowserEntities.kt`, add
+    `Index(value = ["failed", "lastSeenAt"])` to `VisitEntity`. History queries in
+    `BrowserDao.recent()` filter on `failed = 0` and order by `lastSeenAt DESC`
+    across thousands of visits.
+13. **External scheme handling for standard mobile protocols**:
+    `AddressPolicy.EXTERNAL_SCHEMES` currently only allows `mailto:` and `tel:`.
+    Adding standard mobile schemes (`sms:`, `geo:`, `market:`) allows opening them
+    via user confirmation in external native apps instead of triggering `UNSUPPORTED_SCHEME`.
 
 ## Performance and engine
 
@@ -136,6 +151,11 @@ Do not claim a device reproduction for these. They are from the bridge and
 12. **IntersectionObserver is missing.** Some Next.js sites do not start. A
     separate change may already be in flight. Do not start a second one, and do
     not commit a stray `native/src/engine.rs` edit that is not yours.
+13. **`openTabCount()` query optimization**: `publish()` currently runs
+    `dao.openTabs().size`, which executes a full `SELECT * FROM tabs WHERE state = 'OPEN'`
+    loading all `TabEntity` rows into memory on every stateful coordinator event.
+    Replace with `@Query("SELECT COUNT(*) FROM tabs WHERE state = 'OPEN'") suspend fun openTabCount(): Int`
+    and cache active tab ID and open tab count in memory in `BrowserCoordinator`.
 
 ## Chrome still open
 
@@ -163,8 +183,24 @@ Do not claim a device reproduction for these. They are from the bridge and
 - A theme override (system / light / dark) is not built. System appearance is
   the default. Add an override only if the owner wants the phone and the room
   to disagree.
+- Touch targets: Audit icon buttons in `BottomBar` and `RecentSheet` to ensure
+  48x48dp minimum interactive component size (`Modifier.minimumInteractiveComponentSize()`).
+- Soft keyboard layout stability: Use Compose `imePadding` and animated insets
+  on the bottom address bar to prevent jumpy layout shifts during IME open/close.
+- OLED Pitch-Black Theme: True `#000000` surface option for AMOLED displays to
+  maximize battery efficiency and contrast.
+- Configurable retention period: Expose history retention in `SettingsSheet`
+  (1 day, 7 days, 30 days, 90 days, Forever) backed by `BrowserSettings`.
 
 ## Ideas, not Chromium parity
+
+- The Madeleine: An unobtrusive card or subtle action in Recent/Home resurfacing
+  an article or page visited "on this day" last week, last month, or a forgotten gem
+  from Hister search. Directly honors the browser's literary namesake (*In Search of Lost Time*).
+- Distraction-free Zen Mode: Auto-hiding bottom bar on downward scroll; instant
+  slide-back on slight upward scroll.
+- Swipe up on bottom bar to open Recent sheet: Fluid gesture opening Recent/Tabs
+  from anywhere on the bottom navigation bar.
 
 - Long-press Recent to focus the previously focused tab. `lastFocusedAt` already
   orders them.
