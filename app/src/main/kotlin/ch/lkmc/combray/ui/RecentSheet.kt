@@ -87,8 +87,12 @@ fun RecentSheet(
     // One subscription for the sheet's lifetime; the local filter runs against its items.
     // Rebuilding the flow per keystroke re-ran three Room observers each time.
     val allItems by remember { browser.recent() }.collectAsStateWithLifecycle(emptyList())
-    val items = if (scope == RecentScope.OPEN) allItems.filterIsInstance<RecentItem.OpenTab>() else allItems
-    val shown = items.filter { it.matches(query) }
+    // Filtered once per list/scope/query change: unrelated recompositions (the forget
+    // dialog, snackbars) must not re-run two passes over up to 500 rows.
+    val shown = remember(allItems, scope, query) {
+        val scoped = if (scope == RecentScope.OPEN) allItems.filterIsInstance<RecentItem.OpenTab>() else allItems
+        scoped.filter { it.matches(query) }
+    }
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
     val now = System.currentTimeMillis()
 

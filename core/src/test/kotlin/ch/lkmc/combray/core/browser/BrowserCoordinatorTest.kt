@@ -68,6 +68,11 @@ class BrowserCoordinatorTest {
 
     private fun state() = browser.browserState.value
 
+    /**
+     * Filtered here on purpose: the coordinator now returns everything and this helper
+     * mirrors what RecentSheet does with it. The matcher itself has its own tests — do not
+     * read this as the coordinator still filtering.
+     */
     private fun recent(query: String? = null) = runBlocking {
         browser.recent().first().filter { it.matches(query) }
     }

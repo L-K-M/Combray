@@ -125,7 +125,8 @@ class BrowserCoordinator(
     /**
      * Recent: open tabs and local history, newest first, all of it. The local filter runs in
      * the caller against this one subscription — rebuilding the flow per keystroke would
-     * re-run three Room observers each time.
+     * re-run three Room observers each time. The retention cutoff is fixed when the flow is
+     * created: a long-open sheet keeps showing visits until it is opened afresh.
      */
     fun recent(): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
