@@ -529,7 +529,7 @@ class BrowserCoordinator(
             val baseline = view.reloadBaselines[event.document]
             val updated = when {
                 // A failed reload must not turn the page's earlier successful visit into a failure.
-                errorPage && baseline != null && baseline.title != null && !baseline.failed ->
+                errorPage && baseline != null && !baseline.failed ->
                     visit.copy(title = baseline.title, failed = false)
                 // Servo reports a null, then an empty title for every new document before its own:
                 // they must not erase the title of a visit a reload reused. A failed visit's title

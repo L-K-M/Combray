@@ -293,6 +293,22 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aFailedReloadKeepsAnUntitledPageInHistory() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        title(1, 10, null)
+
+        commit(1, 11, "https://a.test/")
+        title(1, 11, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+        assertTrue(state().activeTab!!.loadFailed)
+
+        browser.closeTab(state().activeTab!!.id); idle()
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://a.test/" to null, visit.url to visit.title)
+    }
+
+    @Test
     fun aReloadKeepsThePageTitleUntilTheNewDocumentReportsItsOwn() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()

@@ -210,6 +210,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
         if path == "/once.html":
             key = "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:40]
+            if not key:
+                return self.send(400, page("ONCE-NEEDS-K", "<p>missing or empty k</p>"))
             with lock:
                 first = key not in once_served
                 once_served.add(key)
