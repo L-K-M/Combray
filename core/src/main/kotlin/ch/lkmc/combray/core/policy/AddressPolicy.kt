@@ -190,27 +190,31 @@ object HostNames {
     private const val BLOB_PREFIX = "blob:"
     private val AUTHORITY_PREFIX = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")
 
-    /** Schemes whose addresses never name a site, even written with "//" after the colon. */
-    private val HOSTLESS_SCHEMES = setOf("data", "about", "javascript", "file", "mailto", "tel")
+    /**
+     * The only schemes whose authority is a web site. Any other scheme, page-chosen ones
+     * included ("a.b://accounts.example.com"), writes whatever it likes after "//".
+     */
+    private val SITE_SCHEMES = setOf("http", "https")
 
     /** Lowercase ASCII (punycode) host of a URL without trailing dot, or null. */
     fun of(url: String): String? {
+        val address = url.trim()
         // A blob: address belongs to the web page that made it, named by its inner address.
-        if (url.startsWith(BLOB_PREFIX, ignoreCase = true)) {
-            val inner = url.substring(BLOB_PREFIX.length)
+        if (address.startsWith(BLOB_PREFIX, ignoreCase = true)) {
+            val inner = address.substring(BLOB_PREFIX.length)
             return if (isWeb(inner)) of(inner) else null
         }
 
-        // Only "scheme://" at the very start introduces a host. A data: or about: page chooses
+        // Only "http(s)://" at the very start introduces a host. A data: or about: page chooses
         // its whole address, so a "://" further in must not make it look like another site.
-        val prefix = AUTHORITY_PREFIX.find(url) ?: return null
-        if (prefix.groupValues[1].lowercase() in HOSTLESS_SCHEMES) return null
+        val prefix = AUTHORITY_PREFIX.find(address) ?: return null
+        if (prefix.groupValues[1].lowercase() !in SITE_SCHEMES) return null
 
         val host = try {
-            URI(url).host
+            URI(address).host
         } catch (malformed: URISyntaxException) {
             null
-        } ?: authorityHost(url.substring(prefix.value.length)) ?: return null
+        } ?: authorityHost(address.substring(prefix.value.length)) ?: return null
         return normalize(host)
     }
 

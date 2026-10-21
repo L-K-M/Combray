@@ -21,6 +21,9 @@ class FormattingTest {
         assertEquals("javascript:", displayHost("javascript:alert(1)"))
         assertEquals("…", displayHost("accounts.example.com:x"))
         assertEquals("example.org", displayHost("https://www.example.org/a"))
+        // A blob: page shows the site that made it.
+        assertEquals("a.test", displayHost("blob:https://www.a.test/0f1e"))
+        assertEquals("…", displayHost("a.b://accounts.example.com/"))
     }
 
     @Test
