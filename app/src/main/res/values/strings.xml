@@ -98,6 +98,7 @@
     <!-- Notices and states -->
     <string name="notice_tab_closed">Tab closed</string>
     <string name="notice_address_not_opened">Combray could not open this address.</string>
+    <string name="notice_media_unsupported">This page’s audio or video can’t play in Combray.</string>
     <string name="engine_missing">This build has no browser engine. Build it with scripts/build-native.sh, then rebuild the app.</string>
     <string name="engine_failed">The browser engine could not start.</string>
     <string name="engine_starting">Starting the browser engine…</string>

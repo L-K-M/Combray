@@ -169,6 +169,8 @@ struct Tab {
     retired: HashSet<PipelineId>,
     /// Reports from documents that have not committed yet (they can overtake the commit).
     held: VecDeque<HeldReport>,
+    /// Documents already reported in `media_blocked`, so each is reported once.
+    media_blocked: HashSet<PipelineId>,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
 }
@@ -595,6 +597,7 @@ impl Engine {
                 documents: HashMap::new(),
                 retired: HashSet::new(),
                 held: VecDeque::new(),
+                media_blocked: HashSet::new(),
                 frames_painted: 0,
                 last_paint_report: None,
             },
@@ -1125,11 +1128,36 @@ impl Engine {
             DelegateEvent::DefaultHandled { view, request } => {
                 self.emit(EngineEvent::DefaultHandled { view, request })
             },
+            DelegateEvent::MediaBlocked { view } => self.media_blocked(view),
             DelegateEvent::Crashed { view, reason } => {
                 error!("view {view:?} crashed: {reason}");
                 self.emit(EngineEvent::Crashed { view, reason });
             },
         }
+    }
+
+    /// Reports cancelled media once per document, so a page with many media elements, or one
+    /// that keeps retrying, yields one notice.
+    ///
+    /// A load names its view but not its document, so it is attributed to the tab's committed
+    /// document. A load that overtook its document's commit would count for the previous one;
+    /// Servo announces a document before parsing it and media loads start during parsing, so that
+    /// is unlikely. Before the tab's first commit there is no document to name: nothing is
+    /// reported (the load is still cancelled).
+    fn media_blocked(&mut self, view: ViewKey) {
+        let Some(tab) = self.live_tab(view) else {
+            return;
+        };
+        let Some(document) = tab.current_document else {
+            return;
+        };
+        if !tab.media_blocked.insert(document) {
+            return;
+        }
+        self.emit(EngineEvent::MediaBlocked {
+            view,
+            document: u64::from(document),
+        });
     }
 
     fn show_page_control(&mut self, view: ViewKey, control: ControlHandle) {

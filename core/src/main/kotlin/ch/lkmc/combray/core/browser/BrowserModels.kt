@@ -52,6 +52,9 @@ sealed interface Notice {
 
     /** The engine could not open an address (it does not parse as a URL Servo can load). */
     data object AddressNotOpened : Notice
+
+    /** The shown page has audio or video, which Combray cannot play; its media was not downloaded. */
+    data object MediaUnsupported : Notice
 }
 
 sealed interface KeyboardRequest {

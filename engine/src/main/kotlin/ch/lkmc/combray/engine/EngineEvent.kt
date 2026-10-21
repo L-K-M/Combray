@@ -133,6 +133,9 @@ sealed interface EngineEvent {
 
     data class Crashed(val view: ViewRef, val reason: String) : EngineEvent
 
+    /** The engine cancelled [document]'s audio, video or text-track loads (it cannot play media); once per document. */
+    data class MediaBlocked(val view: ViewRef, val document: Long) : EngineEvent
+
     /** A page control waits for [EnginePort.respondToControl] with [control]. */
     data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
 
@@ -195,6 +198,7 @@ sealed interface EngineEvent {
                 "ime_shown" -> ImeShown(event.view(), event.boolean("multiline"), event.optionalString("kind") ?: "text")
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
+                "media_blocked" -> MediaBlocked(event.view(), event.long("document"))
                 "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
                 "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))

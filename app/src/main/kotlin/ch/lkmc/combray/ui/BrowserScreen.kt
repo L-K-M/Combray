@@ -86,6 +86,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
 
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
+    val mediaUnsupported = stringResource(R.string.notice_media_unsupported)
     val undo = stringResource(R.string.action_undo)
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
@@ -101,6 +102,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 }
                 is Notice.Problem -> snackbar.showSnackbar(notice.message)
                 Notice.AddressNotOpened -> snackbar.showSnackbar(notOpened)
+                Notice.MediaUnsupported -> snackbar.showSnackbar(mediaUnsupported)
             }
         }
     }

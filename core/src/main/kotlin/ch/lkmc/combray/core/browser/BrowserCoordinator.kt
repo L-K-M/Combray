@@ -386,6 +386,7 @@ class BrowserCoordinator(
                 it.dialogCount = 0
                 it.dialogsBlocked = false
             }
+            is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
             is EngineEvent.EngineError -> onEngineError(event)
@@ -412,6 +413,12 @@ class BrowserCoordinator(
             view.dialogCount++
         }
         view.controls.addLast(ShownControl(event.control, event.content, offerBlocking = dialog && view.dialogCount > 1))
+    }
+
+    /** The engine reports each document once. Only the page on screen gets a notice: for a hidden tab or a replaced page it would name the wrong page. */
+    private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
+        if (view.nativeTab != selectedNative || view.currentDocument != event.document) return
+        state.update { it.copy(notice = Notice.MediaUnsupported) }
     }
 
     private suspend fun onHistory(view: LiveView, event: EngineEvent.HistoryChanged) {
