@@ -71,7 +71,15 @@ class OutboxDispatcher(
             // Booked even when this coroutine is cancelled or storage is down: a broken step
             // or a cancelled drain must not strand the jobs behind it until the next kick.
             withContext(NonCancellable) {
-                val next = step { outbox.nextWakeup() } ?: (clock() + WAKEUP_FALLBACK_MS)
+                // A returned null means "nothing pending": schedule(null) cancels any stale
+                // wakeup. Only a query that throws falls back, or an emptied queue would book
+                // a fallback wakeup at every drain and wake the app forever.
+                val next = try {
+                    outbox.nextWakeup()
+                } catch (failure: Exception) {
+                    Log.e(LOG_TAG, "outbox wakeup failed: ${failure.javaClass.name}")
+                    clock() + WAKEUP_FALLBACK_MS
+                }
                 step { scheduler.schedule(next) }
             }
         }

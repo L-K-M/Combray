@@ -141,6 +141,23 @@ class OutboxTest {
     }
 
     @Test
+    fun anEmptiedQueueCancelsItsWakeup() {
+        enqueue()
+        val dispatcher = OutboxDispatcher(
+            outbox = outbox,
+            handlers = mapOf(JobKind.KARAKEEP_SAVE to JobHandler { DispatchResult.Done(remoteId = "kept") }),
+            onDone = { _, _ -> },
+            scheduler = { scheduled += it },
+        )
+
+        val sent = runBlocking { dispatcher.drain() }
+
+        // Nothing pending: the wakeup is cancelled, not re-booked at the fallback time.
+        assertEquals(1, sent)
+        assertEquals(listOf<Long?>(null), scheduled)
+    }
+
+    @Test
     fun aBrokenQueueStillBooksItsNextWakeup() {
         enqueue()
         database.close()
