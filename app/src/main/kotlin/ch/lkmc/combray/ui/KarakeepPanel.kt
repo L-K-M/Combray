@@ -61,7 +61,9 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    // Keyed on service identity: background updates to updatedAt or listName must
+    // not cancel in-flight paging, wipe bookmarks, or jump to page 1.
+    LaunchedEffect(query, service?.fingerprint, service?.generation) {
         val mine = ++generation
         ui = BookmarksUi.Idle
         bookmarks = emptyList()
