@@ -838,12 +838,6 @@ class BrowserCoordinator(
 
     private fun documentKey(view: LiveView, document: Long) = "$processKey:${view.generation}:$document"
 
-    private fun RecentItem.matches(query: String?): Boolean {
-        if (query.isNullOrBlank()) return true
-        val needle = query.trim()
-        return (title?.contains(needle, ignoreCase = true) ?: false) || (url?.contains(needle, ignoreCase = true) ?: false)
-    }
-
     /** One native view incarnation for a logical tab. */
     private class LiveView(val tabId: String, val nativeTab: Long) {
         var generation: Long? = null
