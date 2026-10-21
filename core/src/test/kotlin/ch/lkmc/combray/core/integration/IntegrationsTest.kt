@@ -517,6 +517,7 @@ class IntegrationsTest {
                 val pending = job(queued.job.id)
                 val remoteId = server.bookmarks.getValue(url)
                 assertEquals(JobState.RETRY_WAIT, pending.state)
+                assertEquals("bookmark_id_missing", pending.error)
                 assertEquals(SaveStatus.Pending, status(url))
                 assertTrue(remoteId !in server.lists.getValue("reading"))
 
@@ -545,6 +546,28 @@ class IntegrationsTest {
         assertEquals(SaveStatus.Saved, status())
         assertEquals("malformed_response", job().error)
         assertNull(job().remoteId)
+        assertEquals(1, server.bookmarks.size)
+    }
+
+    @Test
+    fun aPermanentlyMissingIdNeedsAttentionAfterTenAttempts() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        server.fault = FakeKarakeep.Fault.MISSING_ID
+        server.faultCount = Int.MAX_VALUE
+        integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false)
+
+        repeat(10) {
+            drain()
+            now = maxOf(now, job().nextAttemptAt)
+        }
+
+        val error = "bookmark_id_missing_after_10_attempts"
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals(error, job().error)
+        assertEquals(SaveStatus.NeedsAttention(error), status())
+        assertTrue(server.lists.getValue("reading").isEmpty())
         assertEquals(1, server.bookmarks.size)
     }
 

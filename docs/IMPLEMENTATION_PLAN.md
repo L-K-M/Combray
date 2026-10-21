@@ -402,6 +402,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Gate check | Result | Evidence |
 | --- | --- | --- |
 | One tap saves the page with its title | Passed on the device (`run9`) | `SaveTest#oneTapSavesThePageWithItsTitle` |
+| A list-bound save cannot finish without a usable bookmark ID | Passed against fake Karakeep (21 October 2026): malformed and missing-ID 200/201 responses retry, recover the same bookmark, or need attention after ten attempts; standalone acknowledgment is preserved | `IntegrationsTest` |
 | Lost answer after the server stored the link: retried, one bookmark | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | Rejected key pauses saves until resumed with a working key | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | Save targets the tapped page when the tab changes right after | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |

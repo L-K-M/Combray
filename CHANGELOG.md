@@ -93,3 +93,6 @@ All notable changes to this project are documented here. The format follows
   stale APKs that do not match Gradle output metadata. Failed copying or
   hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
+- A Karakeep save with a chosen list stays pending if its acknowledgment
+  has no usable bookmark ID. Duplicate-safe retries recover the ID and
+  finish list membership, or stop with a visible failure.

@@ -2,8 +2,8 @@ package ch.lkmc.combray.core.integration
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
-import java.net.InetSocketAddress
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 
