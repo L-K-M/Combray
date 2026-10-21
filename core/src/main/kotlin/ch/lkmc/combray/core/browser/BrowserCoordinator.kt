@@ -389,7 +389,9 @@ class BrowserCoordinator(
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
             is EngineEvent.EngineError -> onEngineError(event)
-            else -> Unit
+            // Painted (1/s while painting), TabSelected, SurfaceBound and friends cannot change
+            // browser state: publishing would only spend Room reads on the serialized queue.
+            else -> return@submit
         }
         publish()
     }
