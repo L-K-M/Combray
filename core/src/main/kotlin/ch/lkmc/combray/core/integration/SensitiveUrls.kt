@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.integration
 
 import java.net.URI
 import java.net.URISyntaxException
+import java.net.URLDecoder
 
 /**
  * Addresses that look like they carry a login or session credential (a Kagi private-session
@@ -22,8 +23,22 @@ object SensitiveUrls {
         }
         if (uri.rawUserInfo != null) return true
         // OAuth implicit-flow callbacks carry tokens in the fragment (#access_token=...).
+        // Names are decoded once: ?%74oken= is token to a server, and a broken % is not trusted.
         return listOfNotNull(uri.rawQuery, uri.rawFragment).any { part ->
-            part.split('&').any { it.substringBefore('=').lowercase() in CREDENTIAL_PARAMETERS }
+            part.split('&').any { parameter ->
+                val name = parameterName(parameter.substringBefore('='))
+                name == null || name in CREDENTIAL_PARAMETERS
+            }
+        }
+    }
+
+    /** Null when the name is not a safe decode, which the caller treats as sensitive. */
+    private fun parameterName(raw: String): String? {
+        if (raw.isEmpty()) return ""
+        return try {
+            URLDecoder.decode(raw, Charsets.UTF_8).lowercase()
+        } catch (malformed: IllegalArgumentException) {
+            null
         }
     }
 }

@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Save and Hister capture now treat a percent-encoded parameter name
+  (`%74oken`) as the credential name it decodes to, and refuse a broken
+  `%` sequence instead of sending it on.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).

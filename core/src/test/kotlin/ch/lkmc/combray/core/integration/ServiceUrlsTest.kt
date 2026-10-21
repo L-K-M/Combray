@@ -53,5 +53,10 @@ class ServiceUrlsTest {
         assertEquals(true, SensitiveUrls.looksSensitive("https://kagi.com/search?token=abc&q=x"))
         assertEquals(true, SensitiveUrls.looksSensitive("https://u:p@example.org/"))
         assertEquals(false, SensitiveUrls.looksSensitive("https://example.org/article?id=3&ref=home"))
+        // A server that decodes the name sees token. A broken % sequence is not trusted either.
+        assertEquals(true, SensitiveUrls.looksSensitive("https://example.org/cb?%74oken=secret"))
+        assertEquals(true, SensitiveUrls.looksSensitive("https://example.org/cb#%61ccess_token=secret"))
+        assertEquals(true, SensitiveUrls.looksSensitive("https://example.org/cb?bad%zz=1"))
+        assertEquals(false, SensitiveUrls.looksSensitive("https://example.org/article?id=%33"))
     }
 }
