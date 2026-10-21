@@ -428,7 +428,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | A phrase only in the rendered page (written by script) becomes searchable | Passed on the device (`run9`) | `HisterTest#aPhraseThatExistsOnlyInTheRenderedPageBecomesSearchable` |
 | Excluded site never sent; paused capture sends nothing | Passed on the device (`run9`) and in unit tests | `HisterTest`, `HisterIntegrationTest` |
 | Same-URL reload, navigation during capture, stale results, delayed capture | Passed in unit tests and on the engine in M0 | `CaptureTest`, M0 section 5 |
-| Forget and exclusion cancel queued and in-flight captures | Passed in unit tests | `HisterIntegrationTest` |
+| Forget and exclusion cancel queued and in-flight captures | Passed in unit tests; forgetting also verifies shared-Room rollback, failure notice, retry, and restart without in-memory tombstones (21 October 2026) | `HisterIntegrationTest` |
 | Server switch cancels unsent captures; credentials bound to their server | Passed in unit tests | `HisterIntegrationTest`, `IntegrationsTest` |
 | Newer content supersedes unsent older content per document key | Passed in unit tests | `IntegrationsTest` |
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |

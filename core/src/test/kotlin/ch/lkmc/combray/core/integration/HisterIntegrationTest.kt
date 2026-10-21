@@ -7,6 +7,7 @@ import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.CaptureSink
 import ch.lkmc.combray.core.browser.CapturedPage
 import ch.lkmc.combray.core.browser.FakeEngine
+import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.data.CombrayDatabase
@@ -164,6 +165,7 @@ class HisterIntegrationTest {
         browser.awaitIdle()
 
         assertNotNull(database.browser().visit(visit.visitId))
+        assertTrue(browser.browserState.value.notice is Notice.Problem)
         assertEquals(JobState.PENDING, jobs().single().state)
         assertTrue(jobs().single().payload.contains("forgotten text"))
 
@@ -200,6 +202,7 @@ class HisterIntegrationTest {
         browser.awaitIdle()
 
         assertTrue(visits.all { database.browser().visit(it.visitId) != null })
+        assertTrue(browser.browserState.value.notice is Notice.Problem)
         assertTrue(jobs().all { it.state == JobState.PENDING && it.payload.isNotEmpty() })
 
         fail = false
@@ -217,6 +220,7 @@ class HisterIntegrationTest {
 
     private suspend fun browserWithHistory(sink: CaptureSink, urls: List<String>): BrowserCoordinator {
         val engine = FakeEngine()
+        // Share the harness Job for cleanup; awaitIdle fences coordinator work on Default.
         val browser = BrowserCoordinator(
             database, engine, CoroutineScope(scope.coroutineContext + Dispatchers.Default),
             clock = { now }, capture = sink,

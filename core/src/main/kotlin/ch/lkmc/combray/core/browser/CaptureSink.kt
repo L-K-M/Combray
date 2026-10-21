@@ -6,7 +6,8 @@ package ch.lkmc.combray.core.browser
  * *whether* (opt-in, exclusions, budget) and does the queueing.
  *
  * Forgetting runs inside the browser database transaction: durable cancellation must join that
- * same database transaction and finish before returning. No network work belongs in that path.
+ * same database instance and transaction, and finish before returning. No network work belongs
+ * in that path; a separate Room instance cannot join the transaction.
  */
 interface CaptureSink {
     /**
