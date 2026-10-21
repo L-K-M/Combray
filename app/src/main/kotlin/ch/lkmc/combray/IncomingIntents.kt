@@ -82,7 +82,6 @@ object IncomingIntents {
     private fun open(address: String): Incoming.Open? =
         (AddressPolicy.interpret(address).primary as? AddressDecision.Navigate)?.let { Incoming.Open(it.url) }
 
-    /** A shared link opens at once; other shared text waits in the editor. */
     /**
      * What a share is about: the text, unless only the subject holds a link (some apps share a
      * link as the subject, with no text or an empty one).
@@ -93,6 +92,7 @@ object IncomingIntents {
         else -> text?.takeIf { it.isNotBlank() } ?: subject
     }
 
+    /** A shared link opens at once; other shared text waits in the editor. */
     private fun shared(text: String): Incoming? {
         val address = firstWebAddress(text) ?: return editNewTab(text)
         // A refused link (credentials in it) goes to the editor alone, which says why. With the
