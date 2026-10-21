@@ -56,6 +56,7 @@ import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.KeyboardRequest
 import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.browser.SessionState
 import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
@@ -313,6 +314,8 @@ private fun PageOverlay(
     when {
         state.engine == EngineStatus.LIBRARY_MISSING -> OverlayMessage(stringResource(R.string.engine_missing))
         state.engine == EngineStatus.FAILED -> OverlayMessage(stringResource(R.string.engine_failed))
+        // No tab yet does not mean home: a restored session must not flash "New tab" first.
+        state.session == SessionState.RESTORING -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
         tab == null || tab.isHome -> Home(onOpenAddress, onOpenRecent)
         tab.crashed -> OverlayMessage(stringResource(R.string.page_crashed)) {
             Button(onClick = onReload) { Text(stringResource(R.string.action_reload)) }

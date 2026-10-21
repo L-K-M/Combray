@@ -105,7 +105,13 @@ class BrowserCoordinator(
                 } catch (failure: Exception) {
                     // A failed step must not stop the queue; it is a bug worth surfacing.
                     Log.e(LOG_TAG, "browser state update failed", failure)
-                    state.update { it.copy(notice = Notice.Problem("Something went wrong; the last action may not have completed.")) }
+                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
+                    state.update {
+                        it.copy(
+                            session = SessionState.RESTORED,
+                            notice = Notice.Problem("Something went wrong; the last action may not have completed."),
+                        )
+                    }
                 }
             }
         }
@@ -832,6 +838,8 @@ class BrowserCoordinator(
                 },
                 openTabCount = openCount,
                 reader = reader,
+                // Every publish reads the stored session, so the first one ends restoring.
+                session = SessionState.RESTORED,
             )
         }
     }

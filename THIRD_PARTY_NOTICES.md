@@ -18,7 +18,7 @@ The app and the M0 harness ([ENGINE_SPIKE.md](docs/ENGINE_SPIKE.md), [BUILDING.m
 | Servo's crate dependencies (`native/Cargo.lock`), including prebuilt SpiderMonkey (`mozjs_sys` 153.3.0-0), jemalloc and aws-lc | Linked into the native library | Mixed: MPL-2.0, MIT, Apache-2.0, BSD and others; listed with license texts in the app (below) |
 | Android NDK r29 `libc++_shared.so` | Packaged in the harness APK | Apache-2.0 with LLVM exception (see the NDK's `NOTICE`) |
 | Gradle wrapper (`gradlew`, `spike/android/gradlew`, `gradle/wrapper/gradle-wrapper.jar`) | Build tooling, copied from Servo's Android project | Apache-2.0 (Gradle) |
-| AndroidX (Activity, Core, Lifecycle, Room, SQLite, WorkManager), Jetpack Compose (UI, Foundation, Material 3), Material icons core | Bundled in the app APK (`gradle/libs.versions.toml`) | Apache-2.0 |
+| AndroidX (Activity, AppCompat resources, Core, Core SplashScreen, Lifecycle, Room, SQLite, VectorDrawable, WorkManager), Jetpack Compose (UI, Foundation, Material 3), Material icons core | Bundled in the app APK (`gradle/libs.versions.toml`) | Apache-2.0 |
 | kotlinx.coroutines, kotlinx.serialization, Kotlin standard library | Bundled in the app APK | Apache-2.0 |
 | Robolectric, JUnit 4, AndroidX Test, kotlinx-coroutines-test | Tests only, not distributed | MIT (Robolectric), EPL-1.0 (JUnit 4), Apache-2.0 |
 

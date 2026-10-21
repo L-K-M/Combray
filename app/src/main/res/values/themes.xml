@@ -5,5 +5,16 @@
         <item name="android:windowBackground">@color/window_background</item>
     </style>
 
+    <!--
+        Launch window (core-splashscreen): the launcher icon on the window background, held by
+        MainActivity until the stored session is restored. @color/window_background follows the
+        night qualifier, so this one style serves both schemes.
+    -->
+    <style name="Theme.Combray.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/window_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Combray</item>
+    </style>
+
     <color name="window_background">#FFFBF4</color>
 </resources>

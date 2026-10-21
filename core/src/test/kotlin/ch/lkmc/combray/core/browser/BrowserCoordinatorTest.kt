@@ -27,6 +27,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Logical-state invariants (docs/IMPLEMENTATION_PLAN.md section 4) against a fake engine. */
 @RunWith(RobolectricTestRunner::class)
@@ -398,6 +400,40 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun theSessionIsRestoringUntilStartPublishesTheStoredTabs() {
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        val active = state().activeTab!!.id
+
+        // Process death: the new coordinator's restore (maintenance, then publish) waits at the gate.
+        val gate = CountDownLatch(1)
+        engine = FakeEngine()
+        browser = BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = {
+            gate.await(GATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            UnusedTabs.KEEP
+        })
+        assertEquals(SessionState.RESTORING, state().session)
+        browser.start()
+        assertEquals(SessionState.RESTORING, state().session)
+        assertNull(state().activeTab)
+
+        gate.countDown()
+        idle()
+        assertEquals(SessionState.RESTORED, state().session)
+        assertEquals(active, state().activeTab?.id)
+    }
+
+    @Test
+    fun aFailedRestoreStillEndsRestoring() {
+        browser = BrowserCoordinator(database, FakeEngine(), scope, unusedTabs = { error("settings unreadable") })
+        browser.start()
+        idle()
+
+        // The screen must not stay blank: the state shows what there is, with the problem.
+        assertEquals(SessionState.RESTORED, state().session)
+        assertTrue(state().notice is Notice.Problem)
+    }
+
+    @Test
     fun aCrashedViewIsReplacedOnReloadAndItsLateEventsAreIgnored() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
@@ -737,5 +773,6 @@ class BrowserCoordinatorTest {
         const val PAGE_TAB = 1L shl 52
         const val START = 1_760_000_000_000L
         const val DAY = 24L * 60 * 60 * 1000
+        const val GATE_TIMEOUT_SECONDS = 10L
     }
 }

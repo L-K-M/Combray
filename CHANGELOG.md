@@ -60,6 +60,8 @@ All notable changes to this project are documented here. The format follows
   for what you type; a result opens in a new tab.
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
+- A launch screen with the Combray icon, shown until your open tabs are
+  restored (at most two seconds).
 
 ### Changed
 
@@ -80,6 +82,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Starting the app with open tabs no longer shows "New tab" for a moment
+  before the restored page, as if the tabs were lost.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
