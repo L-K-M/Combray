@@ -11,7 +11,9 @@ class FakeHister(private val token: String = TOKEN) : AutoCloseable {
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     val added = CopyOnWriteArrayList<String>()
     val requestSizes = CopyOnWriteArrayList<Int>()
-    @Volatile var searchBody = """{"documents":[],"history":[],"total":0,"page_key":null}"""
+    val searchQueries = CopyOnWriteArrayList<String>()
+    // Like the pinned server: page_key is always present and empty when there is no next page.
+    @Volatile var searchBody = """{"documents":[],"history":[],"total":0,"page_key":""}"""
 
     val root get() = "http://127.0.0.1:${server.address.port}/h"
 
@@ -30,6 +32,7 @@ class FakeHister(private val token: String = TOKEN) : AutoCloseable {
             }
         }
         server.createContext("/h/search") { exchange ->
+            searchQueries += exchange.requestURI.rawQuery
             if (exchange.requestHeaders.getFirst("X-Access-Token") != token) return@createContext reply(exchange, 401, "")
             reply(exchange, 200, searchBody)
         }

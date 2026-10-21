@@ -59,6 +59,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
     var nextPage by remember { mutableStateOf<String?>(null) }
+    var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -68,6 +69,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         ui = SearchUi.Idle
         hits = emptyList()
         nextPage = null
+        loadingMore = false
         if (service == null || query.isBlank()) {
             ui = SearchUi.Idle
             return@LaunchedEffect
@@ -98,7 +100,8 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
             service == null -> stringResource(R.string.search_all_not_configured)
             else -> when (val state = ui) {
                 is SearchUi.Answer -> when (val result = state.result) {
-                    is HisterSearch.Results -> if (result.hits.isEmpty()) stringResource(R.string.search_all_empty) else null
+                    // The rows shown, not the last page: a later page may add none.
+                    is HisterSearch.Results -> if (hits.isEmpty()) stringResource(R.string.search_all_empty) else null
                     HisterSearch.Unauthorized -> stringResource(R.string.search_all_unauthorized)
                     is HisterSearch.Unreachable -> stringResource(R.string.search_all_unreachable, result.category)
                     is HisterSearch.ServerError -> stringResource(R.string.search_all_error, result.status)
@@ -136,17 +139,28 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
             )
         }
         nextPage?.let { page ->
+            // One page at a time: the button waits, disabled, under a progress bar.
+            if (loadingMore) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) }
             item {
                 TextButton(
                     onClick = {
                         val mine = generation
+                        loadingMore = true
                         scope.launch {
-                            val more = hister.search(query.trim(), page) as? HisterSearch.Results ?: return@launch
+                            val more = hister.search(query.trim(), page)
+                            // A newer query owns the list and the loading state now.
                             if (mine != generation) return@launch
+                            loadingMore = false
+                            // Null: the service went away meanwhile; its removal restarts the search.
+                            more ?: return@launch
+                            // A failed page keeps the rows shown and says why above them.
+                            ui = SearchUi.Answer(more)
+                            if (more !is HisterSearch.Results) return@launch
                             hits = hits + more.hits.filter { hit -> hits.none { it.url == hit.url } }
                             nextPage = more.nextPage
                         }
                     },
+                    enabled = !loadingMore,
                     modifier = Modifier.padding(16.dp).heightIn(min = 48.dp),
                 ) { Text(stringResource(R.string.search_all_more)) }
             }

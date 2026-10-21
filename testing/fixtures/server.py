@@ -241,7 +241,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "total": len(docs),
                 "documents": [{"url": d["url"], "title": d["title"], "text": d["text"][:200]} for d in docs],
                 "history": [],
-                "page_key": None,
+                # Like the pinned server: always present, empty when there is no next page.
+                "page_key": "",
             })
         if path == "/_admin/state":
             with lock:
