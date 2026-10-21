@@ -241,6 +241,7 @@ private fun ServiceSettings(
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
     LaunchedEffect(current) { credentialSaved = current?.let { integrations.hasCredential(secret, it) } == true }
@@ -343,9 +344,24 @@ private fun ServiceSettings(
             Text(stringResource(R.string.action_send_to_current_address))
         }
         TextButton(
-            onClick = { integrations.discardParked(kind) },
+            onClick = { confirmDiscard = true },
             modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = discardLabel },
         ) { Text(stringResource(R.string.action_discard)) }
+    }
+    // Discarding cannot be undone, and the saves were the user's own: confirm first.
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text(stringResource(R.string.discard_parked_title)) },
+            text = { Text(pluralStringResource(R.plurals.queue_parked, parked.size, parked.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDiscard = false
+                    integrations.discardParked(kind)
+                }) { Text(stringResource(R.string.action_discard)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
     }
 }
 

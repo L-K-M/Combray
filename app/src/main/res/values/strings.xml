@@ -173,6 +173,7 @@
     </plurals>
     <string name="action_send_to_current_address">Send to the current address</string>
     <string name="action_discard_parked">Discard the saves queued for the previous address</string>
+    <string name="discard_parked_title">Discard these saves?</string>
 
     <!-- Hister -->
     <string name="hister_title">Hister</string>
