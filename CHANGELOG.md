@@ -63,6 +63,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Recent subscribes to open tabs and history once per time it is open
+  instead of restarting three database observers on every keystroke of
+  the local filter.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.

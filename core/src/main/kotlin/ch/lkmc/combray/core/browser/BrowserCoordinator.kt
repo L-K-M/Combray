@@ -122,8 +122,12 @@ class BrowserCoordinator(
         done.await()
     }
 
-    /** Recent: open tabs and local history, newest first, filtered by [query] if given. */
-    fun recent(query: String? = null): Flow<List<RecentItem>> {
+    /**
+     * Recent: open tabs and local history, newest first, all of it. The local filter runs in
+     * the caller against this one subscription — rebuilding the flow per keystroke would
+     * re-run three Room observers each time.
+     */
+    fun recent(): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
         return combine(
             dao.observeOpenTabs(),
@@ -133,7 +137,7 @@ class BrowserCoordinator(
             val items = tabs.map {
                 RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId)
             } + visits.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
-            items.filter { it.matches(query) }.sortedByDescending { it.time }
+            items.sortedByDescending { it.time }
         }
     }
 
@@ -837,12 +841,6 @@ class BrowserCoordinator(
     }
 
     private fun documentKey(view: LiveView, document: Long) = "$processKey:${view.generation}:$document"
-
-    private fun RecentItem.matches(query: String?): Boolean {
-        if (query.isNullOrBlank()) return true
-        val needle = query.trim()
-        return (title?.contains(needle, ignoreCase = true) ?: false) || (url?.contains(needle, ignoreCase = true) ?: false)
-    }
 
     /** One native view incarnation for a logical tab. */
     private class LiveView(val tabId: String, val nativeTab: Long) {

@@ -68,7 +68,9 @@ class BrowserCoordinatorTest {
 
     private fun state() = browser.browserState.value
 
-    private fun recent(query: String? = null) = runBlocking { browser.recent(query).first() }
+    private fun recent(query: String? = null) = runBlocking {
+        browser.recent().first().filter { it.matches(query) }
+    }
 
     /** Simulates Servo committing [url] as [document] in the view the coordinator created for it. */
     private fun commit(native: Long, document: Long, url: String, kind: HistoryKind = HistoryKind.DOCUMENT_COMMITTED, index: Int = 0, length: Int = 1) {

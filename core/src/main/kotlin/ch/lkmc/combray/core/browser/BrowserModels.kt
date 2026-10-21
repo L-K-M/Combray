@@ -118,6 +118,14 @@ sealed interface RecentItem {
     /** Time used for ordering: last focus for tabs, last interaction for history. */
     val time: Long
 
+    /** Whether the local Recent filter keeps this row; a blank query keeps everything. */
+    fun matches(query: String?): Boolean {
+        if (query.isNullOrBlank()) return true
+        val needle = query.trim()
+        return (title?.contains(needle, ignoreCase = true) ?: false) ||
+            (url?.contains(needle, ignoreCase = true) ?: false)
+    }
+
     data class OpenTab(
         val tabId: String,
         override val url: String?,

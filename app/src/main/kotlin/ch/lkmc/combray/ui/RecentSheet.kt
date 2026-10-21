@@ -84,9 +84,12 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
-    val items by remember(query) { browser.recent(query) }.collectAsStateWithLifecycle(emptyList())
+    // One subscription for the sheet's lifetime; the local filter runs against its items.
+    // Rebuilding the flow per keystroke re-ran three Room observers each time.
+    val allItems by remember { browser.recent() }.collectAsStateWithLifecycle(emptyList())
+    val items = if (scope == RecentScope.OPEN) allItems.filterIsInstance<RecentItem.OpenTab>() else allItems
+    val shown = items.filter { it.matches(query) }
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
-    val shown = if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
     val now = System.currentTimeMillis()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
