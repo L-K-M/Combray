@@ -27,6 +27,20 @@ class IncomingIntentsTest {
     }
 
     @Test
+    fun aSubjectLinkWinsOverEmptyOrLinklessText() {
+        fun share(text: String?, subject: String?) = IncomingIntents.interpret(Intent.ACTION_SEND, null) {
+            when (it) {
+                Intent.EXTRA_TEXT -> text
+                Intent.EXTRA_SUBJECT -> subject
+                else -> null
+            }
+        }
+        assertEquals(Incoming.Open("https://example.org/a"), share("", "https://example.org/a"))
+        assertEquals(Incoming.Open("https://example.org/a"), share("look at this", "https://example.org/a"))
+        assertEquals(Incoming.Open("https://example.org/t"), share("https://example.org/t", "https://example.org/s"))
+    }
+
+    @Test
     fun theFirstLinkWinsAndAnUppercaseSchemeCounts() {
         assertEquals(Incoming.Open("HTTPS://a.example/x"), send("Two: HTTPS://a.example/x, and https://b.example/"))
     }

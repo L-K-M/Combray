@@ -54,8 +54,7 @@ object IncomingIntents {
     /** [extra] reads one of the intent's text extras by name. */
     fun interpret(action: String?, data: String?, extra: (String) -> String?): Incoming? = when (action) {
         Intent.ACTION_VIEW -> data?.let(::open)
-        // Some apps share a link as the subject only.
-        Intent.ACTION_SEND -> (extra(Intent.EXTRA_TEXT) ?: extra(Intent.EXTRA_SUBJECT))?.let(::shared)
+        Intent.ACTION_SEND -> sharedText(extra(Intent.EXTRA_TEXT), extra(Intent.EXTRA_SUBJECT))?.let(::shared)
         Intent.ACTION_WEB_SEARCH -> extra(SearchManager.QUERY)?.let(::editNewTab)
         Intent.ACTION_PROCESS_TEXT -> extra(Intent.EXTRA_PROCESS_TEXT)?.let(::searchNow)
         ACTION_NEW_TAB -> LaunchRequest.EditNewTab("")
@@ -84,6 +83,16 @@ object IncomingIntents {
         (AddressPolicy.interpret(address).primary as? AddressDecision.Navigate)?.let { Incoming.Open(it.url) }
 
     /** A shared link opens at once; other shared text waits in the editor. */
+    /**
+     * What a share is about: the text, unless only the subject holds a link (some apps share a
+     * link as the subject, with no text or an empty one).
+     */
+    private fun sharedText(text: String?, subject: String?): String? = when {
+        text != null && firstWebAddress(text) != null -> text
+        subject != null && firstWebAddress(subject) != null -> subject
+        else -> text?.takeIf { it.isNotBlank() } ?: subject
+    }
+
     private fun shared(text: String): Incoming? {
         val address = firstWebAddress(text) ?: return editNewTab(text)
         // A refused link (credentials in it) goes to the editor alone, which says why. With the

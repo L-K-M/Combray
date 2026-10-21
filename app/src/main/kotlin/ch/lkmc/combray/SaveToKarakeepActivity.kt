@@ -34,7 +34,9 @@ class SaveToKarakeepActivity : Activity() {
             return
         }
 
-        val title = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()?.takeIf { it.isNotBlank() }
+        // A subject that only holds the link is no title: Karakeep then uses the page's own.
+        val title = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
+            ?.takeIf { it.isNotBlank() && IncomingIntents.firstWebAddress(it) == null }
         val graph = (application as CombrayApplication).graph
         val app = applicationContext
         // The process scope: closing this screen must not cancel a save while it is queued.
