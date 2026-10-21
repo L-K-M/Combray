@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.lifecycle.Lifecycle
@@ -267,11 +268,12 @@ class BrowsingTest {
         val deadline = SystemClock.uptimeMillis() + Device.LOAD_TIMEOUT_MS
         while (SystemClock.uptimeMillis() < deadline) {
             tapPageCenter()
-            val waitUntil = SystemClock.uptimeMillis() + TAP_OUTCOME_MS
-            while (SystemClock.uptimeMillis() < waitUntil) {
-                compose.waitForIdle()
-                if (done()) return
-                SystemClock.sleep(POLL_MS)
+            // Not waitForIdle: it fast-forwards the clock past a snackbar's display time.
+            try {
+                compose.waitUntil(TAP_OUTCOME_MS) { done() }
+                return
+            } catch (noEffect: ComposeTimeoutException) {
+                continue
             }
         }
         throw AssertionError("tapping the link had no effect")
@@ -300,7 +302,6 @@ class BrowsingTest {
         const val STOP_TIMEOUT_MS = 10_000L
         /** How long one tap may take to show its effect before the next try. */
         const val TAP_OUTCOME_MS = 15_000L
-        const val POLL_MS = 500L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"
     }
