@@ -9,7 +9,8 @@
 (function (maxTextBytes, maxNodes, maxMillis) {
   "use strict";
 
-  // How often the clock is read: reading it costs more than visiting a node.
+  // How often the clock is read: reading it costs more than visiting a node. Work within one
+  // node (a huge text node, a page-defined getter) is not clocked; only the node budget bounds it.
   var CLOCK_EVERY_NODES = 128;
 
   var SKIPPED = {
@@ -30,7 +31,9 @@
   var truncated = false;
   var nodeBudgetExhausted = false;
   var timeBudgetExhausted = false;
-  // A page that replaces the clock only changes how much of its own text it gives.
+  // The page can replace the clock. One that returns NaN or a non-number stops the walk (the
+  // comparison below fails closed); one that fakes a slow clock removes the time guarantee and
+  // leaves only the node budget. Only interruption in Servo would close that.
   var now = typeof performance === "object" && performance && typeof performance.now === "function"
     ? function () { return performance.now(); }
     : function () { return Date.now(); };
@@ -87,6 +90,12 @@
   var root = document.body || document.documentElement;
   // Explicit stack: [node, closing] where closing marks the end of a block element.
   var stack = root ? [[root, false]] : [];
+  // No time at all (a hidden page whose deadline leaves none): read nothing.
+  if (!(maxMillis > 0)) {
+    stack = [];
+    timeBudgetExhausted = true;
+    truncated = true;
+  }
   while (stack.length) {
     var entry = stack.pop();
     var node = entry[0];
@@ -98,7 +107,7 @@
       nodeBudgetExhausted = true;
       break;
     }
-    if (nodes % CLOCK_EVERY_NODES === 0 && now() - started > maxMillis) {
+    if (nodes % CLOCK_EVERY_NODES === 0 && !(now() - started <= maxMillis)) {
       timeBudgetExhausted = true;
       truncated = true;
       break;

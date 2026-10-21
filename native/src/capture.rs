@@ -21,9 +21,10 @@
 //! engine, not from the script result. A page can still make the script slow or never finish:
 //! Servo v0.6.0 has no interrupt for embedder scripts, so the deadline only abandons the result.
 
+use std::collections::BTreeSet;
 #[cfg(target_os = "android")]
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "android")]
 use servo::{JSValue, JavaScriptEvaluationError};
@@ -90,13 +91,14 @@ pub fn capture_script(max_text_bytes: usize, time_budget: Duration) -> String {
 }
 
 /// How long a capture may run in the page: briefly for the page on screen, which the user may
-/// be about to use; for a hidden page up to its result deadline, less a margin.
+/// be about to use; for a hidden page up to its result deadline, less a margin. A deadline that
+/// leaves no time gives zero: the script then reads nothing and reports a truncated capture.
 pub fn time_budget(visibility: Visibility, deadline: Duration) -> Duration {
     match visibility {
         Visibility::Shown => VISIBLE_SCRIPT_BUDGET,
         Visibility::Hidden => deadline
             .saturating_sub(DEADLINE_MARGIN)
-            .clamp(VISIBLE_SCRIPT_BUDGET, MAX_SCRIPT_BUDGET),
+            .clamp(Duration::ZERO, MAX_SCRIPT_BUDGET),
     }
 }
 
@@ -112,6 +114,58 @@ pub fn defer_while_touched(
         return false;
     }
     touching || since_last_touch.is_some_and(|since| since < QUIET_AFTER_TOUCH)
+}
+
+/// Fingers on the page on screen, and when the last touch event came.
+///
+/// The pointer ids down, not a count: a count leaks when an up never comes. The long-press
+/// path sends one cancel, for the pointer that started the press, and keeps the rest of the
+/// gesture from the engine; with two fingers down a count stayed above zero, and every later
+/// capture of the page on screen waited the full [`MAX_DEFERRAL`].
+#[derive(Debug, Default)]
+pub struct Touches {
+    down: BTreeSet<i32>,
+    last: Option<Instant>,
+}
+
+impl Touches {
+    pub fn press(&mut self, pointer: i32, at: Instant) {
+        self.down.insert(pointer);
+        self.last = Some(at);
+    }
+
+    pub fn moved(&mut self, at: Instant) {
+        self.last = Some(at);
+    }
+
+    pub fn lift(&mut self, pointer: i32, at: Instant) {
+        self.down.remove(&pointer);
+        self.last = Some(at);
+    }
+
+    /// An Android cancel ends the whole gesture, whichever pointer it names.
+    pub fn cancel(&mut self, at: Instant) {
+        self.down.clear();
+        self.last = Some(at);
+    }
+
+    /// The surface or the view under the fingers went away: their up events will not come.
+    pub fn forget_pointers(&mut self) {
+        self.down.clear();
+    }
+
+    pub fn since_last(&self, now: Instant) -> Option<Duration> {
+        self.last.map(|at| now.saturating_duration_since(at))
+    }
+
+    /// Whether a finger is down. One silent for [`MAX_DEFERRAL`] counts as lifted, so a lost up
+    /// event cannot hold later captures back.
+    pub fn touching(&self, now: Instant) -> bool {
+        !self.down.is_empty()
+            && self
+                .since_last(now)
+                .is_some_and(|since| since < MAX_DEFERRAL)
+    }
 }
 
 /// The reader script: budgets first, then Readability, so its source is never rewritten.
@@ -283,15 +337,61 @@ mod tests {
             time_budget(Visibility::Hidden, deadline),
             Duration::from_millis(2_500)
         );
-        // Never more than the cap, never less than a page on screen gets.
+        // Never more than the cap, nor past the deadline less its margin.
         assert_eq!(
             time_budget(Visibility::Hidden, Duration::from_secs(60)),
             MAX_SCRIPT_BUDGET
         );
         assert_eq!(
-            time_budget(Visibility::Hidden, Duration::from_millis(100)),
-            VISIBLE_SCRIPT_BUDGET
+            time_budget(Visibility::Hidden, Duration::from_millis(700)),
+            Duration::from_millis(200)
         );
+        assert_eq!(
+            time_budget(Visibility::Hidden, Duration::from_millis(100)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn a_zero_budget_is_filled_in_as_zero() {
+        let script = capture_script(DEFAULT_MAX_TEXT_BYTES, Duration::ZERO);
+        assert!(script.trim_end().ends_with("})(262144, 50000, 0)"));
+    }
+
+    #[test]
+    fn a_cancel_ends_the_whole_gesture() {
+        let at = Instant::now();
+        let mut touches = Touches::default();
+        touches.press(0, at);
+        touches.press(1, at);
+        // Lifting one of two fingers leaves the page touched.
+        touches.lift(1, at);
+        assert!(touches.touching(at));
+        touches.press(1, at);
+        // The long-press path cancels only the pointer that started the press.
+        touches.cancel(at);
+        assert!(!touches.touching(at));
+        assert_eq!(touches.since_last(at), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn fingers_whose_page_went_away_are_forgotten() {
+        let at = Instant::now();
+        let mut touches = Touches::default();
+        touches.press(0, at);
+        touches.forget_pointers();
+        assert!(!touches.touching(at));
+    }
+
+    #[test]
+    fn a_finger_silent_for_the_longest_deferral_counts_as_lifted() {
+        let at = Instant::now();
+        let mut touches = Touches::default();
+        touches.press(0, at);
+        assert!(touches.touching(at + Duration::from_secs(1)));
+        assert!(!touches.touching(at + MAX_DEFERRAL));
+        touches.moved(at + MAX_DEFERRAL);
+        assert!(touches.touching(at + MAX_DEFERRAL));
     }
 
     #[test]

@@ -257,8 +257,7 @@ struct Engine {
     next_control: u64,
     /// Fingers on the page now, and when the last touch event came: captures of the page on
     /// screen wait while the user scrolls or taps.
-    pointers_down: u32,
-    last_touch: Option<Instant>,
+    touches: capture::Touches,
     /// Page-text captures of the page on screen waiting for a quiet moment, with when each
     /// first had to wait.
     deferred_captures: Vec<(CaptureRequest, Instant)>,
@@ -286,8 +285,7 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
-            pointers_down: 0,
-            last_touch: None,
+            touches: Default::default(),
             deferred_captures: Vec::new(),
         }
     }
@@ -504,6 +502,8 @@ impl Engine {
     }
 
     fn surface_destroyed(&mut self) {
+        // The gesture on this surface ends without its up events.
+        self.touches.forget_pointers();
         let Surface::Bound { .. } = self.surface else {
             return;
         };
@@ -647,6 +647,7 @@ impl Engine {
             tab.webview.hide();
         }
         self.active = None;
+        self.touches.forget_pointers();
         self.needs_paint = true;
     }
 
@@ -677,6 +678,7 @@ impl Engine {
         selected.webview.focus();
 
         self.active = Some(tab);
+        self.touches.forget_pointers();
         self.needs_paint = true;
         self.emit(EngineEvent::TabSelected { view });
     }
@@ -689,6 +691,7 @@ impl Engine {
         if self.active == Some(tab) {
             // The application picks the successor; until then the surface shows no page.
             self.active = None;
+            self.touches.forget_pointers();
             self.needs_paint = true;
         }
         if self.ime_owner.is_some_and(|(view, _)| view == closed.view) {
@@ -757,12 +760,13 @@ impl Engine {
     // --- Input (always to the active view) ---------------------------------------------------
 
     fn touch(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) {
-        self.last_touch = Some(Instant::now());
-        self.pointers_down = match phase {
-            TouchPhase::Down => self.pointers_down.saturating_add(1),
-            TouchPhase::Up | TouchPhase::Cancel => self.pointers_down.saturating_sub(1),
-            TouchPhase::Move => self.pointers_down,
-        };
+        let now = Instant::now();
+        match phase {
+            TouchPhase::Down => self.touches.press(pointer, now),
+            TouchPhase::Move => self.touches.moved(now),
+            TouchPhase::Up => self.touches.lift(pointer, now),
+            TouchPhase::Cancel => self.touches.cancel(now),
+        }
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -848,11 +852,12 @@ impl Engine {
     }
 
     fn waits_for_quiet(&self, request: &CaptureRequest, waited: Duration) -> bool {
+        let now = Instant::now();
         request.kind == CaptureKind::PageText
             && self.active == Some(request.tab)
             && capture::defer_while_touched(
-                self.pointers_down > 0,
-                self.last_touch.map(|at| at.elapsed()),
+                self.touches.touching(now),
+                self.touches.since_last(now),
                 waited,
             )
     }
