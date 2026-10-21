@@ -68,7 +68,8 @@ class AddressPolicyTest {
             assertEquals(query, AddressPolicy.kagiQuery(AddressPolicy.kagiSearchUrl(query)))
         }
 
-        // Kagi's own search field submits "+" for spaces; other parameters and the fragment are ignored.
+        // Kagi's own search field submits "+" for spaces. Other parameters and the fragment are
+        // ignored, and of two q parameters the first counts.
         assertEquals("foo bar", AddressPolicy.kagiQuery("https://kagi.com/search?q=foo+bar"))
         assertEquals("a b", AddressPolicy.kagiQuery("HTTPS://KAGI.com/search?r=ch&q=a%20b&q=c#top"))
     }
@@ -86,6 +87,7 @@ class AddressPolicyTest {
             "https://kagi.com/search/?q=x",
             "https://kagi.com/images?q=x",
             "https://kagi.com/?q=x",
+            // Malformed escapes give nothing rather than text the user never typed.
             "https://kagi.com/search?q=%zz",
             "not an address",
         )
@@ -96,6 +98,8 @@ class AddressPolicyTest {
             "https://kagi.com/search?q=",
             "https://kagi.com/search?q=%20",
             "https://kagi.com/search?qq=x",
+            // Parameter names are case-sensitive.
+            "https://kagi.com/search?Q=x",
             "https://kagi.com/search#q=x",
         )
         for (url in others + missing) {
