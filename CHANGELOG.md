@@ -64,6 +64,11 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - Share is in the bottom bar, next to Save, instead of the More menu.
+- Save shows a bookmark instead of a star, which in Karakeep means
+  Favourite: an outline, filled while saving, with a check once saved.
+  Recent shows stacked pages instead of a list.
+- Touch feedback, if enabled on the phone: a long-press on a page, a save
+  Karakeep acknowledged, and a save that needs attention.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.
 - A closed tab's page keeps its place in Recent, ordered by when the tab

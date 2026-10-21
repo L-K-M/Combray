@@ -33,6 +33,7 @@ import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
+import ch.lkmc.combray.ui.PageSaveStatus
 import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertThrows
 import org.junit.Rule
@@ -57,7 +58,7 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnAPageIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(PAGE, openTabs = 3, SaveStatus.Pending, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            BottomBar(PAGE, openTabs = 3, PageSaveStatus(PAGE.url, SaveStatus.Pending), {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()
@@ -70,7 +71,7 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnANewTabIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            BottomBar(null, openTabs = 0, PageSaveStatus(null, SaveStatus.NotConfigured), {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()

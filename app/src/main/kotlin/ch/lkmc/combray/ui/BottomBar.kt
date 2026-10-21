@@ -1,5 +1,10 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,11 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Badge
@@ -29,12 +32,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -52,7 +58,7 @@ import ch.lkmc.combray.core.integration.SaveStatus
 fun BottomBar(
     tab: ActiveTab?,
     openTabs: Int,
-    saveStatus: SaveStatus,
+    saveStatus: PageSaveStatus,
     onBack: () -> Unit,
     onAddress: () -> Unit,
     onSave: () -> Unit,
@@ -78,7 +84,7 @@ fun BottomBar(
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                 IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
                     BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                        Icon(TabStackIcon, contentDescription = null)
                     }
                 }
                 IconButton(onClick = onMore) {
@@ -98,17 +104,44 @@ fun BottomBar(
 
 /** One tap saves; the icon says saved, saving or needs attention, the label says it in words. */
 @Composable
-private fun SaveButton(status: SaveStatus, enabled: Boolean, onSave: () -> Unit) {
+private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Unit) {
+    val status = save.status
     val (icon, label) = when (status) {
-        SaveStatus.Saved -> Icons.Filled.Star to stringResource(R.string.save_state_saved)
-        SaveStatus.Pending -> StarBorder to stringResource(R.string.save_state_pending)
+        SaveStatus.Saved -> BookmarkAddedIcon to stringResource(R.string.save_state_saved)
+        SaveStatus.Pending -> BookmarkIcon to stringResource(R.string.save_state_pending)
         is SaveStatus.NeedsAttention -> Icons.Filled.Warning to stringResource(R.string.save_state_attention)
-        SaveStatus.NotConfigured, SaveStatus.Unsaved -> StarBorder to stringResource(R.string.action_save)
+        SaveStatus.NotConfigured, SaveStatus.Unsaved -> BookmarkBorderIcon to stringResource(R.string.action_save)
     }
-    // A live region: TalkBack announces when the save finishes or needs attention.
-    IconButton(onClick = onSave, enabled = enabled, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+
+    // A save that ends on the shown page is felt too. Through the view, so the system's touch
+    // feedback setting applies.
+    val haptics = LocalHapticFeedback.current
+    var previous by remember { mutableStateOf(save) }
+    LaunchedEffect(save) {
+        when (saveFeedback(previous, save)) {
+            SaveFeedback.CONFIRM -> haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+            SaveFeedback.REJECT -> haptics.performHapticFeedback(HapticFeedbackType.Reject)
+            null -> Unit
+        }
+        previous = save
+    }
+
+    // A live region: TalkBack announces when the save finishes or needs attention. The label is
+    // the button's, not the icon's: during the cross-fade both icons are composed.
+    IconButton(
+        onClick = onSave,
+        enabled = enabled,
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = label
+        },
+    ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label)
+            AnimatedContent(
+                icon,
+                transitionSpec = { (scaleIn(initialScale = SAVE_ICON_START_SCALE) + fadeIn()) togetherWith fadeOut() },
+                label = "save icon",
+            ) { shown -> Icon(shown, contentDescription = null) }
             if (status == SaveStatus.Pending) {
                 CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 2.dp)
             }
@@ -162,16 +195,5 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, modifier: Modifier
     }
 }
 
-/**
- * Material's "star_border" (Apache License 2.0, like the icon library). The core icon set has no
- * empty star: its outlined Star is filled, which made saved and unsaved pages look the same.
- */
-private val StarBorder: ImageVector = ImageVector.Builder("StarBorder", 24.dp, 24.dp, 24f, 24f)
-    .addPath(
-        addPathNodes(
-            "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24z" +
-                "M12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z",
-        ),
-        fill = SolidColor(Color.Black),
-    )
-    .build()
+/** The save icon grows into place from this fraction of its size as it fades in. */
+private const val SAVE_ICON_START_SCALE = 0.6f

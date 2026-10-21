@@ -61,6 +61,7 @@ import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.EngineSurfaceView
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
@@ -80,8 +81,11 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val tab = state.activeTab
-    val saveStatus by remember(tab?.url) { graph.integrations.saveStatus(tab?.url) }
-        .collectAsStateWithLifecycle(SaveStatus.Unsaved)
+    // Tagged with its address: until the new page's status arrives, the bar keeps the last one.
+    val saveStatus by remember(tab?.url) {
+        val url = tab?.url
+        graph.integrations.saveStatus(url).map { PageSaveStatus(url, it) }
+    }.collectAsStateWithLifecycle(PageSaveStatus(null, SaveStatus.Unsaved))
     val histerService by graph.integrations.hister.service.collectAsStateWithLifecycle(null)
 
     val closedMessage = stringResource(R.string.notice_tab_closed)

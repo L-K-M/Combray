@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
@@ -41,6 +42,9 @@ class EngineSurfaceView(
         // The engine may have stopped since the press.
         if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
         longPressed = true
+        // Felt the moment the press turns into a long-press, as elsewhere on Android: from here on
+        // the finger no longer scrolls or taps. The system's touch feedback setting applies.
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         NativeEngine.touch(NativeEngine.TOUCH_CANCEL, pressPointer, pressX, pressY)
         NativeEngine.contextClick(pressX, pressY)
     }
