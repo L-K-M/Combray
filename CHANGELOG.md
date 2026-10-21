@@ -60,6 +60,9 @@ All notable changes to this project are documented here. The format follows
   for what you type; a result opens in a new tab.
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
+- The address sheet lists up to five open tabs and recent pages that match
+  what you type: a tab switches to that tab, a page opens in a new tab.
+  The matches come from this device; nothing is sent while you type.
 
 ### Changed
 
@@ -77,6 +80,11 @@ All notable changes to this project are documented here. The format follows
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- On a Kagi results page, the address sheet starts with your search words
+  instead of the results address.
+- The address sheet no longer shows an error before you type, and its
+  buttons stay on one line, shortened in the middle, with an icon for
+  search or address.
 
 ### Fixed
 

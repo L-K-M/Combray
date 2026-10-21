@@ -229,7 +229,9 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         Sheet.NONE -> Unit
         Sheet.ADDRESS -> AddressSheet(
             target = addressTab,
-            currentUrl = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url },
+            // On a Kagi results page, refining the search starts from its words, not its address.
+            initialText = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
+            suggestions = browser::recent,
             onDecision = { decision ->
                 dismiss()
                 val target = addressTab
@@ -240,6 +242,15 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                     is AddressDecision.External -> openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
                     is AddressDecision.Rejected -> Unit
                 }
+            },
+            // The exact tab, as in Recent: switching never follows an equal address elsewhere.
+            onSelectTab = { tabId ->
+                dismiss()
+                browser.selectTab(tabId)
+            },
+            onOpenVisit = { visitId ->
+                dismiss()
+                browser.openVisit(visitId)
             },
             onDismiss = dismiss,
         )
