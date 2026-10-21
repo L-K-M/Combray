@@ -46,6 +46,7 @@ use crate::events::{
 };
 use crate::native_window::NativeWindow;
 use crate::panic_policy;
+use crate::wakeup::{self, PaintRetry};
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -59,8 +60,6 @@ pub struct EngineConfig {
     pub density: f32,
 }
 
-/// Longest sleep between event loop iterations when nothing wakes the engine.
-const IDLE_TICK: Duration = Duration::from_millis(250);
 /// Reports buffered per tab for documents whose commit has not been seen yet.
 const MAX_HELD_REPORTS: usize = 64;
 /// Minimum interval between `painted` progress events per tab.
@@ -81,7 +80,12 @@ pub fn run(
 ) {
     let mut engine = Engine::new(config, wake, sink);
     loop {
-        let command = match commands.recv_timeout(engine.next_timeout()) {
+        // Without timed work, wait for a command or Servo's waker (see `wakeup`).
+        let received = match engine.next_timeout() {
+            Some(timeout) => commands.recv_timeout(timeout),
+            None => commands.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        let command = match received {
             Ok(command) => Some(command),
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => break,
@@ -165,6 +169,8 @@ struct Tab {
     current_url: Option<Url>,
     /// Every document this tab reported, so callers can name them by numeric ID.
     documents: HashMap<u64, PipelineId>,
+    /// What the application asked for; applied again to every new document (`set_throttling`).
+    throttling: Throttling,
     /// Documents that were current and have been replaced.
     retired: HashSet<PipelineId>,
     /// Reports from documents that have not committed yet (they can overtake the commit).
@@ -301,13 +307,21 @@ impl Engine {
         });
     }
 
-    fn next_timeout(&self) -> Duration {
+    /// How long the loop may wait for a message; `None` until one arrives.
+    fn next_timeout(&self) -> Option<Duration> {
         let now = Instant::now();
-        self.pending_captures
+        let until_capture_deadline = self
+            .pending_captures
             .values()
             .map(|pending| pending.deadline.saturating_duration_since(now))
-            .min()
-            .map_or(IDLE_TICK, |until_deadline| until_deadline.min(IDLE_TICK))
+            .min();
+        // `pump` ends with `paint`, so a request still open on a usable surface means it failed.
+        let paint = if self.needs_paint && self.runtime.is_some() && self.surface.usable() {
+            PaintRetry::Pending
+        } else {
+            PaintRetry::NotNeeded
+        };
+        wakeup::sleep_limit(until_capture_deadline, paint)
     }
 
     fn handle(&mut self, command: Command) -> Flow {
@@ -347,12 +361,7 @@ impl Engine {
                     tab.webview.reload();
                 }
             },
-            Command::SetThrottling { tab, throttling } => {
-                if let Some(tab) = self.tab(tab) {
-                    tab.webview
-                        .set_throttled(throttling == Throttling::Throttled);
-                }
-            },
+            Command::SetThrottling { tab, throttling } => self.set_throttling(tab, throttling),
             Command::Touch {
                 phase,
                 pointer,
@@ -593,6 +602,7 @@ impl Engine {
                 current_document: None,
                 current_url: None,
                 documents: HashMap::new(),
+                throttling: Throttling::Normal,
                 retired: HashSet::new(),
                 held: VecDeque::new(),
                 frames_painted: 0,
@@ -637,6 +647,20 @@ impl Engine {
         }
         self.active = None;
         self.needs_paint = true;
+    }
+
+    /// Servo throttles only the document current when asked: each later one (load, reload,
+    /// history traversal) starts unthrottled, and a view's first document does not exist yet
+    /// when it is created. The tab keeps the request so `history_changed` can apply it again.
+    fn set_throttling(&mut self, tab: i64, throttling: Throttling) {
+        let Some(found) = self.tabs.get_mut(&tab) else {
+            self.refuse(format!("no tab {tab}"), Some(tab), None);
+            return;
+        };
+        found.throttling = throttling;
+        found
+            .webview
+            .set_throttled(throttling == Throttling::Throttled);
     }
 
     fn persist_profile(&mut self) {
@@ -1287,6 +1311,12 @@ impl Engine {
             HistoryChange::ListOnly
         };
         tab.current_url = url.clone();
+
+        // Servo started this document unthrottled; a hidden tab must not run it at full speed.
+        if change == HistoryChange::NewDocument {
+            tab.webview
+                .set_throttled(tab.throttling == Throttling::Throttled);
+        }
 
         // Release reports that overtook this commit; discard those of replaced documents.
         let mut released = Vec::new();

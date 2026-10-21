@@ -732,6 +732,50 @@ class BrowserCoordinatorTest {
         assertTrue(1L !in engine.closed)
     }
 
+    @Test
+    fun theShownPageIsThrottledOnlyWhileTheAppIsInTheBackground() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        assertEquals(false, engine.throttled[1])
+
+        browser.setForeground(AppVisibility.BACKGROUND); idle()
+        assertEquals(true, engine.throttled[1])
+
+        browser.setForeground(AppVisibility.FOREGROUND); idle()
+        assertEquals(false, engine.throttled[1])
+    }
+
+    @Test
+    fun aTabShownWhileTheAppIsInTheBackgroundStaysThrottledUntilItReturns() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertEquals(true, engine.throttled[1])
+        browser.setForeground(AppVisibility.BACKGROUND); idle()
+
+        // The page closes its own window: its successor is shown, but nobody sees it yet.
+        engine.emit(EngineEvent.TabClosed(engine.view(2))); idle()
+        assertEquals(1L, engine.selected.last())
+        assertEquals(true, engine.throttled[1])
+
+        browser.setForeground(AppVisibility.FOREGROUND); idle()
+        assertEquals(false, engine.throttled[1])
+    }
+
+    @Test
+    fun aViewCreatedWhileTheAppIsInTheBackgroundStartsThrottled() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        browser.setForeground(AppVisibility.BACKGROUND); idle()
+
+        // The surface started the engine just before the user left.
+        ready()
+        assertEquals(listOf(1L to "https://a.test/"), engine.created)
+        assertEquals(true, engine.throttled[1])
+
+        browser.setForeground(AppVisibility.FOREGROUND); idle()
+        assertEquals(false, engine.throttled[1])
+    }
+
     private companion object {
         const val NONE = FakeEngine.NONE
         const val PAGE_TAB = 1L shl 52

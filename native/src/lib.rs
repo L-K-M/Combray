@@ -11,13 +11,14 @@
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `events`, `panic_policy` and the pure parts of `capture` build on any host so their tests run
-//! without Servo.
+//! `events`, `panic_policy`, `wakeup` and the pure parts of `capture` build on any host so their
+//! tests run without Servo.
 
 pub mod capture;
 pub mod controls;
 pub mod events;
 mod panic_policy;
+mod wakeup;
 
 #[cfg(target_os = "android")]
 mod commands;

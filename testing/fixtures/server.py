@@ -19,6 +19,8 @@ Pages
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   (the three control pages have a #1f6f78 margin on the left for paint checks)
+  /ticks.html[?then=<s>]     counts setInterval(100 ms) ticks in its title TICKS:<n> (about ten a second,
+                             one when throttled); with then, goes on to /ticks.html after <s> seconds
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
   POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks (newest first), GET .../bookmarks/search?q=,
@@ -99,6 +101,11 @@ INTERSECTION_PAGE = page(
     "  if (entries.some(function (e) { return e.isIntersecting; })) document.title = 'IO:visible';"
     " }).observe(document.getElementById('target')); }</script>",
 )
+
+# Ticks ten times a second at full speed and once a second throttled (Servo's minimum timer
+# interval for throttled pages); the engine reports the title for hidden tabs too.
+TICK_SCRIPT = "<script>var n=0;setInterval(function(){n++;document.title='TICKS:'+n},100);</script>"
+MAX_TICKS_THEN_SECONDS = 600
 
 CONTROL_PAGES = {
     "/select.html": (
@@ -200,6 +207,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/ticks.html":
+            then = query.get("then", [""])[0]
+            script = TICK_SCRIPT
+            if then.isascii() and then.isdigit() and int(then) <= MAX_TICKS_THEN_SECONDS:
+                # A new document of the same page, so the count starts again.
+                script += f"<script>setTimeout(function(){{location.href='/ticks.html'}},{int(then) * 1000});</script>"
+            return self.send(200, page("TICKS:0", "<p>ticks</p>", script))
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

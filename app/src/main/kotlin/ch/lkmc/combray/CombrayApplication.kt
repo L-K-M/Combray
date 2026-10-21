@@ -8,6 +8,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import ch.lkmc.combray.core.browser.AppVisibility
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.EngineStatus
@@ -42,6 +43,7 @@ class CombrayApplication : Application(), OutboxHost {
         graph.browser.start()
         persistProfileWhileRunning()
         expireHistoryOnReturn()
+        throttleThePageInTheBackground()
         // Saves queued before the process died go out as soon as possible.
         graph.integrations.kick()
     }
@@ -76,6 +78,19 @@ class CombrayApplication : Application(), OutboxHost {
     private fun expireHistoryOnReturn() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = graph.browser.runMaintenance()
+        })
+    }
+
+    /**
+     * Off screen the shown page runs throttled like hidden tabs, until Android freezes or kills
+     * the process. Android reports the stop 700 ms after the last Activity stops, so a rotation
+     * does not count.
+     */
+    private fun throttleThePageInTheBackground() {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) = graph.browser.setForeground(AppVisibility.FOREGROUND)
+
+            override fun onStop(owner: LifecycleOwner) = graph.browser.setForeground(AppVisibility.BACKGROUND)
         })
     }
 
