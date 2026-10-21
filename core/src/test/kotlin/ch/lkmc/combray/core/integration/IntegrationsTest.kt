@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.net.HttpURLConnection
 import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
@@ -495,6 +496,56 @@ class IntegrationsTest {
         drain()
         assertEquals(SaveStatus.Saved, status())
         assertEquals(setOf("bm1"), server.lists["reading"])
+    }
+
+    @Test
+    fun aListBoundSaveRetriesAMissingIdAndRecoversTheSameBookmark() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+
+        for (fault in listOf(FakeKarakeep.Fault.MALFORMED, FakeKarakeep.Fault.MISSING_ID)) {
+            for (response in listOf(HttpURLConnection.HTTP_CREATED, HttpURLConnection.HTTP_OK)) {
+                val url = "https://news.example/article?fault=$fault&response=$response"
+                if (response == HttpURLConnection.HTTP_OK) server.bookmarks[url] = "existing-${server.bookmarks.size}"
+                server.fault = fault
+                server.faultCount = 1
+                val queued = integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, url, payload(url), supersede = false) as Enqueued.Queued
+
+                drain()
+
+                val pending = job(queued.job.id)
+                val remoteId = server.bookmarks.getValue(url)
+                assertEquals(JobState.RETRY_WAIT, pending.state)
+                assertEquals(SaveStatus.Pending, status(url))
+                assertTrue(remoteId !in server.lists.getValue("reading"))
+
+                now = pending.nextAttemptAt
+                drain()
+
+                assertEquals(SaveStatus.Saved, status(url))
+                assertEquals(remoteId, job(queued.job.id).remoteId)
+                assertTrue(remoteId in server.lists.getValue("reading"))
+                assertEquals(remoteId, server.bookmarks.getValue(url))
+            }
+        }
+        assertEquals(4, server.bookmarks.size)
+    }
+
+    @Test
+    fun aStandaloneSaveStillAcknowledgesAMalformedSuccessBody() = runBlocking {
+        configure()
+        server.fault = FakeKarakeep.Fault.MALFORMED
+        server.faultCount = 1
+        integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false)
+
+        drain()
+
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals(SaveStatus.Saved, status())
+        assertEquals("malformed_response", job().error)
+        assertNull(job().remoteId)
+        assertEquals(1, server.bookmarks.size)
     }
 
     @Test
