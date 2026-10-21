@@ -1,6 +1,9 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,26 +66,40 @@ fun BottomBar(
 ) {
     Surface(tonalElevation = 3.dp, modifier = modifier) {
         Box {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                }
-                AddressChip(tab, onAddress, Modifier.weight(1f))
-                SaveButton(saveStatus, enabled = tab?.url != null, onSave)
-                IconButton(onClick = onShare, enabled = tab?.url != null) {
-                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
-                }
-                val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
-                IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
-                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+            BoxWithConstraints {
+                // Five 48dp actions leave the chip about 70dp at 320dp, which is not a site name.
+                val stacked = maxWidth < 400.dp
+                Column {
+                    if (stacked) {
+                        AddressChip(
+                            tab,
+                            onAddress,
+                            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp),
+                        )
                     }
-                }
-                IconButton(onClick = onMore) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp),
+                        horizontalArrangement = if (stacked) Arrangement.SpaceEvenly else Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                        if (!stacked) AddressChip(tab, onAddress, Modifier.weight(1f))
+                        SaveButton(saveStatus, enabled = tab?.url != null, onSave)
+                        IconButton(onClick = onShare, enabled = tab?.url != null) {
+                            Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                        }
+                        val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
+                        IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
+                            BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
+                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                            }
+                        }
+                        IconButton(onClick = onMore) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                        }
+                    }
                 }
             }
             // Overlaid on the bar's top edge: loading never moves or covers an action.
