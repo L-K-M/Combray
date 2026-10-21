@@ -31,4 +31,15 @@ class RecentItemMatchTest {
         assertFalse(tab.matches("missing"))
         assertFalse(visit.matches("news.example"))
     }
+
+    @Test
+    fun missingFieldsFallBackToFalsePerSide() {
+        val noTitle = RecentItem.Visit("visit2", "tab1", "https://only-url.test/", title = null, time = 0)
+        assertTrue(noTitle.matches("only-url"))
+        assertFalse(noTitle.matches("nothing"))
+
+        val noUrl = RecentItem.OpenTab("tab2", url = null, title = null, time = 0, active = false)
+        assertFalse(noUrl.matches("anything"))
+        assertTrue(noUrl.matches(null))
+    }
 }
