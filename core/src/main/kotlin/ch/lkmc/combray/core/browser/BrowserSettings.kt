@@ -9,8 +9,9 @@ import kotlinx.coroutines.flow.asStateFlow
 enum class Appearance { SYSTEM, LIGHT, DARK }
 
 /**
- * Reader view body size. Reader is rendered in Combray's own type, so the size is Combray's
- * setting, not the page's or the system font scale.
+ * Reader view text size: a multiplier on the article's sp sizes, so the system font scale
+ * still applies. Reader is rendered in Combray's own type, so the size is Combray's choice,
+ * not the page's.
  */
 enum class ReaderTextSize(val scale: Float) { SMALL(0.85f), DEFAULT(1f), LARGE(1.25f) }
 

@@ -1,11 +1,15 @@
 package ch.lkmc.combray.ui
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import ch.lkmc.combray.core.browser.Appearance
 
 // Pine green and ivory from the launcher artwork (media-sources/icon.png).
@@ -35,6 +39,17 @@ fun CombrayTheme(appearance: Appearance = Appearance.SYSTEM, content: @Composabl
         Appearance.SYSTEM -> isSystemInDarkTheme()
         Appearance.LIGHT -> false
         Appearance.DARK -> true
+    }
+    // System bar icons follow the in-app choice, not the system's: a forced Dark on a
+    // light-mode phone must not leave dark icons on the dark background.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            val bars = WindowCompat.getInsetsController(window, view)
+            bars.isAppearanceLightStatusBars = !dark
+            bars.isAppearanceLightNavigationBars = !dark
+        }
     }
     MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
 }

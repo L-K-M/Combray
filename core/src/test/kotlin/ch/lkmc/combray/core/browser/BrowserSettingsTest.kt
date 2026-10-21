@@ -47,6 +47,13 @@ class BrowserSettingsTest {
 
     @Test
     fun anUnknownStoredChoiceFallsBackToItsDefault() {
+        // Pin the real storage keys first: if these ever move, the literals below must too.
+        val probe = BrowserSettings(preferences)
+        probe.setAppearance(Appearance.LIGHT)
+        probe.setReaderTextSize(ReaderTextSize.SMALL)
+        assertEquals("LIGHT", preferences.getString("appearance", null))
+        assertEquals("SMALL", preferences.getString("reader_text_size", null))
+
         preferences.edit().putString("appearance", "MIDNIGHT").putString("reader_text_size", "HUGE").apply()
 
         val settings = BrowserSettings(preferences)

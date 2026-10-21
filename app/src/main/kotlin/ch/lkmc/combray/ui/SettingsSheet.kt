@@ -219,7 +219,7 @@ private fun ReaderSizeSetting(settings: BrowserSettings) {
 /** A labeled row of choices; the chips announce their own state, like Recent's scopes. */
 @Composable
 private fun ChoiceSetting(label: String, options: List<String>, selected: Int, onChoose: (Int) -> Unit) {
-    Text(label, modifier = Modifier.padding(top = 8.dp))
+    Text(label, modifier = Modifier.semantics { heading() }.padding(top = 8.dp))
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp),

@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.combray.R
@@ -89,7 +90,7 @@ private fun ArticleText(article: Article, readerSize: ReaderTextSize, onOpenLink
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { ArticleHeader(article) }
+            item { ArticleHeader(article, readerSize) }
             items(article.blocks) { block -> Block(block, readerSize, onOpenLink) }
             if (article.truncated) {
                 item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
@@ -100,13 +101,13 @@ private fun ArticleText(article: Article, readerSize: ReaderTextSize, onOpenLink
 }
 
 @Composable
-private fun ArticleHeader(article: Article) {
+private fun ArticleHeader(article: Article, readerSize: ReaderTextSize) {
     Column(Modifier.articleWidth().padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOfNotNull(article.site, article.byline).distinct().takeIf { it.isNotEmpty() }?.let {
             Text(it.joinToString(" · "), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         article.title?.let {
-            Text(it, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+            Text(it, style = MaterialTheme.typography.headlineSmall.scaled(readerSize), modifier = Modifier.semantics { heading() })
         }
     }
 }
@@ -114,11 +115,11 @@ private fun ArticleHeader(article: Article) {
 @Composable
 private fun Block(block: ArticleBlock, readerSize: ReaderTextSize, onOpenLink: (String) -> Unit) {
     val text = annotated(block, onOpenLink)
-    val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp * readerSize.scale, lineHeight = 28.sp * readerSize.scale)
+    val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 28.sp).scaled(readerSize)
     when (block.kind) {
         BlockKind.HEADING -> Text(
             text,
-            style = if (block.level <= 2) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+            style = (if (block.level <= 2) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium).scaled(readerSize),
             modifier = Modifier.articleWidth().padding(top = 8.dp).semantics { heading() },
         )
         BlockKind.PARAGRAPH -> Paragraph(text, body)
@@ -143,11 +144,13 @@ private fun Block(block: ArticleBlock, readerSize: ReaderTextSize, onOpenLink: (
         }
         BlockKind.PREFORMATTED -> Text(
             text,
-            style = body.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp * readerSize.scale, lineHeight = 20.sp * readerSize.scale),
+            style = MaterialTheme.typography.bodyLarge
+                .copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp)
+                .scaled(readerSize),
             softWrap = false,
             modifier = Modifier.articleWidth().horizontalScroll(rememberScrollState()),
         )
-        BlockKind.CAPTION -> Paragraph(text, MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic))
+        BlockKind.CAPTION -> Paragraph(text, MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic).scaled(readerSize))
     }
 }
 
@@ -188,6 +191,15 @@ private fun ReaderMessage(message: String, action: @Composable () -> Unit) {
 }
 
 private fun Modifier.articleWidth() = widthIn(max = MAX_TEXT_WIDTH).fillMaxWidth().padding(horizontal = 20.dp)
+
+/**
+ * The chosen reader size scales the whole article, headings included, so the hierarchy holds
+ * at every size. The system font scale still applies on top: these are sp sizes.
+ */
+private fun TextStyle.scaled(readerSize: ReaderTextSize): TextStyle = copy(
+    fontSize = fontSize * readerSize.scale,
+    lineHeight = if (lineHeight == TextUnit.Unspecified) lineHeight else lineHeight * readerSize.scale,
+)
 
 /** Material's "article" icon (Apache License 2.0, like the icon library), absent from the core set. */
 val ReaderIcon: ImageVector = ImageVector.Builder("Article", 24.dp, 24.dp, 24f, 24f)
