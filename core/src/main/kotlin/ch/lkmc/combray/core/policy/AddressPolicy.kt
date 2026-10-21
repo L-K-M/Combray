@@ -43,10 +43,13 @@ data class AddressInterpretation(val primary: AddressDecision, val alternative: 
  * ```
  * "https://example.org/a b"   -> Navigate (as typed, the engine parses it)
  * "example.org/path"          -> Navigate https://example.org/path, or Search
- * "localhost:8080", "nas/"    -> Navigate https://..., or Search
+ * "192.168.1.10", "localhost" -> Navigate http://..., or https://...
+ * "keep.lan:3000", "nas:5000" -> Navigate https://..., or http://...
+ * "8.8.8.8", "nas/"           -> Navigate https://..., or Search
  * "router"                    -> Search, or Navigate https://router
  * "!w Zürich & co #1 😀"      -> Search, encoded once
  * "javascript:alert(1)"       -> Rejected
+ * "admin:pw@192.168.1.1"      -> Rejected
  * ```
  */
 object AddressPolicy {
@@ -59,6 +62,21 @@ object AddressPolicy {
     private val IPV4 = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
     private val LABEL = Regex("^(?!-)[\\p{L}\\p{N}-]{1,63}(?<!-)$")
     private val TOP_LEVEL = Regex("^(\\p{L}{2,63}|xn--[a-z0-9-]{1,59})$", RegexOption.IGNORE_CASE)
+    private val IPV6_GROUP = Regex("^[0-9A-Fa-f]{1,4}$")
+    private const val IPV6_GROUPS = 8
+    private const val BITS_PER_BYTE = 8
+
+    /** Names that only resolve on a home network (RFC 6762 .local, RFC 8375 .home.arpa, and common ones). */
+    private val LOCAL_SUFFIXES = listOf(".lan", ".local", ".home.arpa", ".internal", ".localdomain")
+
+    /** Private (RFC 1918, IPv6 unique local), loopback and link-local networks, as (bytes, prefix length). */
+    private val LOCAL_NETWORKS = listOf(
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16",
+        "::1/128", "fc00::/7", "fe80::/10",
+    ).map { cidr ->
+        val (network, prefixLength) = cidr.split('/')
+        Pair(checkNotNull(ipv4Bytes(network) ?: ipv6Bytes(network)), prefixLength.toInt())
+    }
 
     fun interpret(input: String): AddressInterpretation {
         val text = input.trim()
@@ -72,17 +90,25 @@ object AddressPolicy {
             return AddressInterpretation(withScheme(text.replace(" ", "%20"), scheme) ?: search, null)
         }
         if (text.any { it.isWhitespace() }) return AddressInterpretation(search, null)
+        // "admin:hunter2@192.168.1.1" names no known scheme, but a search would send the password.
+        if (hasSchemelessCredentials(text)) {
+            return AddressInterpretation(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), null)
+        }
         if (scheme != null && !looksLikeHostAndPort(text)) {
             return AddressInterpretation(withScheme(text, scheme) ?: return AddressInterpretation(search, null), null)
         }
 
         val hostLike = schemelessHost(text) ?: return AddressInterpretation(search, null)
         val navigate = navigateTo("https://$text") ?: return AddressInterpretation(search, null)
-        // A bare word could be an intranet host, but is far more often a search.
-        return if (hostLike == HostShape.SINGLE_LABEL) {
-            AddressInterpretation(search, navigate)
-        } else {
-            AddressInterpretation(navigate, search)
+        val plain = navigateTo("http://$text") ?: return AddressInterpretation(search, null)
+        return when (hostLike) {
+            // A bare word could be an intranet host, but is far more often a search.
+            HostShape.SINGLE_LABEL -> AddressInterpretation(search, navigate)
+            // Home servers often have no certificate; Chrome does not upgrade these to HTTPS either.
+            HostShape.LOCAL_ADDRESS -> AddressInterpretation(plain, navigate)
+            // A home name may have a certificate or not; searching it would only leak it to Kagi.
+            HostShape.LOCAL_NAME -> AddressInterpretation(navigate, plain)
+            HostShape.DOMAIN, HostShape.ADDRESS -> AddressInterpretation(navigate, search)
         }
     }
 
@@ -132,7 +158,31 @@ object AddressPolicy {
         return afterScheme.takeWhile { it != '/' && it != '?' && it != '#' }
     }
 
-    private enum class HostShape { DOMAIN, ADDRESS, SINGLE_LABEL }
+    private enum class HostShape {
+        /** A public name: "example.org". */
+        DOMAIN,
+
+        /** A public IP literal, or one word with a path ("router/"). */
+        ADDRESS,
+
+        /** A private, loopback or link-local IP literal, or localhost. */
+        LOCAL_ADDRESS,
+
+        /** A home network name ("keep.lan"), or one word with a port ("nas:5000"). */
+        LOCAL_NAME,
+
+        /** One word ("router"). */
+        SINGLE_LABEL,
+    }
+
+    /** "user:password@host/path": a colon before the authority's last "@", and a host after it. */
+    private fun hasSchemelessCredentials(text: String): Boolean {
+        val authority = text.takeWhile { it != '/' && it != '?' && it != '#' }
+        if ('@' !in authority) return false
+
+        val userInfo = authority.substringBeforeLast('@')
+        return ':' in userInfo && schemelessHost(text.substring(userInfo.length + 1)) != null
+    }
 
     /** "host:1234" is a host with a port, not a URL with scheme "host". */
     private fun looksLikeHostAndPort(text: String): Boolean {
@@ -150,17 +200,64 @@ object AddressPolicy {
         val (host, port) = splitPort(authority) ?: return null
         if (port != null && !PORT.matches(port)) return null
         val shape = when {
-            host.startsWith("[") && host.endsWith("]") -> HostShape.ADDRESS
-            IPV4.matches(host) -> if (host.split('.').all { it.toInt() <= 255 }) HostShape.ADDRESS else return null
-            host.equals("localhost", ignoreCase = true) -> HostShape.ADDRESS
-            '.' in host -> if (isDomain(host)) HostShape.DOMAIN else return null
+            host.startsWith("[") && host.endsWith("]") -> addressShape(ipv6Bytes(host.removeSurrounding("[", "]")))
+            IPV4.matches(host) -> addressShape(ipv4Bytes(host) ?: return null)
+            host.equals("localhost", ignoreCase = true) -> HostShape.LOCAL_ADDRESS
+            '.' in host -> if (isDomain(host)) domainShape(host) else return null
             LABEL.matches(host) -> HostShape.SINGLE_LABEL
             else -> return null
         }
         // A single word is a host only with an explicit port or path ("nas:5000", "router/").
-        if (shape == HostShape.SINGLE_LABEL && (port != null || hasPath)) return HostShape.ADDRESS
+        if (shape == HostShape.SINGLE_LABEL && port != null) return HostShape.LOCAL_NAME
+        if (shape == HostShape.SINGLE_LABEL && hasPath) return HostShape.ADDRESS
         return shape
     }
+
+    /** [bytes] is null for a bracketed host that is not plain IPv6, which is treated as public. */
+    private fun addressShape(bytes: List<Int>?): HostShape {
+        val local = bytes != null && LOCAL_NETWORKS.any { (network, prefixLength) -> inNetwork(bytes, network, prefixLength) }
+        return if (local) HostShape.LOCAL_ADDRESS else HostShape.ADDRESS
+    }
+
+    private fun domainShape(host: String): HostShape {
+        val name = host.trimEnd('.')
+        return if (LOCAL_SUFFIXES.any { name.endsWith(it, ignoreCase = true) }) HostShape.LOCAL_NAME else HostShape.DOMAIN
+    }
+
+    private fun inNetwork(address: List<Int>, network: List<Int>, prefixLength: Int): Boolean {
+        if (address.size != network.size) return false
+        return (0 until prefixLength).all { bit -> bitAt(address, bit) == bitAt(network, bit) }
+    }
+
+    private fun bitAt(bytes: List<Int>, index: Int): Int =
+        (bytes[index / BITS_PER_BYTE] shr (BITS_PER_BYTE - 1 - index % BITS_PER_BYTE)) and 1
+
+    /** The four bytes of a dotted-quad IPv4 address, or null. */
+    private fun ipv4Bytes(host: String): List<Int>? {
+        if (!IPV4.matches(host)) return null
+        return host.split('.').map { it.toInt() }.takeIf { octets -> octets.all { it <= 255 } }
+    }
+
+    /** The sixteen bytes of an IPv6 address such as "fe80::1", or null; embedded IPv4 and zones are not read. */
+    private fun ipv6Bytes(address: String): List<Int>? {
+        val halves = address.split("::")
+        if (halves.size > 2) return null
+
+        val head = ipv6GroupsOf(halves[0])
+        val tail = if (halves.size == 2) ipv6GroupsOf(halves[1]) else emptyList()
+        val missing = IPV6_GROUPS - head.size - tail.size
+        val compressed = halves.size == 2
+        if ((compressed && missing < 1) || (!compressed && missing != 0)) return null
+
+        val groups = head + List(missing) { "0" } + tail
+        if (groups.any { !IPV6_GROUP.matches(it) }) return null
+        return groups.flatMap { group ->
+            val value = group.toInt(16)
+            listOf(value shr BITS_PER_BYTE, value and 0xFF)
+        }
+    }
+
+    private fun ipv6GroupsOf(part: String): List<String> = if (part.isEmpty()) emptyList() else part.split(':')
 
     private fun splitPort(authority: String): Pair<String, String?>? {
         if (authority.startsWith("[")) {

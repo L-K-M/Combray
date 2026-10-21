@@ -31,11 +31,47 @@ class AddressPolicyTest {
         assertEquals(AddressDecision.Navigate("https://example.org/path"), interpretation.primary)
         assertTrue(interpretation.alternative is AddressDecision.Search)
 
-        navigates("localhost:8080", "https://localhost:8080")
-        navigates("192.168.1.10", "https://192.168.1.10")
-        navigates("[::1]:8443/x", "https://[::1]:8443/x")
         navigates("bücher.de", "https://bücher.de")
         navigates("xn--bcher-kva.de", "https://xn--bcher-kva.de")
+    }
+
+    @Test
+    fun publicHostsWithPortsOrAddressesKeepHttpsAndSearch() {
+        // Next to the private ranges, and names that only look local: still public.
+        val public = listOf(
+            "example.org:8443", "8.8.8.8", "11.0.0.1", "172.15.0.1", "172.32.0.1", "192.169.0.1", "169.255.0.1",
+            "[2001:db8::1]:8443/x", "[fe00::1]", "[fec0::1]", "keep.lan.example.org", "local.example.org",
+        )
+        for (input in public) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.primary)
+            assertTrue(input, interpretation.alternative is AddressDecision.Search)
+        }
+    }
+
+    @Test
+    fun privateAddressesAndLocalhostGoOverHttpWithHttpsInstead() {
+        val local = listOf(
+            "192.168.1.10", "10.0.0.2:8080", "172.16.0.1", "172.31.255.255/x", "127.0.0.1:3000", "169.254.1.1",
+            "localhost", "LOCALHOST:8080", "[::1]:8443/x", "[0:0:0:0:0:0:0:1]", "[fd12:3456::1]", "[fe80::1]:80",
+        )
+        for (input in local) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("http://$input"), interpretation.primary)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.alternative)
+        }
+    }
+
+    @Test
+    fun homeNetworkNamesOfferHttpInsteadOfSearch() {
+        val names = listOf(
+            "keep.lan:3000", "Keep.LAN", "nas.local/x", "printer.home.arpa", "hister.internal:8080", "box.localdomain", "nas:5000",
+        )
+        for (input in names) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.primary)
+            assertEquals(input, AddressDecision.Navigate("http://$input"), interpretation.alternative)
+        }
     }
 
     @Test
@@ -72,6 +108,20 @@ class AddressPolicyTest {
     @Test
     fun credentialsInAddressesAreRejected() {
         assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("https://user:secret@example.org/"))
+    }
+
+    @Test
+    fun schemelessCredentialsAreRejectedNotSearched() {
+        // A search would put the password in Kagi's URL and search history.
+        for (input in listOf("admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas")) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
+            assertNull(input, interpretation.alternative)
+        }
+
+        // Without a colon before "@" it is no password; "define:x@example.com" is the accepted cost.
+        searches("alice@example.com")
+        assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("define:x@example.com"))
     }
 
     @Test

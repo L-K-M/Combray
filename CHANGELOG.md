@@ -96,3 +96,11 @@ All notable changes to this project are documented here. The format follows
   stale APKs that do not match Gradle output metadata. Failed copying or
   hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
+- A typed home-server address opens over plain HTTP when that is likely:
+  `192.168.1.10`, `10.0.0.2:8080`, `localhost` and other private or
+  loopback addresses now go to `http://`, with HTTPS one tap away. Names
+  such as `keep.lan:3000` or `nas:5000` still try HTTPS first, but offer
+  `http://` instead of a Kagi search that would leak the name.
+- A typed `user:password@host` without `https://` was sent to Kagi as a
+  search, password included. It is now refused like other addresses with
+  credentials.
