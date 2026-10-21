@@ -3,11 +3,12 @@ package ch.lkmc.combray.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Info
@@ -16,9 +17,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import ch.lkmc.combray.R
@@ -32,6 +37,7 @@ fun MoreSheet(
     onForward: () -> Unit,
     onReload: () -> Unit,
     onNewTab: () -> Unit,
+    onCloseTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
     /** Null when Hister is not set up; otherwise whether capture is on. */
@@ -41,8 +47,8 @@ fun MoreSheet(
     onReader: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
     }
 }
 
@@ -53,6 +59,7 @@ internal fun MoreActions(
     onForward: () -> Unit,
     onReload: () -> Unit,
     onNewTab: () -> Unit,
+    onCloseTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
     captureEnabled: Boolean?,
@@ -61,24 +68,43 @@ internal fun MoreActions(
     readerOpen: Boolean,
     onReader: () -> Unit,
 ) {
-    val url = tab?.url
-    Column(Modifier.padding(bottom = 16.dp)) {
-        if (tab?.canGoForward == true) MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
-        if (url != null) MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
-        MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
-        // Share is in the bottom bar.
-        if (url != null) {
-            MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
-            MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
+    // Scrolls when the rows are taller than the window, as in landscape, so Settings stays reachable.
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+        for (action in moreActions(tab, captureEnabled)) {
+            when (action) {
+                MoreAction.FORWARD -> MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
+                MoreAction.RELOAD -> MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
+                MoreAction.NEW_TAB -> MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
+                MoreAction.CLOSE_TAB -> MoreRow(Icons.Filled.Close, R.string.action_close_tab, onCloseTab)
+                MoreAction.PAGE_INFO -> MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
+                MoreAction.READER ->
+                    MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
+                MoreAction.PAUSE_CAPTURE -> MoreRow(PauseIcon, R.string.action_pause_capture, onPauseCapture)
+                MoreAction.SETTINGS -> MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
+            }
         }
-        // Pausing is one tap; switching capture on goes through Settings, which explains it.
-        when (captureEnabled) {
-            true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)
-            false -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
-            null -> Unit
-        }
-        MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
     }
+}
+
+/** A row of the More sheet. */
+internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, PAUSE_CAPTURE, SETTINGS }
+
+/** The rows More offers for [tab], in order. */
+internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAction> = buildList {
+    val onPage = tab?.url != null
+    if (tab?.canGoForward == true) add(MoreAction.FORWARD)
+    if (onPage) add(MoreAction.RELOAD)
+    add(MoreAction.NEW_TAB)
+    // A new-tab home is a tab too; the Undo notice brings a closed tab back.
+    if (tab != null) add(MoreAction.CLOSE_TAB)
+    // Share is in the bottom bar.
+    if (onPage) {
+        add(MoreAction.PAGE_INFO)
+        add(MoreAction.READER)
+    }
+    // Pausing is one tap; switching capture on goes through Settings, which explains it.
+    if (captureEnabled == true) add(MoreAction.PAUSE_CAPTURE)
+    add(MoreAction.SETTINGS)
 }
 
 @Composable
@@ -89,3 +115,11 @@ private fun MoreRow(icon: ImageVector, label: Int, onClick: () -> Unit) {
         modifier = Modifier.clickable(onClick = onClick),
     )
 }
+
+/**
+ * Material's "pause" (Apache License 2.0, like the icon library), absent from the core set. The
+ * close X it replaces read as closing the tab.
+ */
+private val PauseIcon: ImageVector = ImageVector.Builder("Pause", 24.dp, 24.dp, 24f, 24f)
+    .addPath(addPathNodes("M6 19h4V5H6v14zm8-14v14h4V5h-4z"), fill = SolidColor(Color.Black))
+    .build()

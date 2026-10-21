@@ -80,12 +80,14 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
             }
         }
 
         assertTargetsAreAccessible()
-        compose.onNodeWithText("Settings").assertIsDisplayed()
+        for (label in listOf("Close tab", "Pause history capture", "Settings")) {
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
     }
 
     @Test

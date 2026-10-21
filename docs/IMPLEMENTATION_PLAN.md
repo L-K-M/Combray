@@ -55,7 +55,7 @@ An installable APK renders real pages with Servo; handles typing, links, scrolli
 
 ### Chrome and navigation
 
-Use a quiet bottom bar containing Back, an address/search surface, Save, Share, Recent, and More (Share moved from More at the owner's request, 20 October 2026). The exact spacing can adapt to narrow widths; avoid tiny targets. More opens a bottom sheet with Forward, Reload/Stop, New tab, page information, and Settings. A loading indicator must not shift the bar or obscure its actions. Show the page's current address/domain and a security state derived from real engine data, never a decorative lock.
+Use a quiet bottom bar containing Back, an address/search surface, Save, Share, Recent, and More (Share moved from More at the owner's request, 20 October 2026). The exact spacing can adapt to narrow widths; avoid tiny targets. More opens a bottom sheet with Forward, Reload/Stop, New tab, Close tab, page information, and Settings. A loading indicator must not shift the bar or obscure its actions. Show the page's current address/domain and a security state derived from real engine data, never a decorative lock.
 
 Tapping the address surface opens an editable address/search sheet above the keyboard. Select the current address for replacement. Provide a clear explicit submit action. Keep the text and primary actions above IME and system gesture insets. Handle predictive/system Back in this order: dismiss keyboard or transient sheet, navigate the active live tab back if available, then use normal Android activity behavior. Do not turn Back into a destructive history clear. Test Back with nested sheets and a focused page field.
 

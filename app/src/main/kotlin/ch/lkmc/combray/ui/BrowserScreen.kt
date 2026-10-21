@@ -260,6 +260,8 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onForward = { dismiss(); browser.goForward() },
             onReload = { dismiss(); browser.reload() },
             onNewTab = editNewTab,
+            // The sheet closes so it does not cover the Undo notice in the main window.
+            onCloseTab = { dismiss(); tab?.let { browser.closeTab(it.id) } },
             onPageInfo = { sheet = Sheet.PAGE_INFO },
             onSettings = { sheet = Sheet.SETTINGS },
             captureEnabled = histerService?.captureEnabled,

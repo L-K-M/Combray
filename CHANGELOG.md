@@ -60,6 +60,7 @@ All notable changes to this project are documented here. The format follows
   for what you type; a result opens in a new tab.
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
+- More › Close tab closes the current tab, with the same Undo as Recent.
 
 ### Changed
 
@@ -77,6 +78,9 @@ All notable changes to this project are documented here. The format follows
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- More shows "Pause history capture" only while capture is on, with a
+  pause icon. The "Resume history capture" row, which only opened
+  Settings, is gone: switch capture on in Settings.
 
 ### Fixed
 
@@ -88,6 +92,8 @@ All notable changes to this project are documented here. The format follows
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
   Each patch is now checked to have landed.
 - A page's prompt dialog labels its text field, so TalkBack names it.
+- More and Settings open fully expanded instead of at half height, which
+  hid their last rows; More scrolls when it is taller than the window.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.
