@@ -70,6 +70,9 @@ All notable changes to this project are documented here. The format follows
   was last used rather than moved to the top.
 - Back on a page another app's link opened returns to that app; the page
   stays in history only, unless you switched tabs meanwhile.
+- Back on a tab a page opened, or that you opened with the link menu's
+  Open in new tab, closes it and returns to the tab you came from instead
+  of leaving the app. The page stays in history.
 - `scripts/build.sh` builds the engine first: it installs the pinned NDK
   and Rust toolchain when missing and fetches, verifies and patches Servo
   whenever the tree is missing or was prepared with other patches. Builds

@@ -39,6 +39,8 @@ data class ActiveTab(
     val loadFailed: Boolean = false,
     /** Another app's link opened this tab and the user has not moved to another tab since. */
     val openedByOtherApp: Boolean = false,
+    /** A page in another tab opened this one, and Back on its first page returns there ([BrowserCoordinator.returnToOpener]). */
+    val returnsToOpener: Boolean = false,
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView
