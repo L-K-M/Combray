@@ -2,9 +2,9 @@
 
 **What this repo does:** Combray embeds Servo in a native Android browser. It keeps controls at the bottom, combines tabs and local history in Recent, saves to Karakeep, archives rendered text in Hister, and searches the web with Kagi.
 
-**Baseline:** `e5cf8ed`, 21 October 2026. Expected load: one person, 10–30 logical tabs, several active sites, intermittent connectivity, and days between clean process exits. This review was written before implementation. The final handoff will distinguish open proposals from work offered in PRs.
+**Baseline:** `e5cf8ed`; review date: 21 October 2026. Expected load: one person, 10–30 logical tabs, several active sites, intermittent connectivity, and days between clean process exits. The findings were written before implementation; the dated implementation handoff below records later work.
 
-Path shorthand: `core/...` means `core/src/main/kotlin/ch/lkmc/combray/core/`; UI filenames are under `app/src/main/kotlin/ch/lkmc/combray/ui/`.
+All `file:line` citations refer to baseline `e5cf8ed`. Path shorthand: `core/...` means `core/src/main/kotlin/ch/lkmc/combray/core/`, `engine/...` means `engine/src/main/kotlin/ch/lkmc/combray/engine/`, and UI filenames are under `app/src/main/kotlin/ch/lkmc/combray/ui/`.
 
 ## Assessment
 
@@ -18,10 +18,12 @@ Fix S13 and S14 first: they break promises about retained and forgotten content.
 
 - Read the project brief, implementation plan, integration contracts, engine report, build/release tooling, coordinator, and relevant tests. Independent source reviews cover the native bridge, integration/data layer, and Android UI.
 - Baseline `python3 scripts/check_docs.py`: passed.
+- With `Sol.md` added, the documentation check and `git diff --check` also passed.
 - Baseline `./gradlew testDebugUnitTest lintDebug assembleDebug`, with the installed Android SDK and JDK 21: passed.
 - Baseline `python3 -I -m unittest discover -s scripts/tests`: 29 passed.
 - Baseline native host tests: 20 passed after preparing the pinned Servo source. `cargo fmt --check`: passed.
-- Fresh native compilation and an isolated x86_64 emulator are being prepared. Device observations will be recorded separately; source reasoning is not a measurement of phone responsiveness.
+- Fresh pinned x86_64 native compilation passed in 16m11s. An isolated Android 11/API 30 emulator used SwiftShader without KVM; those timings are not phone performance measurements.
+- Two real-engine Reader runs each passed 2/3 checks. Extraction/display, link opening, and unavailable-article handling worked; Back key injection was intercepted by a System UI ANR, even after the existing dismissal helper was added. A screenshot confirmed that system dialog. Restarting System UI led to a later timeout; the recovery attempt was stopped. The device gate is **not passed**. Commands and limitations are in `docs/ENGINE_SPIKE.md`, section 14.
 - Existing M0 screenshots demonstrate engine behavior, including a stale painted page. They do not show the current Compose browser chrome.
 - No personal history, live services, Kagi login, physical phone, or other contributors' PRs were inspected. Visual proposals below need device validation.
 
@@ -88,6 +90,8 @@ The following are proposals, not additional confirmed requirements.
 Keep one surface and the existing Open/All/Hister/Karakeep scopes, date separators, active/open text markers, and horizontally scrolling scope strip. These already exist in `RecentSheet.kt`. Improve their hierarchy and check title, domain, state, and close action at 320dp and 200% text. Preserve tab identity when titles or URLs match. Give Open tabs its own empty message; its present message also mentions history hidden by that filter.
 
 **Acceptance:** Narrow portrait, landscape with the keyboard, long translated labels, large text, duplicate tabs, and empty/error/loading states are usable with touch and TalkBack. Remote requests occur only in an explicitly selected remote scope.
+
+Also measure the bottom address label: five 48dp actions plus padding leave roughly 64dp for its surface at 320dp, before its icon and internal padding. A responsive full-width address row above the action row may be clearer. Preserve the explicitly requested Share action and primary target sizes; this is a source-based layout proposal, not a reproduced clipping claim.
 
 ### S09. Complete the pine-and-paper theme
 
@@ -161,6 +165,8 @@ Ship these as separate experiments after the correctness and layout checks. Resp
 
 **Acceptance:** Delay the first configured-service emission and verify no false setup prompt. Fill the queue, reject a capture, drain/discard it, and verify the warning clears without needing another page capture.
 
+Additional retry-policy check found while consolidating: `DispatchResult.kt:48–51` multiplies Retry-After seconds before clamping. `Long.MAX_VALUE` seconds overflows to a zero delay instead of the six-hour ceiling. Clamp before multiplication and test huge, invalid, negative and ordinary values; this remains backlog work.
+
 ### S18. A server URL does not identify a service account
 
 Destination fingerprints currently identify normalized service roots. Rotating a key pauses queued work, which is useful, but a different account on that root can inherit old Saved markers and the option to resume old payloads. See `Integrations.kt:263–275,308–317`, `ServiceUrls.kt`, and the destination-binding decision in the implementation plan.
@@ -205,6 +211,19 @@ Also harden direct concurrent native startup before exposing that API to more ca
 4. Honest completion for list-bound Karakeep saves (S15).
 
 Keep fixes independent where possible. Open PRs for review and leave them open for the owner. Consolidate the remaining, unmerged work into `ANALYSIS.md`; do not describe an open PR as a completed feature on main.
+
+## Implementation handoff, 21 October 2026
+
+| Finding | Open PR | Verification |
+| --- | --- | --- |
+| S13: old capture bodies | [#31](https://github.com/L-K-M/Combray/pull/31), `sol/expire-abandoned-captures` | Abandoned-claim and mid-drain expiry regressions failed before the fix; live leases and late-result fencing are covered. |
+| S14: atomic forgetting | [#32](https://github.com/L-K-M/Combray/pull/32), `sol/atomic-forgetting` | Both injected invalidation failures originally left deletion committed; shared-Room rollback, visible failure, retry and fresh integration objects now pass. |
+| S01: Reader navigation | [#34](https://github.com/L-K-M/Combray/pull/34), `sol/reader-navigation` | Three stale-state regressions failed before the fix. Same-address retention, hash routing, delayed results and hidden-tab independence pass. Device limitations are above. |
+| S15: incomplete list save | [#35](https://github.com/L-K-M/Combray/pull/35), `sol/karakeep-list-receipt` | The false-success regression failed before the fix. Malformed/missing-ID 200/201 recovery, standalone acknowledgment and ten-attempt exhaustion pass. |
+
+Each branch passed `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease`, the documentation check, and `git diff --check` after its final code/test changes. Reader's Android-test APK also assembles. Tests use Room, fake engines where appropriate, and local fake services; they do not prove installed service contracts.
+
+The [consolidated backlog on main](https://github.com/L-K-M/Combray/blob/main/ANALYSIS.md) retains existing work and these remaining ideas, consolidating overlapping inert-event, palette and budget entries. Open PRs are tracked separately from work still needing implementation. This file remains the baseline review, not a second living backlog. The requested `Sol.md` filename is retained despite a review suggestion to rename it. No `tmp.md` was created.
 
 **Verdict:** prioritize page/input correctness and trustworthy state, then responsive layout and the coherent theme. Measure actual device responsiveness before claiming speed gains.
 
