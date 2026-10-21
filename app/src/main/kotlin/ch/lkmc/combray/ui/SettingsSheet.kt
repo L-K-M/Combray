@@ -416,7 +416,7 @@ private fun HisterCaptureSettings(integrations: Integrations, service: ServiceEn
     val hister = integrations.hister
     val exclusions by hister.exclusions.collectAsStateWithLifecycle(emptyList())
     val queued by hister.queuedBytes.collectAsStateWithLifecycle(0L)
-    val budgetReached by hister.captureBudgetReached.collectAsStateWithLifecycle()
+    val budgetReached by hister.captureBudgetReached.collectAsStateWithLifecycle(false)
     var site by rememberSaveable { mutableStateOf("") }
     var includeSubdomains by rememberSaveable { mutableStateOf(true) }
     var problem by remember { mutableStateOf(false) }

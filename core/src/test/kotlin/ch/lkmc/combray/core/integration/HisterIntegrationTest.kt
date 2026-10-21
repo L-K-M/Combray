@@ -166,8 +166,20 @@ class HisterIntegrationTest {
         enable()
         val text = "x".repeat(256 * 1024)
         repeat(90) { capture("https://a.example/$it", "$text$it") }
-        assertTrue(hister.captureBudgetReached.value)
+        assertTrue(runBlocking { hister.captureBudgetReached.first() })
         assertTrue(runBlocking { database.integrations().queuedCaptureBytes() } <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+    }
+
+    @Test
+    fun theBudgetWarningClearsWhenTheQueueDrainsWithoutNewCaptures() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        repeat(90) { capture("https://a.example/$it", "$text$it") }
+        assertTrue(runBlocking { hister.captureBudgetReached.first() })
+        // The queue drains by expiring: no new capture arrives to clear the flag.
+        now += 8L * 24 * 60 * 60 * 1000
+        drain()
+        assertFalse(runBlocking { hister.captureBudgetReached.first() })
     }
 
     @Test
