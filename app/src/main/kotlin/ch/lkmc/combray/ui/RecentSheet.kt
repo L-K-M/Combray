@@ -86,7 +86,7 @@ fun RecentSheet(
     var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
     // Subscribe once: the filter only narrows the already-collected list, so a new flow per
     // keystroke would just pay three Room re-observations for the same result.
-    val items by remember { browser.recent() }.collectAsStateWithLifecycle(emptyList())
+    val items by remember(browser) { browser.recent() }.collectAsStateWithLifecycle(emptyList())
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
     val shown = items.filter { it.matches(query) && (scope != RecentScope.OPEN || it is RecentItem.OpenTab) }
     val now = System.currentTimeMillis()
