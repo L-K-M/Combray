@@ -163,10 +163,23 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 state.reader?.let { reader ->
                     ReaderView(
                         state = reader,
-                        // A link leaves reader view and opens in the tab, through the address policy.
+                        // Same decisions as the address bar. A rejected link stays in the article.
                         onOpenLink = { url ->
-                            browser.closeReader()
-                            (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrlInTab(reader.tabId, it.url) }
+                            when (val decision = AddressPolicy.interpret(url).primary) {
+                                is AddressDecision.Navigate -> {
+                                    browser.closeReader()
+                                    browser.openUrlInTab(reader.tabId, decision.url)
+                                }
+                                is AddressDecision.Search -> {
+                                    browser.closeReader()
+                                    browser.openUrlInTab(reader.tabId, decision.url)
+                                }
+                                is AddressDecision.External -> {
+                                    browser.closeReader()
+                                    openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
+                                }
+                                is AddressDecision.Rejected -> Unit
+                            }
                         },
                         onClose = browser::closeReader,
                     )
