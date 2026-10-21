@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,9 +13,14 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,16 +70,26 @@ private val QUOTE_BAR_WIDTH = 3.dp
 @Composable
 fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        when (state) {
-            is ReaderState.Loading -> ReaderMessage(stringResource(R.string.reader_loading)) { CircularProgressIndicator() }
-            is ReaderState.Unavailable -> ReaderMessage(stringResource(R.string.reader_unavailable)) {
-                Button(onClick = onClose) { Text(stringResource(R.string.action_show_page)) }
-            }
-            is ReaderState.Ready -> {
-                val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
-                CompositionLocalProvider(LocalLayoutDirection provides direction) {
-                    ArticleText(state.article, onOpenLink)
+        Box(Modifier.fillMaxSize()) {
+            when (state) {
+                is ReaderState.Loading -> ReaderMessage(stringResource(R.string.reader_loading)) { CircularProgressIndicator() }
+                is ReaderState.Unavailable -> ReaderMessage(stringResource(R.string.reader_unavailable)) {
+                    Button(onClick = onClose) { Text(stringResource(R.string.action_show_page)) }
                 }
+                is ReaderState.Ready -> {
+                    val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
+                    CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                        ArticleText(state.article, onOpenLink)
+                    }
+                }
+            }
+            // Otherwise the only exits are Back and More > Leave reader view, both easy to miss.
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
             }
         }
     }
