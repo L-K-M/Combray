@@ -80,6 +80,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Credential-bearing parameter names are matched after a single percent-decode,
+  so an encoded `token`/`access_token`/`auth` name in a query or fragment is
+  still sensitive and is never sent to Karakeep or captured for Hister.
+  Double-encoded names and ordinary parameters are unchanged, and escapes the
+  decoder rejects remain conservative (sensitive).
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
