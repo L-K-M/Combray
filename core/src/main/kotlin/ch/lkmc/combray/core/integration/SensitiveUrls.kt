@@ -36,7 +36,7 @@ object SensitiveUrls {
     private fun parameterName(raw: String): String? {
         if (raw.isEmpty()) return ""
         return try {
-            URLDecoder.decode(raw, Charsets.UTF_8).lowercase()
+            URLDecoder.decode(raw, "UTF-8").lowercase()
         } catch (malformed: IllegalArgumentException) {
             null
         }
