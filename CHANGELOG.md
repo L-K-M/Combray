@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page whose tab is between renderers (evicted, restored, or sent back
+  home by a refused address) no longer disappears from Recent: it is
+  ordinary history again until the tab commits its next page.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).

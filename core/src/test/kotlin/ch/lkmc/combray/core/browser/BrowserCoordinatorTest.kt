@@ -254,6 +254,8 @@ class BrowserCoordinatorTest {
         // not showing it while the new address waits for a renderer.
         browser.openUrlInTab(tabA, "https://a2.test/"); idle()
         assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+        // The requested address stays the tab's recovery URL until a renderer commits it.
+        assertEquals("https://a2.test/", runBlocking { database.browser().tab(tabA) }?.url)
 
         // Once the new page commits, the tab owns it: suppressed, while the old page stays.
         commit(3, 30, "https://a2.test/")
