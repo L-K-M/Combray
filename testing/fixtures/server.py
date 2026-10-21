@@ -13,6 +13,7 @@ Pages
   /opener.html               link with target=_blank to /solid/3b4f8a.html
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /private.html              page for exclusion checks
+  /slow.html                 answers after SLOW_PAGE_SECONDS; title SLOW
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
@@ -47,6 +48,8 @@ KARAKEEP_KEY = "fixture-key"
 SIGN_IN = ("ada", "lovelace")
 HISTER_TOKEN = "fixture-token"
 HANG_SECONDS = 20
+# Long enough for a check to see the tab loading before the page commits.
+SLOW_PAGE_SECONDS = 8
 COOKIE_NAME = "combray"
 COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60
 MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -200,6 +203,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/slow.html":
+            time.sleep(SLOW_PAGE_SECONDS)
+            return self.send(200, page("SLOW", "<p>SLOW</p>"))
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

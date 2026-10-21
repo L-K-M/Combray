@@ -230,7 +230,20 @@ class BrowsingTest {
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))
     }
 
+    @Test
+    fun aSlowPageShowsLoadingBeforeItsServerAnswers() {
+        open(Device.GREEN)
+        device.browser.openUrl(Fixtures.SLOW, Placement.CURRENT_TAB)
+
+        // The server has not answered: the tab still shows the green page, and says it loads.
+        val waiting = device.awaitState(SLOW_ANSWER_MS) { it.activeTab?.loading == true }
+        assertEquals(Fixtures.solid(Device.GREEN), waiting.activeTab!!.url)
+        device.awaitPage(Fixtures.SLOW)
+    }
+
     private companion object {
+        /** Under the fixture's SLOW_PAGE_SECONDS, so the check runs before the answer. */
+        const val SLOW_ANSWER_MS = 5_000L
         const val STOP_TIMEOUT_MS = 10_000L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"

@@ -43,6 +43,9 @@ object Fixtures {
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 
+    /** A page the server answers only after several seconds. */
+    const val SLOW = "$BASE/slow.html"
+
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
 

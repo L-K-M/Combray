@@ -8,6 +8,7 @@ import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.CoroutineScope
@@ -54,9 +55,12 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(): BrowserCoordinator {
+    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
         engine = FakeEngine()
-        return BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs }).also { it.start() }
+        return BrowserCoordinator(
+            database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
+            navigationTimeoutMs = navigationTimeoutMs,
+        ).also { it.start() }
     }
 
     private fun idle() = runBlocking { browser.awaitIdle() }
@@ -73,6 +77,11 @@ class BrowserCoordinatorTest {
     /** Simulates Servo committing [url] as [document] in the view the coordinator created for it. */
     private fun commit(native: Long, document: Long, url: String, kind: HistoryKind = HistoryKind.DOCUMENT_COMMITTED, index: Int = 0, length: Int = 1) {
         engine.emit(EngineEvent.HistoryChanged(engine.view(native), kind, document, url, index, length))
+        idle()
+    }
+
+    private fun loaded(native: Long, document: Long) {
+        engine.emit(EngineEvent.LoadStatus(engine.view(native), document, LoadPhase.COMPLETE, Attribution.CURRENT))
         idle()
     }
 
@@ -534,6 +543,60 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun anAddressShowsLoadingFromItsRequestNotOnlyFromItsCommit() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        assertTrue("a new tab's first load", state().activeTab!!.loading)
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        assertFalse(state().activeTab!!.loading)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        assertTrue("a typed address on a loaded page", state().activeTab!!.loading)
+        commit(1, 11, "https://b.test/", index = 1, length = 2)
+        loaded(1, 11)
+        assertFalse(state().activeTab!!.loading)
+
+        browser.reload(); idle()
+        assertTrue("a reload", state().activeTab!!.loading)
+        commit(1, 12, "https://b.test/", index = 1, length = 2)
+        loaded(1, 12)
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aRequestThatNeverCommitsStopsShowingLoading() {
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        browser = newCoordinator(navigationTimeoutMs = SHORT_TIMEOUT_MS)
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        // A 204 answer, for one, leaves the page as it was and commits nothing.
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        assertTrue(state().activeTab!!.loading)
+        Thread.sleep(SHORT_TIMEOUT_MS * 3)
+        idle()
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aRefusedAddressStopsShowingLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        val request = engine.navigated.last().second
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", 1, request))
+        idle()
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
     fun goingBackToACachedDocumentDoesNotMarkTheTabAsLoading() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
@@ -737,5 +800,8 @@ class BrowserCoordinatorTest {
         const val PAGE_TAB = 1L shl 52
         const val START = 1_760_000_000_000L
         const val DAY = 24L * 60 * 60 * 1000
+        const val SHORT_TIMEOUT_MS = 200L
+        /** Longer than any test: a request does not time out unless the test means it to. */
+        const val LONG_TIMEOUT_MS = 10L * 60 * 1000
     }
 }

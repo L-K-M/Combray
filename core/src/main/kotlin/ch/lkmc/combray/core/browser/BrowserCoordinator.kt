@@ -63,6 +63,8 @@ class BrowserCoordinator(
     private val maxLiveViews: Int = MAX_LIVE_VIEWS,
     /** Read at each maintenance: whether open tabs unused for the retention period close. */
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
+    /** How long a request may wait for its page before the tab stops showing it as loading. */
+    private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -191,6 +193,7 @@ class BrowserCoordinator(
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
             engine.navigate(view.nativeTab, nextRequest++, url)
+            awaitCommit(view)
             return
         }
         // No renderer yet (new tab, restored tab): the request becomes the recovery address.
@@ -258,7 +261,10 @@ class BrowserCoordinator(
                 closeView(view)
                 reconcile()
             }
-            else -> engine.reload(view.nativeTab)
+            else -> {
+                engine.reload(view.nativeTab)
+                awaitCommit(view)
+            }
         }
         publish()
     }
@@ -381,6 +387,7 @@ class BrowserCoordinator(
                 Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
                 it.crashed = true
                 it.loading = false
+                it.awaitingCommit = false
                 it.controls.clear()
                 it.dialogDocument = null
                 it.dialogCount = 0
@@ -424,6 +431,7 @@ class BrowserCoordinator(
             val current = tab.currentVisitId?.let { dao.visit(it) }
             val visit = when (event.kind) {
                 HistoryKind.DOCUMENT_COMMITTED -> {
+                    view.awaitingCommit = false
                     view.currentDocument = event.document
                     // Reader view shows the page it was opened on, never the next one.
                     if (reader?.tabId == view.tabId) reader = null
@@ -433,6 +441,7 @@ class BrowserCoordinator(
                     committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
+                    view.awaitingCommit = false
                     scheduleCapture(view, event.document, captureTiming.debounceMs)
                     sameDocumentVisit(view, tab, current, event, now)
                 }
@@ -550,6 +559,24 @@ class BrowserCoordinator(
         view.captureTimer = scope.launch {
             delay(delayMs)
             submit { requestCapture(view, document) }
+        }
+    }
+
+    /**
+     * The app asked [view] for a page: the tab shows it loading until a document commits, which
+     * for a slow server can take seconds after the tap. A request that never commits (a 204
+     * answer, a download) stops showing after [navigationTimeoutMs].
+     */
+    private fun awaitCommit(view: LiveView) {
+        view.awaitingCommit = true
+        val request = ++view.commitRequests
+        scope.launch {
+            delay(navigationTimeoutMs)
+            submit {
+                if (view.commitRequests != request || !view.awaitingCommit) return@submit
+                view.awaitingCommit = false
+                publish()
+            }
         }
     }
 
@@ -731,7 +758,10 @@ class BrowserCoordinator(
         Log.w(LOG_TAG, "engine refused a request: ${event.message}")
         val view = event.tab?.let { liveByNative[it] } ?: return
         if (view.generation != null) {
-            if (event.request != null) state.update { it.copy(notice = Notice.AddressNotOpened) }
+            if (event.request != null) {
+                view.awaitingCommit = false
+                state.update { it.copy(notice = Notice.AddressNotOpened) }
+            }
             return
         }
         val wasShown = selectedNative == view.nativeTab
@@ -791,6 +821,7 @@ class BrowserCoordinator(
             liveByTab[tabId] = it
             liveByNative[it.nativeTab] = it
             engine.createView(it.nativeTab, url)
+            awaitCommit(it)
         }
 
     private suspend fun maintain() {
@@ -818,7 +849,7 @@ class BrowserCoordinator(
                         id = active.id,
                         url = active.url,
                         title = active.title,
-                        loading = view?.loading ?: false,
+                        loading = view?.let { it.loading || it.awaitingCommit } ?: false,
                         canGoBack = view?.takeIf { !it.crashed }?.canGoBack ?: false,
                         canGoForward = view?.takeIf { !it.crashed }?.canGoForward ?: false,
                         crashed = view?.crashed ?: false,
@@ -849,6 +880,10 @@ class BrowserCoordinator(
         var generation: Long? = null
         var currentDocument: Long? = null
         var loading = false
+
+        /** The app requested a page that has not committed yet (see awaitCommit). */
+        var awaitingCommit = false
+        var commitRequests = 0L
         var canGoBack = false
         var canGoForward = false
         var crashed = false
@@ -899,6 +934,9 @@ class BrowserCoordinator(
         /** Reader view budget: the article's JSON (native/src/reader.js); longer ones are cut. */
         const val MAX_ARTICLE_BYTES = 512 * 1024
         const val ARTICLE_TIMEOUT_MS = 15_000
+
+        /** Proposed default: well past a slow home server, short of a stuck bar. */
+        const val NAVIGATION_TIMEOUT_MS = 30_000L
     }
 }
 
