@@ -5,8 +5,9 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class ServiceUrlsTest {
-    private fun root(input: String, cleartext: Set<String> = emptySet()) =
-        ServiceUrls.normalizeRoot(input, Integrations.KARAKEEP_SUFFIXES, cleartext)
+    private fun root(input: String) = ServiceUrls.normalizeRoot(input, Integrations.KARAKEEP_SUFFIXES)
+
+    private fun addresses(root: String, alternate: String?) = ServiceUrls.normalizeAddresses(root, alternate, Integrations.KARAKEEP_SUFFIXES)
 
     @Test
     fun keepsPathPrefixesAndDropsPastedApiSuffixes() {
@@ -17,12 +18,28 @@ class ServiceUrlsTest {
     }
 
     @Test
-    fun plainHttpOnlyForAllowedHosts() {
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.CLEARTEXT_NOT_ALLOWED), root("http://keep.example"))
-        assertEquals(ServiceRoot.Valid("http://10.0.2.2:8766/keep"), root("http://10.0.2.2:8766/keep", setOf("10.0.2.2")))
+    fun plainHttpIsAllowedForAnyHostAndOtherSchemesAreNot() {
+        assertEquals(ServiceRoot.Valid("http://keep.example"), root("http://keep.example"))
+        assertEquals(ServiceRoot.Valid("http://192.168.1.20:3000"), root("HTTP://192.168.1.20:3000/api/v1"))
+        assertEquals(true, ServiceUrls.isCleartext("http://keep.example"))
+        assertEquals(false, ServiceUrls.isCleartext("https://keep.example"))
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME), root("ftp://keep.example"))
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY), root("https://u:p@keep.example"))
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("keep example"))
+    }
+
+    @Test
+    fun anAlternateIsCheckedLikeTheMainAddressAndIsNoneWhenBlankOrTheSame() {
+        assertEquals(
+            ServiceAddresses.Valid("http://keep.lan", "https://keep.tailnet.ts.net"),
+            addresses("http://keep.lan/", "https://keep.tailnet.ts.net/api/v1"),
+        )
+        assertEquals(ServiceAddresses.Valid("http://keep.lan", null), addresses("http://keep.lan", "  "))
+        assertEquals(ServiceAddresses.Valid("http://keep.lan", null), addresses("http://keep.lan", "http://Keep.lan/"))
+        assertEquals(ServiceAddresses.Invalid(AddressField.MAIN, ServiceRootProblem.NOT_A_URL), addresses("keep lan", "https://k.example"))
+        assertEquals(ServiceAddresses.Invalid(AddressField.ALTERNATE, ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY), addresses("http://keep.lan", "https://k.example/?a=1"))
+        // The identity is the main address: an alternate does not change it.
+        assertEquals(ServiceUrls.fingerprint("http://keep.lan"), addresses("http://keep.lan", "https://k.example").let { (it as ServiceAddresses.Valid).fingerprint })
     }
 
     @Test

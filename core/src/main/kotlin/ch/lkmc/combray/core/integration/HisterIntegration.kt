@@ -43,11 +43,10 @@ class HisterIntegration(
     transport: HttpTransport,
     private val clock: Clock,
     private val outbox: Outbox,
-    private val cleartextHosts: Set<String>,
     private val kick: () -> Unit,
 ) : CaptureSink {
     private val dao = database.integrations()
-    private val client = HisterClient(transport)
+    private val routes = ServiceRoutes(transport)
     private val policyGeneration = AtomicLong(1)
     private val lastQueuedHash = object : LinkedHashMap<String, String>(HASH_MEMORY, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > HASH_MEMORY
@@ -66,34 +65,44 @@ class HisterIntegration(
     /** Automatic capture is paused because unsent captures reached the content budget. */
     val captureBudgetReached: StateFlow<Boolean> = budgetReached.asStateFlow()
 
-    /** Saves the root and, if given, a new token. Capture stays as it was (off at first). */
-    suspend fun configure(rootInput: String, token: String?): Configured {
-        val root = when (val checked = ServiceUrls.normalizeRoot(rootInput, HISTER_SUFFIXES, cleartextHosts)) {
-            is ServiceRoot.Invalid -> return Configured.InvalidRoot(checked.reason)
-            is ServiceRoot.Valid -> checked.root
+    /**
+     * Saves the root, an optional alternate address and, if given, a new token. Capture stays as
+     * it was (off at first).
+     */
+    suspend fun configure(rootInput: String, token: String?, alternateInput: String? = null): Configured {
+        val addresses = when (val checked = ServiceUrls.normalizeAddresses(rootInput, alternateInput, HISTER_SUFFIXES)) {
+            is ServiceAddresses.Invalid -> return Configured.InvalidRoot(checked.problem, checked.field)
+            is ServiceAddresses.Valid -> checked
         }
         val secret = token?.trim()?.takeIf { it.isNotEmpty() }
         if (secret != null && !isHeaderSafe(secret)) return Configured.InvalidCredential
-        val fingerprint = ServiceUrls.fingerprint(root)
+        val fingerprint = addresses.fingerprint
         // Not cancellable: leaving the screen must not stop between the token and the configuration.
         val result = withContext(NonCancellable) {
             config.withLock {
                 val previous = dao.service(ServiceKind.HISTER)
-                // A stored token belongs to the server it was entered for, never to a new one.
+                // A stored token belongs to the addresses it was entered for, never to a new one.
                 val keepsServer = previous != null && previous.fingerprint == fingerprint
+                val knownAddresses = keepsServer && (addresses.alternate == null || addresses.alternate == previous?.alternateUrl)
                 val stored = credentials.read(SecretName.HISTER_TOKEN, fingerprint) != null
-                if (secret == null && !(keepsServer && stored)) return@withLock Configured.MissingCredential
-                // Same server, stored token kept: nothing changed, and queued captures keep going.
-                if (secret == null) return@withLock Configured.Saved
+                if (secret == null && !(knownAddresses && stored)) return@withLock Configured.MissingCredential
+                // Same server, stored token kept: queued captures keep going. At most the alternate was dropped.
+                if (secret == null) {
+                    if (previous != null && previous.alternateUrl != addresses.alternate) {
+                        dao.setService(previous.copy(alternateUrl = addresses.alternate, updatedAt = clock.now()))
+                    }
+                    return@withLock Configured.Saved
+                }
                 if (!credentials.write(SecretName.HISTER_TOKEN, fingerprint, secret)) return@withLock Configured.CredentialNotStored
                 database.withTransaction {
                     val current = ServiceEntity(
                         kind = ServiceKind.HISTER,
-                        baseUrl = root,
+                        baseUrl = addresses.root,
                         fingerprint = fingerprint,
                         generation = outbox.nextGeneration(ServiceKind.HISTER, previous),
                         captureEnabled = previous?.captureEnabled == true && keepsServer,
                         updatedAt = clock.now(),
+                        alternateUrl = addresses.alternate,
                     )
                     dao.setService(current)
                     outbox.onServiceChanged(previous, current)
@@ -155,7 +164,9 @@ class HisterIntegration(
         val (service, token) = snapshot()
         service ?: return null
         token ?: return ConnectionCheck.CredentialMissing
-        return withContext(Dispatchers.IO) { client.checkConnection(service.baseUrl, token) }
+        return withContext(Dispatchers.IO) {
+            routes.call(service) { transport, root -> HisterClient(transport).checkConnection(root, token) }
+        }
     }
 
     /** Explicit long-term search. Null when Hister is not configured. */
@@ -163,7 +174,9 @@ class HisterIntegration(
         val (service, token) = snapshot()
         service ?: return null
         token ?: return HisterSearch.Unauthorized
-        return withContext(Dispatchers.IO) { client.search(service.baseUrl, token, query, pageKey) }
+        return withContext(Dispatchers.IO) {
+            routes.call(service) { transport, root -> HisterClient(transport).search(root, token, query, pageKey) }
+        }
     }
 
     /** The service row and its token, read together. */
@@ -234,7 +247,7 @@ class HisterIntegration(
         // The policy may have changed since the capture: recheck right before sending.
         if (!eligible(payload.url, service) || wasForgotten(job, payload.url)) return DispatchResult.Cancelled("excluded")
         token ?: return DispatchResult.AuthRequired("credential_missing")
-        return client.add(service.baseUrl, token, payload.url, payload.title, payload.text)
+        return routes.call(service) { transport, root -> HisterClient(transport).add(root, token, payload.url, payload.title, payload.text) }
     }
 
     private suspend fun eligible(url: String, service: ServiceEntity): Boolean {
@@ -242,7 +255,8 @@ class HisterIntegration(
         val host = HostNames.of(url) ?: return false
         // The services' own pages (accounts, settings, search results) are never captured. Kagi
         // result pages hold the user's queries: not captured by default (an open owner question).
-        val serviceHosts = listOfNotNull(HostNames.of(service.baseUrl), dao.service(ServiceKind.KARAKEEP)?.baseUrl?.let(HostNames::of), KAGI_HOST)
+        val serviceRoots = service.roots + dao.service(ServiceKind.KARAKEEP)?.roots.orEmpty()
+        val serviceHosts = serviceRoots.mapNotNull(HostNames::of) + KAGI_HOST
         if (serviceHosts.any { HostNames.matches(host, it, includeSubdomains = true) }) return false
         return dao.exclusions().none { HostNames.matches(host, it.host, it.includeSubdomains) }
     }

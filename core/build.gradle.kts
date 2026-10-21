@@ -24,6 +24,11 @@ android {
         // unless allowed; Android's sends it. scripts/check-app.sh proves the device path.
         unitTests.all { it.systemProperty("sun.net.http.allowRestrictedHeaders", "true") }
     }
+
+    // Migration tests open the committed schemas.
+    sourceSets {
+        named("test") { assets.directories.add("$projectDir/schemas") }
+    }
 }
 
 ksp {
@@ -43,6 +48,7 @@ dependencies {
 
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.room.testing)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.kotlinx.coroutines.test)
 }

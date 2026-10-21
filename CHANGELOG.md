@@ -46,6 +46,12 @@ All notable changes to this project are documented here. The format follows
   synthetic pages and fake services (`testing/fixtures/`).
 - Internationalized host names show in Unicode only when they cannot
   imitate another site; other hosts show as punycode.
+- Karakeep and Hister take plain `http://` addresses, with a warning in
+  Settings about what travels unencrypted.
+- A second address for each service, such as a Tailscale address for use
+  away from home. Combray tries the address that last answered and
+  switches only when the other cannot be reached, so a request is never
+  sent twice.
 
 ### Changed
 
