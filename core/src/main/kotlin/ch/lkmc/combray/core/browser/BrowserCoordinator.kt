@@ -724,24 +724,27 @@ class BrowserCoordinator(
     }
 
     /**
-     * The engine refused a request. A refused view (an address Servo cannot parse) must not
-     * leave a dead tab with the previous page still shown: the tab returns to the internal home.
+     * The engine refused a request — or the engine itself failed. A refused view (an address
+     * Servo cannot parse) must not leave a dead tab with the previous page still shown: the
+     * tab returns to the internal home.
      */
     private suspend fun onEngineError(event: EngineEvent.EngineError) {
-        Log.w(LOG_TAG, "engine refused a request: ${event.message}")
-        val view = event.tab?.let { liveByNative[it] }
-        if (view == null) {
-            // Engine-level failure (EGL, profile directory, ...): while the app still waits
-            // for engine_ready, "starting" would never resolve — fail into the overlay that
-            // already renders it. Errors for a forgotten view or a refused request are not
-            // engine-level and leave the status alone.
-            if (event.tab == null && event.request == null) {
-                state.update { current ->
-                    if (current.engine == EngineStatus.STARTING) current.copy(engine = EngineStatus.FAILED) else current
-                }
+        val tab = event.tab
+        if (tab == null) {
+            // Engine-level: the native error() path emits with no tab, refusals carry one.
+            Log.e(LOG_TAG, "engine-level failure: ${event.message}")
+            // While the app still waits for engine_ready, "starting" would never resolve —
+            // fail into the overlay that already renders it. After ready, engine-level
+            // errors are recoverable or benign (a failed surface bind retries on the next
+            // bind; control-response oddities do not affect rendering), so the status stays
+            // READY and the log carries them; severity per message belongs with the emitter.
+            state.update { current ->
+                if (current.engine == EngineStatus.STARTING) current.copy(engine = EngineStatus.FAILED) else current
             }
             return
         }
+        Log.w(LOG_TAG, "engine refused a request: ${event.message}")
+        val view = liveByNative[tab] ?: return
         if (view.generation != null) {
             if (event.request != null) state.update { it.copy(notice = Notice.AddressNotOpened) }
             return

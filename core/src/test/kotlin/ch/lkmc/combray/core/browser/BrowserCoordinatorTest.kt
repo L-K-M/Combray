@@ -743,6 +743,17 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun engineLevelErrorCarryingARequestStillFailsStartup() {
+        assertEquals(EngineStatus.STARTING, state().engine)
+
+        // The contract is "no tab means engine-level"; a request id must not soften it.
+        engine.emit(EngineEvent.EngineError("bind failed during load", tab = null, request = 5))
+        idle()
+
+        assertEquals(EngineStatus.FAILED, state().engine)
+    }
+
+    @Test
     fun engineLevelErrorAfterReadyLeavesTheEngineRunning() {
         ready()
 
