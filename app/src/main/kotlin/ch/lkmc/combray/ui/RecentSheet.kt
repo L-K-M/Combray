@@ -1,10 +1,13 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -32,9 +35,12 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -177,22 +183,59 @@ private fun LocalRecent(
                 item(key = "day:$day") { DayHeader(day, now) }
             }
             item(key = item.key) {
-                RecentRow(
-                    item = item,
-                    now = now,
-                    onOpen = {
-                        when (item) {
-                            is RecentItem.OpenTab -> browser.selectTab(item.tabId)
-                            is RecentItem.Visit -> browser.openVisit(item.visitId)
-                        }
-                        onDismiss()
-                    },
-                    onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
-                    onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
-                    onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
-                )
+                val row: @Composable () -> Unit = {
+                    RecentRow(
+                        item = item,
+                        now = now,
+                        onOpen = {
+                            when (item) {
+                                is RecentItem.OpenTab -> browser.selectTab(item.tabId)
+                                is RecentItem.Visit -> browser.openVisit(item.visitId)
+                            }
+                            onDismiss()
+                        },
+                        onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
+                        onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
+                        onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                    )
+                }
+                if (item is RecentItem.OpenTab) {
+                    // A swipe closes the tab exactly like its close button, with the Undo
+                    // snackbar as the way back. History rows keep their explicit menu: removing
+                    // a visit has no undo, so it must stay a deliberate tap.
+                    SwipeToDismissBox(
+                        state = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { direction ->
+                                if (direction != SwipeToDismissBoxValue.StartToEnd) return@rememberSwipeToDismissBoxState false
+                                browser.closeTab(item.tabId)
+                                true
+                            },
+                        ),
+                        backgroundContent = { CloseRowBackground() },
+                        enableDismissFromEndToStart = false,
+                        content = { row() },
+                    )
+                } else {
+                    row()
+                }
             }
         }
+    }
+}
+
+/** Behind a swiped tab row: closing, with the row's own close icon in the error tint. */
+@Composable
+private fun CloseRowBackground() {
+    Box(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(start = 20.dp),
+        )
     }
 }
 
