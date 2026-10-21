@@ -1509,7 +1509,6 @@ fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption
     options
 }
 
-/// Maps an Android key (character plus key code) to a DOM key.
 fn servo_theme(appearance: Appearance) -> Theme {
     match appearance {
         Appearance::Light => Theme::Light,
@@ -1517,6 +1516,7 @@ fn servo_theme(appearance: Appearance) -> Theme {
     }
 }
 
+/// Maps an Android key (character plus key code) to a DOM key.
 fn servo_key(key: KeyInput) -> Option<Key> {
     if let Some(character) = char::from_u32(key.unicode).filter(|c| *c != '\0' && !c.is_control()) {
         return Some(Key::Character(character.to_string()));
