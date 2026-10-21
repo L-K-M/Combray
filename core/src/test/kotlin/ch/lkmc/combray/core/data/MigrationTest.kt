@@ -69,7 +69,7 @@ class MigrationTest {
     fun committedSchemasAreFrozen() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val directory = CombrayDatabase::class.java.name
-        val versions = assets.list(directory).orEmpty().map { it.removeSuffix(".json").toInt() }.toSet()
+        val versions = assets.list(directory).orEmpty().filter { it.endsWith(".json") }.map { it.removeSuffix(".json").toInt() }.toSet()
         assertEquals("a new schema version needs its identity hash here", FROZEN_IDENTITY_HASHES.keys, versions)
 
         for ((version, hash) in FROZEN_IDENTITY_HASHES) {

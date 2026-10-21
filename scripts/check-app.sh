@@ -31,6 +31,7 @@ PROCESS_DEATH_CLASS="$TEST_PACKAGE.ProcessDeathTest"
 device_check_classes() {
     local file class
     for file in "$ROOT/app/src/androidTest/kotlin/ch/lkmc/combray/"*Test.kt; do
+        [ -f "$file" ] || continue
         class="$TEST_PACKAGE.$(basename "$file" .kt)"
         [ "$class" = "$PROCESS_DEATH_CLASS" ] || echo "$class"
     done

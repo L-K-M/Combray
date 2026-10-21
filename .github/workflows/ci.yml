@@ -57,6 +57,7 @@ jobs:
         working-directory: native
         run: |
           toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          [ -n "$toolchain" ] || { echo "::error::could not read channel from native/rust-toolchain.toml"; exit 1; }
           rustup toolchain install "$toolchain" --profile minimal --component rustfmt --no-self-update
           cargo "+$toolchain" fmt --check
 
@@ -120,10 +121,10 @@ jobs:
       - name: Room schemas are committed
         if: steps.detect.outputs.present == 'true'
         run: |
-          git diff --exit-code -- core/schemas
+          # Lists modified, deleted and new files alike, before failing.
           uncommitted="$(git status --porcelain -- core/schemas)"
           if [ -n "$uncommitted" ]; then
-            echo "::error::Room wrote schema files that are not committed:"
+            echo "::error::Room schema files differ from what is committed:"
             echo "$uncommitted"
             exit 1
           fi
