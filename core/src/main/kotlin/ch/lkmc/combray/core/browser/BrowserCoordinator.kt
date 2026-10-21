@@ -600,8 +600,13 @@ class BrowserCoordinator(
         if (event.capture != readerRequest || reader != ReaderState.Loading(pending.tabId)) return
         // Status only: the detail can quote page script errors.
         Log.i(LOG_TAG, "reader article: ${event.status}")
+        // The saved view identity is not enough: a replaced or crashed renderer can still
+        // deliver that callback, and it must not cover the page now on screen.
+        val live = view(pending.view)?.takeIf {
+            !it.crashed && it.currentDocument == pending.document && pending.document !in it.errorDocuments
+        }
         val content = event.content?.takeIf {
-            event.status == CaptureStatus.CAPTURED && event.view == pending.view && event.document == pending.document
+            live != null && event.status == CaptureStatus.CAPTURED && event.view == pending.view && event.document == pending.document
         }
         val article = content?.let { ArticleJson.parse(it.text, it.truncated) }
         reader = article?.let { ReaderState.Ready(pending.tabId, pending.url, it) } ?: ReaderState.Unavailable(pending.tabId)
