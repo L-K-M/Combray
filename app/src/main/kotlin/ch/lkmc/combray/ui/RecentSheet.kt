@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,7 +62,7 @@ import java.util.Calendar
 import java.util.Date
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
-enum class RecentScope(val label: Int) {
+enum class RecentScope(@StringRes val label: Int) {
     OPEN(R.string.recent_filter_open),
     ALL(R.string.recent_filter_all),
     HISTER(R.string.recent_scope_hister),
@@ -85,10 +86,10 @@ fun RecentSheet(
     snackbar: SnackbarHostState,
     onDismiss: () -> Unit,
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable(restartKey) { mutableStateOf("") }
     var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
     val items by remember(query) { browser.recent(query) }.collectAsStateWithLifecycle(emptyList())
-    var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
+    var forgetting by rememberSaveable(restartKey) { mutableStateOf<String?>(null) }
     val shown = if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
     val now = System.currentTimeMillis()
 

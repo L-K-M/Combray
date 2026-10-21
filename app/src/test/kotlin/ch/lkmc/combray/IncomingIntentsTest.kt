@@ -19,6 +19,14 @@ class IncomingIntentsTest {
     }
 
     @Test
+    fun aLinkSharedAsTheSubjectOnlyStillOpens() {
+        val subjectOnly = IncomingIntents.interpret(Intent.ACTION_SEND, null) {
+            if (it == Intent.EXTRA_SUBJECT) "https://example.org/a" else null
+        }
+        assertEquals(Incoming.Open("https://example.org/a"), subjectOnly)
+    }
+
+    @Test
     fun theFirstLinkWinsAndAnUppercaseSchemeCounts() {
         assertEquals(Incoming.Open("HTTPS://a.example/x"), send("Two: HTTPS://a.example/x, and https://b.example/"))
     }

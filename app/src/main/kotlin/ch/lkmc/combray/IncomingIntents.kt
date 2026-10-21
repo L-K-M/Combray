@@ -54,7 +54,8 @@ object IncomingIntents {
     /** [extra] reads one of the intent's text extras by name. */
     fun interpret(action: String?, data: String?, extra: (String) -> String?): Incoming? = when (action) {
         Intent.ACTION_VIEW -> data?.let(::open)
-        Intent.ACTION_SEND -> extra(Intent.EXTRA_TEXT)?.let(::shared)
+        // Some apps share a link as the subject only.
+        Intent.ACTION_SEND -> (extra(Intent.EXTRA_TEXT) ?: extra(Intent.EXTRA_SUBJECT))?.let(::shared)
         Intent.ACTION_WEB_SEARCH -> extra(SearchManager.QUERY)?.let(::editNewTab)
         Intent.ACTION_PROCESS_TEXT -> extra(Intent.EXTRA_PROCESS_TEXT)?.let(::searchNow)
         ACTION_NEW_TAB -> LaunchRequest.EditNewTab("")

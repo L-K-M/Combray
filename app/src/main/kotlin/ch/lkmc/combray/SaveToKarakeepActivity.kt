@@ -1,6 +1,7 @@
 package ch.lkmc.combray
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -24,7 +25,10 @@ class SaveToKarakeepActivity : Activity() {
             return
         }
 
-        val url = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.let(IncomingIntents::firstWebAddress)
+        // Some apps share a link as the subject only.
+        val url = listOf(Intent.EXTRA_TEXT, Intent.EXTRA_SUBJECT).firstNotNullOfOrNull { name ->
+            intent.getCharSequenceExtra(name)?.toString()?.let(IncomingIntents::firstWebAddress)
+        }
         if (url == null) {
             report(R.string.save_no_link)
             return
@@ -32,7 +36,8 @@ class SaveToKarakeepActivity : Activity() {
 
         val title = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()?.takeIf { it.isNotBlank() }
         val graph = (application as CombrayApplication).graph
-        // The process scope: leaving this screen must not cancel a save while it is being queued.
+        val app = applicationContext
+        // The process scope: closing this screen must not cancel a save while it is queued.
         graph.scope.launch {
             val message = when (graph.integrations.save(url, title)) {
                 SaveRequest.Queued -> R.string.save_state_pending
@@ -42,14 +47,18 @@ class SaveToKarakeepActivity : Activity() {
                 SaveRequest.AlreadyQueued -> R.string.save_already_queued
                 SaveRequest.NeedsAttention -> R.string.save_needs_attention
             }
-            withContext(Dispatchers.Main) { report(message) }
+            withContext(Dispatchers.Main) { toast(app, message) }
         }
+        // At once: an invisible window still takes focus and touches from the app that shared.
+        finish()
     }
 
     private fun report(@StringRes message: Int) {
-        // The application context: the toast outlives this activity. Long enough to read the
-        // longer messages.
-        Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
+        toast(applicationContext, message)
         finish()
     }
+
+    // The application context: the toast outlives this activity. Long enough to read the
+    // longer messages.
+    private fun toast(context: Context, @StringRes message: Int) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 }
