@@ -61,6 +61,9 @@ object NativeEngine {
      */
     @JvmStatic external fun persistProfile()
 
+    /** Pages match `prefers-color-scheme: dark` when [dark], in every view and in views created later. */
+    @JvmStatic external fun setDarkAppearance(dark: Boolean)
+
     @JvmStatic external fun closeTab(tab: Long)
 
     @JvmStatic external fun navigate(tab: Long, request: Long, url: String)

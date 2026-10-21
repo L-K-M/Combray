@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.TabState
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
@@ -79,6 +80,24 @@ class BrowserCoordinatorTest {
     private fun title(native: Long, document: Long, title: String, attribution: Attribution = Attribution.CURRENT) {
         engine.emit(EngineEvent.TitleChanged(engine.view(native), document, title, attribution))
         idle()
+    }
+
+    @Test
+    fun pagesGetTheAppearanceBeforeTheFirstViewAndOnEveryChange() {
+        browser.setAppearance(Appearance.DARK)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertTrue(engine.appearances.isEmpty())
+
+        // Sent once the engine runs, before the restored tab gets its view.
+        ready()
+        assertEquals(listOf(Appearance.DARK to 0), engine.appearances)
+        assertEquals(1, engine.created.size)
+
+        browser.setAppearance(Appearance.DARK)
+        browser.setAppearance(Appearance.LIGHT)
+        idle()
+        assertEquals(listOf(Appearance.DARK to 0, Appearance.LIGHT to 1), engine.appearances)
     }
 
     @Test

@@ -13,6 +13,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.Appearance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -217,6 +218,23 @@ class BrowsingTest {
         device.browser.openUrl(Fixtures.INTERSECTION, Placement.CURRENT_TAB)
         val state = device.awaitState { it.activeTab?.title in setOf(INTERSECTION_VISIBLE, INTERSECTION_MISSING) }
         assertEquals(INTERSECTION_VISIBLE, state.activeTab?.title)
+    }
+
+    @Test
+    fun pagesFollowTheDarkAppearanceAndItsChanges() {
+        try {
+            device.browser.setAppearance(Appearance.DARK)
+            device.browser.openUrl(Fixtures.SCHEME, Placement.CURRENT_TAB)
+            device.awaitPage(Fixtures.SCHEME)
+            assertScreen(Device.BLUE)
+
+            // A change reaches the page already shown, without a reload.
+            device.browser.setAppearance(Appearance.LIGHT)
+            assertScreen(Device.GREEN)
+        } finally {
+            // The emulator runs in light mode, as BrowserScreen told the engine at start.
+            device.browser.setAppearance(Appearance.LIGHT)
+        }
     }
 
     private fun tapPageCenter() {

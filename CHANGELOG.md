@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Pages follow the phone's dark theme: sites with dark styles, such as
+  Kagi, render dark when the system is in dark mode, and switch when it
+  changes.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

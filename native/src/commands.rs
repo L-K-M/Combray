@@ -34,6 +34,13 @@ pub enum Throttling {
     Throttled,
 }
 
+/// The system's light or dark theme, which pages see as `prefers-color-scheme`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appearance {
+    Light,
+    Dark,
+}
+
 /// Whether the engine may refuse a capture locally when it already knows the expected
 /// document was replaced. Tests disable the shortcut to exercise Servo's own guard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +114,10 @@ pub enum Command {
     SelectNone,
     /// Write cookies and other profile state now; Android can kill the process at any time.
     PersistProfile,
+    /// For every view now and every view created later.
+    SetAppearance {
+        appearance: Appearance,
+    },
     SetThrottling {
         tab: i64,
         throttling: Throttling,

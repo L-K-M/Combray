@@ -40,6 +40,9 @@ object Fixtures {
     /** Titled `IO:visible` once IntersectionObserver reports its text on screen, `IO:missing` without it. */
     const val INTERSECTION = "$BASE/intersection.html"
 
+    /** [Device.GREEN] in a light appearance, [Device.BLUE] when the page is told the theme is dark. */
+    const val SCHEME = "$BASE/scheme.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

@@ -29,15 +29,16 @@ use servo::{
     EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
     Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts,
     PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
-    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType,
-    TouchId, TouchPointerType, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme, TouchEvent,
+    TouchEventType, TouchId, TouchPointerType, WebView, WebViewBuilder, WebViewPoint,
+    WindowRenderingContext,
 };
 use url::Url;
 
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
-    CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
-    TouchPhase,
+    Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
+    Throttling, TouchPhase,
 };
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
 use crate::delegate::{DelegateEvent, DelegateQueue, TabDelegate};
@@ -255,6 +256,8 @@ struct Engine {
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// Given to every view, so pages match the app's light or dark theme.
+    appearance: Appearance,
 }
 
 impl Engine {
@@ -279,6 +282,7 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            appearance: Appearance::Light,
         }
     }
 
@@ -330,6 +334,7 @@ impl Engine {
             Command::SelectTab { tab } => self.select_tab(tab),
             Command::SelectNone => self.select_none(),
             Command::PersistProfile => self.persist_profile(),
+            Command::SetAppearance { appearance } => self.set_appearance(appearance),
             Command::CloseTab { tab } => self.close_tab(tab),
             Command::Navigate { tab, request, url } => self.navigate(tab, request, &url),
             Command::GoBack { tab } => {
@@ -584,6 +589,8 @@ impl Engine {
     /// Registers a new view, hidden until selected so two shown views never overlap.
     fn insert_tab(&mut self, view: ViewKey, webview: WebView) -> String {
         webview.hide();
+        // Servo starts every view light; documents it loads later inherit the view's theme.
+        webview.notify_theme_change(servo_theme(self.appearance));
         let webview_id = format!("{:?}", webview.id());
         self.tabs.insert(
             view.tab,
@@ -637,6 +644,13 @@ impl Engine {
         }
         self.active = None;
         self.needs_paint = true;
+    }
+
+    fn set_appearance(&mut self, appearance: Appearance) {
+        self.appearance = appearance;
+        for tab in self.tabs.values() {
+            tab.webview.notify_theme_change(servo_theme(appearance));
+        }
     }
 
     fn persist_profile(&mut self) {
@@ -1496,6 +1510,13 @@ fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption
 }
 
 /// Maps an Android key (character plus key code) to a DOM key.
+fn servo_theme(appearance: Appearance) -> Theme {
+    match appearance {
+        Appearance::Light => Theme::Light,
+        Appearance::Dark => Theme::Dark,
+    }
+}
+
 fn servo_key(key: KeyInput) -> Option<Key> {
     if let Some(character) = char::from_u32(key.unicode).filter(|c| *c != '\0' && !c.is_control()) {
         return Some(Key::Character(character.to_string()));

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +61,7 @@ import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.launch
 
@@ -115,6 +117,10 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         }
         browser.keyboardHandled(request)
     }
+
+    // Pages follow the system's light or dark theme, like the chrome around them.
+    val dark = isSystemInDarkTheme()
+    LaunchedEffect(dark) { browser.setAppearance(if (dark) Appearance.DARK else Appearance.LIGHT) }
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
     var addressTab by rememberSaveable { mutableStateOf<String?>(null) }

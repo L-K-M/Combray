@@ -16,6 +16,7 @@ Pages
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /scheme.html               page in #2e6b4f, or #3b4f8a when it matches prefers-color-scheme: dark
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   (the three control pages have a #1f6f78 margin on the left for paint checks)
@@ -98,6 +99,14 @@ INTERSECTION_PAGE = page(
     " new IntersectionObserver(function (entries) {"
     "  if (entries.some(function (e) { return e.isIntersecting; })) document.title = 'IO:visible';"
     " }).observe(document.getElementById('target')); }</script>",
+)
+
+# The page's color says which theme it was told: light #2e6b4f, dark #3b4f8a.
+SCHEME_PAGE = page(
+    "SCHEME",
+    "<p>scheme</p>",
+    "<style>html,body{margin:0;min-height:100%;background:#2e6b4f}"
+    "@media (prefers-color-scheme: dark){html,body{background:#3b4f8a}}</style>",
 )
 
 CONTROL_PAGES = {
@@ -200,6 +209,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/scheme.html":
+            return self.send(200, SCHEME_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
