@@ -20,13 +20,20 @@ class ThemeContrastTest {
 
     @Test
     fun outlineDistinguishesComponentsOnSurfaces() {
-        // Non-text UI (borders, checkbox outlines) needs 3:1 against its surface.
-        assertAtLeast("light outline/surface", LightColors.outline, LightColors.surface, 3.0)
-        assertAtLeast("dark outline/surface", DarkColors.outline, DarkColors.surface, 3.0)
-        assertAtLeast("light outline/lowest", LightColors.outline, LightColors.surfaceContainerLowest, 3.0)
-        assertAtLeast("dark outline/highest", DarkColors.outline, DarkColors.surfaceContainerHighest, 3.0)
-        assertAtLeast("light outline/low", LightColors.outline, LightColors.surfaceContainerLow, 3.0)
-        assertAtLeast("dark outline/high", DarkColors.outline, DarkColors.surfaceContainerHigh, 3.0)
+        // Non-text UI (borders, checkbox outlines) needs 3:1 against every surface step:
+        // any of them can host a bordered component.
+        listOf("light" to LightColors, "dark" to DarkColors).forEach { (schemeName, scheme) ->
+            listOf(
+                "surface" to scheme.surface,
+                "lowest" to scheme.surfaceContainerLowest,
+                "low" to scheme.surfaceContainerLow,
+                "container" to scheme.surfaceContainer,
+                "high" to scheme.surfaceContainerHigh,
+                "highest" to scheme.surfaceContainerHighest,
+            ).forEach { (step, surface) ->
+                assertAtLeast("$schemeName outline/$step", scheme.outline, surface, 3.0)
+            }
+        }
     }
 
     @Test
@@ -74,9 +81,13 @@ class ThemeContrastTest {
             Triple("onErrorContainer/errorContainer", scheme.onErrorContainer, scheme.errorContainer),
             Triple("inverseOnSurface/inverseSurface", scheme.inverseOnSurface, scheme.inverseSurface),
             Triple("inversePrimary/inverseSurface", scheme.inversePrimary, scheme.inverseSurface),
-            // Supporting text on the sheet containers the bottom bar and sheets use.
+            // Supporting text on the sheet containers the bottom bar and sheets use,
+            // plus label text on surfaceVariant/surfaceContainer fills (text fields,
+            // chips, nav bar destinations).
             Triple("onSurface/low", scheme.onSurface, scheme.surfaceContainerLow),
             Triple("onSurface/high", scheme.onSurface, scheme.surfaceContainerHigh),
+            Triple("onSurfaceVariant/surfaceVariant", scheme.onSurfaceVariant, scheme.surfaceVariant),
+            Triple("onSurfaceVariant/container", scheme.onSurfaceVariant, scheme.surfaceContainer),
         )
         pairs.forEach { (name, foreground, background) ->
             assertAtLeast(name, foreground, background, 4.5)
@@ -89,14 +100,14 @@ class ThemeContrastTest {
     }
 
     private fun assertLuminanceOrder(colors: List<Color>, descending: Boolean, name: String) {
-        colors.zipWithNext().forEach { (brighter, darker) ->
+        colors.zipWithNext().forEach { (first, second) ->
             val orderOk = if (descending) {
-                luminance(brighter) >= luminance(darker)
+                luminance(first) >= luminance(second)
             } else {
-                luminance(brighter) <= luminance(darker)
+                luminance(first) <= luminance(second)
             }
             assertTrue(
-                "$name out of order: #${brighter.value.toString(16)} then #${darker.value.toString(16)}",
+                "$name out of order: #${(first.value shr 32).toString(16)} then #${(second.value shr 32).toString(16)}",
                 orderOk,
             )
         }
