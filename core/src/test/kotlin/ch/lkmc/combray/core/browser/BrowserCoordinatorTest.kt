@@ -493,6 +493,28 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun lookingAtAnEarlierTabOfAChainKeepsTheWholeWayBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val first = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://b.test/")
+        val second = state().activeTab!!.id
+        engine.openWindow(opener = PAGE_TAB, tab = PAGE_TAB + 1); idle()
+        commit(PAGE_TAB + 1, 60, "https://c.test/")
+        val third = state().activeTab!!.id
+
+        // A, which opened B, which opened C: looking at A is inside that chain.
+        browser.selectTab(first); idle()
+        browser.selectTab(third); idle()
+        assertTrue(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(third); idle()
+        assertEquals(second, state().activeTab?.id)
+        assertTrue(state().activeTab!!.returnsToOpener)
+    }
+
+    @Test
     fun focusingAThirdTabEndsTheWayBackToTheOpener() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()

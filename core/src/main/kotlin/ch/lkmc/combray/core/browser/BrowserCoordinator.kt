@@ -709,14 +709,19 @@ class BrowserCoordinator(
     }
 
     /**
-     * Focus moved to [tabId]. Opener relations survive only on its way back (the tab, its opener,
-     * that tab's opener, ...) or when [tabId] is the opener: a chain of page-opened tabs unwinds
-     * one Back at a time, and focusing any other tab ends the relation, as for [otherAppTab].
+     * Focus moved to [tabId]. Opener relations survive within its chain: on its way back (the tab,
+     * its opener, that tab's opener, ...) and below it (tabs whose way back passes [tabId]). A
+     * chain of page-opened tabs unwinds one Back at a time, and focusing a tab outside it ends the
+     * relation, as for [otherAppTab].
      */
     private fun keepOpenersFor(tabId: String?) {
         // Bounded: an opener always existed before its tab, but a cycle must not hang the queue.
-        val wayBack = generateSequence(tabId) { openers[it] }.take(openers.size + 1).toSet()
-        openers.entries.removeAll { (child, opener) -> child !in wayBack && opener != tabId }
+        val bound = openers.size + 1
+        fun wayBack(from: String?) = generateSequence(from) { openers[it] }.take(bound)
+        val onWayBack = wayBack(tabId).toSet()
+        // Decided before removing anything, so no chain is walked while it changes.
+        val ended = openers.keys.filter { child -> child !in onWayBack && wayBack(child).none { it == tabId } }
+        ended.forEach(openers::remove)
     }
 
     /**
