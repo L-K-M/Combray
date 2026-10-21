@@ -14,9 +14,8 @@ import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -52,7 +51,6 @@ class HisterIntegration(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > HASH_MEMORY
     }
     private val forgotten = HashMap<String, Long>()
-    private val budgetRefused = MutableStateFlow(false)
 
     /** Configuration changes and dispatch read/write the service row and its token together. */
     private val config = Mutex()
@@ -63,14 +61,12 @@ class HisterIntegration(
     val queuedBytes: Flow<Long> = dao.observeQueuedCaptureBytes()
 
     /**
-     * Automatic capture is paused: a capture was refused for budget and the queue still cannot
-     * hold a largest-possible payload. Derived from the live queue size so it clears once the
-     * queue drains, even when no further captures arrive.
+     * True while the queue could not hold a largest-possible capture payload. Derived from the
+     * live queue size: no refusal has to happen first, and it clears by itself once the queue
+     * drains or after a process restart.
      */
     val captureBudgetReached: Flow<Boolean> =
-        combine(budgetRefused, dao.observeQueuedCaptureBytes()) { refused, queued ->
-            refused && queued + MAX_CAPTURE_PAYLOAD_BYTES > MAX_QUEUED_CAPTURE_BYTES
-        }.distinctUntilChanged()
+        dao.observeQueuedCaptureBytes().map { it + MAX_CAPTURE_PAYLOAD_BYTES > MAX_QUEUED_CAPTURE_BYTES }.distinctUntilChanged()
 
     /**
      * Saves the root, an optional alternate address and, if given, a new token. Capture stays as
@@ -215,11 +211,7 @@ class HisterIntegration(
         if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
-        if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) {
-            budgetRefused.value = true
-            return
-        }
-        budgetRefused.value = false
+        if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) return
         val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true)
         if (enqueued !is Enqueued.Queued) return
         // Remembered only under the policy it was captured with: a policy change since then
@@ -308,7 +300,7 @@ class HisterIntegration(
         /** Proposed transient content budget for unsent captures. */
         const val MAX_QUEUED_CAPTURE_BYTES = 20L * 1024 * 1024
 
-        /** One payload's upper bound: the 256 KiB text cap plus address, title and JSON. */
+        /** Estimated largest payload: the 256 KiB text cap plus address, title and JSON slack. */
         private const val MAX_CAPTURE_PAYLOAD_BYTES = 300 * 1024
 
         private const val HASH_MEMORY = 512
