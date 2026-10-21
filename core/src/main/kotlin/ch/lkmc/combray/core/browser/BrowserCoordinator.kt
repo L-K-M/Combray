@@ -179,8 +179,7 @@ class BrowserCoordinator(
      * page opened, Back on the new tab's first page returns to the opener ([returnToOpener]).
      */
     fun openUrlFromTab(url: String, openerTabId: String) = submit {
-        val opener = dao.tab(openerTabId)?.takeIf { it.state == TabState.OPEN }
-        createTab(url, opener?.id)
+        createTab(url, openerTabId)
         reconcile()
         publish()
     }
@@ -676,8 +675,9 @@ class BrowserCoordinator(
             lastFocusedAt = now,
             closedAt = null,
         )
-        // Recorded before focus moves to the new tab, so that keeps the opener's own way back.
-        openerTabId?.let { openers[tab.id] = it }
+        // Recorded before focus moves to the new tab, so that keeps the opener's own way back;
+        // only for an opener still open (a page window can race its opener's close).
+        openerTabId?.takeIf { dao.tab(it)?.state == TabState.OPEN }?.let { openers[tab.id] = it }
         database.withTransaction {
             dao.insertTab(tab)
             activate(tab.id, now)

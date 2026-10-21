@@ -132,9 +132,17 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     // the tab whose page opened this one, then leave the app. A tab another app opened closes on
     // the way out: its page stays in history only.
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
-    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack == true) { browser.goBack() }
-    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.returnsToOpener == true) {
-        tab?.let { browser.returnToOpener(it.id) }
+    // One action for system Back and the bar's Back button, so the two cannot drift apart.
+    val backInPage = {
+        tab?.let {
+            when {
+                it.canGoBack -> browser.goBack()
+                it.returnsToOpener -> browser.returnToOpener(it.id)
+            }
+        }
+    }
+    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && (tab?.canGoBack == true || tab?.returnsToOpener == true)) {
+        backInPage()
     }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
         tab?.let { browser.returnToOtherApp(it.id) }
@@ -180,15 +188,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
-                // Like the system Back on the page: back in its history, else back to its opener.
-                onBack = {
-                    tab?.let {
-                        when {
-                            it.canGoBack -> browser.goBack()
-                            it.returnsToOpener -> browser.returnToOpener(it.id)
-                        }
-                    }
-                },
+                onBack = { backInPage() },
                 onAddress = editAddress,
                 onSave = {
                     // Snapshot now: switching tabs right after the tap must not change what is saved.
