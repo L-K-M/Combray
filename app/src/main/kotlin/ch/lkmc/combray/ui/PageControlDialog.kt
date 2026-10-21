@@ -53,6 +53,7 @@ import ch.lkmc.combray.UploadStaging
 import ch.lkmc.combray.core.browser.DialogBlocking
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.engine.ControlResponse
+import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
 import kotlinx.coroutines.CoroutineScope
@@ -85,6 +86,7 @@ fun PageControlDialog(
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
         is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onShare) { answer(ControlResponse.Dismiss) }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
+        PageControlContent.LeavePage -> LeavePageDialog(control.site) { answer(it.response) }
         else -> ScriptDialog(control, content, onAnswer)
     }
 }
@@ -201,6 +203,31 @@ private fun ScriptDialog(
             { TextButton(onClick = { onAnswer(ControlResponse.Dismiss, blocking) }) { Text(stringResource(R.string.action_cancel)) } }
         } else {
             null
+        },
+    )
+}
+
+/**
+ * The page asks before it is left (`beforeunload`), usually over unsaved form text. Back answers
+ * Stay: leaving is the choice that loses the text, so only its own button leaves.
+ */
+@Composable
+private fun LeavePageDialog(site: String?, onAnswer: (LeavePageChoice) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { onAnswer(LeavePageChoice.STAY) },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text(stringResource(R.string.leave_page_title), Modifier.semantics { heading() }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                site?.let { Text(stringResource(R.string.leave_page_site, it)) }
+                Text(stringResource(R.string.leave_page_message))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onAnswer(LeavePageChoice.LEAVE) }) { Text(stringResource(R.string.leave_page_leave)) }
+        },
+        dismissButton = {
+            TextButton(onClick = { onAnswer(LeavePageChoice.STAY) }) { Text(stringResource(R.string.leave_page_stay)) }
         },
     )
 }

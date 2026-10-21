@@ -1,5 +1,6 @@
 //! Page controls Servo asks the embedder to present: `<select>` pickers, script dialogs
-//! (`alert`, `confirm`, `prompt`), file pickers, link menus and HTTP sign-in.
+//! (`alert`, `confirm`, `prompt`), file pickers, link menus, HTTP sign-in and leave-page
+//! questions (`beforeunload`).
 //!
 //! The engine keeps each control's Servo handle until the application answers or the page hides
 //! the control. Only a bounded description crosses JNI; the answer comes back as JSON:
@@ -17,6 +18,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::error::Category;
@@ -30,6 +32,10 @@ pub const MAX_OPTIONS: usize = 2_000;
 pub const MAX_FILE_EXTENSIONS: usize = 50;
 /// Longer link addresses are left out of a link menu rather than cut (a cut URL is wrong).
 pub const MAX_URL_CHARS: usize = 32_768;
+/// How long a leave-page question waits for an answer (proposed default). The asking page's
+/// script thread, and every same-site tab sharing it, is blocked until then, so an unanswered
+/// question lets the page go, as Servo does when nobody is asked.
+pub const LEAVE_PAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectOption {
@@ -74,6 +80,9 @@ pub enum ControlDescription {
         origin: String,
         proxy: bool,
     },
+    /// The page asks to confirm leaving it (`beforeunload`), usually over unsaved form text.
+    /// Servo passes no page message, as browsers no longer show one.
+    LeavePage,
 }
 
 impl ControlDescription {
@@ -141,7 +150,73 @@ impl ControlDescription {
             ControlDescription::SignIn { origin, proxy } => {
                 json!({ "kind": "sign_in", "origin": bounded(origin, MAX_LABEL_CHARS), "proxy": proxy })
             },
+            ControlDescription::LeavePage => json!({ "kind": "leave_page" }),
         }
+    }
+}
+
+/// Whether the tab asking to confirm leaving is the one on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabVisibility {
+    Selected,
+    Hidden,
+}
+
+/// Whether the user touched or typed into the asking page's current document: browsers' sticky
+/// user activation, which Servo 0.6.0 does not check before asking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageActivation {
+    Interacted,
+    Untouched,
+}
+
+impl PageActivation {
+    /// Activation belongs to one document: the one the user last interacted with must still be
+    /// the current one, so a newly committed document starts without it.
+    pub fn of<D: PartialEq>(interacted: Option<D>, current: Option<D>) -> Self {
+        match (interacted, current) {
+            (Some(interacted), Some(current)) if interacted == current => {
+                PageActivation::Interacted
+            },
+            _ => PageActivation::Untouched,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeavePageDecision {
+    /// Show the question; the page waits for the answer.
+    Ask,
+    /// Let the page go without asking.
+    Leave,
+}
+
+/// Browsers ask before leaving a page only after the user interacted with it, so a page cannot
+/// nag or hold someone who never touched it; a hidden tab cannot take over the screen to ask.
+pub fn leave_page_decision(
+    visibility: TabVisibility,
+    activation: PageActivation,
+) -> LeavePageDecision {
+    match (visibility, activation) {
+        (TabVisibility::Selected, PageActivation::Interacted) => LeavePageDecision::Ask,
+        _ => LeavePageDecision::Leave,
+    }
+}
+
+/// The user's answer to a leave-page question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeavePageAnswer {
+    Leave,
+    Stay,
+}
+
+/// Leave answers like OK; Stay like Cancel or Back, since leaving is what loses unsaved text.
+/// None for a response that does not fit the question.
+pub fn leave_page_answer(response: &ControlResponse) -> Option<LeavePageAnswer> {
+    match response {
+        ControlResponse::Accept => Some(LeavePageAnswer::Leave),
+        ControlResponse::Dismiss => Some(LeavePageAnswer::Stay),
+        _ => None,
     }
 }
 
@@ -165,7 +240,7 @@ pub fn link_menu(link: Option<&str>, image: Option<&str>) -> Option<ControlDescr
 pub enum ControlResponse {
     /// `<select>`: the chosen option IDs.
     Select { ids: Vec<usize> },
-    /// OK on `alert` or `confirm`.
+    /// OK on `alert` or `confirm`; Leave on a leave-page question.
     Accept,
     /// OK on `prompt` with the entered text.
     Text { value: String },
@@ -173,7 +248,8 @@ pub enum ControlResponse {
     Files { paths: Vec<PathBuf> },
     /// HTTP sign-in.
     Credentials { username: String, password: String },
-    /// Cancel, Back, or no selection: Servo's default response.
+    /// Cancel, Back, or no selection: Servo's default response. Stay on a leave-page question,
+    /// where Servo's default would leave.
     Dismiss,
 }
 
@@ -386,6 +462,60 @@ mod tests {
         assert!(!error.contains("hunter2"), "{error}");
         let error = parse_response(r#"{"type":"select","ids":"hunter2"}"#).unwrap_err();
         assert!(!error.contains("hunter2"), "{error}");
+    }
+
+    #[test]
+    fn leave_page_questions_carry_no_page_text() {
+        assert_eq!(
+            ControlDescription::LeavePage.to_json(),
+            json!({ "kind": "leave_page" })
+        );
+    }
+
+    #[test]
+    fn only_the_tab_on_screen_asks_and_only_after_the_user_interacted() {
+        use LeavePageDecision::{Ask, Leave};
+        use PageActivation::{Interacted, Untouched};
+        use TabVisibility::{Hidden, Selected};
+
+        assert_eq!(leave_page_decision(Selected, Interacted), Ask);
+        assert_eq!(leave_page_decision(Selected, Untouched), Leave);
+        assert_eq!(leave_page_decision(Hidden, Interacted), Leave);
+        assert_eq!(leave_page_decision(Hidden, Untouched), Leave);
+    }
+
+    #[test]
+    fn activation_belongs_to_the_document_the_user_interacted_with() {
+        assert_eq!(
+            PageActivation::of(Some(7), Some(7)),
+            PageActivation::Interacted
+        );
+        // A new document committed since the touch.
+        assert_eq!(
+            PageActivation::of(Some(7), Some(8)),
+            PageActivation::Untouched
+        );
+        assert_eq!(PageActivation::of(None, Some(8)), PageActivation::Untouched);
+        assert_eq!(
+            PageActivation::of::<u64>(None, None),
+            PageActivation::Untouched
+        );
+    }
+
+    #[test]
+    fn leave_answers_like_ok_and_stay_like_cancel() {
+        assert_eq!(
+            leave_page_answer(&parse_response(r#"{"type":"accept"}"#).unwrap()),
+            Some(LeavePageAnswer::Leave)
+        );
+        assert_eq!(
+            leave_page_answer(&parse_response(r#"{"type":"dismiss"}"#).unwrap()),
+            Some(LeavePageAnswer::Stay)
+        );
+        assert_eq!(
+            leave_page_answer(&ControlResponse::Text { value: "x".into() }),
+            None
+        );
     }
 
     #[test]

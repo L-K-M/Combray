@@ -9,6 +9,7 @@ import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.HistoryKind
+import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -717,6 +718,35 @@ class BrowserCoordinatorTest {
         assertEquals(2L, state().pageControl?.id)
         assertFalse(state().pageControl!!.offerBlocking)
         assertEquals(1L to ControlResponse.Credentials("ada", "wrong"), engine.responses.last())
+    }
+
+    /**
+     * A blocked page's dialogs are answered Cancel unseen; for a leave-page question that would
+     * keep the user on the page with no way to follow its links, so it is always asked.
+     */
+    @Test
+    fun aLeavePageQuestionIsAskedEvenAfterThePageWasBlocked() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        showControl(1, 1, PageControlContent.Alert("one"))
+        browser.answerPageControl(1, ControlResponse.Accept); idle()
+        showControl(1, 2, PageControlContent.Alert("two"))
+        browser.answerPageControl(2, ControlResponse.Dismiss, DialogBlocking.BLOCK_FOR_PAGE); idle()
+
+        showControl(1, 3, PageControlContent.LeavePage)
+        val shown = state().pageControl!!
+        assertEquals(3L, shown.id)
+        assertEquals("a.test", shown.site)
+        assertFalse(shown.offerBlocking)
+        browser.answerPageControl(3, LeavePageChoice.STAY.response); idle()
+        assertEquals(3L to ControlResponse.Dismiss, engine.responses.last())
+        assertNull(state().pageControl)
+
+        showControl(1, 4, PageControlContent.LeavePage)
+        assertEquals(4L, state().pageControl?.id)
+        browser.answerPageControl(4, LeavePageChoice.LEAVE.response); idle()
+        assertEquals(4L to ControlResponse.Accept, engine.responses.last())
     }
 
     @Test

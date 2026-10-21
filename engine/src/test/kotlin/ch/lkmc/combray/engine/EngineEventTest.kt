@@ -99,6 +99,21 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesLeavePageQuestion() {
+        val leave = EngineEvent.parse(
+            """{"type":"control_shown","control":10,"kind":"leave_page","tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(PageControlContent.LeavePage, leave.content)
+    }
+
+    /** Back and Cancel must keep the page: Servo's own default would leave it. */
+    @Test
+    fun leavePageChoicesAnswerAsNativeExpects() {
+        assertEquals("""{"type":"accept"}""", LeavePageChoice.LEAVE.response.toJson())
+        assertEquals("""{"type":"dismiss"}""", LeavePageChoice.STAY.response.toJson())
+    }
+
+    @Test
     fun controlResponsesSerializeAsNativeExpects() {
         assertEquals("""{"type":"select","ids":[1,3]}""", ControlResponse.Select(listOf(1, 3)).toJson())
         assertEquals("""{"type":"accept"}""", ControlResponse.Accept.toJson())

@@ -18,6 +18,11 @@ All notable changes to this project are documented here. The format follows
   address.
 - HTTP sign-in: a dialog naming the server asks for a username and
   password, warns on unencrypted connections and stores nothing.
+- "Leave this page?" when a page you touched or typed into asks before it
+  is left (`beforeunload`), so unsaved form text is not lost silently;
+  pressing Back on the question stays. Servo 0.6.0 asks only when the page
+  itself navigates (links, forms), on reload and on `window.close()`, not
+  for a typed address, Back/Forward or closing the tab.
 - Device check that the bottom bar, More menu and page dialogs keep 48dp,
   labeled touch targets at the narrowest width and largest font size.
 - Local release signing through environment variables, with explicit validation

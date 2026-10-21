@@ -15,6 +15,8 @@ import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.PageControlContent
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -24,7 +26,8 @@ import java.io.File
 
 /**
  * Page controls on the real engine: a `<select>` answered through the app's dialog, script
- * dialogs whose answers reach the page, and a file upload Servo reads from a staged path.
+ * dialogs whose answers reach the page, a file upload Servo reads from a staged path, and a
+ * page's question before it is left.
  */
 @RunWith(AndroidJUnit4::class)
 class PageControlsTest {
@@ -155,6 +158,58 @@ class PageControlsTest {
         assertEquals(null, device.browser.browserState.value.pageControl)
     }
 
+    /**
+     * Servo 0.6.0 runs `beforeunload` only for navigations the page starts (links, forms,
+     * `location`), reloads and `window.close()`, not for loads the app starts: the checks follow
+     * the page's own link. Stay keeps the same document (its handler counted one question).
+     */
+    @Test
+    fun aTouchedPageAsksBeforeItIsLeft() {
+        openControls("leave", "LEAVE")
+        // The tap that follows the link is the user's first interaction with the page.
+        tapPage()
+        assertEquals(PageControlContent.LeavePage, awaitControl().content)
+        awaitText("Leave this page?")
+        compose.onNodeWithText("Asked by localhost").assertExists()
+        compose.onNodeWithText("Stay").performClick()
+
+        device.awaitState { it.activeTab?.title == "LEAVE:1" && it.pageControl == null }
+        Thread.sleep(SETTLE_MS)
+        assertEquals(LEAVE_PAGE, device.browser.browserState.value.activeTab?.url)
+
+        tapPage()
+        assertEquals(PageControlContent.LeavePage, awaitControl().content)
+        awaitText("Leave")
+        compose.onNodeWithText("Leave").performClick()
+        device.awaitPage(Fixtures.solid(Device.GREEN))
+    }
+
+    /** Browsers ask only after the user interacted with the page; this one follows its link by script. */
+    @Test
+    fun anUntouchedPageIsLeftWithoutAsking() {
+        device.browser.openUrl("$LEAVE_PAGE?auto", Placement.CURRENT_TAB)
+        var asked = false
+        device.awaitState {
+            asked = asked || it.pageControl != null
+            it.activeTab?.url == Fixtures.solid(Device.GREEN) && it.activeTab?.loading == false
+        }
+        assertFalse("the page asked although nobody touched it", asked)
+    }
+
+    /** The page's scripts wait for the answer, so an unanswered question lets the page go. */
+    @Test
+    fun anUnansweredQuestionLetsThePageGo() {
+        openControls("leave", "LEAVE")
+        tapPage()
+        assertEquals(PageControlContent.LeavePage, awaitControl().content)
+        val shown = System.currentTimeMillis()
+
+        device.awaitPage(Fixtures.solid(Device.GREEN))
+        assertNull(device.browser.browserState.value.pageControl)
+        val waited = System.currentTimeMillis() - shown
+        assertTrue("left after $waited ms", waited >= UNANSWERED_MIN_MS)
+    }
+
     private fun awaitText(text: String) =
         compose.waitUntil(DIALOG_TIMEOUT_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
 
@@ -178,6 +233,14 @@ class PageControlsTest {
     }
 
     private companion object {
+        const val LEAVE_PAGE = "${Fixtures.BASE}/leave.html"
+
+        /** Time for a refused navigation to show if it happened after all. */
+        const val SETTLE_MS = 3_000L
+
+        /** Well within the engine's 30 s wait, allowing for the delay before the dialog shows. */
+        const val UNANSWERED_MIN_MS = 20_000L
+
         /** The control pages' left margin colour. */
         const val MARGIN = 0x1f6f78
         const val MARGIN_X = 0.05f
