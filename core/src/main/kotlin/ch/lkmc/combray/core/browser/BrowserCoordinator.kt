@@ -150,12 +150,17 @@ class BrowserCoordinator(
 
     /** Opens [url] (already classified as a web address or search) in the focused, a new or a background tab. */
     fun openUrl(url: String, placement: Placement) = submit {
+        // With no tab in focus there is nothing to stay on: every placement opens a focused tab.
         val active = activeTab()
-        when {
-            // With no tab in focus there is nothing to stay on: even a background tab takes focus.
-            placement == Placement.NEW_TAB || active == null -> createTab(url)
-            placement == Placement.BACKGROUND_TAB -> createBackgroundTab(url, active)
-            else -> navigateTab(active, url)
+        if (active == null) {
+            createTab(url)
+        } else {
+            // A subject, so a new Placement does not compile until it is handled here.
+            when (placement) {
+                Placement.CURRENT_TAB -> navigateTab(active, url)
+                Placement.NEW_TAB -> createTab(url)
+                Placement.BACKGROUND_TAB -> createBackgroundTab(url, active)
+            }
         }
         reconcile()
         publish()
