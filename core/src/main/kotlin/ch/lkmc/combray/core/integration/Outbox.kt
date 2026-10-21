@@ -87,6 +87,7 @@ class Outbox(
                 state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
                 // The user saved this page again: its current title travels, not the stale one.
                 payload = payload, payloadBytes = payloadBytes,
+                leaseOwner = null, leaseUntil = null,
             )
             dao.updateJob(retried)
             failed.filter { it.id != retried.id }.forEach { dao.updateJob(it.copy(state = JobState.SUPERSEDED, error = "superseded", updatedAt = now)) }
@@ -127,12 +128,19 @@ class Outbox(
     /** Claims the next due job under a lease of [leaseMs], or returns null. */
     suspend fun claim(owner: String, leaseMs: Long): Claim? = database.withTransaction {
         val now = clock.now()
-        // Skip jobs whose attempts ran out (crashed workers kept reclaiming them): they need
-        // the user now, and must not be re-run at every wakeup forever.
         var due = dao.nextDue(now)
-        while (due != null && due.attempts >= retry.maxAttempts) {
-            Log.w(LOG_TAG, "giving up on job ${due.id} after ${due.attempts} attempts")
-            dao.updateJob(due.copy(state = JobState.FAILED, error = "abandoned_after_${due.attempts}_attempts", updatedAt = now, leaseOwner = null, leaseUntil = null))
+        while (due != null && (due.isExpiredCapture(now) || due.attempts >= retry.maxAttempts)) {
+            val givenUp = when {
+                // Expired content is never sent, even when the prune above could not run.
+                due.isExpiredCapture(now) -> due.copy(state = JobState.EXPIRED, error = "expired", updatedAt = now, leaseOwner = null, leaseUntil = null)
+                else -> {
+                    // Crashed workers reclaimed this job until its attempts ran out: it needs
+                    // the user now, and must not be re-run at every wakeup forever.
+                    Log.w(LOG_TAG, "giving up on job ${due.id} after ${due.attempts} attempts")
+                    due.copy(state = JobState.FAILED, error = "abandoned_after_${due.attempts}_attempts", updatedAt = now, leaseOwner = null, leaseUntil = null)
+                }
+            }
+            dao.updateJob(givenUp)
             due = dao.nextDue(now)
         }
         if (due == null) return@withTransaction null
@@ -246,7 +254,12 @@ class Outbox(
         for (job in dao.unfinishedJobs(service.kind)) {
             if (job.state != JobState.AUTH_REQUIRED || job.fingerprint != service.fingerprint) continue
             // Like retryNow: the user's action starts the attempt budget over.
-            dao.updateJob(job.copy(state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now))
+            dao.updateJob(
+                job.copy(
+                    state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
+                    leaseOwner = null, leaseUntil = null,
+                ),
+            )
         }
     }
 
@@ -275,6 +288,10 @@ class Outbox(
     /** The next generation for a (re)configured service: never one an existing job carries. */
     suspend fun nextGeneration(kind: ServiceKind, previous: ServiceEntity?): Long =
         maxOf(previous?.generation ?: 0, dao.maxJobGeneration(kind)) + 1
+
+    /** Unsent captures past the content age limit are never dispatched. */
+    private fun OutboxJobEntity.isExpiredCapture(now: Long): Boolean =
+        kind == JobKind.HISTER_ADD && createdAt < now - CAPTURE_MAX_AGE_MS
 
     companion object {
         private const val LOG_TAG = "CombrayOutbox"

@@ -73,20 +73,47 @@ class OutboxTest {
     @Test
     fun oneBrokenJobCycleDoesNotStrandTheRestOrTheWakeup() {
         val first = enqueue(dedupeKey = "https://a.test/") as Enqueued.Queued
-        enqueue(dedupeKey = "https://b.test/")
+        val second = enqueue(dedupeKey = "https://b.test/") as Enqueued.Queued
         val handler = JobHandler { DispatchResult.Done(remoteId = "kept") }
+        var recordingBroken = true
         val dispatcher = OutboxDispatcher(
             outbox = outbox,
             handlers = mapOf(JobKind.KARAKEEP_SAVE to handler),
-            // Recording the finished save fails for the first job only.
-            onDone = { job, _ -> if (job.id == first.job.id) error("recording failed") },
+            // Recording the first finished save fails; later records work.
+            onDone = { _, _ -> if (recordingBroken) { recordingBroken = false; error("recording failed") } },
             scheduler = { scheduled += it },
         )
 
         val sent = runBlocking { dispatcher.drain() }
 
-        assertEquals(2, sent)
+        // The second job went out and is recorded; the count says what was finished.
+        assertEquals(1, sent)
+        assertEquals(JobState.SUCCEEDED, job(second.job.id).state)
+        // The broken cycle leaves the job waiting for its backoff, not RUNNING under a lease.
+        assertEquals(JobState.RETRY_WAIT, job(first.job.id).state)
         assertTrue(scheduled.isNotEmpty())
+
+        // The recording works again: the retried job completes at the next wakeup.
+        now += RETRY_BACKOFF
+        assertEquals(1, runBlocking { dispatcher.drain() })
+        assertEquals(JobState.SUCCEEDED, job(first.job.id).state)
+    }
+
+    @Test
+    fun expiredCapturesAreNeverClaimed() {
+        runBlocking {
+            database.integrations().setService(ServiceEntity(ServiceKind.HISTER, "https://hister.test", "fp-hister", 1, true, now))
+        }
+        val hister = runBlocking { database.integrations().service(ServiceKind.HISTER) }!!
+        val queued = runBlocking {
+            outbox.enqueue(JobKind.HISTER_ADD, hister, Binding.SAME_DESTINATION, "doc", """{"url":"https://a.test/"}""", supersede = true)
+        } as Enqueued.Queued
+
+        // A week later the content must not go out, even at the send point itself.
+        now += Outbox.CAPTURE_MAX_AGE_MS + 1
+
+        assertNull(runBlocking { outbox.claim("owner", LEASE_MS) })
+        assertEquals(JobState.EXPIRED, job(queued.job.id).state)
     }
 
     @Test
@@ -126,5 +153,6 @@ class OutboxTest {
 
     private companion object {
         const val LEASE_MS = 60_000L
+        const val RETRY_BACKOFF = 120_000L
     }
 }

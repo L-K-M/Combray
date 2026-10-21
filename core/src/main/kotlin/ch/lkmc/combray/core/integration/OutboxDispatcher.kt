@@ -5,6 +5,7 @@ import ch.lkmc.combray.core.data.JobKind
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,21 +40,25 @@ class OutboxDispatcher(
         val owner = UUID.randomUUID().toString()
         var sent = 0
         try {
-            // Expire old captures before anything is claimed: they must never go out.
-            step { outbox.prune() }
-            while (sent < maxJobs) {
-                val claim = step { outbox.claim(owner, leaseMs) } ?: break
-                step {
+            // Expired captures must never go out: if pruning cannot run, this round claims
+            // nothing. The wakeup below brings the queue back when storage recovers.
+            if (step { outbox.prune() } != null) {
+                while (sent < maxJobs) {
+                    val claim = step { outbox.claim(owner, leaseMs) } ?: break
                     val result = dispatch(claim)
-                    outbox.finish(claim, result, onDone)
+                    val finished = step { outbox.finish(claim, result, onDone) }
+                    // A cycle that broke after the claim (a storage error, a recorder bug) must
+                    // not leave the job RUNNING under a live lease: it waits for its backoff
+                    // instead, and the attempt limit hands it to the user.
+                    if (finished == null) step { outbox.finish(claim, DispatchResult.Retry("cycle_failed")) }
+                    if (finished == true) sent++
                 }
-                sent++
+                step { outbox.prune() }
             }
-            step { outbox.prune() }
         } finally {
-            // Booked whatever happened above: one broken step must not strand the jobs behind
-            // it until the next foreground kick.
-            step { scheduler.schedule(outbox.nextWakeup()) }
+            // Booked even when this coroutine is cancelled: a broken step or a cancelled drain
+            // must not strand the jobs behind it until the next foreground kick.
+            withContext(NonCancellable) { step { scheduler.schedule(outbox.nextWakeup()) } }
         }
         sent
     }
