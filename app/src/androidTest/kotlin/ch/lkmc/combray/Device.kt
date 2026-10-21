@@ -34,6 +34,12 @@ object Fixtures {
 
     fun solid(color: Int) = "$BASE/solid/%06x.html".format(color and 0xFFFFFF)
 
+    /** A news-style page with navigation, an aside and a footer around its article. */
+    const val ARTICLE = "$BASE/article.html"
+
+    /** A page without any text. */
+    const val EMPTY = "$BASE/empty.html"
+
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
 

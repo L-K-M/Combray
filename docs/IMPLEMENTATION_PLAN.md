@@ -61,6 +61,10 @@ Tapping the address surface opens an editable address/search sheet above the key
 
 A New tab starts an internal Combray home/address state. Never feed an internal UI URI to arbitrary web navigation. Reuse an unused blank logical tab when appropriate; do not proliferate empty entries for every canceled search. External HTTP(S) VIEW intents enter through the same URL policy and navigation coordinator. Default proposal: open in a new logical tab and focus it, without destroying the current one. Verify singleTop/onNewIntent behavior so warm and cold launches agree.
 
+### Reader view
+
+Requested by the owner (20 October 2026). More › Reader view shows the focused page's main article as plain text in the app's own type: headings, paragraphs, lists, quotes, preformatted text and captions, with links; images, media and forms are left out. Mozilla's Readability.js (0.6.0, vendored in `native/src/vendor/`) finds the article inside the page's own document, through the same document-guarded path as Hister capture, and `native/src/reader.js` turns it into bounded JSON (512 KiB; a longer article says the rest is on the page). The page can shape that output, so it is parsed defensively and shown only as text; a link leaves reader view and opens in the tab through the address policy. Back or More › Leave reader view returns to the page; moving to another tab leaves it. A page without an article, or one replaced before the article arrived, says so.
+
 ### Recent: one mental model, several record types
 
 Recent combines open tabs and recent page visits. Show a small Open/active marker on live or restorable tab rows, title and domain, and relative time for history. Closing an open tab is a distinct accessible action. Its row remains findable as history. A closed row offers reopening; it never appears to have a live renderer. Old page visits within a still-open tab remain recoverable even after that tab navigates elsewhere.
@@ -518,6 +522,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Closing unused tabs | Confirmed (owner choice, 20 October 2026) | A Settings switch, off by default; uses the history retention period; the focused tab stays |
 | Browser preferences in SharedPreferences | Decided | One switch so far, with nothing bound to it transactionally; DataStore can replace it when preferences grow |
 | Opt-in automatic Hister capture | Proposed | Owner controls content transfer and exclusions |
+| Reader view through Readability.js in the page | Decided (20 October 2026) | Firefox's article detection, run in the document shown (no second fetch, no cookies leave Servo); rendered natively as text, never as page markup. A page can only misreport its own article |
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
 | Engine revision/toolchain/packaging | Decided (M0) | Servo v0.6.0 + `native/servo/patches/`, Rust 1.97.1, NDK r29; [ENGINE_SPIKE.md](ENGINE_SPIKE.md#2-servo-selection-and-integration-decision) |
@@ -542,7 +547,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 
 **Background execution:** Android may postpone work. Durable queued state and honest pending status satisfy offline reliability; a permanent background service is not justified by the current requirements.
 
-**Scope expansion:** extensions, ad blocking, reader mode, sync, AI features, custom search results, full download management and a public launch are not required for the first personal version. Add them only if they become necessary for the owner's actual workflow or are requested.
+**Scope expansion:** extensions, ad blocking, sync, AI features, custom search results, full download management and a public launch are not required for the first personal version. Add them only if they become necessary for the owner's actual workflow or are requested.
 
 ### Questions to resolve when they become consequential
 

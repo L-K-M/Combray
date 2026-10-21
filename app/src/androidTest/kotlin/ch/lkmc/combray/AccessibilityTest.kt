@@ -80,7 +80,7 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
             }
         }
 

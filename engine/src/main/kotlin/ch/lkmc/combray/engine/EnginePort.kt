@@ -37,6 +37,12 @@ interface EnginePort {
 
     /** Reads bounded text from [document] only; the result names the document it came from. */
     fun capture(tab: Long, document: Long, capture: Long, maxTextBytes: Int, timeoutMs: Int)
+
+    /**
+     * Like [capture], for reader view: the result's text is [document]'s main article as JSON
+     * blocks of at most [maxBytes] (native/src/reader.js), or empty when it has none.
+     */
+    fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
 }
 
 enum class EngineStart {

@@ -67,6 +67,21 @@ def page(title, body, head=""):
 # in the margin shows the page has painted.
 CONTROL_STYLE = ("<style>html,body{margin:0;background:#1f6f78}"
                  ".c{display:block;box-sizing:border-box;margin-left:12vw;width:80vw;height:90vh;font-size:40px}</style>")
+# A news-style page for reader view: markers say what must and must not reach the article.
+ARTICLE_PARAGRAPH = ("Readers keep coming back to this story because it explains, at some length and with care, "
+                     "how the fixture server lays out a page that looks like a real article. ")
+ARTICLE_BODY = (
+    "<nav><a href='/'>READER-NAV-TEXT</a> <a href='/solid/112233.html'>Section</a></nav>"
+    "<article><h1>Reader fixture</h1>"
+    # The link comes first, so reader view shows it without scrolling.
+    f"<p>READER-BODY-ONE <a id='inner' href='/solid/2f6b3c.html'>READER-LINK</a> {ARTICLE_PARAGRAPH * 3}</p>"
+    f"<p>{ARTICLE_PARAGRAPH * 3}</p>"
+    "<h2>READER-HEADING</h2>"
+    f"<p>READER-BODY-TWO {ARTICLE_PARAGRAPH * 3}</p>"
+    "<ul><li>READER-ITEM-ONE</li><li>READER-ITEM-TWO</li></ul></article>"
+    "<aside>READER-ASIDE-TEXT related stories</aside><footer>READER-FOOTER-TEXT</footer>"
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -162,6 +177,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in CONTROL_PAGES:
             title, control, script = CONTROL_PAGES[path]
             return self.send(200, page(title, control, CONTROL_STYLE + script))
+        if path == "/article.html":
+            # Reader view keeps the article and drops the navigation, aside and footer around it.
+            return self.send(200, page("ARTICLE", ARTICLE_BODY))
+        if path == "/empty.html":
+            # Nothing to read: reader view finds no article.
+            return self.send(200, page("EMPTY", ""))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
         if path == "/auth.html":

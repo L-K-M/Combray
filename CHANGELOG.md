@@ -53,6 +53,9 @@ All notable changes to this project are documented here. The format follows
   switches only when the other cannot be reached, so a request is never
   sent twice.
 - Settings › Local history: an option to close tabs unused for seven days.
+- Reader view (More › Reader view): the page's article as plain text with
+  links, found by Mozilla's Readability.js (Apache-2.0, vendored) inside
+  the page and listed in the third-party notices.
 
 ### Changed
 

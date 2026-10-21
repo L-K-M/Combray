@@ -871,7 +871,7 @@ impl Engine {
         let (capture_id, expected_document) = (request.capture, request.document);
         tab.webview.evaluate_javascript_in_document(
             document,
-            capture::capture_script(request.max_text_bytes),
+            capture::script(request.kind, request.max_text_bytes),
             move |result| {
                 results
                     .borrow_mut()

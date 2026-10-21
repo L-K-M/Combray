@@ -99,6 +99,9 @@ object NativeEngine {
         skipLocalCheck: Boolean,
     )
 
+    /** Reader view: [document]'s main article as JSON in the result's text (native/src/reader.js). */
+    @JvmStatic external fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
+
     /** Test support: evaluate [script] in the tab's current document, without a document guard. */
     @JvmStatic external fun evaluate(tab: Long, request: Long, script: String)
 

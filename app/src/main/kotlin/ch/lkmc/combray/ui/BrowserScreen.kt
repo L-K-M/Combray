@@ -128,14 +128,15 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         sheet = Sheet.ADDRESS
     }
 
-    // Back: close the open sheet first, then go back in the page, then leave the app. A tab
-    // another app opened closes on the way out: its page stays in history only.
+    // Back: close the open sheet or reader view first, then go back in the page, then leave
+    // the app. A tab another app opened closes on the way out: its page stays in history only.
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
-    BackHandler(enabled = sheet == Sheet.NONE && tab?.canGoBack == true) { browser.goBack() }
-    BackHandler(enabled = sheet == Sheet.NONE && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
+    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack == true) { browser.goBack() }
+    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
         tab?.let { browser.returnToOtherApp(it.id) }
         onLeave()
     }
+    BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
 
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
@@ -159,6 +160,17 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                     onOpenRecent = { sheet = Sheet.RECENT },
                     onReload = browser::reload,
                 )
+                state.reader?.let { reader ->
+                    ReaderView(
+                        state = reader,
+                        // A link leaves reader view and opens in the tab, through the address policy.
+                        onOpenLink = { url ->
+                            browser.closeReader()
+                            (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrlInTab(reader.tabId, it.url) }
+                        },
+                        onClose = browser::closeReader,
+                    )
+                }
             }
             BottomBar(
                 tab = tab,
@@ -254,6 +266,11 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onPauseCapture = {
                 dismiss()
                 scope.launch { graph.integrations.hister.setCaptureEnabled(false) }
+            },
+            readerOpen = state.reader != null,
+            onReader = {
+                dismiss()
+                if (state.reader != null) browser.closeReader() else browser.openReader()
             },
             onDismiss = dismiss,
         )

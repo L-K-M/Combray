@@ -82,6 +82,19 @@ enum class DialogBlocking {
     BLOCK_FOR_PAGE,
 }
 
+/** Reader view of the focused tab: preparing, the article, or none found. */
+sealed interface ReaderState {
+    val tabId: String
+
+    data class Loading(override val tabId: String) : ReaderState
+
+    /** [url]: the page the article was read from. */
+    data class Ready(override val tabId: String, val url: String, val article: Article) : ReaderState
+
+    /** The page has no article Combray can find, or it changed before one was read. */
+    data class Unavailable(override val tabId: String) : ReaderState
+}
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
     /** Null: no tab is focused, the internal home is shown. */
@@ -91,6 +104,8 @@ data class BrowserState(
     val keyboard: KeyboardRequest? = null,
     /** The focused page's oldest unanswered control. */
     val pageControl: PageControl? = null,
+    /** Reader view over the focused tab, while it is open. */
+    val reader: ReaderState? = null,
     val notice: Notice? = null,
 )
 
