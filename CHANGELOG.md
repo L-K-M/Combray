@@ -80,6 +80,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Battery use of pages nobody sees: a hidden tab that navigated, reloaded
+  or went back ran its new page at full speed, and the shown page kept its
+  full timer rate while the app was in the background. Both now run
+  throttled (timers about once a second) until shown again. The engine
+  thread no longer wakes four times a second when it has nothing to do.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

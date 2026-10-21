@@ -79,7 +79,12 @@ class FakeEngine : EnginePort {
 
     override fun reload(tab: Long) = Unit
 
-    override fun setThrottled(tab: Long, throttled: Boolean) = Unit
+    /** The throttling last requested per view. */
+    val throttled = HashMap<Long, Boolean>()
+
+    override fun setThrottled(tab: Long, throttled: Boolean) {
+        this.throttled[tab] = throttled
+    }
 
     val responses = mutableListOf<Pair<Long, ControlResponse>>()
 

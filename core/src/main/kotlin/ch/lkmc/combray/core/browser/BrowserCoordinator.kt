@@ -87,6 +87,12 @@ class BrowserCoordinator(
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
+    /**
+     * Views exist only once a surface started the engine, which takes a visible Activity, so
+     * the app counts as on screen until Android reports otherwise ([setForeground]).
+     */
+    private var visibility = AppVisibility.FOREGROUND
+
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
 
@@ -297,6 +303,17 @@ class BrowserCoordinator(
         maintain()
         reconcile()
         publish()
+    }
+
+    /**
+     * The app left or returned to the screen. In the background nobody sees the shown page, so
+     * it runs throttled like hidden tabs (timers at about once a second, no animations) instead
+     * of using battery; on return it runs at full speed again.
+     */
+    fun setForeground(visibility: AppVisibility) = submit {
+        if (this.visibility == visibility) return@submit
+        this.visibility = visibility
+        selectedNative?.let { engine.setThrottled(it, visibility == AppVisibility.BACKGROUND) }
     }
 
     /** Writes cookies and profile state, so logins survive Android killing the process. */
@@ -743,7 +760,8 @@ class BrowserCoordinator(
 
     /**
      * Brings native views in line with logical state: the focused tab, if it has an address, has
-     * a renderer and is the one shown. Other renderers are throttled; they are not evicted yet.
+     * a renderer and is the one shown. Other renderers are throttled, and so is the shown one
+     * while the app is in the background.
      */
     private suspend fun reconcile() {
         if (!engineReady) return
@@ -760,7 +778,7 @@ class BrowserCoordinator(
         }
         if (selectedNative != view.nativeTab) {
             selectedNative?.let { engine.setThrottled(it, true) }
-            engine.setThrottled(view.nativeTab, false)
+            engine.setThrottled(view.nativeTab, visibility == AppVisibility.BACKGROUND)
             engine.selectView(view.nativeTab)
             selectedNative = view.nativeTab
         }
@@ -904,6 +922,9 @@ class BrowserCoordinator(
 
 /** Whether open tabs the user has not used for the retention period close by themselves. */
 enum class UnusedTabs { KEEP, CLOSE }
+
+/** Whether the app is on screen (Android's process lifecycle: started or stopped). */
+enum class AppVisibility { FOREGROUND, BACKGROUND }
 
 /** Proposed default: closed history kept seven days after its last interaction. */
 data class Retention(val closedHistoryDays: Int = 7) {
