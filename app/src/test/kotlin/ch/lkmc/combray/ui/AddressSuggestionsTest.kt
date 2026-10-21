@@ -37,14 +37,27 @@ class AddressSuggestionsTest {
         val deduped = addressSuggestions(items, "news.example", initial = "")
         assertEquals(1, deduped.size)
 
+        // Newest first, even when the input arrives oldest first.
         val many = (1..10).map { RecentItem.Visit("v$it", "t", "https://page$it.test/", "Page $it", it.toLong()) }
-        assertEquals(5, addressSuggestions(many, "page", initial = "").size)
-        assertEquals(2, addressSuggestions(many, "page", initial = "", limit = 2).size)
+        assertEquals(
+            listOf("visit:v10", "visit:v9", "visit:v8", "visit:v7", "visit:v6"),
+            addressSuggestions(many, "page", initial = "").map { it.key },
+        )
+        assertEquals(
+            listOf("visit:v10", "visit:v9"),
+            addressSuggestions(many, "page", initial = "", limit = 2).map { it.key },
+        )
     }
 
     @Test
-    fun blankTabsWithoutAnAddressNeverMatch() {
-        val blank = RecentItem.OpenTab("tab9", url = null, title = null, time = 1, active = false)
-        assertTrue(addressSuggestions(listOf(blank), "anything", initial = "").isEmpty())
+    fun rowsWithoutAnAddressOrWithoutAPassableReadingAreNotOffered() {
+        // A title-only row would match the filter but render nothing in SuggestionRow.
+        val titleOnly = RecentItem.OpenTab("tabT", url = null, title = "World News", time = 1, active = false)
+        assertTrue(addressSuggestions(listOf(titleOnly), "world", initial = "").isEmpty())
+
+        // A stored URL the address policy now rejects would be a dead, tappable row:
+        // the typed path never submits a rejected reading either.
+        val credentials = RecentItem.Visit("vc", "t", "https://user:pass@inner.test/", "inner", time = 1)
+        assertTrue(addressSuggestions(listOf(credentials), "inner.test", initial = "").isEmpty())
     }
 }

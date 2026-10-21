@@ -140,7 +140,10 @@ private fun SuggestionRow(item: RecentItem, onDecision: (AddressDecision) -> Uni
 /**
  * History rows offered under the editor: only while the text differs from what the editor
  * opened with — on open the field holds the current address, and re-suggesting it (or
- * nothing, for a blank field) is noise. One row per address, newest first.
+ * nothing, for a blank field) is noise. Rows must have an address and must actually open
+ * through the address policy (a stored URL the policy now rejects is not offered as a dead
+ * row — the typed path never submits a rejected reading either). One row per address,
+ * newest first.
  *
  * [resembles] mirrors the Recent filter (title or address, case-insensitive) so this change
  * does not depend on that branch; once both land, collapse them onto one predicate.
@@ -154,7 +157,13 @@ internal fun addressSuggestions(
     if (text.isBlank() || text == initial) return emptyList()
     val needle = text.trim()
     return items
-        .filter { resembles(it, needle) }
+        .filter { item ->
+            val url = item.url
+            url != null &&
+                resembles(item, needle) &&
+                AddressPolicy.interpret(url).primary is AddressDecision.Navigate
+        }
+        .sortedByDescending { it.time }
         .distinctBy { it.url }
         .take(limit)
 }
