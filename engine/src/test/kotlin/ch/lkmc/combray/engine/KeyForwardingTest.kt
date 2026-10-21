@@ -40,6 +40,7 @@ class KeyForwardingTest {
             KeyEvent.KEYCODE_TAB,
             KeyEvent.KEYCODE_ESCAPE,
             KeyEvent.KEYCODE_MOVE_HOME,
+            KeyEvent.KEYCODE_MOVE_END,
             KeyEvent.KEYCODE_PAGE_UP,
             KeyEvent.KEYCODE_PAGE_DOWN,
             KeyEvent.KEYCODE_DPAD_UP,
@@ -57,7 +58,7 @@ class KeyForwardingTest {
         assertTrue(isPageKey(KeyEvent.KEYCODE_A, unicodeChar = 'a'.code))
         assertTrue(isPageKey(KeyEvent.KEYCODE_A, unicodeChar = 'A'.code))
         assertTrue(isPageKey(KeyEvent.KEYCODE_SPACE, unicodeChar = ' '.code))
-        assertTrue(isPageKey(KeyEvent.KEYCODE_SPACE, unicodeChar = 0).not())
+        assertFalse("space without unicode must not be forwarded", isPageKey(KeyEvent.KEYCODE_SPACE, unicodeChar = 0))
         // Shifted punctuation arrives with its own unicode, no modifier mapping needed.
         assertTrue(isPageKey(KeyEvent.KEYCODE_COMMA, unicodeChar = '<'.code))
     }

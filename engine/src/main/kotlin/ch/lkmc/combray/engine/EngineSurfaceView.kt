@@ -244,6 +244,11 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
  * volume, menu, search, function and power-adjacent keys — stays with Android: the surface
  * takes focus on the first touch, and unconsumed system keys would otherwise be swallowed
  * while the engine drops them anyway.
+ *
+ * Known limit: bare modifiers (Ctrl/Alt/Meta) are deliberately not forwarded — their unicode
+ * is 0 and the engine has no modifier channel — so page shortcuts such as Ctrl+F cannot be
+ * built on this path yet. Shift-typing still works because Android bakes shift into the
+ * unicode of the character key.
  */
 internal fun isPageKey(keyCode: Int, unicodeChar: Int): Boolean {
     if (unicodeChar != 0) return true
