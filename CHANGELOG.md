@@ -84,6 +84,9 @@ All notable changes to this project are documented here. The format follows
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
   Each patch is now checked to have landed.
+- Abandoned Hister captures expire after seven days, including when a
+  running queue crosses the age limit. Expiry clears page bodies and
+  rejects late results without invalidating a live request's lease.
 - A page's prompt dialog labels its text field, so TalkBack names it.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in

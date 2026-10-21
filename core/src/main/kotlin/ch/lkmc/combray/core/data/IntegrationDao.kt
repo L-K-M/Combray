@@ -124,7 +124,7 @@ interface IntegrationDao {
     @Query("SELECT COALESCE(SUM(payloadBytes), 0) FROM outbox WHERE kind = 'HISTER_ADD' AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED')")
     fun observeQueuedCaptureBytes(): Flow<Long>
 
-    /** Captured content older than the maximum age is never sent. */
+    /** Expired bodies are never resent; an abandoned request may already have reached the server. */
     @Query(
         """
         UPDATE outbox SET state = 'EXPIRED', updatedAt = :now, leaseOwner = NULL, leaseUntil = NULL
