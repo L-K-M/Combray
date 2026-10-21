@@ -6,6 +6,8 @@ import ch.lkmc.combray.core.data.OutboxJobEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -32,33 +34,46 @@ class OutboxDispatcher(
     private val onDone: suspend (OutboxJobEntity, DispatchResult.Done) -> Unit,
     private val scheduler: WakeupScheduler,
     private val leaseMs: Long = LEASE_MS,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val running = Mutex()
 
-    /** Sends due jobs until none is left (or [maxJobs]), then schedules the next wakeup. */
+    /**
+     * Sends due jobs until none is left (or [maxJobs] cycles), then schedules the next
+     * wakeup. Returns how many results landed (sent, failed or cancelled alike).
+     */
     suspend fun drain(maxJobs: Int = MAX_JOBS_PER_DRAIN): Int = running.withLock {
         val owner = UUID.randomUUID().toString()
+        var processed = 0
         var sent = 0
         try {
-            // Expired captures must never go out: if pruning cannot run, this round claims
-            // nothing. The wakeup below brings the queue back when storage recovers.
-            if (step { outbox.prune() } != null) {
-                while (sent < maxJobs) {
-                    val claim = step { outbox.claim(owner, leaseMs) } ?: break
-                    val result = dispatch(claim)
-                    val finished = step { outbox.finish(claim, result, onDone) }
-                    // A cycle that broke after the claim (a storage error, a recorder bug) must
-                    // not leave the job RUNNING under a live lease: it waits for its backoff
-                    // instead, and the attempt limit hands it to the user.
-                    if (finished == null) step { outbox.finish(claim, DispatchResult.Retry("cycle_failed")) }
-                    if (finished == true) sent++
-                }
-                step { outbox.prune() }
+            // Expired captures are refused at the send point (Outbox.claim), so a prune
+            // failure only delays housekeeping: it must not stall every job kind.
+            step { outbox.prune() }
+            while (processed < maxJobs) {
+                val claim = step { outbox.claim(owner, leaseMs) } ?: break
+                processed++
+                // dispatch() already turns a throwing handler into a Rejected; the step guard
+                // covers anything that escapes it, mapped to the honest ambiguous result.
+                val result = step { dispatch(claim) } ?: DispatchResult.Retry("dispatch_failed")
+                val finished = step { outbox.finish(claim, result, onDone) }
+                // A cycle that broke after the claim (a storage error, a recorder bug) must
+                // not leave the job RUNNING under a live lease: it waits for its backoff
+                // instead, and the attempt limit hands it to the user. finish applies the
+                // state and the recorded result in one transaction, so a rollback retries
+                // the delivery; the service APIs dedupe (Karakeep answers 200 with the
+                // existing bookmark, Hister updates the document).
+                if (finished == null) step { outbox.finish(claim, DispatchResult.Retry("cycle_failed")) }
+                if (finished == true) sent++
             }
+            step { outbox.prune() }
         } finally {
-            // Booked even when this coroutine is cancelled: a broken step or a cancelled drain
-            // must not strand the jobs behind it until the next foreground kick.
-            withContext(NonCancellable) { step { scheduler.schedule(outbox.nextWakeup()) } }
+            // Booked even when this coroutine is cancelled or storage is down: a broken step
+            // or a cancelled drain must not strand the jobs behind it until the next kick.
+            withContext(NonCancellable) {
+                val next = step { outbox.nextWakeup() } ?: (clock() + WAKEUP_FALLBACK_MS)
+                step { scheduler.schedule(next) }
+            }
         }
         sent
     }
@@ -66,12 +81,15 @@ class OutboxDispatcher(
     /**
      * Runs one queue step. A non-cancellation failure is logged and swallowed (the class name
      * only: an exception message can quote a request header or page content), so a broken step
-     * never stops the queue or the wakeup behind it. Cancellation still propagates.
+     * never stops the queue or the wakeup behind it. Only this coroutine's own cancellation
+     * stops the queue: a dependency's dead job throws the same exception type.
      */
     private suspend fun <T> step(action: suspend () -> T): T? = try {
         action()
     } catch (cancelled: CancellationException) {
-        throw cancelled
+        if (!currentCoroutineContext().isActive) throw cancelled
+        Log.e(LOG_TAG, "outbox step failed: ${cancelled.javaClass.name}")
+        null
     } catch (failure: Exception) {
         Log.e(LOG_TAG, "outbox step failed: ${failure.javaClass.name}")
         null
@@ -93,6 +111,9 @@ class OutboxDispatcher(
 
     companion object {
         private const val LOG_TAG = "CombrayOutbox"
+
+        /** When the queue cannot say when work is due, come back anyway. */
+        const val WAKEUP_FALLBACK_MS = 60_000L
 
         /** Longer than one request can take (two 15 s timeouts), so a live claim never expires. */
         const val LEASE_MS = 60_000L

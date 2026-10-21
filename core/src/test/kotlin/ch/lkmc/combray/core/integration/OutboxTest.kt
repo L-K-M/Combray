@@ -100,6 +100,66 @@ class OutboxTest {
     }
 
     @Test
+    fun aBrokenHandlerStopsItsJobButNotTheDrain() {
+        val first = enqueue(dedupeKey = "https://a.test/") as Enqueued.Queued
+        val second = enqueue(dedupeKey = "https://b.test/") as Enqueued.Queued
+        val handler = JobHandler { job ->
+            if (job.id == first.job.id) error("handler bug") else DispatchResult.Done(remoteId = "kept")
+        }
+        val dispatcher = OutboxDispatcher(
+            outbox = outbox,
+            handlers = mapOf(JobKind.KARAKEEP_SAVE to handler),
+            onDone = { _, _ -> },
+            scheduler = { scheduled += it },
+        )
+
+        val sent = runBlocking { dispatcher.drain() }
+
+        // A handler bug fails its own job visibly and the queue keeps moving.
+        assertEquals(2, sent)
+        assertEquals(JobState.FAILED, job(first.job.id).state)
+        assertEquals(JobState.SUCCEEDED, job(second.job.id).state)
+    }
+
+    @Test
+    fun maxJobsBoundsEvenARoundOfBrokenCycles() {
+        val first = enqueue(dedupeKey = "https://a.test/") as Enqueued.Queued
+        val second = enqueue(dedupeKey = "https://b.test/") as Enqueued.Queued
+        val dispatcher = OutboxDispatcher(
+            outbox = outbox,
+            handlers = mapOf(JobKind.KARAKEEP_SAVE to JobHandler { DispatchResult.Done(remoteId = "kept") }),
+            // Every recording fails: no cycle completes.
+            onDone = { _, _ -> error("recording failed") },
+            scheduler = { scheduled += it },
+        )
+
+        runBlocking { dispatcher.drain(maxJobs = 1) }
+
+        // One job per round at most: broken cycles must not let a drain claim the whole queue.
+        assertEquals(JobState.RETRY_WAIT, job(first.job.id).state)
+        assertEquals(JobState.PENDING, job(second.job.id).state)
+    }
+
+    @Test
+    fun aBrokenQueueStillBooksItsNextWakeup() {
+        enqueue()
+        database.close()
+        val dispatcher = OutboxDispatcher(
+            outbox = outbox,
+            handlers = mapOf(JobKind.KARAKEEP_SAVE to JobHandler { DispatchResult.Done(remoteId = "kept") }),
+            onDone = { _, _ -> },
+            scheduler = { scheduled += it },
+            clock = { now },
+        )
+
+        val sent = runBlocking { dispatcher.drain() }
+
+        // Even with the queue unreadable, a wakeup is booked so the work resumes later.
+        assertEquals(0, sent)
+        assertEquals(listOf<Long?>(now + OutboxDispatcher.WAKEUP_FALLBACK_MS), scheduled)
+    }
+
+    @Test
     fun expiredCapturesAreNeverClaimed() {
         runBlocking {
             database.integrations().setService(ServiceEntity(ServiceKind.HISTER, "https://hister.test", "fp-hister", 1, true, now))
