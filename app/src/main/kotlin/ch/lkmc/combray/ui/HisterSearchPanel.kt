@@ -53,7 +53,7 @@ private sealed interface SearchUi {
  * Recent never is. A newer query's answer always wins over a slower older one.
  */
 @Composable
-fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onBack: () -> Unit) {
+fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit) {
     val service by hister.service.collectAsStateWithLifecycle(null)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
@@ -84,7 +84,6 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.search_local_history)) }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },

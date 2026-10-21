@@ -65,6 +65,39 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun aBookmarkIsAddedToAnExistingListOnly() {
+        server.lists["reading"] = mutableSetOf()
+        assertEquals(DispatchResult.Rejected("list_not_found"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
+        server.bookmarks["https://example.org/"] = "bm1"
+        assertEquals(DispatchResult.Done("bm1"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
+        assertEquals(DispatchResult.Done("bm1"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
+        assertEquals(setOf("bm1"), server.lists["reading"])
+        assertEquals(DispatchResult.Rejected("list_not_found"), client.addToList(server.root, FakeKarakeep.KEY, "gone", "bm1"))
+        assertEquals(DispatchResult.AuthRequired("http_401"), client.addToList(server.root, "wrong", "reading", "bm1"))
+    }
+
+    @Test
+    fun onlyManualListsAreOffered() {
+        server.lists["b"] = mutableSetOf()
+        server.lists["a"] = mutableSetOf()
+        val lists = client.lists(server.root, FakeKarakeep.KEY)
+        assertEquals(KarakeepRead.Ok(listOf(KarakeepList("a", "📚 List a"), KarakeepList("b", "📚 List b"))), lists)
+        assertEquals(KarakeepRead.Unauthorized, client.lists(server.root, "wrong"))
+    }
+
+    @Test
+    fun bookmarksAreListedNewestFirstAndSearched() {
+        create("https://a.example/", "Alpha")
+        create("https://b.example/", "Beta")
+        val newest = client.bookmarks(server.root, FakeKarakeep.KEY, query = null) as KarakeepRead.Ok
+        assertEquals(listOf("https://b.example/", "https://a.example/"), newest.value.bookmarks.map { it.url })
+        assertEquals("Beta", newest.value.bookmarks.first().title)
+        val found = client.bookmarks(server.root, FakeKarakeep.KEY, query = "alpha") as KarakeepRead.Ok
+        assertEquals(listOf(KarakeepBookmark("bm1", "https://a.example/", "Alpha")), found.value.bookmarks)
+        assertEquals(KarakeepRead.Unauthorized, client.bookmarks(server.root, "wrong", query = null))
+    }
+
+    @Test
     fun unreachableServersAreRetriable() {
         server.close()
         val result = create()

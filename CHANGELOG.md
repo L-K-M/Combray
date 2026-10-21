@@ -56,10 +56,16 @@ All notable changes to this project are documented here. The format follows
 - Reader view (More › Reader view): the page's article as plain text with
   links, found by Mozilla's Readability.js (Apache-2.0, vendored) inside
   the page and listed in the third-party notices.
+- A Karakeep scope in Recent: the newest bookmarks, or Karakeep's search
+  for what you type; a result opens in a new tab.
+- Settings › Karakeep › List for saves: saved pages are also added to a
+  manual Karakeep list you choose.
 
 ### Changed
 
 - Share is in the bottom bar, next to Save, instead of the More menu.
+- Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
+  Hister search moved there from the "Search all history" button.
 - A closed tab's page keeps its place in Recent, ordered by when the tab
   was last used rather than moved to the top.
 - Back on a page another app's link opened returns to that app; the page

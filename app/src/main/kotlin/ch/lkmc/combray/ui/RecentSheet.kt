@@ -9,8 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -53,47 +54,45 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.RecentItem
-import ch.lkmc.combray.core.integration.HisterIntegration
+import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.policy.HostNames
 import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
 
-private enum class RecentFilter { ALL, OPEN }
+/** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
+private enum class RecentScope(val label: Int) {
+    OPEN(R.string.recent_filter_open),
+    ALL(R.string.recent_filter_all),
+    HISTER(R.string.recent_scope_hister),
+    KARAKEEP(R.string.recent_scope_karakeep),
+}
 
 /**
- * Open tabs and recently visited pages in one most-recently-used list (R5). Filtering stays on
- * the device; nothing typed here leaves it.
+ * Open tabs and recently visited pages in one most-recently-used list (R5), opening on the
+ * tabs. Filtering them stays on the device; Hister and Karakeep are separate, labeled scopes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentSheet(
     browser: BrowserCoordinator,
-    hister: HisterIntegration,
+    integrations: Integrations,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     snackbar: SnackbarHostState,
     onDismiss: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    var searchAll by rememberSaveable { mutableStateOf(false) }
-    var filter by rememberSaveable { mutableStateOf(RecentFilter.ALL) }
+    var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
     val items by remember(query) { browser.recent(query) }.collectAsStateWithLifecycle(emptyList())
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
-    val shown = if (filter == RecentFilter.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
+    val shown = if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
     val now = System.currentTimeMillis()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        if (searchAll) {
-            // Tall enough that a snackbar sits below the search field, not over it.
-            Box(Modifier.heightIn(min = 240.dp)) {
-                Column { HisterSearchPanel(hister, initialQuery = query, onOpen = onOpenUrl, onBack = { searchAll = false }) }
-                SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
-            }
-            return@ModalBottomSheet
-        }
         // The sheet is its own window: the Undo for a tab closed here must be shown inside it.
-        Box {
+        // Tall enough that a snackbar sits below a search field, not over it.
+        Box(Modifier.heightIn(min = 240.dp)) {
             Column {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -107,62 +106,34 @@ fun RecentSheet(
                             Text(stringResource(R.string.action_new_tab), modifier = Modifier.padding(start = 8.dp))
                         }
                     }
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
-                        FilterChip(
-                            selected = filter == RecentFilter.ALL,
-                            onClick = { filter = RecentFilter.ALL },
-                            label = { Text(stringResource(R.string.recent_filter_all)) },
-                        )
-                        FilterChip(
-                            selected = filter == RecentFilter.OPEN,
-                            onClick = { filter = RecentFilter.OPEN },
-                            label = { Text(stringResource(R.string.recent_filter_open)) },
-                        )
-                    }
-                    // A separate, labeled scope: local filtering above never contacts Hister.
-                    TextButton(onClick = { searchAll = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.search_all_history))
-                    }
-                }
-
-                if (shown.isEmpty()) {
-                    Text(
-                        stringResource(if (query.isBlank()) R.string.recent_empty else R.string.recent_no_matches),
-                        modifier = Modifier.padding(24.dp),
-                    )
-                }
-                LazyColumn(Modifier.fillMaxWidth()) {
-                    var lastDay: Long? = null
-                    for (item in shown) {
-                        val day = startOfDay(item.time)
-                        if (day != lastDay) {
-                            lastDay = day
-                            item(key = "day:$day") { DayHeader(day, now) }
-                        }
-                        item(key = item.key) {
-                            RecentRow(
-                                item = item,
-                                now = now,
-                                onOpen = {
-                                    when (item) {
-                                        is RecentItem.OpenTab -> browser.selectTab(item.tabId)
-                                        is RecentItem.Visit -> browser.openVisit(item.visitId)
-                                    }
-                                    onDismiss()
-                                },
-                                onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
-                                onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
-                                onForgetSite = { forgetting = HostNames.of(item.url.orEmpty()) },
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+                    ) {
+                        RecentScope.entries.forEach { option ->
+                            FilterChip(
+                                selected = scope == option,
+                                onClick = { scope = option },
+                                label = { Text(stringResource(option.label)) },
                             )
                         }
                     }
+                    if (scope == RecentScope.OPEN || scope == RecentScope.ALL) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            singleLine = true,
+                            placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        )
+                    }
+                }
+
+                // The server scopes start from the local filter's text; only their own field is sent.
+                when (scope) {
+                    RecentScope.HISTER -> HisterSearchPanel(integrations.hister, initialQuery = query, onOpen = onOpenUrl)
+                    RecentScope.KARAKEEP -> KarakeepPanel(integrations, initialQuery = query, onOpen = onOpenUrl)
+                    RecentScope.OPEN, RecentScope.ALL -> LocalRecent(browser, shown, query, now, onDismiss) { forgetting = it }
                 }
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
@@ -178,6 +149,50 @@ fun RecentSheet(
             },
             onDismiss = { forgetting = null },
         )
+    }
+}
+
+/** Tabs and history on this device, grouped by day. */
+@Composable
+private fun LocalRecent(
+    browser: BrowserCoordinator,
+    shown: List<RecentItem>,
+    query: String,
+    now: Long,
+    onDismiss: () -> Unit,
+    onForgetSite: (String) -> Unit,
+) {
+    if (shown.isEmpty()) {
+        Text(
+            stringResource(if (query.isBlank()) R.string.recent_empty else R.string.recent_no_matches),
+            modifier = Modifier.padding(24.dp),
+        )
+    }
+    LazyColumn(Modifier.fillMaxWidth()) {
+        var lastDay: Long? = null
+        for (item in shown) {
+            val day = startOfDay(item.time)
+            if (day != lastDay) {
+                lastDay = day
+                item(key = "day:$day") { DayHeader(day, now) }
+            }
+            item(key = item.key) {
+                RecentRow(
+                    item = item,
+                    now = now,
+                    onOpen = {
+                        when (item) {
+                            is RecentItem.OpenTab -> browser.selectTab(item.tabId)
+                            is RecentItem.Visit -> browser.openVisit(item.visitId)
+                        }
+                        onDismiss()
+                    },
+                    onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
+                    onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
+                    onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                )
+            }
+        }
     }
 }
 

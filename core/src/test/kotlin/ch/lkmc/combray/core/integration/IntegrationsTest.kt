@@ -480,6 +480,69 @@ class IntegrationsTest {
         assertNull(runBlocking { database.integrations().service(ServiceKind.KARAKEEP) })
     }
 
+    private fun chooseList(id: String) = runBlocking {
+        val lists = integrations.karakeepLists()!!
+        val list = (lists.read as KarakeepRead.Ok).value.single { it.id == id }
+        assertTrue(integrations.setKarakeepList(lists.fingerprint, list))
+    }
+
+    @Test
+    fun aSaveGoesIntoTheChosenList() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        save()
+        drain()
+        assertEquals(SaveStatus.Saved, status())
+        assertEquals(setOf("bm1"), server.lists["reading"])
+    }
+
+    @Test
+    fun aDeletedListNeedsTheUserAndARetryUsesTheListChosenThen() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        server.lists.remove("reading")
+        save()
+        drain()
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals("list_not_found", job().error)
+        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+
+        server.lists["later"] = mutableSetOf()
+        chooseList("later")
+        runBlocking { integrations.outbox.retryNow("job0") }
+        drain()
+        assertEquals(SaveStatus.Saved, status())
+        assertEquals(setOf("bm1"), server.lists["later"])
+        assertEquals(1, server.bookmarks.size)
+    }
+
+    @Test
+    fun aListStaysWithItsServer() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        configure(key = "rotated-key")
+        assertEquals("reading", service().listId)
+        assertFalse(runBlocking { integrations.setKarakeepList("another-server", null) })
+        assertEquals("reading", service().listId)
+        configure(root = alternateServer.root)
+        assertNull(service().listId)
+        assertNull(service().listName)
+    }
+
+    @Test
+    fun savedBookmarksCanBeListedAndSearched() {
+        configure()
+        save()
+        drain()
+        val newest = runBlocking { integrations.karakeepBookmarks("") } as KarakeepRead.Ok
+        assertEquals(listOf(URL), newest.value.bookmarks.map { it.url })
+        val none = runBlocking { integrations.karakeepBookmarks("no such words") } as KarakeepRead.Ok
+        assertTrue(none.value.bookmarks.isEmpty())
+    }
+
     /** An address nothing listens on: connecting fails at once, before anything is sent. */
     private fun unreachableRoot(): String {
         val port = ServerSocket(0).use { it.localPort }
