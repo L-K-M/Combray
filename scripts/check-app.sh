@@ -149,6 +149,7 @@ else
     run page-controls -e class ch.lkmc.combray.PageControlsTest
     run about -e class ch.lkmc.combray.AboutTest
     run accessibility -e class ch.lkmc.combray.AccessibilityTest
+    run text-size -e class ch.lkmc.combray.TextSizeTest
     if [ -f "$ROOT/app/src/androidTest/kotlin/ch/lkmc/combray/HisterTest.kt" ]; then
         run hister -e class ch.lkmc.combray.HisterTest
     fi

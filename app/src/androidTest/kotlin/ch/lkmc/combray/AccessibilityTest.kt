@@ -26,6 +26,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.PageControl
+import ch.lkmc.combray.core.browser.TextSize
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
@@ -33,6 +34,7 @@ import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
+import ch.lkmc.combray.ui.TextSizeDialog
 import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertThrows
 import org.junit.Rule
@@ -80,12 +82,24 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {}, {})
             }
         }
 
         assertTargetsAreAccessible()
         compose.onNodeWithText("Settings").assertIsDisplayed()
+    }
+
+    @Test
+    fun theTextSizeDialogIsAccessible() {
+        // A middle step, so smaller, larger and reset are all enabled.
+        show(LARGE_FONT) { TextSizeDialog(TextSize.PERCENT_110, {}, {}) }
+
+        assertTargetsAreAccessible()
+        for (label in listOf("Smaller text", "Larger text")) {
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        }
+        compose.onNodeWithText("110%").assertIsDisplayed()
     }
 
     @Test

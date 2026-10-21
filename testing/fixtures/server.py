@@ -18,6 +18,8 @@ Pages
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
+  /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
+                             (page zoom checks)
   (the three control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -98,6 +100,14 @@ INTERSECTION_PAGE = page(
     " new IntersectionObserver(function (entries) {"
     "  if (entries.some(function (e) { return e.isIntersecting; })) document.title = 'IO:visible';"
     " }).observe(document.getElementById('target')); }</script>",
+)
+
+# Reports its layout viewport: page zoom changes both the CSS width and the device pixel ratio.
+ZOOM_PAGE = page(
+    "ZOOM-WAITING",
+    "<p>zoom</p><script>"
+    "function report() { document.title = 'ZOOM:' + innerWidth + ':' + devicePixelRatio; }"
+    "addEventListener('load', report); addEventListener('resize', report);</script>",
 )
 
 CONTROL_PAGES = {
@@ -200,6 +210,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/zoom.html":
+            return self.send(200, ZOOM_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

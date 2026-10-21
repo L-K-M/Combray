@@ -39,10 +39,11 @@ fun MoreSheet(
     onPauseCapture: () -> Unit,
     readerOpen: Boolean,
     onReader: () -> Unit,
+    onTextSize: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
+        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader, onTextSize)
     }
 }
 
@@ -60,6 +61,7 @@ internal fun MoreActions(
     /** Reader view is open over the page: the row leaves it. */
     readerOpen: Boolean,
     onReader: () -> Unit,
+    onTextSize: () -> Unit,
 ) {
     val url = tab?.url
     Column(Modifier.padding(bottom = 16.dp)) {
@@ -71,6 +73,8 @@ internal fun MoreActions(
             MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
             MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
         }
+        // Every page, not just this one: offered on the home screen too.
+        MoreRow(TextSizeIcon, R.string.action_text_size, onTextSize)
         // Pausing is one tap; switching capture on goes through Settings, which explains it.
         when (captureEnabled) {
             true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)

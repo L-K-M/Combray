@@ -63,7 +63,7 @@ import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.launch
 
-private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
+private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -272,6 +272,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 dismiss()
                 if (state.reader != null) browser.closeReader() else browser.openReader()
             },
+            onTextSize = { sheet = Sheet.TEXT_SIZE },
             onDismiss = dismiss,
         )
         Sheet.SETTINGS -> SettingsSheet(
@@ -282,6 +283,17 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onDismiss = dismiss,
         )
         Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
+        Sheet.TEXT_SIZE -> {
+            val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
+            TextSizeDialog(
+                size = textSize,
+                onChange = { size ->
+                    graph.settings.setTextSize(size)
+                    browser.applyTextSize()
+                },
+                onDismiss = dismiss,
+            )
+        }
     }
 
     // Shown over any sheet: the page is blocked until it gets an answer.

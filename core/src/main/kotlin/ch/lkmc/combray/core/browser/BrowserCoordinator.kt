@@ -63,6 +63,8 @@ class BrowserCoordinator(
     private val maxLiveViews: Int = MAX_LIVE_VIEWS,
     /** Read at each maintenance: whether open tabs unused for the retention period close. */
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
+    /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
+    private val textSize: () -> TextSize = { TextSize.DEFAULT },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -304,6 +306,11 @@ class BrowserCoordinator(
         if (engineReady) engine.persistProfile()
     }
 
+    /** The text size setting changed: every page, open or opened later, lays out at it. */
+    fun applyTextSize() = submit {
+        if (engineReady) engine.setPageZoom(textSize().zoom)
+    }
+
     /**
      * Opens reader view for the focused tab: the engine reads the main article of the document
      * shown now, in that document only.
@@ -356,6 +363,8 @@ class BrowserCoordinator(
         when (event) {
             is EngineEvent.EngineReady -> {
                 engineReady = true
+                // Before any view exists, so the first page lays out at the chosen size.
+                engine.setPageZoom(textSize().zoom)
                 state.update { it.copy(engine = EngineStatus.READY) }
                 reconcile()
             }

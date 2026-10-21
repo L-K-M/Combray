@@ -106,7 +106,7 @@ class AppGraph(application: Application) {
         scheduler = WorkManagerScheduler(application),
     )
     val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
-    val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister, unusedTabs = { settings.unusedTabs.value })
+    val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister, unusedTabs = { settings.unusedTabs.value }, textSize = { settings.textSize.value })
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
     val notices = ThirdPartyNotices(application.assets)
 

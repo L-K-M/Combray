@@ -73,6 +73,9 @@ object NativeEngine {
 
     @JvmStatic external fun setThrottled(tab: Long, throttled: Boolean)
 
+    /** Page zoom of every view, now and for views created later (1.0 is 100%). */
+    @JvmStatic external fun setPageZoom(zoom: Float)
+
     /** Touch input for the selected tab, in surface pixels. */
     @JvmStatic external fun touch(phase: Int, pointer: Int, x: Float, y: Float)
 
