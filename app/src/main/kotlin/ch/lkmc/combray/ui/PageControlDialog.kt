@@ -75,8 +75,8 @@ fun PageControlDialog(
     uploadScope: CoroutineScope,
     onAnswer: (ControlResponse, DialogBlocking) -> Unit,
     onUploadFailed: () -> Unit,
-    /** Whether an address may open in a tab (the address policy refuses `javascript:` and the like). */
-    canOpenInNewTab: (String) -> Boolean,
+    /** Whether the address policy would navigate to an address: only those open in a tab or go to Karakeep. */
+    isWebAddress: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
     onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
@@ -88,7 +88,7 @@ fun PageControlDialog(
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
-        is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
+        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
@@ -100,7 +100,7 @@ fun PageControlDialog(
 @Composable
 private fun LinkMenu(
     content: PageControlContent.LinkMenu,
-    canOpenInNewTab: (String) -> Boolean,
+    isWebAddress: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
     onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
@@ -119,7 +119,7 @@ private fun LinkMenu(
     val actions = buildList {
         content.link?.let { link ->
             // Only web addresses open in a tab, and only those can be saved to Karakeep.
-            if (canOpenInNewTab(link)) {
+            if (isWebAddress(link)) {
                 add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
                 add(R.string.link_open_background to { onOpenInBackground(link) })
                 add(R.string.link_save to { onSaveLink(link) })
@@ -128,7 +128,7 @@ private fun LinkMenu(
             add(R.string.link_share to { onShare(link) })
         }
         content.image?.let { image ->
-            if (canOpenInNewTab(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+            if (isWebAddress(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
             add(R.string.image_copy to { copy(image, imageCopied) })
         }
     }

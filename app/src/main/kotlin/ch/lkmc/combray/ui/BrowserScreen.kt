@@ -281,7 +281,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             uploadScope = graph.scope,
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
-            canOpenInNewTab = { url -> navigation(url) != null },
+            isWebAddress = { url -> navigation(url) != null },
             onOpenInNewTab = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.NEW_TAB) } },
             onOpenInBackground = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.BACKGROUND_TAB) } },
             onSaveLink = { url ->

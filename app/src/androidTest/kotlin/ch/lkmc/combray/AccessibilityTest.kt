@@ -166,7 +166,7 @@ class AccessibilityTest {
                 MainScope(),
                 { _, _ -> },
                 {},
-                canOpenInNewTab = { true },
+                isWebAddress = { true },
                 onOpenInNewTab = {},
                 onOpenInBackground = {},
                 onSaveLink = {},
