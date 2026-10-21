@@ -21,11 +21,13 @@ Pages
   (the three control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
-  POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks; key "fixture-key"
+  POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks (newest first), GET .../bookmarks/search?q=,
+  GET /keep/api/v1/lists (manual list "reading" plus a smart list), PUT .../lists/<list>/bookmarks/<id>;
+  key "fixture-key"
 Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
   POST /hister/api/add (needs Origin: hister://), GET /hister/search?q=&format=json; token "fixture-token"
 Admin (for the checks)
-  GET  /_admin/state                    JSON: bookmarks, hister documents, request log
+  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log
   POST /_admin/reset                    forget everything
   POST /_admin/fault?service=karakeep|hister&kind=<fault>&count=<n>
        faults: none, store_then_hang, too_many_requests, server_error, unauthorized
@@ -51,7 +53,12 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unauthorized"}
 
 lock = threading.Lock()
-state = {"bookmarks": {}, "hister": {}, "log": []}
+def fresh_lists():
+    """List id -> bookmark ids in it. Lists that are not here answer 404."""
+    return {"reading": []}
+
+
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": []}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 
 
@@ -192,11 +199,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(401, page("AUTH-REQUIRED", "<p>sign-in required</p>"),
                              headers=[("WWW-Authenticate", 'Basic realm="fixture"')])
 
-        if path == "/keep/api/v1/bookmarks":
+        if path in ("/keep/api/v1/bookmarks", "/keep/api/v1/bookmarks/search", "/keep/api/v1/lists"):
             if self.headers.get("Authorization") != f"Bearer {KARAKEEP_KEY}":
                 return self.send_json(401, {"error": "unauthorized"})
-            self.record({"service": "karakeep", "method": "GET"})
-            return self.send_json(200, {"bookmarks": [], "nextCursor": None})
+            text = query.get("q", [None])[0] if path.endswith("/search") else None
+            self.record({"service": "karakeep", "method": "GET", "path": path, "q": text})
+            with lock:
+                if path.endswith("/lists"):
+                    manual = [{"id": key, "name": f"List {key}", "icon": "📚", "parentId": None, "type": "manual"}
+                              for key in state["lists"]]
+                    smart = {"id": "smart", "name": "Smart", "icon": "🔎", "parentId": None, "type": "smart"}
+                    return self.send_json(200, {"lists": manual + [smart]})
+                # Newest first, like Karakeep; a search matches the address or the title.
+                found = [b for b in reversed(state["bookmarks"].values())
+                         if text is None or text.lower() in (b["url"] + " " + (b["title"] or "")).lower()]
+                items = [{"id": b["id"], "title": None, "content": {"type": "link", "url": b["url"], "title": b["title"]}}
+                         for b in found]
+            return self.send_json(200, {"bookmarks": items, "nextCursor": None})
         if path == "/hister/search":
             if not self.hister_authorized():
                 return self.send_json(401, {"error": "unauthorized"})
@@ -225,6 +244,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/_admin/reset":
             with lock:
                 state["bookmarks"].clear()
+                state["lists"].clear()
+                state["lists"].update(fresh_lists())
                 state["hister"].clear()
                 state["log"].clear()
                 for value in faults.values():
@@ -244,6 +265,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/hister/api/add":
             return self.hister_add(raw)
         return self.send(404, page("not found", ""))
+
+    def do_PUT(self):
+        path = urllib.parse.urlsplit(self.path).path
+        self.body()
+        parts = path.split("/")
+        # /keep/api/v1/lists/{list}/bookmarks/{bookmark}
+        if len(parts) != 8 or parts[:5] != ["", "keep", "api", "v1", "lists"] or parts[6] != "bookmarks":
+            return self.send(404, page("not found", ""))
+        if self.headers.get("Authorization") != f"Bearer {KARAKEEP_KEY}":
+            return self.send_json(401, {"error": "unauthorized"})
+        self.record({"service": "karakeep", "method": "PUT", "list": parts[5], "bookmark": parts[7]})
+        with lock:
+            members = state["lists"].get(parts[5])
+            if members is None:
+                return self.send_json(404, {"error": "list not found"})
+            if parts[7] not in members:
+                members.append(parts[7])
+        return self.send(204)
 
     def karakeep_create(self, raw):
         fault = take_fault("karakeep")

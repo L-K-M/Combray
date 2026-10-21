@@ -23,6 +23,9 @@ data class ServiceEntity(
     val updatedAt: Long,
     /** Another address of the same server, tried when [baseUrl] cannot be reached (or the reverse). */
     val alternateUrl: String? = null,
+    /** Karakeep only: the list saves are added to, and its name when it was chosen. */
+    val listId: String? = null,
+    val listName: String? = null,
 ) {
     /** Every address of the server, main first. */
     val roots get() = listOfNotNull(baseUrl, alternateUrl)

@@ -78,6 +78,9 @@ sealed interface Configured {
 /** API keys and tokens are printable ASCII; control characters cannot travel in an HTTP header. */
 internal fun isHeaderSafe(secret: String) = secret.all { it in ' '..'~' }
 
+/** Lists read from the server with [fingerprint]: a choice from them applies to that server only. */
+data class KarakeepLists(val fingerprint: String, val read: KarakeepRead<List<KarakeepList>>)
+
 @Serializable
 internal data class SavePayload(val url: String, val title: String? = null)
 
@@ -168,6 +171,9 @@ class Integrations(
                         captureEnabled = false,
                         updatedAt = clock.now(),
                         alternateUrl = addresses.alternate,
+                        // A list belongs to its server: a new key for the same one keeps it.
+                        listId = previous?.listId?.takeIf { keepsServer },
+                        listName = previous?.listName?.takeIf { keepsServer },
                     )
                     dao.setService(current)
                     outbox.onServiceChanged(previous, current)
@@ -199,6 +205,43 @@ class Integrations(
             routes.call(service) { transport, root -> KarakeepClient(transport).checkConnection(root, key) }
         }
     }
+
+    /** Manual lists on the configured server, to choose where saves go. Null when not configured. */
+    suspend fun karakeepLists(): KarakeepLists? {
+        val (service, key) = karakeepSnapshot()
+        service ?: return null
+        val read = key?.let { readKarakeep(service) { client, root -> client.lists(root, it) } } ?: KarakeepRead.Unauthorized
+        return KarakeepLists(service.fingerprint, read)
+    }
+
+    /**
+     * Saves go to [list] from now on (null: no list), queued ones included. Applies only while the
+     * server the list was read from is configured; returns whether it did.
+     */
+    suspend fun setKarakeepList(fingerprint: String, list: KarakeepList?): Boolean = withContext(NonCancellable) {
+        karakeepConfig.withLock {
+            val service = dao.service(ServiceKind.KARAKEEP)?.takeIf { it.fingerprint == fingerprint } ?: return@withLock false
+            dao.setService(service.copy(listId = list?.id, listName = list?.name, updatedAt = clock.now()))
+            true
+        }
+    }
+
+    /** Newest bookmarks for a blank [query], otherwise Karakeep's search. Null when not configured. */
+    suspend fun karakeepBookmarks(query: String, cursor: String? = null): KarakeepRead<KarakeepPage>? {
+        val (service, key) = karakeepSnapshot()
+        service ?: return null
+        key ?: return KarakeepRead.Unauthorized
+        return readKarakeep(service) { client, root -> client.bookmarks(root, key, query.trim().ifEmpty { null }, cursor) }
+    }
+
+    /** The service row and its key, read together. */
+    private suspend fun karakeepSnapshot(): Pair<ServiceEntity?, String?> = karakeepConfig.withLock {
+        val service = dao.service(ServiceKind.KARAKEEP)
+        service to service?.let { credentials.read(SecretName.KARAKEEP_API_KEY, it.fingerprint) }
+    }
+
+    private suspend fun <T> readKarakeep(service: ServiceEntity, read: (KarakeepClient, String) -> KarakeepRead<T>): KarakeepRead<T> =
+        withContext(Dispatchers.IO) { routes.call(service) { transport, root -> read(KarakeepClient(transport), root) } }
 
     /** One tap on Save: durable before this returns, then sent in the background. */
     suspend fun save(url: String?, title: String?): SaveRequest {
@@ -273,7 +316,14 @@ class Integrations(
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
         key ?: return DispatchResult.AuthRequired("credential_missing")
         val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        return routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
+        val created = routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
+
+        // The list is the one chosen when sending, not when tapping: after its list was deleted,
+        // a save can be retried into another one. Creating again finds the same bookmark (200).
+        val listId = service.listId ?: return created
+        val bookmarkId = (created as? DispatchResult.Done)?.remoteId ?: return created
+        val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
+        return if (added is DispatchResult.Done) created else added
     }
 
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {

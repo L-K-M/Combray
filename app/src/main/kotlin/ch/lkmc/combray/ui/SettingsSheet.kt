@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,6 +69,9 @@ import ch.lkmc.combray.core.integration.AddressField
 import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.ConnectionCheck
 import ch.lkmc.combray.core.integration.Integrations
+import ch.lkmc.combray.core.integration.KarakeepList
+import ch.lkmc.combray.core.integration.KarakeepLists
+import ch.lkmc.combray.core.integration.KarakeepRead
 import ch.lkmc.combray.core.integration.SecretName
 import ch.lkmc.combray.core.integration.ServiceRootProblem
 import ch.lkmc.combray.core.integration.ServiceUrls
@@ -123,7 +128,7 @@ fun SettingsSheet(
                 configure = integrations::configureKarakeep,
                 check = integrations::checkKarakeep,
                 remove = integrations::removeKarakeep,
-            )
+            ) { service -> KarakeepListSetting(integrations, service) }
             ServiceSettings(
                 integrations = integrations,
                 labels = ServiceLabels(
@@ -326,6 +331,82 @@ private fun ServiceSettings(
         OutlinedButton(onClick = { integrations.resume(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(labels.resume))
         }
+    }
+}
+
+/** The Karakeep list saves are added to. Its lists are read from the server when choosing. */
+@Composable
+private fun KarakeepListSetting(integrations: Integrations, service: ServiceEntity) {
+    var choosing by remember { mutableStateOf<KarakeepLists?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<KarakeepRead<*>?>(null) }
+    var serverChanged by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Text(stringResource(R.string.karakeep_list_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
+    Text(stringResource(R.string.karakeep_list_explanation), style = MaterialTheme.typography.bodySmall)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(service.listName ?: stringResource(R.string.karakeep_list_none), modifier = Modifier.weight(1f))
+        OutlinedButton(
+            onClick = {
+                loading = true
+                failure = null
+                serverChanged = false
+                scope.launch {
+                    val lists = integrations.karakeepLists()
+                    loading = false
+                    if (lists?.read is KarakeepRead.Ok) choosing = lists else failure = lists?.read
+                }
+            },
+            enabled = !loading,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) { Text(stringResource(R.string.karakeep_list_choose)) }
+    }
+    val problem = when {
+        serverChanged -> stringResource(R.string.karakeep_list_server_changed)
+        else -> failure?.let { karakeepProblem(it) }
+    }
+    problem?.let { Text(it, modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
+
+    choosing?.let { lists ->
+        KarakeepListDialog(
+            lists = (lists.read as KarakeepRead.Ok).value,
+            selected = service.listId,
+            onChoose = { list ->
+                choosing = null
+                scope.launch { serverChanged = !integrations.setKarakeepList(lists.fingerprint, list) }
+            },
+            onDismiss = { choosing = null },
+        )
+    }
+}
+
+/** One tap chooses: "No list" or one of the manual lists the user may add to. */
+@Composable
+private fun KarakeepListDialog(lists: List<KarakeepList>, selected: String?, onChoose: (KarakeepList?) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.karakeep_list_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                ListOption(stringResource(R.string.karakeep_list_none), selected == null) { onChoose(null) }
+                lists.forEach { list -> ListOption(list.name, selected == list.id) { onChoose(list) } }
+                if (lists.isEmpty()) Text(stringResource(R.string.karakeep_list_empty), modifier = Modifier.padding(top = 8.dp))
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+@Composable
+private fun ListOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, modifier = Modifier.padding(start = 8.dp))
     }
 }
 

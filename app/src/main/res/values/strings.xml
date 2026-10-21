@@ -76,6 +76,8 @@
     <string name="recent_title">Recent</string>
     <string name="recent_filter_all">All</string>
     <string name="recent_filter_open">Open tabs</string>
+    <string name="recent_scope_hister">Hister</string>
+    <string name="recent_scope_karakeep">Karakeep</string>
     <string name="recent_filter_hint">Filter tabs and history on this device</string>
     <string name="recent_open_marker">Open</string>
     <string name="recent_active_marker">Current tab</string>
@@ -187,8 +189,6 @@
     <string name="action_resume_capture">Resume history capture</string>
 
     <!-- Search all history -->
-    <string name="search_all_history">Search all history</string>
-    <string name="search_local_history">Back to Recent</string>
     <string name="search_all_hint">Search your Hister history</string>
     <string name="search_all_not_configured">Connect Hister in Settings to search all history.</string>
     <string name="search_all_empty">No results in Hister.</string>
@@ -201,6 +201,20 @@
     <string name="search_all_error">Hister could not search (HTTP %1$d).</string>
     <string name="search_all_malformed">Hister’s answer could not be read. Check the address in Settings.</string>
     <string name="search_all_more">More results</string>
+    <string name="karakeep_search_hint">Search your Karakeep bookmarks</string>
+    <string name="karakeep_search_not_configured">Connect Karakeep in Settings to see your bookmarks.</string>
+    <string name="karakeep_search_empty">No results in Karakeep.</string>
+    <string name="karakeep_bookmarks_empty">No bookmarks in Karakeep yet.</string>
+    <string name="karakeep_read_unauthorized">Karakeep rejected the API key. Check it in Settings.</string>
+    <string name="karakeep_read_unreachable">Could not reach Karakeep (%1$s).</string>
+    <string name="karakeep_read_error">Karakeep could not answer (HTTP %1$d).</string>
+    <string name="karakeep_read_malformed">Karakeep’s answer could not be read. Check the address in Settings.</string>
+    <string name="karakeep_list_title">List for saves</string>
+    <string name="karakeep_list_explanation">Pages you save are also added to this Karakeep list.</string>
+    <string name="karakeep_list_none">No list</string>
+    <string name="karakeep_list_choose">Choose list</string>
+    <string name="karakeep_list_empty">No lists you can add to. Create one in Karakeep first.</string>
+    <string name="karakeep_list_server_changed">The server changed. Choose a list again.</string>
     <string name="search_all_from_history">From your history</string>
     <string name="settings_history_title">Local history</string>
     <plurals name="settings_history_body">

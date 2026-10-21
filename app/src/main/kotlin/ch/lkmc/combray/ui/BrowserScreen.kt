@@ -245,10 +245,10 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         )
         Sheet.RECENT -> RecentSheet(
             browser = browser,
-            hister = graph.integrations.hister,
+            integrations = graph.integrations,
             onOpenUrl = { url ->
                 dismiss()
-                // Hister results open as new navigations, through the same address policy.
+                // Hister and Karakeep results open as new navigations, through the same address policy.
                 (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrl(it.url, Placement.NEW_TAB) }
             },
             onNewTab = editNewTab,

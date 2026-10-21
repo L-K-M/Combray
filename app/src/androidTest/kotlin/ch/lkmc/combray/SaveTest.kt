@@ -1,18 +1,24 @@
 package ch.lkmc.combray
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.data.ServiceKind
 import ch.lkmc.combray.core.integration.Configured
+import ch.lkmc.combray.core.integration.KarakeepRead
 import ch.lkmc.combray.core.integration.SaveStatus
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -32,6 +38,14 @@ class SaveTest {
         device.awaitEngine()
         device.closeAllTabs()
         assertEquals(Configured.Saved, runBlocking { device.integrations.configureKarakeep(Fixtures.KARAKEEP_ROOT, Fixtures.KARAKEEP_KEY) })
+        // App data outlives a check: a list chosen by an earlier one must not apply here.
+        chooseList(null)
+    }
+
+    private fun chooseList(id: String?) = runBlocking {
+        val lists = device.integrations.karakeepLists()!!
+        val list = id?.let { wanted -> (lists.read as KarakeepRead.Ok).value.single { it.id == wanted } }
+        assertTrue(device.integrations.setKarakeepList(lists.fingerprint, list))
     }
 
     private fun open(color: Int, placement: Placement = Placement.CURRENT_TAB): String {
@@ -109,8 +123,40 @@ class SaveTest {
         assertEquals(1, bookmarks().length())
     }
 
+    @Test
+    fun aSaveGoesIntoTheChosenList() {
+        chooseList("reading")
+        val url = open(LISTED)
+        tapSave()
+        awaitSaveStatus(url) { it == SaveStatus.Saved }
+        val id = bookmarks().getJSONObject(url).getString("id")
+        val reading = Fixtures.state().getJSONObject("lists").getJSONArray("reading")
+        assertEquals(listOf(id), (0 until reading.length()).map(reading::getString))
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun recentOpensOnTabsAndItsKarakeepScopeOpensASavedPage() {
+        val url = open(SHOWN_IN_RECENT)
+        tapSave()
+        awaitSaveStatus(url) { it == SaveStatus.Saved }
+
+        device.dismissSystemDialogs()
+        compose.onNodeWithContentDescription("Recent", substring = true).performClick()
+        compose.onNode(hasText("Open tabs") and isSelected()).assertExists()
+        compose.onNodeWithText("Karakeep").performClick()
+        compose.waitUntilAtLeastOneExists(hasText("Search your Karakeep bookmarks"), Device.LOAD_TIMEOUT_MS)
+        // The bookmark row: in this scope no tab row shows the page's title.
+        val title = "SOLID-%06x".format(SHOWN_IN_RECENT)
+        compose.waitUntilAtLeastOneExists(hasText(title), Device.LOAD_TIMEOUT_MS)
+        compose.onNodeWithText(title).performClick()
+        device.awaitState { it.openTabCount == 2 && it.activeTab?.url == url }
+    }
+
     private companion object {
         const val UNSAVED_FIRST = 0x6b2e5f
         const val UNSAVED_SECOND = 0x2e5f6b
+        const val LISTED = 0x5f2e6b
+        const val SHOWN_IN_RECENT = 0x2e6b6b
     }
 }

@@ -7,14 +7,20 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 
 /**
- * A minimal Karakeep: `POST /keep/api/v1/bookmarks` (201 new, 200 existing URL) and
- * `GET /keep/api/v1/bookmarks`, behind a configurable fault for the next requests.
+ * A minimal Karakeep: `POST /keep/api/v1/bookmarks` (201 new, 200 existing URL),
+ * `GET /keep/api/v1/bookmarks` (newest first) and `.../bookmarks/search?q=` (address or title
+ * contains q), `GET /keep/api/v1/lists` and `PUT .../lists/{list}/bookmarks/{id}`, behind a
+ * configurable fault for the next requests.
  */
 class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
     enum class Fault { NONE, STORE_THEN_HANG, TOO_MANY_REQUESTS, SERVER_ERROR, BAD_REQUEST, REDIRECT, MALFORMED }
 
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     val bookmarks = LinkedHashMap<String, String>()
+    private val titles = HashMap<String, String?>()
+
+    /** List id -> bookmark ids in it. Lists that are not here answer 404. */
+    val lists = LinkedHashMap<String, MutableSet<String>>()
     val requests = CopyOnWriteArrayList<String>()
     @Volatile var fault = Fault.NONE
     @Volatile var faultCount = 0
@@ -25,6 +31,7 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
     init {
         server.executor = Executors.newCachedThreadPool()
         server.createContext("/keep/api/v1/bookmarks") { exchange -> handle(exchange) }
+        server.createContext("/keep/api/v1/lists") { exchange -> handleLists(exchange) }
         server.start()
     }
 
@@ -32,7 +39,7 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
         val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
         requests += "${exchange.requestMethod} $body"
         if (exchange.requestHeaders.getFirst("Authorization") != "Bearer $acceptedKey") return reply(exchange, 401, "{}")
-        if (exchange.requestMethod == "GET") return reply(exchange, 200, """{"bookmarks":[],"nextCursor":null}""")
+        if (exchange.requestMethod == "GET") return reply(exchange, 200, listing(exchange))
 
         val url = Regex("\"url\":\"([^\"]+)\"").find(body)!!.groupValues[1]
         val current = if (faultCount > 0) fault.also { faultCount-- } else Fault.NONE
@@ -54,7 +61,36 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
         }
         val existing = bookmarks[url]
         val id = existing ?: "bm${bookmarks.size + 1}".also { bookmarks[url] = it }
+        titles.putIfAbsent(url, Regex("\"title\":\"([^\"]+)\"").find(body)?.groupValues?.get(1))
         reply(exchange, if (existing != null) 200 else 201, """{"id":"$id","url":"$url"}""")
+    }
+
+    private fun listing(exchange: HttpExchange): String {
+        val query = exchange.requestURI.query.orEmpty().split('&').map { it.substringBefore('=') to it.substringAfter('=') }.toMap()
+        val search = query["q"]?.takeIf { exchange.requestURI.path.endsWith("/search") }
+        val matches = bookmarks.entries.reversed().filter { (url, _) ->
+            search == null || url.contains(search, ignoreCase = true) || titles[url]?.contains(search, ignoreCase = true) == true
+        }
+        val items = matches.joinToString(",") { (url, id) ->
+            val title = titles[url]?.let { "\"$it\"" } ?: "null"
+            """{"id":"$id","title":null,"content":{"type":"link","url":"$url","title":$title}}"""
+        }
+        return """{"bookmarks":[$items],"nextCursor":null}"""
+    }
+
+    private fun handleLists(exchange: HttpExchange) {
+        requests += "${exchange.requestMethod} ${exchange.requestURI.path}"
+        if (exchange.requestHeaders.getFirst("Authorization") != "Bearer $acceptedKey") return reply(exchange, 401, "{}")
+        if (exchange.requestMethod == "GET") {
+            val manual = lists.keys.map { """{"id":"$it","name":"List $it","icon":"📚","parentId":null,"type":"manual"}""" }
+            val smart = """{"id":"smart","name":"Smart","icon":"🔎","parentId":null,"type":"smart"}"""
+            return reply(exchange, 200, """{"lists":[${(manual + smart).joinToString(",")}]}""")
+        }
+        // PUT /keep/api/v1/lists/{list}/bookmarks/{id}
+        val parts = exchange.requestURI.path.split('/')
+        val members = lists[parts[parts.size - 3]] ?: return reply(exchange, 404, """{"error":"not found"}""")
+        members += parts.last()
+        reply(exchange, 204, "")
     }
 
     private fun reply(exchange: HttpExchange, status: Int, body: String, vararg headers: Pair<String, String>) {
