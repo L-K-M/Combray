@@ -127,8 +127,10 @@ interface IntegrationDao {
     /** Captured content older than the maximum age is never sent. */
     @Query(
         """
-        UPDATE outbox SET state = 'EXPIRED', updatedAt = :now
-        WHERE kind = 'HISTER_ADD' AND state IN ('PENDING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED') AND createdAt < :cutoff
+        UPDATE outbox SET state = 'EXPIRED', updatedAt = :now, leaseOwner = NULL, leaseUntil = NULL
+        WHERE kind = 'HISTER_ADD' AND createdAt < :cutoff
+          AND (state IN ('PENDING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED')
+               OR (state = 'RUNNING' AND leaseUntil < :now))
         """,
     )
     suspend fun expireCapturesBefore(cutoff: Long, now: Long): Int

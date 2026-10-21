@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.browser.CapturedPage
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.ExclusionEntity
+import ch.lkmc.combray.core.data.JobKind
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import kotlinx.coroutines.CoroutineScope
@@ -162,6 +163,67 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun anAbandonedCaptureExpiresInsteadOfBeingSentAfterRestart() = runBlocking {
+        enable()
+        capture("https://a.example/", "old text")
+        val abandoned = integrations.outbox.claim("dead-worker", LEASE_MS)!!
+
+        now += 8 * DAY_MS
+        drain()
+
+        val expired = jobs().single()
+        assertEquals(JobState.EXPIRED, expired.state)
+        assertEquals("", expired.payload)
+        assertEquals(0, expired.payloadBytes)
+        assertNull(expired.leaseOwner)
+        assertNull(expired.leaseUntil)
+        assertTrue(server.added.isEmpty())
+        assertFalse(integrations.outbox.finish(abandoned, DispatchResult.Done(null)))
+    }
+
+    @Test
+    fun aCaptureThatAgesDuringADrainIsNeverDispatched() = runBlocking {
+        enable()
+        capture("https://a.example/first", "fresh text")
+        capture("https://a.example/second", "text about to expire")
+        val second = jobs().last()
+        database.integrations().updateJob(second.copy(createdAt = now - 7 * DAY_MS + 1_000))
+
+        val dispatcher = OutboxDispatcher(
+            integrations.outbox,
+            mapOf(JobKind.HISTER_ADD to JobHandler { job ->
+                // The first request takes the second body past its retention deadline.
+                now += 2_000
+                hister.dispatch(job)
+            }),
+            onDone = { _, _ -> },
+            scheduler = {},
+        )
+        dispatcher.drain()
+
+        assertEquals(JobState.EXPIRED, jobs().last().state)
+        assertEquals("", jobs().last().payload)
+        assertEquals(1, server.added.size)
+        assertTrue(server.added.single().contains("fresh text"))
+    }
+
+    @Test
+    fun expiryDoesNotInvalidateAnOldCaptureWithALiveLease() = runBlocking {
+        enable()
+        capture("https://a.example/", "in flight")
+        now += 7 * DAY_MS - 1_000
+        val live = integrations.outbox.claim("live-worker", LEASE_MS)!!
+        now += 2_000
+
+        integrations.outbox.prune()
+
+        assertEquals(JobState.RUNNING, jobs().single().state)
+        assertTrue(jobs().single().payload.isNotEmpty())
+        assertNull(integrations.outbox.claim("other-worker", LEASE_MS))
+        assertTrue(integrations.outbox.finish(live, DispatchResult.Done(null)))
+    }
+
+    @Test
     fun theContentBudgetPausesCapture() {
         enable()
         val text = "x".repeat(256 * 1024)
@@ -289,5 +351,10 @@ class HisterIntegrationTest {
         override fun delete(name: SecretName) {
             values.remove(name)
         }
+    }
+
+    private companion object {
+        const val DAY_MS = 24L * 60 * 60 * 1000
+        const val LEASE_MS = 60_000L
     }
 }
