@@ -33,7 +33,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Placement { CURRENT_TAB, NEW_TAB }
+enum class Placement {
+    CURRENT_TAB,
+    NEW_TAB,
+
+    /**
+     * A new tab right after the focused one in Recent, which keeps focus. The tab has no renderer
+     * until it is selected, so its page loads when the user switches to it.
+     */
+    BACKGROUND_TAB,
+}
 
 /**
  * Owns the browser's logical state: tabs, visits and the focused tab in the database, and the
@@ -139,10 +148,15 @@ class BrowserCoordinator(
 
     // --- Commands -------------------------------------------------------------------------------
 
-    /** Opens [url] (already classified as a web address or search) in the focused or a new tab. */
+    /** Opens [url] (already classified as a web address or search) in the focused, a new or a background tab. */
     fun openUrl(url: String, placement: Placement) = submit {
         val active = activeTab()
-        if (placement == Placement.NEW_TAB || active == null) createTab(url) else navigateTab(active, url)
+        when {
+            // With no tab in focus there is nothing to stay on: even a background tab takes focus.
+            placement == Placement.NEW_TAB || active == null -> createTab(url)
+            placement == Placement.BACKGROUND_TAB -> createBackgroundTab(url, active)
+            else -> navigateTab(active, url)
+        }
         reconcile()
         publish()
     }
@@ -636,22 +650,40 @@ class BrowserCoordinator(
 
     private suspend fun createTab(url: String?): String {
         val now = clock.now()
-        val tab = TabEntity(
-            id = newId(),
-            state = TabState.OPEN,
-            currentVisitId = null,
-            url = url,
-            title = null,
-            createdAt = now,
-            lastFocusedAt = now,
-            closedAt = null,
-        )
+        val tab = newOpenTab(url, createdAt = now, lastFocusedAt = now)
         database.withTransaction {
             dao.insertTab(tab)
             activate(tab.id, now)
         }
         return tab.id
     }
+
+    /**
+     * A tab for [url] that does not take focus. [active] was in use until now, like a tab focus
+     * leaves ([activate]), and the new tab just before, so Recent lists it right after [active]
+     * and a later one before it. No renderer is created here ([reconcile] serves the focused tab
+     * only): the page loads when the user switches to the tab.
+     */
+    private suspend fun createBackgroundTab(url: String, active: TabEntity) {
+        val now = clock.now()
+        val tab = newOpenTab(url, createdAt = now, lastFocusedAt = now - 1)
+        database.withTransaction {
+            dao.updateTab(active.copy(lastFocusedAt = now))
+            dao.insertTab(tab)
+        }
+        state.update { it.copy(notice = Notice.OpenedInBackground(tab.id)) }
+    }
+
+    private fun newOpenTab(url: String?, createdAt: Long, lastFocusedAt: Long) = TabEntity(
+        id = newId(),
+        state = TabState.OPEN,
+        currentVisitId = null,
+        url = url,
+        title = null,
+        createdAt = createdAt,
+        lastFocusedAt = lastFocusedAt,
+        closedAt = null,
+    )
 
     private suspend fun focus(tab: TabEntity) {
         val now = clock.now()

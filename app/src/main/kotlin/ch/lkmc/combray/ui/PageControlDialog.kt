@@ -3,6 +3,7 @@ package ch.lkmc.combray.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -77,13 +78,19 @@ fun PageControlDialog(
     /** Whether an address may open in a tab (the address policy refuses `javascript:` and the like). */
     canOpenInNewTab: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
+    onOpenInBackground: (String) -> Unit,
+    onSaveLink: (String) -> Unit,
     onShare: (String) -> Unit,
+    /** Shows a short message, such as a copy confirmation where Android shows none. */
+    onNotify: (String) -> Unit,
 ) {
     val answer = { response: ControlResponse -> onAnswer(response, DialogBlocking.KEEP_SHOWING) }
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
-        is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onShare) { answer(ControlResponse.Dismiss) }
+        is PageControlContent.LinkMenu -> LinkMenu(content, canOpenInNewTab, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
+            answer(ControlResponse.Dismiss)
+        }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
         else -> ScriptDialog(control, content, onAnswer)
     }
@@ -95,22 +102,34 @@ private fun LinkMenu(
     content: PageControlContent.LinkMenu,
     canOpenInNewTab: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
+    onOpenInBackground: (String) -> Unit,
+    onSaveLink: (String) -> Unit,
     onShare: (String) -> Unit,
+    onNotify: (String) -> Unit,
     onDone: () -> Unit,
 ) {
     val context = LocalContext.current
-    val copy = { url: String ->
+    val linkCopied = stringResource(R.string.link_copied)
+    val imageCopied = stringResource(R.string.image_address_copied)
+    val copy = { url: String, copied: String ->
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(url, url))
+        // Android 13 and later confirm a copy on screen themselves; Android 11 and 12 show nothing.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onNotify(copied)
     }
     val actions = buildList {
         content.link?.let { link ->
-            if (canOpenInNewTab(link)) add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
-            add(R.string.link_copy to { copy(link) })
+            // Only web addresses open in a tab, and only those can be saved to Karakeep.
+            if (canOpenInNewTab(link)) {
+                add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
+                add(R.string.link_open_background to { onOpenInBackground(link) })
+                add(R.string.link_save to { onSaveLink(link) })
+            }
+            add(R.string.link_copy to { copy(link, linkCopied) })
             add(R.string.link_share to { onShare(link) })
         }
         content.image?.let { image ->
             if (canOpenInNewTab(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
-            add(R.string.image_copy to { copy(image) })
+            add(R.string.image_copy to { copy(image, imageCopied) })
         }
     }
 
@@ -125,7 +144,8 @@ private fun LinkMenu(
             )
         },
         text = {
-            Column {
+            // A linked image lists both menus: at large font sizes they need more than one screen.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 actions.forEach { (label, action) ->
                     TextButton(
                         onClick = {

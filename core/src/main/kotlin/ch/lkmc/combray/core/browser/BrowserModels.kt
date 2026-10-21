@@ -52,6 +52,9 @@ sealed interface Notice {
 
     /** The engine could not open an address (it does not parse as a URL Servo can load). */
     data object AddressNotOpened : Notice
+
+    /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
+    data class OpenedInBackground(val tabId: String) : Notice
 }
 
 sealed interface KeyboardRequest {

@@ -39,10 +39,15 @@
     <string name="sign_in_password">Password</string>
     <string name="sign_in_action">Sign in</string>
     <string name="link_open_new_tab">Open in new tab</string>
+    <string name="link_open_background">Open in background</string>
+    <string name="link_save">Save link to Karakeep</string>
     <string name="link_copy">Copy link</string>
     <string name="link_share">Share link</string>
     <string name="image_open_new_tab">Open image in new tab</string>
     <string name="image_copy">Copy image address</string>
+    <string name="link_copied">Link copied</string>
+    <string name="image_address_copied">Image address copied</string>
+    <string name="link_save_queued">Saving link to Karakeep</string>
     <string name="upload_failed">The file could not be read, so nothing was attached.</string>
     <string name="action_undo">Undo</string>
     <string name="loading">Loading</string>
@@ -98,6 +103,8 @@
     <!-- Notices and states -->
     <string name="notice_tab_closed">Tab closed</string>
     <string name="notice_address_not_opened">Combray could not open this address.</string>
+    <string name="notice_opened_in_background">Opened in background</string>
+    <string name="action_show">Show</string>
     <string name="engine_missing">This build has no browser engine. Build it with scripts/build-native.sh, then rebuild the app.</string>
     <string name="engine_failed">The browser engine could not start.</string>
     <string name="engine_starting">Starting the browser engine…</string>

@@ -111,8 +111,26 @@ class AccessibilityTest {
     )
 
     @Test
-    fun aLinkMenuIsAccessible() =
-        assertControlIsAccessible(PageControlContent.LinkMenu("https://example.org/a", "https://example.org/a.png"))
+    fun aLinkMenuIsAccessible() {
+        assertControlIsAccessible(PageControlContent.LinkMenu("https://example.org/a", image = null))
+        for (label in listOf("Open in new tab", "Open in background", "Save link to Karakeep", "Copy link", "Share link")) {
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun anImageMenuIsAccessible() = assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+
+    /**
+     * A linked image lists both menus. At the largest font they can need to scroll on the
+     * reference emulator's 360x720dp screen, and a row scrolled out of view has no touch area to
+     * measure.
+     */
+    @Test
+    fun aLinkedImageMenuIsAccessible() = assertControlIsAccessible(
+        PageControlContent.LinkMenu("https://example.org/a", "https://example.org/a.png"),
+        fontScale = DEFAULT_FONT,
+    )
 
     /** The check itself: a target without a label fails it. */
     @Test
@@ -136,13 +154,25 @@ class AccessibilityTest {
         assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
     }
 
-    /** A page's dialog, as the browser shows it, at the largest font size. */
-    private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false) {
+    /** A page's dialog, as the browser shows it, at the largest font size unless [fontScale] says otherwise. */
+    private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false, fontScale: Float = LARGE_FONT) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val staging = UploadStaging(File(context.cacheDir, "accessibility-uploads"), context.contentResolver)
         val control = PageControl(id = 1, site = "example.org", content = content, offerBlocking = offerBlocking)
-        show(LARGE_FONT) {
-            PageControlDialog(control, staging, MainScope(), { _, _ -> }, {}, canOpenInNewTab = { true }, {}, {})
+        show(fontScale) {
+            PageControlDialog(
+                control,
+                staging,
+                MainScope(),
+                { _, _ -> },
+                {},
+                canOpenInNewTab = { true },
+                onOpenInNewTab = {},
+                onOpenInBackground = {},
+                onSaveLink = {},
+                onShare = {},
+                onNotify = {},
+            )
         }
 
         assertTargetsAreAccessible()
