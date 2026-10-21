@@ -658,6 +658,8 @@ impl Engine {
         for tab in self.tabs.values() {
             tab.webview.set_page_zoom(zoom);
         }
+        // The shown page lays out again; paint it, as the other visual changes here do.
+        self.needs_paint = true;
     }
 
     fn persist_profile(&mut self) {
