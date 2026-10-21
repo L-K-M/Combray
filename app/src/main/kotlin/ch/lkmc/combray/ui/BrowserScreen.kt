@@ -70,7 +70,7 @@ private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
  * surface stays in place under every overlay, so sheets never release a renderer.
  */
 @Composable
-fun BrowserScreen(graph: AppGraph) {
+fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     val browser = graph.browser
     val state by browser.browserState.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
@@ -128,9 +128,14 @@ fun BrowserScreen(graph: AppGraph) {
         sheet = Sheet.ADDRESS
     }
 
-    // Back: close the open sheet first, then go back in the page, then leave the app.
+    // Back: close the open sheet first, then go back in the page, then leave the app. A tab
+    // another app opened closes on the way out: its page stays in history only.
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
     BackHandler(enabled = sheet == Sheet.NONE && tab?.canGoBack == true) { browser.goBack() }
+    BackHandler(enabled = sheet == Sheet.NONE && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
+        tab?.let { browser.returnToOtherApp(it.id) }
+        onLeave()
+    }
 
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
@@ -252,7 +257,13 @@ fun BrowserScreen(graph: AppGraph) {
             },
             onDismiss = dismiss,
         )
-        Sheet.SETTINGS -> SettingsSheet(integrations = graph.integrations, notices = graph.notices, onDismiss = dismiss)
+        Sheet.SETTINGS -> SettingsSheet(
+            integrations = graph.integrations,
+            settings = graph.settings,
+            onUnusedTabsChanged = browser::runMaintenance,
+            notices = graph.notices,
+            onDismiss = dismiss,
+        )
         Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
     }
 

@@ -198,9 +198,14 @@
     <string name="search_all_from_history">From your history</string>
     <string name="settings_history_title">Local history</string>
     <plurals name="settings_history_body">
-        <item quantity="one">Closed tabs and visited pages stay in Recent for %1$d day after you last used them. Open tabs stay until you close them. This only affects this device.</item>
-        <item quantity="other">Closed tabs and visited pages stay in Recent for %1$d days after you last used them. Open tabs stay until you close them. This only affects this device.</item>
+        <item quantity="one">Closed tabs and visited pages stay in Recent for %1$d day after you last used them. This only affects this device.</item>
+        <item quantity="other">Closed tabs and visited pages stay in Recent for %1$d days after you last used them. This only affects this device.</item>
     </plurals>
+    <plurals name="settings_close_unused_tabs">
+        <item quantity="one">Close tabs unused for %1$d day</item>
+        <item quantity="other">Close tabs unused for %1$d days</item>
+    </plurals>
+    <string name="settings_close_unused_tabs_body">Their pages leave Recent with them. The tab you are on stays open.</string>
     <string name="settings_about_title">About</string>
     <string name="settings_version">Combray %1$s</string>
     <string name="settings_engine">Browser engine: Servo %1$s</string>

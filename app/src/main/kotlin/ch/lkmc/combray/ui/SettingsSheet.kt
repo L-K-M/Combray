@@ -56,7 +56,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.BuildConfig
 import ch.lkmc.combray.R
 import ch.lkmc.combray.ThirdPartyNotices
+import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.Retention
+import ch.lkmc.combray.core.browser.UnusedTabs
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import ch.lkmc.combray.core.data.ServiceEntity
@@ -80,7 +82,14 @@ private val ACTIONABLE_STATES = setOf(JobState.FAILED, JobState.RETRY_WAIT, JobS
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSheet(integrations: Integrations, notices: ThirdPartyNotices, onDismiss: () -> Unit) {
+fun SettingsSheet(
+    integrations: Integrations,
+    settings: BrowserSettings,
+    /** Applies a changed tab choice now rather than at the next maintenance. */
+    onUnusedTabsChanged: () -> Unit,
+    notices: ThirdPartyNotices,
+    onDismiss: () -> Unit,
+) {
     var showNotices by rememberSaveable { mutableStateOf(false) }
     if (showNotices) NoticesDialog(notices) { showNotices = false }
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -145,6 +154,7 @@ fun SettingsSheet(integrations: Integrations, notices: ThirdPartyNotices, onDism
             SectionTitle(R.string.settings_history_title)
             val days = Retention().closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
+            UnusedTabsSetting(settings, days, onUnusedTabsChanged)
             SectionTitle(R.string.settings_about_title)
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
             Text(stringResource(R.string.settings_engine, BuildConfig.SERVO_VERSION))
@@ -154,6 +164,26 @@ fun SettingsSheet(integrations: Integrations, notices: ThirdPartyNotices, onDism
             }
         }
     }
+}
+
+/** Opt-in: open tabs unused for the retention period close like history expires. */
+@Composable
+private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: () -> Unit) {
+    val choice by settings.unusedTabs.collectAsStateWithLifecycle()
+    val closing = choice == UnusedTabs.CLOSE
+    // One accessibility node per row: TalkBack reads the label with the switch state.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
+            .toggleable(value = closing, role = Role.Switch) { enabled ->
+                settings.setUnusedTabs(if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP)
+                onChanged()
+            },
+    ) {
+        Text(pluralStringResource(R.plurals.settings_close_unused_tabs, days, days), modifier = Modifier.weight(1f))
+        Switch(checked = closing, onCheckedChange = null)
+    }
+    Text(stringResource(R.string.settings_close_unused_tabs_body), style = MaterialTheme.typography.bodySmall)
 }
 
 /** Each service's own wording: an API key for Karakeep, an access token for Hister. */

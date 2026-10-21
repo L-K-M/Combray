@@ -4,8 +4,10 @@ import android.app.UiAutomation
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
@@ -172,6 +174,35 @@ class BrowsingTest {
     }
 
     @Test
+    fun backFromAnotherAppsLinkLeavesTheAppAndKeepsThePageInHistoryOnly() {
+        open(Device.GREEN)
+        val url = Fixtures.solid(Device.OCHRE)
+        compose.activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName))
+        // The title comes from the engine, so the page has committed (a new tab has its address before).
+        device.awaitState { it.activeTab?.url == url && it.activeTab?.title == Fixtures.title(Device.OCHRE) }
+        assertTrue(device.browser.browserState.value.activeTab!!.openedByOtherApp)
+        // The UI enables its Back handling once it has drawn that state, as it has long before a
+        // person presses Back.
+        compose.waitForIdle()
+
+        // The system Back key, as the user presses it.
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        val state = device.awaitState { it.openTabCount == 1 }
+        assertEquals(Fixtures.solid(Device.GREEN), state.activeTab?.url)
+        val recent = device.recent()
+        assertTrue("$url not in history: ${recent.take(5)}", recent.any { it is RecentItem.Visit && it.url == url })
+        awaitActivityStopped()
+    }
+
+    private fun awaitActivityStopped() {
+        val deadline = SystemClock.uptimeMillis() + STOP_TIMEOUT_MS
+        while (compose.activityRule.scenario.state != Lifecycle.State.CREATED) {
+            assertTrue("Combray stayed in the foreground", SystemClock.uptimeMillis() < deadline)
+            SystemClock.sleep(100)
+        }
+    }
+
+    @Test
     fun aSearchQueryReachesTheServerEncodedExactlyOnce() {
         val query = "C++ & Rust #1 ü 😀 /x?y=z"
         // Same encoder as Kagi searches; the fixture echoes what it received in the title.
@@ -190,5 +221,9 @@ class BrowsingTest {
         val down = SystemClock.uptimeMillis()
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))
+    }
+
+    private companion object {
+        const val STOP_TIMEOUT_MS = 10_000L
     }
 }

@@ -5,7 +5,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.ui.BrowserScreen
@@ -23,7 +22,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromRecents) openLink(intent)
         setContent {
             CombrayTheme {
-                BrowserScreen(graph)
+                // Back from a page another app opened returns to that app.
+                BrowserScreen(graph, onLeave = { moveTaskToBack(true) })
             }
         }
     }
@@ -38,6 +38,6 @@ class MainActivity : ComponentActivity() {
         if (intent?.action != Intent.ACTION_VIEW) return
         val url = intent.dataString ?: return
         val decision = AddressPolicy.interpret(url).primary
-        if (decision is AddressDecision.Navigate) graph.browser.openUrl(decision.url, Placement.NEW_TAB)
+        if (decision is AddressDecision.Navigate) graph.browser.openFromOtherApp(decision.url)
     }
 }

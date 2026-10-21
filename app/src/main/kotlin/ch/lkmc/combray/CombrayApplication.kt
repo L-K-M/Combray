@@ -1,6 +1,7 @@
 package ch.lkmc.combray
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -8,6 +9,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import ch.lkmc.combray.core.browser.BrowserCoordinator
+import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.integration.Integrations
@@ -103,7 +105,8 @@ class AppGraph(application: Application) {
         scope = scope,
         scheduler = WorkManagerScheduler(application),
     )
-    val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister)
+    val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
+    val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister, unusedTabs = { settings.unusedTabs.value })
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
     val notices = ThirdPartyNotices(application.assets)
 
