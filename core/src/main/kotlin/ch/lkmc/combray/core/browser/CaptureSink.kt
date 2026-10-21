@@ -4,6 +4,9 @@ package ch.lkmc.combray.core.browser
  * Where captured page text goes (Hister, through the outbox). The coordinator decides *when* a
  * document can be captured and guarantees *which* document the text came from; the sink decides
  * *whether* (opt-in, exclusions, budget) and does the queueing.
+ *
+ * Forgetting runs inside the browser database transaction: durable cancellation must join that
+ * same database transaction and finish before returning. No network work belongs in that path.
  */
 interface CaptureSink {
     /**
