@@ -430,7 +430,8 @@ class BrowserCoordinatorTest {
 
         // The screen must not stay blank: the state shows what there is, with the problem.
         assertEquals(SessionState.RESTORED, state().session)
-        assertTrue(state().notice is Notice.Problem)
+        // The user did nothing yet: the notice is about the tabs, not "the last action".
+        assertEquals(Notice.Problem("Your open tabs could not be fully restored."), state().notice)
     }
 
     @Test

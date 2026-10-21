@@ -107,10 +107,9 @@ class BrowserCoordinator(
                     Log.e(LOG_TAG, "browser state update failed", failure)
                     // Restoring ends even if it was this step that failed: show what there is, not a blank page.
                     state.update {
-                        it.copy(
-                            session = SessionState.RESTORED,
-                            notice = Notice.Problem("Something went wrong; the last action may not have completed."),
-                        )
+                        // Before the session is restored the user has done nothing: it was the restore.
+                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
                     }
                 }
             }
@@ -896,6 +895,8 @@ class BrowserCoordinator(
 
     private companion object {
         const val LOG_TAG = "CombrayBrowser"
+        const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
+        const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val RECENT_LIMIT = 500
         const val PROCESS_KEY_LENGTH = 8
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */

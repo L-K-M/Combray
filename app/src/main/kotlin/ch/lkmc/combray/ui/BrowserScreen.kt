@@ -315,7 +315,8 @@ private fun PageOverlay(
         state.engine == EngineStatus.LIBRARY_MISSING -> OverlayMessage(stringResource(R.string.engine_missing))
         state.engine == EngineStatus.FAILED -> OverlayMessage(stringResource(R.string.engine_failed))
         // No tab yet does not mean home: a restored session must not flash "New tab" first.
-        state.session == SessionState.RESTORING -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
+        // The launch screen covers this for up to two seconds; a slower restore says what happens.
+        state.session == SessionState.RESTORING -> OverlayMessage(stringResource(R.string.session_restoring))
         tab == null || tab.isHome -> Home(onOpenAddress, onOpenRecent)
         tab.crashed -> OverlayMessage(stringResource(R.string.page_crashed)) {
             Button(onClick = onReload) { Text(stringResource(R.string.action_reload)) }
