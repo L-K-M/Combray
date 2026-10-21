@@ -85,6 +85,8 @@ class ReaderTest {
         fun ordinalOf(marker: String) = reader.article.blocks.single { block -> block.spans.any { it.text == marker } }.ordinal
         // <ol start='3'>, its third item with value='9'; the bulleted list has no numbers.
         assertEquals(listOf(3, 4, 9), listOf("READER-STEP-THREE", "READER-STEP-FOUR", "READER-STEP-NINE").map(::ordinalOf))
+        // <ol reversed> without start counts down from its number of items.
+        assertEquals(listOf(3, 2, 1), listOf("READER-COUNTDOWN-THREE", "READER-COUNTDOWN-TWO", "READER-COUNTDOWN-ONE").map(::ordinalOf))
         assertEquals(null, ordinalOf("READER-ITEM-ONE"))
 
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("9."))
