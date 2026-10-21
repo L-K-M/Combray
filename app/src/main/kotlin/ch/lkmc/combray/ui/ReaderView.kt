@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,6 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,7 +77,20 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
             is ReaderState.Ready -> {
                 val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
                 CompositionLocalProvider(LocalLayoutDirection provides direction) {
-                    ArticleText(state.article, onOpenLink)
+                    Box(Modifier.fillMaxSize()) {
+                        ArticleText(state.article, onOpenLink)
+                        IconButton(
+                            onClick = onClose,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp)
+                                .widthIn(min = 48.dp).heightIn(min = 48.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.action_close),
+                                modifier = Modifier.padding(4.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
