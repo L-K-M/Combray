@@ -104,11 +104,18 @@ class HisterClient(private val transport: HttpTransport) {
         } catch (malformed: IllegalArgumentException) {
             null
         } ?: return HisterSearch.Malformed
-        val documents = (root["documents"] as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = false) }
-        val history = (root["history"] as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = true) }
+        val documents = root["documents"]
+        val history = root["history"]
+        // A missing field is an empty list. A missing object, or a field of the wrong type, is not
+        // an empty search: that would hide a server that is not speaking this API.
+        if ((documents == null && history == null) || (documents != null && documents !is JsonArray) || (history != null && history !is JsonArray)) {
+            return HisterSearch.Malformed
+        }
+        val documentHits = documents.orEmpty().mapNotNull { hit(it, fromHistory = false) }
+        val historyHits = history.orEmpty().mapNotNull { hit(it, fromHistory = true) }
         // Promoted history first, then documents not already listed: neither array is dropped.
         // Each address appears once, even when the server repeats it within one array.
-        val hits = (history + documents).distinctBy { it.url }
+        val hits = (historyHits + documentHits).distinctBy { it.url }
         return HisterSearch.Results(hits, (root["total"] as? JsonPrimitive)?.content?.toIntOrNull(), (root["page_key"] as? JsonPrimitive)?.takeIf { it.isString }?.content)
     }
 

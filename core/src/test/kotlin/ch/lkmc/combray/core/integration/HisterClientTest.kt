@@ -49,6 +49,10 @@ class HisterClientTest {
         assertEquals(HisterSearch.Unauthorized, client.search(server.root, "wrong", "x"))
         server.searchBody = "<html>login</html>"
         assertEquals(HisterSearch.Malformed, client.search(server.root, FakeHister.TOKEN, "x"))
+        server.searchBody = """{"query":"x"}"""
+        assertEquals(HisterSearch.Malformed, client.search(server.root, FakeHister.TOKEN, "x"))
+        server.searchBody = """{"documents":"nope","history":[]}"""
+        assertEquals(HisterSearch.Malformed, client.search(server.root, FakeHister.TOKEN, "x"))
         server.close()
         assertTrue(client.search(server.root, FakeHister.TOKEN, "x") is HisterSearch.Unreachable)
     }
