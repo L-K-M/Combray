@@ -85,7 +85,9 @@ ARTICLE_BODY = (
     f"<p>{ARTICLE_PARAGRAPH * 3}</p>"
     "<h2>READER-HEADING</h2>"
     f"<p>READER-BODY-TWO {ARTICLE_PARAGRAPH * 3}</p>"
-    "<ul><li>READER-ITEM-ONE</li><li>READER-ITEM-TWO</li></ul></article>"
+    "<ul><li>READER-ITEM-ONE</li><li>READER-ITEM-TWO</li></ul>"
+    # Numbered from 3, then from an item's own value: reader view shows 3., 4. and 9.
+    "<ol start='3'><li>READER-STEP-THREE</li><li>READER-STEP-FOUR</li><li value='9'>READER-STEP-NINE</li></ol></article>"
     "<aside>READER-ASIDE-TEXT related stories</aside><footer>READER-FOOTER-TEXT</footer>"
 )
 

@@ -174,6 +174,35 @@ class ReaderTest {
         assertNull(ArticleJson.parse("""{"blocks":[]}""", truncated = false))
     }
 
+    @Test
+    fun aNumberedListItemKeepsItsNumberOnlyWithinTheScriptsRange() {
+        val parsed = ArticleJson.parse(
+            """
+            {"blocks":[
+              {"k":"li","l":1,"o":3,"s":[["three"]]},
+              {"k":"li","l":1,"o":-99999,"s":[["lowest"]]},
+              {"k":"li","l":1,"o":99999,"s":[["highest"]]},
+              {"k":"li","l":1,"s":[["bullet"]]},
+              {"k":"li","l":1,"o":100000,"s":[["too high"]]},
+              {"k":"li","l":1,"o":-100000,"s":[["too low"]]},
+              {"k":"li","l":1,"o":99999999999999999999,"s":[["past Long"]]},
+              {"k":"li","l":1,"o":"4","s":[["string"]]},
+              {"k":"li","l":1,"o":2.5,"s":[["fraction"]]},
+              {"k":"li","l":1,"o":true,"s":[["boolean"]]},
+              {"k":"li","l":1,"o":null,"s":[["null"]]},
+              {"k":"li","l":1,"o":[5],"s":[["array"]]},
+              {"k":"p","o":6,"s":[["paragraph"]]}
+            ]}
+            """.trimIndent(),
+            truncated = false,
+        )!!
+        assertEquals(
+            listOf(3, -99999, 99999, null, null, null, null, null, null, null, null, null, null),
+            parsed.blocks.map { it.ordinal },
+        )
+        assertEquals(13, parsed.blocks.size)
+    }
+
     private companion object {
         const val START = 1_760_000_000_000L
         const val URL = "https://news.test/story"

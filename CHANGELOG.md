@@ -77,9 +77,14 @@ All notable changes to this project are documented here. The format follows
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- Reader view sets the article in a serif reading face (the system's Noto
+  Serif) with a larger title, and has a "Show the page" button at the top.
 
 ### Fixed
 
+- Reader view showed numbered lists as bullets, and section headings
+  smaller than the text under them. Numbered items now show the page's
+  numbers, and no heading is smaller than the body text.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
