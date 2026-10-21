@@ -63,6 +63,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The whole Material3 palette is defined in the app's pine and ivory:
+  sheets, chips, checkboxes, switches and snackbars no longer fall back to
+  Material's baseline purple. Text and outline contrast is pinned by unit
+  tests for both light and dark schemes.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.
