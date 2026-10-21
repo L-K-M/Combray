@@ -68,8 +68,13 @@ class OutboxDispatcher(
     companion object {
         private const val LOG_TAG = "CombrayOutbox"
 
-        /** Longer than one request can take (two 15 s timeouts), so a live claim never expires. */
-        const val LEASE_MS = 60_000L
+        /**
+         * Longer than the slowest live dispatch: a Karakeep save-with-list is two requests, and
+         * each may try both configured roots at up to 8 s connect + 15 s read. That bounds a
+         * dispatch near a minute before DNS; the lease stays comfortably above it so a live
+         * claim never expires under a second dispatcher.
+         */
+        const val LEASE_MS = 150_000L
         const val MAX_JOBS_PER_DRAIN = 50
     }
 }
