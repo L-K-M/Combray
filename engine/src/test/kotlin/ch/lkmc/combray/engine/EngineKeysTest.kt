@@ -61,6 +61,8 @@ class EngineKeysTest {
     /** servo_key drops control characters and values that are not Unicode scalar values. */
     @Test
     fun charactersServoDropsDoNotMakeAKeyHandled() {
+        // servo_key filters NUL explicitly: it is no printable character here either.
+        assertFalse(EngineKeys.handles(KeyEvent.KEYCODE_UNKNOWN, NO_CHARACTER))
         assertFalse(EngineKeys.handles(KeyEvent.KEYCODE_NUMPAD_ENTER, '\n'.code))
         assertFalse(EngineKeys.handles(KeyEvent.KEYCODE_UNKNOWN, DELETE_CONTROL))
         assertFalse(EngineKeys.handles(KeyEvent.KEYCODE_UNKNOWN, C1_CONTROL))
