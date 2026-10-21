@@ -47,7 +47,8 @@ data class Claim(val job: OutboxJobEntity, val owner: String)
  *    │                └──Rejected/too many attempts─> FAILED ─retry─┤
  *    └──────────────────────────────────────────────────────────────┘
  * newer capture of the same key: unsent older jobs -> SUPERSEDED
- * destination changed: unfinished jobs -> CANCELLED (never sent elsewhere)
+ * destination changed: unfinished saves -> DESTINATION_CHANGED (sent only after the user
+ *   rebinds them), unfinished captures -> CANCELLED; never sent elsewhere silently
  * ```
  */
 class Outbox(
@@ -77,6 +78,12 @@ class Outbox(
         }
 
         val now = clock.now()
+        if (!supersede) {
+            // Saving again for the current destination replaces a copy parked for an earlier one.
+            dao.parkedJobs(service.kind).filter { it.kind == kind && it.dedupeKey == dedupeKey }.forEach {
+                dao.updateJob(it.copy(state = JobState.SUPERSEDED, error = "superseded", updatedAt = now))
+            }
+        }
         val active = dao.activeJobs(kind, service.fingerprint, dedupeKey)
         if (!supersede && active.isNotEmpty()) return@withTransaction Enqueued.AlreadyQueued(active.first())
         val failed = dao.failedJobs(kind, service.fingerprint, dedupeKey)
@@ -205,7 +212,8 @@ class Outbox(
 
     /**
      * Destination or credential changed (inside the configuration transaction). A different
-     * destination cancels unfinished jobs: they are never sent with new settings. Same
+     * destination parks unfinished saves (see [PARKED_ON_DESTINATION_CHANGE]) and cancels other
+     * jobs; a removal cancels all. Nothing is sent with new settings unless the user says so. Same
      * destination, new credential: jobs pause until the user resumes them explicitly.
      */
     suspend fun onServiceChanged(previous: ServiceEntity?, current: ServiceEntity?) {
@@ -217,6 +225,8 @@ class Outbox(
         for (job in dao.openJobs(kind)) {
             val sameDestination = current != null && current.fingerprint == job.fingerprint
             val update = when {
+                !sameDestination && current != null && job.kind in PARKED_ON_DESTINATION_CHANGE ->
+                    job.copy(state = JobState.DESTINATION_CHANGED, error = "destination_changed")
                 !sameDestination -> job.copy(state = JobState.CANCELLED, error = "destination_changed")
                 // A failed job keeps its real reason; Retry rebinds it to the new generation.
                 job.state == JobState.FAILED -> continue
@@ -236,6 +246,35 @@ class Outbox(
             if (job.state != JobState.AUTH_REQUIRED || job.fingerprint != service.fingerprint) continue
             dao.updateJob(job.copy(state = JobState.PENDING, generation = service.generation, nextAttemptAt = now, error = null, updatedAt = now))
         }
+    }
+
+    /**
+     * User action after a main address change: parked jobs are bound to the destination and
+     * generation configured now and go out with its credential. A key already queued (or failed)
+     * there keeps its own job; the parked copy is superseded rather than sent twice.
+     */
+    suspend fun sendParkedToCurrent(kind: ServiceKind) = database.withTransaction {
+        val service = dao.service(kind) ?: return@withTransaction
+        val now = clock.now()
+        // Newest first: when two earlier addresses parked the same key, the newer content wins.
+        for (job in dao.parkedJobs(kind).sortedByDescending { it.sequence }) {
+            val queuedThere = dao.activeJobs(job.kind, service.fingerprint, job.dedupeKey).isNotEmpty() ||
+                dao.failedJobs(job.kind, service.fingerprint, job.dedupeKey).isNotEmpty()
+            val update = when {
+                queuedThere -> job.copy(state = JobState.SUPERSEDED, error = "superseded")
+                else -> job.copy(
+                    state = JobState.PENDING, fingerprint = service.fingerprint, generation = service.generation,
+                    attempts = 0, nextAttemptAt = now, error = null,
+                )
+            }
+            dao.updateJob(update.copy(updatedAt = now))
+        }
+    }
+
+    /** User action: give up on every job parked by a main address change. */
+    suspend fun discardParked(kind: ServiceKind) = database.withTransaction {
+        val now = clock.now()
+        dao.parkedJobs(kind).forEach { dao.updateJob(it.copy(state = JobState.CANCELLED, error = "discarded", updatedAt = now)) }
     }
 
     suspend fun nextWakeup(): Long? = dao.nextWakeup(clock.now())
@@ -277,5 +316,12 @@ class Outbox(
         }
         private val RESUMABLE = setOf(JobState.FAILED, JobState.AUTH_REQUIRED, JobState.RETRY_WAIT)
         private val DISCARDABLE = setOf(JobState.PENDING, JobState.RETRY_WAIT, JobState.AUTH_REQUIRED, JobState.FAILED)
+
+        /**
+         * Saves are deliberate and usually stuck because of the address being corrected, so they
+         * wait for the user. Captures are automatic and made under the old server's policy: not
+         * worth sending to another one, so they are cancelled.
+         */
+        private val PARKED_ON_DESTINATION_CHANGE = setOf(JobKind.KARAKEEP_SAVE)
     }
 }

@@ -53,6 +53,12 @@ enum class JobState {
 
     /** Unsent content past its maximum age. */
     EXPIRED,
+
+    /**
+     * Parked: a save queued for a main address that is no longer configured. It keeps its old
+     * fingerprint, so nothing sends it until the user sends it to the current address or discards it.
+     */
+    DESTINATION_CHANGED,
     ;
 
     val isActive get() = this == PENDING || this == RUNNING || this == RETRY_WAIT || this == AUTH_REQUIRED

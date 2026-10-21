@@ -47,6 +47,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -230,6 +231,7 @@ private fun ServiceSettings(
 ) {
     val current by service.collectAsStateWithLifecycle(null)
     val jobs by remember(kind) { integrations.openJobs(kind) }.collectAsStateWithLifecycle(emptyList())
+    val parked by remember(kind) { integrations.parkedJobs(kind) }.collectAsStateWithLifecycle(emptyList())
     // Null until edited: the field shows the stored address, and an edit survives rotation.
     var editedAddress by rememberSaveable { mutableStateOf<String?>(null) }
     val address = editedAddress ?: current?.baseUrl.orEmpty()
@@ -306,7 +308,7 @@ private fun ServiceSettings(
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.title))) },
-            text = { Text(pluralStringResource(labels.removeBody, jobs.size, jobs.size)) },
+            text = { Text(pluralStringResource(labels.removeBody, jobs.size + parked.size, jobs.size + parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemove = false
@@ -325,12 +327,25 @@ private fun ServiceSettings(
     current?.let { extra(it) }
 
     Text(stringResource(labels.queue), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
-    if (jobs.isEmpty()) Text(stringResource(R.string.queue_empty))
+    if (jobs.isEmpty() && parked.isEmpty()) Text(stringResource(R.string.queue_empty))
     jobs.forEach { job -> QueueRow(integrations, labels, job) }
     if (jobs.any { it.state == JobState.AUTH_REQUIRED }) {
         OutlinedButton(onClick = { integrations.resume(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(labels.resume))
         }
+    }
+    // Only saves are parked by a main address change (captures are cancelled), hence the wording.
+    // They are never sent to the new address without this explicit choice.
+    if (parked.isNotEmpty()) {
+        val discardLabel = stringResource(R.string.action_discard_parked)
+        Text(pluralStringResource(R.plurals.queue_parked, parked.size, parked.size), modifier = Modifier.padding(top = 8.dp))
+        OutlinedButton(onClick = { integrations.sendParkedToCurrent(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_send_to_current_address))
+        }
+        TextButton(
+            onClick = { integrations.discardParked(kind) },
+            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = discardLabel },
+        ) { Text(stringResource(R.string.action_discard)) }
     }
 }
 

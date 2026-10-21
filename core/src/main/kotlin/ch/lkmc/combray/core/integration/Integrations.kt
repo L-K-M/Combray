@@ -122,6 +122,9 @@ class Integrations(
 
     fun openJobs(kind: ServiceKind): Flow<List<OutboxJobEntity>> = dao.observeOpenJobs(kind)
 
+    /** Saves queued for an earlier main address, waiting for the user to send or discard them. */
+    fun parkedJobs(kind: ServiceKind): Flow<List<OutboxJobEntity>> = dao.observeParkedJobs(kind)
+
     /** Keystore work stays off the main thread. */
     suspend fun hasCredential(name: SecretName, service: ServiceEntity): Boolean = credentials.read(name, service.fingerprint) != null
 
@@ -133,8 +136,8 @@ class Integrations(
 
     /**
      * Saves the Karakeep root, an optional alternate address and, if given, a new API key. Any
-     * change starts a new generation: unfinished saves for another server are cancelled; saves
-     * for this server pause until resumed.
+     * change starts a new generation: unfinished saves for another server are parked until the
+     * user sends them to this one or discards them; saves for this server pause until resumed.
      */
     suspend fun configureKarakeep(rootInput: String, apiKey: String?, alternateInput: String? = null): Configured {
         val addresses = when (val checked = ServiceUrls.normalizeAddresses(rootInput, alternateInput, KARAKEEP_SUFFIXES)) {
@@ -264,12 +267,18 @@ class Integrations(
         when {
             service == null -> flowOf(SaveStatus.NotConfigured)
             url == null -> flowOf(SaveStatus.Unsaved)
-            else -> combine(dao.observeSaved(service.fingerprint, url), dao.observeLatestSave(service.fingerprint, url)) { saved, job ->
+            else -> combine(
+                dao.observeSaved(service.fingerprint, url),
+                dao.observeLatestSave(service.fingerprint, url),
+                dao.observeParkedSave(url),
+            ) { saved, job, parked ->
                 when {
                     job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
                     job != null -> SaveStatus.Pending
                     saved != null -> SaveStatus.Saved
+                    // Queued for an earlier address: Settings offers to send it here or discard it.
+                    parked != null -> SaveStatus.NeedsAttention(parked.error)
                     else -> SaveStatus.Unsaved
                 }
             }
@@ -288,6 +297,14 @@ class Integrations(
         outbox.resume(kind)
         dispatcher.drain()
     }
+
+    /** After the main address changed: parked saves go to the address configured now, with its key. */
+    fun sendParkedToCurrent(kind: ServiceKind) = launchGuarded("sending parked jobs") {
+        outbox.sendParkedToCurrent(kind)
+        dispatcher.drain()
+    }
+
+    fun discardParked(kind: ServiceKind) = launchGuarded("discarding parked jobs") { outbox.discardParked(kind) }
 
     /** User actions run on the app scope: a failure is logged (class only), never a crash. */
     private fun launchGuarded(action: String, block: suspend () -> Unit) = scope.launch {
