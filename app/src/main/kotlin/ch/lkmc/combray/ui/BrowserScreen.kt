@@ -4,10 +4,12 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,8 +19,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -40,10 +46,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
@@ -56,6 +66,7 @@ import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.KeyboardRequest
 import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.browser.TopSite
 import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
@@ -64,6 +75,9 @@ import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.launch
 
 private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
+
+private val MONOGRAM_SIZE = 64.dp
+private const val QUICK_LINK_COLUMNS = 3
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -80,6 +94,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val tab = state.activeTab
+    val topSites by remember { browser.topSites() }.collectAsStateWithLifecycle(emptyList())
     val saveStatus by remember(tab?.url) { graph.integrations.saveStatus(tab?.url) }
         .collectAsStateWithLifecycle(SaveStatus.Unsaved)
     val histerService by graph.integrations.hister.service.collectAsStateWithLifecycle(null)
@@ -156,8 +171,10 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 )
                 PageOverlay(
                     state = state,
+                    topSites = topSites,
                     onOpenAddress = editAddress,
                     onOpenRecent = { sheet = Sheet.RECENT },
+                    onOpenUrl = { url -> browser.openUrl(url, Placement.CURRENT_TAB) },
                     onReload = browser::reload,
                 )
                 state.reader?.let { reader ->
@@ -305,15 +322,17 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
 @Composable
 private fun PageOverlay(
     state: BrowserState,
+    topSites: List<TopSite>,
     onOpenAddress: () -> Unit,
     onOpenRecent: () -> Unit,
+    onOpenUrl: (String) -> Unit,
     onReload: () -> Unit,
 ) {
     val tab: ActiveTab? = state.activeTab
     when {
         state.engine == EngineStatus.LIBRARY_MISSING -> OverlayMessage(stringResource(R.string.engine_missing))
         state.engine == EngineStatus.FAILED -> OverlayMessage(stringResource(R.string.engine_failed))
-        tab == null || tab.isHome -> Home(onOpenAddress, onOpenRecent)
+        tab == null || tab.isHome -> Home(topSites, onOpenAddress, onOpenRecent, onOpenUrl)
         tab.crashed -> OverlayMessage(stringResource(R.string.page_crashed)) {
             Button(onClick = onReload) { Text(stringResource(R.string.action_reload)) }
         }
@@ -322,13 +341,19 @@ private fun PageOverlay(
 }
 
 @Composable
-private fun Home(onOpenAddress: () -> Unit, onOpenRecent: () -> Unit) {
+private fun Home(
+    topSites: List<TopSite>,
+    onOpenAddress: () -> Unit,
+    onOpenRecent: () -> Unit,
+    onOpenUrl: (String) -> Unit,
+) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
-            Modifier.fillMaxSize().padding(24.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Monogram()
             Text(
                 stringResource(R.string.home_title),
                 style = MaterialTheme.typography.headlineSmall,
@@ -341,6 +366,62 @@ private fun Home(onOpenAddress: () -> Unit, onOpenRecent: () -> Unit) {
             OutlinedButton(onClick = onOpenRecent, modifier = Modifier.widthIn(min = 240.dp)) {
                 Text(stringResource(R.string.action_recent))
             }
+            if (topSites.isNotEmpty()) QuickLinks(topSites, onOpenUrl)
+        }
+    }
+}
+
+/** The launcher artwork: square and sharp like the source (media-sources/icon.png). */
+@Composable
+private fun Monogram() {
+    Box(Modifier.size(MONOGRAM_SIZE).background(colorResource(R.color.ic_launcher_background))) {
+        Image(painterResource(R.mipmap.ic_launcher_foreground), contentDescription = null, modifier = Modifier.fillMaxSize())
+    }
+}
+
+/** The hosts the user visits most, in the concept's icon-tile rows. */
+@Composable
+private fun QuickLinks(topSites: List<TopSite>, onOpenUrl: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(R.string.home_quick_links),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        topSites.chunked(QUICK_LINK_COLUMNS).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { site -> QuickLink(site, onOpenUrl, Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickLink(site: TopSite, onOpenUrl: (String) -> Unit, modifier: Modifier) {
+    val host = displayHost(site.url)
+    val openLabel = stringResource(R.string.home_open_site, host)
+    Surface(
+        onClick = { onOpenUrl(site.url) },
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = modifier.semantics { contentDescription = openLabel },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(9.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    site.host.first().uppercase(),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Text(host, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
         }
     }
 }

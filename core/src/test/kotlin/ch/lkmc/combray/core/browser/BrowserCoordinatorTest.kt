@@ -236,6 +236,31 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun topSitesRankTheHostsTheUserVisitsMost() {
+        ready()
+        browser.openUrl("https://a.test/one", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/one")
+        title(1, 10, "A one")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        now += 1_000
+        browser.openUrl("https://a.test/two", Placement.CURRENT_TAB); idle()
+        commit(2, 21, "https://a.test/two", index = 1, length = 2)
+        title(2, 21, "A two")
+
+        val sites = runBlocking { browser.topSites().first() }
+
+        // Pages open tabs show right now count too: a.test has one of each, b.test is history.
+        assertEquals(listOf("a.test", "b.test"), sites.map { it.host })
+        assertEquals(2, sites[0].visits)
+        assertEquals(1, sites[1].visits)
+        // A tap opens the host's newest page, with its title.
+        assertEquals("https://a.test/two", sites[0].url)
+        assertEquals("A two", sites[0].title)
+    }
+
+    @Test
     fun closedHistoryExpiresButOpenTabsDoNot() {
         ready()
         browser.openUrl("https://old-open.test/", Placement.NEW_TAB); idle()

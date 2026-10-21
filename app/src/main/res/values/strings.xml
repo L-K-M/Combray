@@ -104,6 +104,8 @@
     <string name="page_crashed">This page stopped working.</string>
     <string name="home_title">New tab</string>
     <string name="home_body">Search with Kagi or open an address.</string>
+    <string name="home_quick_links">Frequent sites</string>
+    <string name="home_open_site">Open %1$s</string>
 
     <!-- Page info -->
     <string name="page_info_address">Address</string>

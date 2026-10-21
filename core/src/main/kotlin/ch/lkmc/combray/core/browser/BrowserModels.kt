@@ -109,6 +109,16 @@ data class BrowserState(
     val notice: Notice? = null,
 )
 
+/** A frequent host for the new-tab page's quick links. */
+data class TopSite(
+    val host: String,
+    /** The host's most recently used page: what a tap opens. */
+    val url: String,
+    val title: String?,
+    /** How many of the host's pages were seen in the retention window. */
+    val visits: Int,
+)
+
 /** One row of the unified Recent list. */
 sealed interface RecentItem {
     val key: String

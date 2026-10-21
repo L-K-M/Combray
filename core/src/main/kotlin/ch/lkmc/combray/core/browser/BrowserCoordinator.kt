@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -134,6 +135,22 @@ class BrowserCoordinator(
                 RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId)
             } + visits.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
             items.filter { it.matches(query) }.sortedByDescending { it.time }
+        }
+    }
+
+    /**
+     * The hosts the user visits most, for the new-tab page's quick links: one entry per host
+     * (its newest page), most pages first within the retention window, ties by recency.
+     */
+    fun topSites(limit: Int = TOP_SITES_LIMIT): Flow<List<TopSite>> {
+        val since = clock.now() - retention.closedHistoryMillis
+        return dao.observeRecentVisits(since, RECENT_LIMIT).map { visits ->
+            visits
+                .mapNotNull { visit -> visit.host?.let { it to visit } }
+                .groupBy({ it.first }, { it.second })
+                .map { (host, pages) -> TopSite(host, pages.first().url, pages.first().title, pages.size) }
+                .sortedByDescending { it.visits }
+                .take(limit)
         }
     }
 
@@ -895,6 +912,9 @@ class BrowserCoordinator(
 
         /** Proposed default until measured on the owner's phone (M4). */
         const val MAX_LIVE_VIEWS = 6
+
+        /** Quick-link tiles on the new-tab page: two rows of three. */
+        const val TOP_SITES_LIMIT = 6
 
         /** Reader view budget: the article's JSON (native/src/reader.js); longer ones are cut. */
         const val MAX_ARTICLE_BYTES = 512 * 1024
