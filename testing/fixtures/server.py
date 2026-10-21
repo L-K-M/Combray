@@ -365,7 +365,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(bytes(MEDIA_CHUNK_BYTES))
                 self.wfile.flush()
                 time.sleep(MEDIA_CHUNK_DELAY_SECONDS)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             # The client stopped the download.
             self.close_connection = True
             return
