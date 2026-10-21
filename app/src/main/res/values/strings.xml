@@ -50,7 +50,6 @@
     <!-- Address -->
     <string name="address_placeholder">Search or enter address</string>
     <string name="address_edit">Edit address</string>
-    <string name="address_secure">Encrypted connection (HTTPS)</string>
     <string name="address_insecure">Not encrypted (HTTP)</string>
     <string name="address_go">Go to %1$s</string>
     <string name="address_search">Search Kagi for “%1$s”</string>
@@ -108,7 +107,7 @@
     <!-- Page info -->
     <string name="page_info_address">Address</string>
     <string name="page_info_connection">Connection</string>
-    <string name="page_info_https">HTTPS: the connection to this site is encrypted. Certificate details are not available from the engine yet.</string>
+    <string name="page_info_https">This address uses HTTPS. The engine does not report certificate details, so this is not a verified connection.</string>
     <string name="page_info_http">HTTP: the connection is not encrypted. Others on the network can read and change this page.</string>
     <string name="share_chooser">Share page</string>
 
