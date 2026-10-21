@@ -44,11 +44,14 @@ class HisterClient(private val transport: HttpTransport) {
             // Hister updates a document key in place, so resending the same content is harmless.
             HttpOutcome.Timeout -> DispatchResult.Retry("timeout")
             is HttpOutcome.Failure -> DispatchResult.Retry(outcome.category)
-            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category)
-            is HttpOutcome.Response -> if (outcome.status in 200..299) {
-                DispatchResult.Done(null)
-            } else {
-                HttpStatus.classifyFailure(outcome)
+            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category, delivery = Delivery.NOT_SENT)
+            is HttpOutcome.Response -> when (outcome.status) {
+                in 200..299 -> DispatchResult.Done(null)
+                // Hister's rules skip the page: skip rules, an allow list it misses, Hister's own host.
+                406 -> DispatchResult.Declined("skipped_by_server")
+                // Sensitive content. At the pinned revision only submitted HTML is checked: none is sent.
+                422 -> DispatchResult.Declined("sensitive_content")
+                else -> HttpStatus.classifyFailure(outcome)
             }
         }
     }

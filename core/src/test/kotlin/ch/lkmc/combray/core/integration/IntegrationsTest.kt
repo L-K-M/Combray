@@ -40,6 +40,9 @@ class IntegrationsTest {
 
     /** Every request's address, in order. */
     private val sent = CopyOnWriteArrayList<String>()
+
+    /** Like a phone away from home: no request connects, so nothing is sent. */
+    @Volatile private var offline = false
     private val secrets = MemorySecrets()
     private var now = 1_760_000_000_000L
     private var ids = 0
@@ -52,7 +55,13 @@ class IntegrationsTest {
         integrations = Integrations(
             database = database,
             secrets = secrets,
-            transport = UrlConnectionTransport(timeoutMs = 500).let { http -> HttpTransport { sent += it.url; http.execute(it) } },
+            transport = UrlConnectionTransport(timeoutMs = 500).let { http ->
+                HttpTransport { request ->
+                    if (offline) return@HttpTransport HttpOutcome.NotConnected("network")
+                    sent += request.url
+                    http.execute(request)
+                }
+            },
             clock = { now },
             newId = { "job${ids++}" },
             scope = scope,
@@ -196,6 +205,47 @@ class IntegrationsTest {
         }
         assertEquals(JobState.FAILED, job().state)
         assertEquals("http_503_after_10_attempts", job().error)
+    }
+
+    @Test
+    fun attemptsThatCannotConnectNeverUseUpTheAttemptLimit() {
+        configure(root = unreachableRoot())
+        runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
+        repeat(15) {
+            now = maxOf(now, job().nextAttemptAt)
+            drain()
+        }
+        assertEquals(JobState.RETRY_WAIT, job().state)
+        assertEquals(0, job().attempts)
+        assertEquals(SaveStatus.Waiting, status())
+        // The wait still backs off, up to the six-hour ceiling (minus jitter).
+        assertTrue(job().nextAttemptAt - now in (SIX_HOURS_MS * 4 / 5)..SIX_HOURS_MS)
+    }
+
+    @Test
+    fun onlyAttemptsThatMayHaveReachedTheServerCountTowardTheLimit() {
+        configure()
+        runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
+        offline = true
+        repeat(5) {
+            drain()
+            now = maxOf(now, job().nextAttemptAt)
+        }
+        assertEquals(0, job().attempts)
+
+        // Back in reach, but no answer in time: each of these may have created the bookmark.
+        offline = false
+        server.fault = FakeKarakeep.Fault.STORE_THEN_HANG
+        server.faultCount = 100
+        repeat(9) {
+            drain()
+            now = maxOf(now, job().nextAttemptAt)
+        }
+        assertEquals(JobState.RETRY_WAIT, job().state)
+        assertEquals(SaveStatus.Pending, status())
+        drain()
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals("timeout_after_10_attempts", job().error)
     }
 
     @Test
@@ -573,5 +623,6 @@ class IntegrationsTest {
 
     private companion object {
         const val URL = "https://news.example/article?id=7#comments"
+        const val SIX_HOURS_MS = 6L * 60 * 60 * 1000
     }
 }

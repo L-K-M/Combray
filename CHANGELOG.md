@@ -80,6 +80,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A save or capture made while its server cannot be reached no longer stops
+  after ten tries: attempts that could not connect sent nothing and do not
+  count. Save shows "Waiting for Karakeep" instead of a spinning "Saving".
+- A page Hister refuses on purpose (its skip rules, or sensitive content) is
+  dropped with its text instead of staying as a stopped capture that counts
+  against the capture budget.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

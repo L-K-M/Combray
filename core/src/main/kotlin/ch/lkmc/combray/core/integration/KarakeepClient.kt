@@ -57,7 +57,7 @@ class KarakeepClient(private val transport: HttpTransport) {
             // Sent without an answer: the bookmark may exist. Retrying is safe (200 existing).
             HttpOutcome.Timeout -> DispatchResult.Retry("timeout")
             is HttpOutcome.Failure -> DispatchResult.Retry(outcome.category)
-            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category)
+            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category, delivery = Delivery.NOT_SENT)
             is HttpOutcome.Response -> when (outcome.status) {
                 201, 200 -> {
                     val id = bookmarkId(outcome.body)
@@ -87,7 +87,7 @@ class KarakeepClient(private val transport: HttpTransport) {
         return when (outcome) {
             HttpOutcome.Timeout -> DispatchResult.Retry("timeout")
             is HttpOutcome.Failure -> DispatchResult.Retry(outcome.category)
-            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category)
+            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category, delivery = Delivery.NOT_SENT)
             is HttpOutcome.Response -> when (outcome.status) {
                 in 200..299 -> DispatchResult.Done(bookmarkId)
                 // The list was deleted (or the bookmark): the user has to choose another list.

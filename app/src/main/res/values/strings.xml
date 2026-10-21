@@ -69,6 +69,7 @@
     <string name="save_needs_attention">Saving this page is paused. Check Karakeep in Settings.</string>
     <string name="save_state_saved">Saved to Karakeep</string>
     <string name="save_state_pending">Saving to Karakeep</string>
+    <string name="save_state_waiting">Waiting for Karakeep</string>
     <string name="save_state_attention">Saving needs attention</string>
     <string name="action_open_settings">Settings</string>
 

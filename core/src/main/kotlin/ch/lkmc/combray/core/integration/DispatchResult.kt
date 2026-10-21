@@ -5,8 +5,15 @@ sealed interface DispatchResult {
     /** The service acknowledged it. [remoteId] may be null if the answer could not be parsed. */
     data class Done(val remoteId: String?, val note: String? = null) : DispatchResult
 
-    /** Transient: network, timeout, 408, 429, 5xx. [retryAfterMs] from the server, if any. */
-    data class Retry(val category: String, val retryAfterMs: Long? = null) : DispatchResult
+    /**
+     * Transient: network, timeout, 408, 429, 5xx. [retryAfterMs] from the server, if any.
+     * [delivery] says whether this attempt can have reached the server at all.
+     */
+    data class Retry(
+        val category: String,
+        val retryAfterMs: Long? = null,
+        val delivery: Delivery = Delivery.MAY_HAVE_ARRIVED,
+    ) : DispatchResult
 
     /** 401/403: pause until the user fixes the credential (or the CSRF convention). */
     data class AuthRequired(val category: String) : DispatchResult
@@ -14,8 +21,20 @@ sealed interface DispatchResult {
     /** Permanent: invalid request, unexpected redirect, oversized payload. Needs the user. */
     data class Rejected(val category: String) : DispatchResult
 
+    /** The service refused this content on purpose, by its own rules: nothing to retry or keep. */
+    data class Declined(val category: String) : DispatchResult
+
     /** Not sent: policy changed since the job was made (exclusion, forgetting). */
     data class Cancelled(val category: String) : DispatchResult
+}
+
+/** Whether a failed attempt's request can have reached the server. */
+enum class Delivery {
+    /** No connection was made to any of the service's addresses: nothing was sent. */
+    NOT_SENT,
+
+    /** Sent (or the connection broke while sending): the server may have received it. */
+    MAY_HAVE_ARRIVED,
 }
 
 sealed interface ConnectionCheck {

@@ -96,12 +96,14 @@ fun BottomBar(
     }
 }
 
-/** One tap saves; the icon says saved, saving or needs attention, the label says it in words. */
+/** One tap saves; the icon says saved, saving, waiting or needs attention, the label in words. */
 @Composable
 private fun SaveButton(status: SaveStatus, enabled: Boolean, onSave: () -> Unit) {
     val (icon, label) = when (status) {
         SaveStatus.Saved -> Icons.Filled.Star to stringResource(R.string.save_state_saved)
         SaveStatus.Pending -> StarBorder to stringResource(R.string.save_state_pending)
+        // Karakeep could not be reached: nothing is being sent, so no spinner.
+        SaveStatus.Waiting -> Schedule to stringResource(R.string.save_state_waiting)
         is SaveStatus.NeedsAttention -> Icons.Filled.Warning to stringResource(R.string.save_state_attention)
         SaveStatus.NotConfigured, SaveStatus.Unsaved -> StarBorder to stringResource(R.string.action_save)
     }
@@ -171,6 +173,18 @@ private val StarBorder: ImageVector = ImageVector.Builder("StarBorder", 24.dp, 2
         addPathNodes(
             "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24z" +
                 "M12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z",
+        ),
+        fill = SolidColor(Color.Black),
+    )
+    .build()
+
+/** Material's "schedule" clock (Apache License 2.0, like the icon library): not in the core set. */
+private val Schedule: ImageVector = ImageVector.Builder("Schedule", 24.dp, 24.dp, 24f, 24f)
+    .addPath(
+        addPathNodes(
+            "M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2z " +
+                "M12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z " +
+                "M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z",
         ),
         fill = SolidColor(Color.Black),
     )

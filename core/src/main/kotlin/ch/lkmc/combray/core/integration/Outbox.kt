@@ -48,6 +48,8 @@ data class Claim(val job: OutboxJobEntity, val owner: String)
  *    └──────────────────────────────────────────────────────────────┘
  * newer capture of the same key: unsent older jobs -> SUPERSEDED
  * destination changed: unfinished jobs -> CANCELLED (never sent elsewhere)
+ * refused on purpose by the service (Declined): -> CANCELLED, captured text dropped
+ * Retry that could not connect: RETRY_WAIT, not counted toward the attempt limit
  * ```
  */
 class Outbox(
@@ -173,10 +175,18 @@ class Outbox(
     private fun transition(released: OutboxJobEntity, current: OutboxJobEntity, result: DispatchResult, now: Long): OutboxJobEntity =
         when (result) {
             is DispatchResult.Done -> released.copy(state = JobState.SUCCEEDED, remoteId = result.remoteId, error = result.note)
-            is DispatchResult.Retry -> if (current.attempts >= retry.maxAttempts) {
-                released.copy(state = JobState.FAILED, error = "${result.category}_after_${current.attempts}_attempts")
-            } else {
-                released.copy(
+            is DispatchResult.Retry -> when {
+                // Nothing was sent: claim() counted this attempt, but it does not use up the limit.
+                // A save waits for its server, a capture until it expires; the wait still backs off.
+                result.delivery == Delivery.NOT_SENT -> released.copy(
+                    state = JobState.RETRY_WAIT,
+                    attempts = current.attempts - 1,
+                    error = UNREACHABLE_PREFIX + result.category,
+                    nextAttemptAt = now + retry.delayWithoutConnectionMs(now - current.createdAt),
+                )
+                current.attempts >= retry.maxAttempts ->
+                    released.copy(state = JobState.FAILED, error = "${result.category}_after_${current.attempts}_attempts")
+                else -> released.copy(
                     state = JobState.RETRY_WAIT,
                     error = result.category,
                     nextAttemptAt = now + retry.delayMs(current.attempts, result.retryAfterMs),
@@ -184,6 +194,8 @@ class Outbox(
             }
             is DispatchResult.AuthRequired -> released.copy(state = JobState.AUTH_REQUIRED, error = result.category)
             is DispatchResult.Rejected -> released.copy(state = JobState.FAILED, error = result.category)
+            // Refused on purpose: retrying cannot help, and captured text is not kept for it.
+            is DispatchResult.Declined -> released.copy(state = JobState.CANCELLED, error = result.category)
             is DispatchResult.Cancelled -> released.copy(state = JobState.CANCELLED, error = result.category)
         }
 
@@ -268,6 +280,9 @@ class Outbox(
         private const val LOG_TAG = "CombrayOutbox"
         private const val FINISHED_RETENTION_MS = 7L * 24 * 60 * 60 * 1000
 
+        /** Error prefix of a job whose last attempt could not connect, as in `unreachable_network`. */
+        private const val UNREACHABLE_PREFIX = "unreachable_"
+
         /** Proposed transient body limit: captured text is not kept as a hidden archive. */
         const val CAPTURE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
 
@@ -275,6 +290,11 @@ class Outbox(
             JobKind.KARAKEEP_SAVE -> ServiceKind.KARAKEEP
             JobKind.HISTER_ADD -> ServiceKind.HISTER
         }
+
+        /** Whether [job] waits for its server to be reachable: its last attempt sent nothing. */
+        fun waitsForConnection(job: OutboxJobEntity) =
+            job.state == JobState.RETRY_WAIT && job.error?.startsWith(UNREACHABLE_PREFIX) == true
+
         private val RESUMABLE = setOf(JobState.FAILED, JobState.AUTH_REQUIRED, JobState.RETRY_WAIT)
         private val DISCARDABLE = setOf(JobState.PENDING, JobState.RETRY_WAIT, JobState.AUTH_REQUIRED, JobState.FAILED)
     }

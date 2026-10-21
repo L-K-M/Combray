@@ -20,6 +20,25 @@ class HisterClientTest {
     }
 
     @Test
+    fun histersDeliberateRefusalsAreDeclinedNotFailures() {
+        server.refusal = 406
+        assertEquals(DispatchResult.Declined("skipped_by_server"), client.add(server.root, FakeHister.TOKEN, "https://a.example/", "A", "x"))
+        server.refusal = 422
+        assertEquals(DispatchResult.Declined("sensitive_content"), client.add(server.root, FakeHister.TOKEN, "https://a.example/", "A", "x"))
+        // An invalid request still needs the user.
+        server.refusal = 400
+        assertEquals(DispatchResult.Rejected("http_400"), client.add(server.root, FakeHister.TOKEN, "https://a.example/", "A", "x"))
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
+    fun anAddThatCannotConnectWasNotSent() {
+        server.close()
+        val result = client.add(server.root, FakeHister.TOKEN, "https://a.example/", "A", "x") as DispatchResult.Retry
+        assertEquals(Delivery.NOT_SENT, result.delivery)
+    }
+
+    @Test
     fun theRequestBodyStaysBoundedEvenWhenEscapingGrowsIt() {
         // Every quote doubles in JSON: 600 KiB of quotes would be 1.2 MB escaped.
         val text = "\"".repeat(600 * 1024) + "😀"
