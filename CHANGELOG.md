@@ -82,7 +82,8 @@ All notable changes to this project are documented here. The format follows
 
 - A save or capture made while its server cannot be reached no longer stops
   after ten tries: attempts that could not connect sent nothing and do not
-  count. Save shows "Waiting for Karakeep" instead of a spinning "Saving".
+  count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
+  and asks for attention once its server has not answered for a week.
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.

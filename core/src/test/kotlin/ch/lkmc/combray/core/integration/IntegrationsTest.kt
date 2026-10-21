@@ -223,6 +223,24 @@ class IntegrationsTest {
     }
 
     @Test
+    fun aSaveThatCannotConnectForAWeekNeedsAttention() {
+        configure(root = unreachableRoot())
+        val created = now
+        runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
+        while (now - created < WEEK_MS) {
+            now = maxOf(now, job().nextAttemptAt)
+            drain()
+            if (job().state != JobState.RETRY_WAIT) break
+        }
+        now = maxOf(now, job().nextAttemptAt)
+        drain()
+
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals("unreachable_network_for_7_days", job().error)
+        assertTrue(status() is SaveStatus.NeedsAttention)
+    }
+
+    @Test
     fun onlyAttemptsThatMayHaveReachedTheServerCountTowardTheLimit() {
         configure()
         runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
@@ -624,5 +642,6 @@ class IntegrationsTest {
     private companion object {
         const val URL = "https://news.example/article?id=7#comments"
         const val SIX_HOURS_MS = 6L * 60 * 60 * 1000
+        const val WEEK_MS = 7L * 24 * 60 * 60 * 1000
     }
 }

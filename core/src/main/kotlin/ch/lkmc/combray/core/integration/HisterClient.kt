@@ -49,7 +49,8 @@ class HisterClient(private val transport: HttpTransport) {
                 in 200..299 -> DispatchResult.Done(null)
                 // Hister's rules skip the page: skip rules, an allow list it misses, Hister's own host.
                 406 -> DispatchResult.Declined("skipped_by_server")
-                // Sensitive content. At the pinned revision only submitted HTML is checked: none is sent.
+                // Sensitive content. The pinned revision checks only submitted HTML and Combray sends
+                // none, so this is defensive: such a refusal must not fail the capture.
                 422 -> DispatchResult.Declined("sensitive_content")
                 else -> HttpStatus.classifyFailure(outcome)
             }

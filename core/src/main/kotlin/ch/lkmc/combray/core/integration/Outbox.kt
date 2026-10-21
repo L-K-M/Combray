@@ -176,11 +176,14 @@ class Outbox(
         when (result) {
             is DispatchResult.Done -> released.copy(state = JobState.SUCCEEDED, remoteId = result.remoteId, error = result.note)
             is DispatchResult.Retry -> when {
+                // A server out of reach for a week is gone or misaddressed, not briefly away.
+                result.delivery == Delivery.NOT_SENT && now - current.createdAt >= UNREACHABLE_LIMIT_MS ->
+                    released.copy(state = JobState.FAILED, error = "$UNREACHABLE_PREFIX${result.category}_for_${UNREACHABLE_LIMIT_DAYS}_days")
                 // Nothing was sent: claim() counted this attempt, but it does not use up the limit.
                 // A save waits for its server, a capture until it expires; the wait still backs off.
                 result.delivery == Delivery.NOT_SENT -> released.copy(
                     state = JobState.RETRY_WAIT,
-                    attempts = current.attempts - 1,
+                    attempts = (current.attempts - 1).coerceAtLeast(0),
                     error = UNREACHABLE_PREFIX + result.category,
                     nextAttemptAt = now + retry.delayWithoutConnectionMs(now - current.createdAt),
                 )
@@ -282,6 +285,10 @@ class Outbox(
 
         /** Error prefix of a job whose last attempt could not connect, as in `unreachable_network`. */
         private const val UNREACHABLE_PREFIX = "unreachable_"
+
+        /** How long unsent work waits for its server before it needs the user's attention. */
+        private const val UNREACHABLE_LIMIT_DAYS = 7L
+        private const val UNREACHABLE_LIMIT_MS = UNREACHABLE_LIMIT_DAYS * 24 * 60 * 60 * 1000
 
         /** Proposed transient body limit: captured text is not kept as a hidden archive. */
         const val CAPTURE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
