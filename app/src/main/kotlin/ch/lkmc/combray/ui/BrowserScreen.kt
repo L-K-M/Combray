@@ -1,8 +1,11 @@
 package ch.lkmc.combray.ui
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -213,6 +216,17 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser)) } },
                 onRecent = { sheet = Sheet.RECENT },
                 onMore = { sheet = Sheet.MORE },
+                onCopyAddress = {
+                    // The rendered address as shown (a recovery URL before a commit), copied whole.
+                    tab?.url?.let { url ->
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText(resources.getString(R.string.page_info_address), url))
+                        // Android 13+ shows its own clipboard confirmation; below it we must.
+                        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                            notify(resources.getString(R.string.address_copied))
+                        }
+                    }
+                },
                 // Clear of the navigation bar and, in landscape, of a display cutout.
                 modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
             )
