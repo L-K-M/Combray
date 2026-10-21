@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.policy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -60,6 +61,12 @@ class AddressPolicyTest {
     fun mappedAndZonedIpv6HomeAddressesGoOverHttp() {
         assertEquals(AddressDecision.Navigate("http://[::ffff:192.168.1.1]"), primary("[::ffff:192.168.1.1]"))
         assertEquals("https://[::ffff:8.8.8.8]", (primary("[::ffff:8.8.8.8]") as AddressDecision.Navigate).url)
+        // A zone names the interface of a link-local address; the address alone decides.
+        assertEquals(AddressDecision.Navigate("http://[fe80::1%25wlan0]"), primary("[fe80::1%25wlan0]"))
+        // Malformed dotted tails are no home address (and do not throw).
+        for (malformed in listOf("[::1.2]", "[::1.2.3]", "[::1.2.3.4.5]")) {
+            assertNotEquals(AddressDecision.Navigate("http://$malformed"), primary(malformed))
+        }
     }
 
     @Test
