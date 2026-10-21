@@ -71,11 +71,13 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
         // The newest bookmarks show at once; a search waits for a pause in typing.
         if (query.isNotBlank()) delay(SEARCH_DEBOUNCE_MS)
         ui = BookmarksUi.Loading
-        val answer = integrations.karakeepBookmarks(query) ?: return@LaunchedEffect
+        val answer = integrations.karakeepBookmarks(query)
         if (mine != generation) return@LaunchedEffect
-        ui = BookmarksUi.Answer(answer)
+        // Null: the service went away meanwhile; its removal restarts this effect.
+        ui = answer?.let { BookmarksUi.Answer(it) } ?: BookmarksUi.Idle
         if (answer is KarakeepRead.Ok) {
-            bookmarks = answer.value.bookmarks
+            // Ids key the rows below; a repeat from the server must not crash the list.
+            bookmarks = answer.value.bookmarks.distinctBy { it.id }
             nextCursor = answer.value.nextCursor
         }
     }
@@ -118,9 +120,12 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
                     onClick = {
                         val mine = generation
                         scope.launch {
-                            val more = integrations.karakeepBookmarks(query, cursor) as? KarakeepRead.Ok ?: return@launch
+                            val more = integrations.karakeepBookmarks(query, cursor) ?: return@launch
                             if (mine != generation) return@launch
-                            bookmarks = bookmarks + more.value.bookmarks.filter { next -> bookmarks.none { it.id == next.id } }
+                            // A failed page keeps the rows shown and says why above them.
+                            ui = BookmarksUi.Answer(more)
+                            if (more !is KarakeepRead.Ok) return@launch
+                            bookmarks = (bookmarks + more.value.bookmarks).distinctBy { it.id }
                             nextCursor = more.value.nextCursor
                         }
                     },

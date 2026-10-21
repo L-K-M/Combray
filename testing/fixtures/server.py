@@ -280,6 +280,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             members = state["lists"].get(parts[5])
             if members is None:
                 return self.send_json(404, {"error": "list not found"})
+            if parts[7] not in {b["id"] for b in state["bookmarks"].values()}:
+                return self.send_json(404, {"error": "bookmark not found"})
             if parts[7] not in members:
                 members.append(parts[7])
         return self.send(204)

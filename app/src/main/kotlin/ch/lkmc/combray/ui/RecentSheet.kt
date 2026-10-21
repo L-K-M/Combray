@@ -162,38 +162,38 @@ private fun LocalRecent(
     onDismiss: () -> Unit,
     onForgetSite: (String) -> Unit,
 ) {
-        if (shown.isEmpty()) {
-            Text(
-                stringResource(if (query.isBlank()) R.string.recent_empty else R.string.recent_no_matches),
-                modifier = Modifier.padding(24.dp),
-            )
-        }
-        LazyColumn(Modifier.fillMaxWidth()) {
-            var lastDay: Long? = null
-            for (item in shown) {
-                val day = startOfDay(item.time)
-                if (day != lastDay) {
-                    lastDay = day
-                    item(key = "day:$day") { DayHeader(day, now) }
-                }
-                item(key = item.key) {
-                    RecentRow(
-                        item = item,
-                        now = now,
-                        onOpen = {
-                            when (item) {
-                                is RecentItem.OpenTab -> browser.selectTab(item.tabId)
-                                is RecentItem.Visit -> browser.openVisit(item.visitId)
-                            }
-                            onDismiss()
-                        },
-                        onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
-                        onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
-                        onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
-                    )
-                }
+    if (shown.isEmpty()) {
+        Text(
+            stringResource(if (query.isBlank()) R.string.recent_empty else R.string.recent_no_matches),
+            modifier = Modifier.padding(24.dp),
+        )
+    }
+    LazyColumn(Modifier.fillMaxWidth()) {
+        var lastDay: Long? = null
+        for (item in shown) {
+            val day = startOfDay(item.time)
+            if (day != lastDay) {
+                lastDay = day
+                item(key = "day:$day") { DayHeader(day, now) }
+            }
+            item(key = item.key) {
+                RecentRow(
+                    item = item,
+                    now = now,
+                    onOpen = {
+                        when (item) {
+                            is RecentItem.OpenTab -> browser.selectTab(item.tabId)
+                            is RecentItem.Visit -> browser.openVisit(item.visitId)
+                        }
+                        onDismiss()
+                    },
+                    onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
+                    onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
+                    onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                )
             }
         }
+    }
 }
 
 @Composable

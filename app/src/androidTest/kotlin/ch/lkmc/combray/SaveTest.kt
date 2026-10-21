@@ -150,7 +150,11 @@ class SaveTest {
         val title = "SOLID-%06x".format(SHOWN_IN_RECENT)
         compose.waitUntilAtLeastOneExists(hasText(title), Device.LOAD_TIMEOUT_MS)
         compose.onNodeWithText(title).performClick()
-        device.awaitState { it.openTabCount == 2 && it.activeTab?.url == url }
+        // Two steps, so a failure says which one: the tap closes Recent, then a new tab shows the page.
+        compose.waitUntilDoesNotExist(hasText(title), Device.LOAD_TIMEOUT_MS)
+        val opened = runCatching { device.awaitPage(url) }
+            .getOrElse { throw AssertionError("bookmark not opened: ${device.browser.browserState.value}", it) }
+        assertEquals(2, opened.openTabCount)
     }
 
     private companion object {

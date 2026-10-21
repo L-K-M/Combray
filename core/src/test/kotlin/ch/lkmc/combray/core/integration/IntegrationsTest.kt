@@ -480,7 +480,6 @@ class IntegrationsTest {
         assertNull(runBlocking { database.integrations().service(ServiceKind.KARAKEEP) })
     }
 
-    /** An address nothing listens on: connecting fails at once, before anything is sent. */
     private fun chooseList(id: String) = runBlocking {
         val lists = integrations.karakeepLists()!!
         val list = (lists.read as KarakeepRead.Ok).value.single { it.id == id }
@@ -544,6 +543,7 @@ class IntegrationsTest {
         assertTrue(none.value.bookmarks.isEmpty())
     }
 
+    /** An address nothing listens on: connecting fails at once, before anything is sent. */
     private fun unreachableRoot(): String {
         val port = ServerSocket(0).use { it.localPort }
         return "http://127.0.0.1:$port/keep"

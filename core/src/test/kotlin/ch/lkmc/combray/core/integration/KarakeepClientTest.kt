@@ -67,6 +67,8 @@ class KarakeepClientTest {
     @Test
     fun aBookmarkIsAddedToAnExistingListOnly() {
         server.lists["reading"] = mutableSetOf()
+        assertEquals(DispatchResult.Rejected("list_not_found"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
+        server.bookmarks["https://example.org/"] = "bm1"
         assertEquals(DispatchResult.Done("bm1"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
         assertEquals(DispatchResult.Done("bm1"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
         assertEquals(setOf("bm1"), server.lists["reading"])

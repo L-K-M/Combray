@@ -89,6 +89,7 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
         // PUT /keep/api/v1/lists/{list}/bookmarks/{id}
         val parts = exchange.requestURI.path.split('/')
         val members = lists[parts[parts.size - 3]] ?: return reply(exchange, 404, """{"error":"not found"}""")
+        if (parts.last() !in bookmarks.values) return reply(exchange, 404, """{"error":"not found"}""")
         members += parts.last()
         reply(exchange, 204, "")
     }
