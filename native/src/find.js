@@ -73,7 +73,6 @@
   var capped = false;
   var nodes = 0;
   var deadline = Date.now() + maxMillis;
-  var probe = document.createRange();
   var root = document.body || document.documentElement;
   var walker = root ? document.createTreeWalker(root, SHOW_TEXT) : null;
 
@@ -95,9 +94,11 @@
     var at = haystack.indexOf(needle);
     if (at < 0) continue;
 
-    // Text without a box (display: none, or in a hidden subtree) is not on the page.
-    probe.selectNodeContents(node);
-    if (!probe.getClientRects().length) continue;
+    // Text whose element has no box (display: none, or in a hidden subtree) is not on the page.
+    // Not the text's own Range: in Servo 0.6.0 a range within one text node reports the boxes of
+    // every node after it in the document, so hidden text before visible text counted.
+    var element = node.parentElement;
+    if (!element || !element.getClientRects().length) continue;
 
     while (at >= 0) {
       if (matches.length >= maxMatches) {
