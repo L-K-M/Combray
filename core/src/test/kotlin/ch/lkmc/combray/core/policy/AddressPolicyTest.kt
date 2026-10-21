@@ -50,6 +50,19 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun aTypedSchemeIsKeptOnHomeAddresses() {
+        assertEquals(AddressDecision.Navigate("https://192.168.1.10"), primary("https://192.168.1.10"))
+        assertEquals(AddressDecision.Navigate("http://localhost:3000"), primary("http://localhost:3000"))
+        assertEquals(AddressDecision.Navigate("https://keep.lan:3000"), primary("https://keep.lan:3000"))
+    }
+
+    @Test
+    fun mappedAndZonedIpv6HomeAddressesGoOverHttp() {
+        assertEquals(AddressDecision.Navigate("http://[::ffff:192.168.1.1]"), primary("[::ffff:192.168.1.1]"))
+        assertEquals("https://[::ffff:8.8.8.8]", (primary("[::ffff:8.8.8.8]") as AddressDecision.Navigate).url)
+    }
+
+    @Test
     fun privateAddressesAndLocalhostGoOverHttpWithHttpsInstead() {
         val local = listOf(
             "192.168.1.10", "10.0.0.2:8080", "172.16.0.1", "172.31.255.255/x", "127.0.0.1:3000", "169.254.1.1",
@@ -113,7 +126,7 @@ class AddressPolicyTest {
     @Test
     fun schemelessCredentialsAreRejectedNotSearched() {
         // A search would put the password in Kagi's URL and search history.
-        for (input in listOf("admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas")) {
+        for (input in listOf("admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas", "admin:pw@nas!", "u:p@1.2.3.4.5")) {
             val interpretation = AddressPolicy.interpret(input)
             assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
             assertNull(input, interpretation.alternative)

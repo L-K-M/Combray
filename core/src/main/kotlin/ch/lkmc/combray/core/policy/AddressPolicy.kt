@@ -65,6 +65,10 @@ object AddressPolicy {
     private val IPV6_GROUP = Regex("^[0-9A-Fa-f]{1,4}$")
     private const val IPV6_GROUPS = 8
     private const val BITS_PER_BYTE = 8
+    private const val IPV4_BYTES = 4
+    private const val IPV6_BYTES = 16
+    /** ::ffff:0:0/96, the prefix of IPv4-mapped IPv6 addresses (RFC 4291). */
+    private val IPV4_MAPPED_PREFIX = List(10) { 0 } + listOf(0xFF, 0xFF)
 
     /** Names that only resolve on a home network (RFC 6762 .local, RFC 8375 .home.arpa, and common ones). */
     private val LOCAL_SUFFIXES = listOf(".lan", ".local", ".home.arpa", ".internal", ".localdomain")
@@ -175,13 +179,15 @@ object AddressPolicy {
         SINGLE_LABEL,
     }
 
-    /** "user:password@host/path": a colon before the authority's last "@", and a host after it. */
+    /**
+     * "user:password@host/path": a colon before the authority's last "@". What follows the "@"
+     * need not be a valid host: "admin:pw@nas!" would still send the password as a search.
+     */
     private fun hasSchemelessCredentials(text: String): Boolean {
         val authority = text.takeWhile { it != '/' && it != '?' && it != '#' }
         if ('@' !in authority) return false
 
-        val userInfo = authority.substringBeforeLast('@')
-        return ':' in userInfo && schemelessHost(text.substring(userInfo.length + 1)) != null
+        return ':' in authority.substringBeforeLast('@')
     }
 
     /** "host:1234" is a host with a port, not a URL with scheme "host". */
@@ -215,7 +221,10 @@ object AddressPolicy {
 
     /** [bytes] is null for a bracketed host that is not plain IPv6, which is treated as public. */
     private fun addressShape(bytes: List<Int>?): HostShape {
-        val local = bytes != null && LOCAL_NETWORKS.any { (network, prefixLength) -> inNetwork(bytes, network, prefixLength) }
+        // An IPv4-mapped IPv6 address ("::ffff:192.168.1.1") is that IPv4 address.
+        val address = bytes?.takeIf { it.size == IPV6_BYTES && it.take(IPV4_MAPPED_PREFIX.size) == IPV4_MAPPED_PREFIX }
+            ?.takeLast(IPV4_BYTES) ?: bytes
+        val local = address != null && LOCAL_NETWORKS.any { (network, prefixLength) -> inNetwork(address, network, prefixLength) }
         return if (local) HostShape.LOCAL_ADDRESS else HostShape.ADDRESS
     }
 
@@ -238,8 +247,20 @@ object AddressPolicy {
         return host.split('.').map { it.toInt() }.takeIf { octets -> octets.all { it <= 255 } }
     }
 
-    /** The sixteen bytes of an IPv6 address such as "fe80::1", or null; embedded IPv4 and zones are not read. */
-    private fun ipv6Bytes(address: String): List<Int>? {
+    /**
+     * The sixteen bytes of an IPv6 address such as "fe80::1", or null. A zone ("fe80::1%wlan0",
+     * "%25" in a URL) names an interface and is ignored; a dotted IPv4 tail counts as two groups.
+     */
+    private fun ipv6Bytes(written: String): List<Int>? {
+        val bare = written.substringBefore('%')
+        val lastColon = bare.lastIndexOf(':')
+        val dottedTail = bare.substring(lastColon + 1)
+        val address = if ('.' in dottedTail) {
+            val tail = ipv4Bytes(dottedTail) ?: return null
+            bare.substring(0, lastColon + 1) + "%x:%x".format((tail[0] shl BITS_PER_BYTE) or tail[1], (tail[2] shl BITS_PER_BYTE) or tail[3])
+        } else {
+            bare
+        }
         val halves = address.split("::")
         if (halves.size > 2) return null
 
