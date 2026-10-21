@@ -80,6 +80,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Addresses with common credential parameters (`auth_token`, `accessToken`,
+  `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
+  `code` with its `state`, session IDs) could be saved to Karakeep or captured
+  to Hister. Parameter names are now compared without case or separators, and
+  pagination cursors such as `pageToken` are still allowed.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
