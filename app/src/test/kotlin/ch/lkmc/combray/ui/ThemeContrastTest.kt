@@ -105,11 +105,12 @@ class ThemeContrastTest {
     }
 
     private fun assertLuminanceOrder(colors: List<Color>, descending: Boolean, name: String) {
+        // Strict: an equal adjacent pair would be a duplicated rung, not a ladder step.
         colors.zipWithNext().forEach { (first, second) ->
             val orderOk = if (descending) {
-                luminance(first) >= luminance(second)
+                luminance(first) > luminance(second)
             } else {
-                luminance(first) <= luminance(second)
+                luminance(first) < luminance(second)
             }
             assertTrue(
                 "$name out of order: #${(first.value shr 32).toString(16)} then #${(second.value shr 32).toString(16)}",
