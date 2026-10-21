@@ -52,6 +52,9 @@ sealed interface Notice {
 
     /** The engine could not open an address (it does not parse as a URL Servo can load). */
     data object AddressNotOpened : Notice
+
+    /** The shown page asked for a window without the user's tap, and it was not opened. */
+    data object PopupBlocked : Notice
 }
 
 sealed interface KeyboardRequest {

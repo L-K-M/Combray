@@ -196,6 +196,10 @@ pub enum EngineEvent {
         view: ViewKey,
         url: String,
     },
+    /// The page asked for a window without the user's tap; it was not opened.
+    PopupBlocked {
+        view: ViewKey,
+    },
     History {
         view: ViewKey,
         change: HistoryChange,
@@ -312,6 +316,9 @@ impl EngineEvent {
             ),
             EngineEvent::ExternalLink { view, url } => {
                 with_view(view, json!({ "type": "external_link", "url": url }))
+            },
+            EngineEvent::PopupBlocked { view } => {
+                with_view(view, json!({ "type": "popup_blocked" }))
             },
             EngineEvent::History {
                 view,

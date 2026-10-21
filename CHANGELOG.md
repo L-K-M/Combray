@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages could open new tabs by themselves, on load or from a timer, and
+  each new tab could open the next. A page now opens a window only right
+  after your tap, one per tap; Combray says when it blocked one.
 - Tapping a `mailto:`, `tel:`, map or app link on a page replaced the page
   with an error. Such links now open in the app that handles them, or say
   that none can; an `intent:` link's fallback page opens instead. A link

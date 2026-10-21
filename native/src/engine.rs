@@ -627,8 +627,16 @@ impl Engine {
     /// the application adopts it (`tab_opened`). Dropping the request refuses the window.
     fn open_page_tab(&mut self, opener: ViewKey, request: CreateNewWebViewRequest) {
         // Only the tab the user sees may open windows: hidden or throttled tabs cannot take
-        // over the screen (Servo 0.6.0 reports no user activation to check instead).
+        // over the screen.
         if self.live_tab(opener).is_none() || self.active != Some(opener.tab) {
+            return;
+        }
+        // And only right after the user's own tap or key press there: Servo 0.6.0 opens every
+        // window.open() and target=_blank window, with or without one, and each new tab could
+        // open the next. One tap opens at most one window.
+        if !self.take_activation(&[opener.tab]) {
+            info!("window without the user's tap in the visible tab: refused");
+            self.emit(EngineEvent::PopupBlocked { view: opener });
             return;
         }
         let Some(runtime) = &self.runtime else {
