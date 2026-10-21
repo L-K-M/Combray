@@ -240,6 +240,8 @@ deployed service compatibility or physical-device acceptance.
   response loss; bookmark creation and failed list membership are separate facts.
   Map safe error categories consistently to useful copy, rather than exposing
   one specially translated code alongside otherwise raw queue errors.
+  When localizing generic coordinator failures, use a typed notice mapped to app
+  string resources; do not push resource IDs into the core domain model.
 
 ## Visual and layout notes
 
@@ -319,6 +321,15 @@ deployed service compatibility or physical-device acceptance.
   Production startup is serialized, but the direct native singleton publication
   path also needs a two-caller race check before supporting additional callers.
 
+Sol validation on 21 October: the pinned x86_64 native build passed in 16m11s,
+20 native host tests and 29 script tests passed, and each of the four fix branches
+passed JVM tests, lint and debug/release assembly. Two complete Reader device runs
+each passed 2/3 checks; a confirmed System UI ANR intercepted Back injection. A
+later recovery attempt timed out and was stopped. This is an incomplete device
+gate, not evidence of phone performance or a completed visual/accessibility pass.
+Exact commands and limitations are recorded in the report PR's
+`docs/ENGINE_SPIKE.md`, section 14.
+
 ## Process notes for the next agent
 
 - `python3 scripts/check_docs.py` and `git diff --check` always;
@@ -339,3 +350,9 @@ deployed service compatibility or physical-device acceptance.
 - Preserve URL/document identity and credentials at every boundary. Avoid
   unescaped SQL LIKE for local search, token-based account identities, or
   timestamps presented as a server latest-wins guarantee.
+- Add policy tests for pasted URL tabs/newlines before changing normalization;
+  blindly replacing every whitespace character with a space can change meaning.
+  Count ambiguous attempts conservatively: counting only returned failures can
+  permit endless resends after repeated response loss. Non-positive Kotlin
+  `repeat` counts do not establish a crash; the input concern is positive-range
+  work and correct editing semantics.
