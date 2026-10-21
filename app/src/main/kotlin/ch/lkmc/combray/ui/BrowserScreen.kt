@@ -105,9 +105,17 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         }
     }
 
-    // The page focused or left an editable element.
-    LaunchedEffect(state.keyboard, surfaceView) {
+    // The page focused or left an editable element. While a sheet or page dialog owns the
+    // keyboard, its request is dropped, not applied: a page that autofocuses a field on a
+    // timer must not yank focus and the IME out of the address editor or a sign-in dialog
+    // (and a page-side blur must not hide the keyboard under them). Dropped, not queued —
+    // tapping the page field asks again. The keys re-evaluate when the overlay closes.
+    LaunchedEffect(state.keyboard, surfaceView, sheet, state.pageControl) {
         val request = state.keyboard ?: return@LaunchedEffect
+        if (sheet != Sheet.NONE || state.pageControl != null) {
+            browser.keyboardHandled(request)
+            return@LaunchedEffect
+        }
         val view = surfaceView ?: return@LaunchedEffect
         when (request) {
             is KeyboardRequest.Show -> view.showKeyboard(request.kind)

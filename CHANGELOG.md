@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page that focuses a field on its own (autofocus, timers) no longer
+  takes the keyboard away from the address editor or a page dialog,
+  and a page-side blur no longer hides it under them.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
