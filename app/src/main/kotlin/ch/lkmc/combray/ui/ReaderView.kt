@@ -89,7 +89,11 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
             ) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.action_close),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
