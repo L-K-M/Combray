@@ -230,6 +230,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         Sheet.ADDRESS -> AddressSheet(
             target = addressTab,
             currentUrl = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url },
+            browser = browser,
             onDecision = { decision ->
                 dismiss()
                 val target = addressTab

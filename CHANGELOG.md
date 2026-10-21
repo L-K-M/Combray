@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Suggestions under the address editor from open tabs and recent pages
+  on this device, while the text is edited; matching and the row limit
+  run locally and nothing is sent anywhere.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

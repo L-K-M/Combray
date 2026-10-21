@@ -60,6 +60,7 @@
     <string name="address_reject_credentials">Addresses that contain a user name or password are not opened.</string>
     <string name="address_reject_malformed">This is not a valid web address.</string>
     <string name="address_instead">Instead: %1$s</string>
+    <string name="address_suggestions">On this device</string>
     <string name="address_load_failed">Page did not load</string>
     <string name="no_app_for_link">No app on this device can open this link.</string>
     <string name="save_not_set_up">Saving needs Karakeep. Set it up in Settings.</string>
