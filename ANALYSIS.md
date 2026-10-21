@@ -4,6 +4,11 @@ Shovel-ready list for the next session. Consolidated 21 October 2026 from the
 earlier roadmap (`SWE2.md`), `Grok.md` (discarded after its merge),
 `GeminiFlash.md`, the [Sol review](https://github.com/L-K-M/Combray/pull/28),
 and the MiMo review (`MiMo.md`, folded in below).
+This version also incorporates the independent Fusion review in `fusion.md`
+(source baseline `4105c28`, followed by the prepared branches below). Its
+source findings are not phone benchmarks. Earlier contributors' PR descriptions
+are retained as provenance, not re-verified PR status; no other contributor's
+PR was inspected during this pass.
 Sol's source citations refer to `e5cf8ed`; its handoff records later verification. Read
 `AGENTS.md` and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) before
 editing. Keep Servo and the personal-browser scope. Private browsing, extensions
@@ -36,7 +41,12 @@ Earlier session:
 - #25 Recent filters in memory. `RecentItem.matches` is on the model.
 - #26 full Material 3 roles for both modes. Light `outline` is about 3.5:1.
 - #27 floating reader close button.
-- #29 outbox lease 60 s to 150 s. Worst-case dispatch is about 62 s plus DNS.
+- #29 outbox lease 60 s to 150 s. Worst-case dispatch was estimated at about
+  62 s plus DNS; that figure is an earlier estimate, not a proven worst-case
+  bound. Per-read/connect timeouts are not an overall request deadline: a slow
+  trickle or DNS can outlast a fixed lease. Test a slow live request,
+  expiry/takeover and its stale late completion; use deadlines/renewal and
+  fenced transitions, never an exactly-once promise (Fusion 15).
 - #30 capture-budget flag derived from the live queue.
 
 Additional recorded work, not merged:
@@ -101,12 +111,49 @@ MiMo fixes, also left open for the owner:
   same Undo as the close button. History rows keep their explicit menu:
   removing a visit has no undo. Offers the swipe part of the close-all item.
 
+## Prepared Fusion Changes
+
+These changes are committed on local branches prepared against locally known
+`origin/main` at `1cc2da9`. I have not published them, opened their PRs, or
+applied them to main. Network approval is pending; no GitHub CI/GLM review or
+steady-state claim is made. Do not start a second implementation of these
+slices while the owner decides how to publish/merge them.
+
+| Branch / tip | Implemented scope and evidence |
+| --- | --- |
+| `fusion/encoded-credential-keys` / `6e57bd8` | Fusion 1: percent-decode query/fragment names once before the shared sensitive-URL guard. Values and double encoding are not rewritten. Failing-first pure, Karakeep-save and Hister-capture regressions pass. This is an independent alternative to the already-recorded #39, not a claim about that PR's implementation; choose one rather than merge both blindly. |
+| `fusion/startup-error-state` / `54d752f` | Fusion 3: an unscoped startup error leaves STARTING for FAILED without deleting tabs/session; later EngineReady recovers. All 41 coordinator tests on this branch pass. READY diagnostics and tab-scoped refusals retain their handling. |
+| `fusion/background-throttling` / `fbd3dfa` | Fusion 7: process visibility reaches the serialized coordinator. New/restored views stay throttled while backgrounded; resume unthrottles only the selected view. All 43 coordinator tests on this branch pass. These are emitted hints, not measured battery savings. |
+| `fusion/copy-address` / `f908d84` | First part of Fusion 20: long-press address copies the exact current URL; tap still edits; a blank tab has no copy action. Three failing-first/new semantics regressions pass; Android 13+ uses its own clipboard confirmation. Title-aware sharing and previous-tab switching remain future work. |
+
+The unpublished combined source gate also passed Kotlin unit tests, lint,
+debug/release assembly and five targeted emulator chrome checks, including
+large-font/48dp/non-overlap regressions. The initial integration-only test
+insertion conflict needed its missing closing brace and annotation restored;
+no independent feature logic changed. Builds deliberately omitted Servo.
+See Verification below and `fusion.md` for limits; an open/prepared branch is
+not implemented behavior on main.
+
 ## Correctness still open
 
 History/capture atomicity and abandoned-claim expiry are offered in #32 and #31;
 do not implement them again. Connection labels, page-info dismissal, and
 Karakeep-panel identity are offered in #43, #48 and #40. Validate the listed
 source candidates before editing; none is a new device reproduction.
+
+**First remaining privacy slice: capture pause and durable admission (Fusion 2).**
+The due-job query checks `captureEnabled`; `HisterIntegration.dispatch` does not.
+Pause a claimed-but-unsent job while the dispatcher switches to IO, and its
+fresh disabled-service snapshot can still be sent. Recheck pause before
+transport, retain paused work without spending a network-attempt budget, and
+prove resume neither loses the job nor reports a false authentication error.
+Also gate a real Settings exclusion/configuration change during suspended
+`captured` admission and reject stale policy before persistence. Normal Forget
+and capture-result handling use the same coordinator consumer; a direct
+concurrent sink test is not a production Forget-race reproduction. This work
+is distinct from the recorded local-deletion/cancellation transaction proposal.
+Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
+`IntegrationDao.kt`; use controlled barriers at claim/dispatch/admission.
 
 1. **A failed list add hides a bookmark Karakeep already stored.** After
    `createLink` succeeds, a list PUT that is not `Done` becomes the job result,
@@ -146,6 +193,15 @@ source candidates before editing; none is a new device reproduction.
     boundary before adding a Rust guard. If needed, reject paths outside the
     staging root without breaking multiple uploads. Files: `PageControls.kt`,
     `UploadStaging.kt`, `native/src/controls.rs`. No page-to-JNI path is established.
+    Staging lifetime/resource bounds (Fusion 9) are separate confirmed gaps:
+    `UploadStaging.stage` streams without a byte budget and retains copies until
+    process restart; `CombrayApplication` starts root cleanup asynchronously, so an
+    early new pick can race that deletion. Finish cleanup before admission or
+    isolate process generations. Choose documented finite per-pick/total limits
+    with the owner, enforce them while streaming unknown-length providers, and
+    roll back only the failed pick. Test a blocked provider racing cleanup, large
+    repeated picks, duplicate names, cancellation and disk-full without deleting
+    an active attachment.
 8. **Local search misses retained visits beyond the newest 500 (Sol S02).**
     `BrowserCoordinator.recent(query)` limits `BrowserDao.observeHistory` before
     filtering title/URL. Search before limiting. Seed more than 500 retained visits
@@ -161,6 +217,10 @@ source candidates before editing; none is a new device reproduction.
     FAILED rows also keep their payloads inside the seven-day budget sum
     (`queuedCaptureBytes`), so one permanently failed large capture blocks new
     captures until it ages out.
+    When admitting replacement content, account for the body being atomically
+    superseded rather than counting old and new bodies as permanent extra usage.
+    Test equal/smaller replacements near capacity and warning recovery after
+    expiry, drain and discard without another capture (Fusion 14).
 10. **A service root is not an account identity (Sol S18).** Root fingerprints
     can reuse Saved status across accounts on one server. Key rotation pauses jobs
     but does not identify an account. Establish a supported read-only identity, or
@@ -194,6 +254,15 @@ source candidates before editing; none is a new device reproduction.
     via user confirmation in external native apps instead of triggering `UNSUPPORTED_SCHEME`.
     Keep these optional. Test absent handlers and deliberate user activation;
     unsafe `intent:`, `javascript:`, file/content schemes stay rejected.
+    The current end-to-end gap (Fusion 5) is not just missing scheme names:
+    `native/src/delegate.rs::request_navigation` allows page requests and the
+    coordinator ignores `PageNavigationRequested`, so clicked mail/tel links never
+    reach the typed-input external decision. Carry view/document, frame level and
+    user activation into an explicit decision: normal HTTP(S) stays fast;
+    unsupported schemes are refused; deliberate external links get confirmation.
+    Never launch an intent from arbitrary script or an iframe. Test mail/tel,
+    redirects, popups, unsupported schemes and absent handlers. No local-file read
+    or sandbox escape has been demonstrated.
 16. **Page controls can be attributed to the wrong page.** `view.controls` is
     cleared on crash but not when a document commits, so a dialog from the
     previous document is presented under the new page's host when the engine
@@ -208,7 +277,10 @@ source candidates before editing; none is a new device reproduction.
     on screen; and `pendingCaptures`/`pendingArticles` are removed only when a
     result arrives, so a crashed view leaks them for the process lifetime (fold
     the last one into item 13's pruning when measured). Each is small and
-    unit-testable like the PR #36 cases. File: `BrowserCoordinator.kt`.
+    unit-testable like the PR #36 cases. File: `BrowserCoordinator.kt`. The narrow
+    unscoped-STARTING failure path is prepared in
+    `fusion/startup-error-state` (Fusion 3, Prepared Fusion Changes above); it is
+    not a fresh implementation task here and does not claim all runtime errors.
 18. **Destination fingerprints do not canonicalize the host.** `https://h`,
     `https://h:443` and `https://h.` count as different servers, forcing
     credential re-entry and re-binding queued work to a "new" destination. Strip
@@ -280,6 +352,13 @@ Do not claim a device reproduction for these. They are from the bridge and
    keyboard modifiers type literal characters; `ImeShown.multiline` is parsed but
    unused, so a `<textarea>` gets single-line input; and `deleteSurroundingText`
    emits two JNI commands per character with no cap.
+   Fusion 4 also confirms that `setComposingText` only buffers a string: no
+   visible composing preview reaches the page, and deletion does not update that
+   buffer. Surrounding-text/caps (`getTextBeforeCursor`, `getCursorCapsMode`) and
+   selection synchronization are absent. Exercise AOSP/Gboard, CJK, correction,
+   emoji/surrogates, large ranges, field/tab changes, navigation and dismissal.
+   Use bounded view/field-attributed edits or decline unsupported requests; do not
+   silently clip an edit or flush an old composition into the next active field.
 5. **`publish()` Room work.** Reviewed main still publishes ignored events; #24
    offers the inert-event fix. Paint reports are already limited to one per
    second, not 60 per second. After that lands, measure stateful title/load bursts
@@ -324,7 +403,10 @@ Do not claim a device reproduction for these. They are from the bridge and
     Measure cold chrome, resident/evicted switches, scroll frames, 1/10/30-tab
     memory, idle CPU, thermals and background timers on a real GPU. The loop polls
     at 250ms and selection survives backgrounding; use lifecycle evidence before
-    changing suspension, frame scheduling or the live-view budget.
+    changing suspension, frame scheduling or the live-view budget. The missing
+    visibility hint is offered by `fusion/background-throttling`; remaining work
+    is real-GPU validation, not another implementation of that hint. No measured
+    CPU/FPS/battery numbers.
 14. **History index candidate.** For `BrowserDao.observeHistory`, run EXPLAIN QUERY
     PLAN and timing on thousands of good/failed visits. Add a composite
     `visits(failed, lastSeenAt)` index in `BrowserEntities.kt` only if it helps
@@ -361,25 +443,29 @@ Do not claim a device reproduction for these. They are from the bridge and
   the debounced search waits: the list flickers and empty space flashes. Keep
   the last answer visible (with the loading line) until the new one arrives.
   Files: `HisterSearchPanel.kt`, `KarakeepPanel.kt`.
+  For Load more, Hister currently discards non-Results replies without an
+  explanation, and neither panel guards the button while its cursor request is
+  running (Fusion 11). Bind in-flight state to destination/query/cursor, disable
+  duplicate taps, preserve rows with inline Retry on failure, and reject late
+  old-generation pages. Test double taps, delayed old queries and unauthorized/
+  offline later pages; #40's service-identity fix is related but distinct.
 - Tab badge shows the raw count. Cap the display at "99+" but announce the real
   count. Check 0/1/99/100 without changing logical state.
 - Share sends only the URL. Send the title and the address (`title` then the
   URL). File: `share()` in the app module. Long-press Share can copy the address
   instead of opening the chooser.
-- Long-press the address chip to copy the full URL, with a short "Copied" and a
-  TalkBack announcement.
-  Keep a visible alternative. Also confirm link/image-address copying on API
-  30–32; avoid duplicate notifications beside newer Android's clipboard preview.
-  Tapping the chip could also reveal the full URL in place (the bar keeps the
-  privacy-friendly host), and a "Paste and go" row in the address sheet when the
-  clipboard holds an address is the same convenience.
+- Address-copy long press is prepared in `fusion/copy-address` (Fusion 20),
+  with a labeled accessibility action, no copy action on home, and no duplicate
+  Android 13+ confirmation. Do not implement that slice again. Still verify a
+  physical long press, real clipboard contents and TalkBack on the owner's
+  phone; the emulator tests invoked the exposed semantics action.
+  Also verify link/image-address copying through the existing context menus on
+  API 30-32; those are separate actions. Keep a
+  visible copying route. Optional future experiments remain full-URL reveal
+  without losing tap-to-edit, and a user-invoked Paste and go row; never read
+  the clipboard in the background.
 - Recent row menu has Remove and Forget. Add Copy link and Share there, using
   the clipboard and chooser the page UI already uses.
-- The IME bridge does not implement `getTextBeforeCursor` or `getCursorCapsMode`.
-  Composition preview/selection sync are absent; deletion repeats key events.
-  Test AOSP/Gboard, CJK, correction, emoji/surrogate pairs and large ranges.
-  Implement bounded, view-attributed edits or decline unsupported requests;
-  silently clipping a requested edit is incorrect.
 - Address-sheet focus is requested in `LaunchedEffect` and may run before the
   sheet window is laid out. Confirm the keyboard opens and the field clears it
   on a device.
@@ -398,6 +484,11 @@ Do not claim a device reproduction for these. They are from the bridge and
   accent tint. Verify sheets, chips, outlines,
   disabled/errors, dialogs, Reader and system bars in both modes, including text
   and non-text contrast. Landscape/large text on Recent and Settings is unverified.
+  Lint also flags the missing monochrome layer in
+  `app/src/main/res/mipmap-anydpi/ic_launcher.xml`. If themed launcher icons
+  matter to the owner, generate a separate matching monochrome asset and test
+  platform tinting; preserve the original square, opaque `media-sources/icon.png`
+  unchanged. Do not bake Android masking into the source artwork.
 - A theme override (system / light / dark) is not built. System appearance is
   the default. Add an override only if the owner wants the phone and the room
   to disagree. (Offered in #52, together with reader text size.)
@@ -416,6 +507,10 @@ Do not claim a device reproduction for these. They are from the bridge and
   non-overlap before adding blanket modifiers. Five 48dp actions leave roughly
   64dp for the address surface at 320dp, before its icon/padding. Verify #50's
   proposed full-width address row preserves readable origin, Share and target sizes.
+  Start ellipsis preserves the string suffix, not necessarily the complete
+  registrable domain, despite the source comment (Fusion 12). Check actual
+  rendered site identity at 320/360dp, 200% type, RTL, long IDNs/subdomains and
+  99/1000 tabs; passing hit-target semantics alone is insufficient.
 - Soft keyboard layout stability: verify existing `imePadding`, focus timing and
   viewport resizing before adding animated insets. Respect reduced motion.
   Measure snackbar/bar bounds; its fixed 72dp clearance may not fit every font.
@@ -460,6 +555,9 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   for distinct useful information. Capture acknowledgment is not proof of indexing.
 - On the new-tab surface, one line: the last page you can reopen, and the open
   tabs. That is the Recent-home idea in miniature. Do not retire the sheet.
+  The local madeleine variant reads the existing Recent projection: title,
+  domain and relative time, no extra history store or recommendation feed. It is
+  distinct from the optional user-invoked Hister recall experiment above.
   A quiet wordmark/search/Recent variant is another experiment; the owner has not
   selected a final Recent-home layout. Avoid a busy dashboard. (#42 offers the
   monogram and host quick links on that surface.)
@@ -499,7 +597,9 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   Do not fetch icons through another stack.
 - A compact, non-color-only mark for whether this page will be captured
   (on, paused, excluded). Label eligibility/acceptance accurately; Hister's
-  acknowledgment alone does not prove searchable indexing.
+  acknowledgment alone does not prove searchable indexing. Derive paused/
+  excluded/queued reasons locally; do not make a background Hister search merely
+  to fill a badge.
 - Named Undo: `Notice.TabClosed` carries a title. Show a bounded title with an
   untitled fallback, preserving exact tab identity and a reachable Undo action.
 
@@ -514,7 +614,10 @@ haptics on every routine action.
   before adding a JNI method. Do not invent one.
 - Camera, microphone, location. Every permission request is denied. That is the
   safe default. A prompt needs a tagged request, the origin, and the Android
-  runtime permission first.
+  runtime permission first. Useful feedback need not wait for granting support
+  (Fusion 18): show one document-attributed notice and a Page Info explanation
+  for an unsupported request, with no stale/hidden-tab notice or automatic
+  grant. Repeated requests must not spam the user.
 - Text selection, pinch zoom, find in page. Not exercised. Do not add a gesture
   that fights the surface.
   Pinch touches are already forwarded; verify behavior before adding another
@@ -532,6 +635,11 @@ haptics on every routine action.
   Do not export personal history to validate a fixture.
 - Accessibility pass on Recent and Settings. Other screens have device checks.
 - Personal signing key and a native build in CI before any release tag.
+  Page accessibility is separate from chrome: the SurfaceView tests do not
+  establish an Android accessibility-tree bridge. Still to do: the owner's
+  keyboard, essential live sites, login and cookie persistence, and final
+  arm64 ABI/ELF/16 KiB page-size compatibility as applicable before release.
+  No real service writes without an explicit test action.
 
 The stale-frame reproduction in `docs/ENGINE_SPIKE.md` section 6 compares pixels
 with the selected document after view churn/navigation. Repeat after eviction,
@@ -557,6 +665,22 @@ a confirmed System UI ANR intercepted Back. A later recovery attempt timed out
 and was stopped. This is an incomplete device gate, not phone performance or a
 completed visual/accessibility pass. Exact commands/limits are in the report PR's
 `docs/ENGINE_SPIKE.md`, section 14.
+
+## Fusion validation
+
+Independent branch regressions were failing-first, then green after the fix.
+The combined unpublished gate `./gradlew --offline testDebugUnitTest lintDebug
+assembleDebug assembleRelease :app:assembleDebugAndroidTest` succeeded with no
+lint errors. Five selected AccessibilityTest cases passed on our API 30 x86_64
+software emulator (3 copy-action cases plus 2 large-font/48dp/non-overlap
+cases). Lint retains the existing targetSdk/Espresso/ChromeOS/monochrome-icon
+and EngineSurfaceView tooling/performClick warnings. No native engine was
+staged; no signed usable release, native device behavior, physical gesture,
+actual clipboard contents, live integrations or phone battery/FPS were
+validated. Logs: `build/fusion-audit/final-kotlin-gate.log`,
+`build/fusion-audit/final-accessibility.log`, `build/fusion-audit/final-xml/`
+and the union patch `build/fusion-audit/verification-union.diff` (all local,
+inside the audit worktree).
 
 ## How to check
 
