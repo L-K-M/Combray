@@ -2,7 +2,8 @@
 
 Shovel-ready list for the next session. Consolidated 21 October 2026 from the
 earlier roadmap (`SWE2.md`), `Grok.md` (discarded after its merge),
-`GeminiFlash.md`, and the [Sol review](https://github.com/L-K-M/Combray/pull/28).
+`GeminiFlash.md`, the [Sol review](https://github.com/L-K-M/Combray/pull/28),
+and the MiMo review (`MiMo.md`, folded in below).
 Sol's source citations refer to `e5cf8ed`; its handoff records later verification. Read
 `AGENTS.md` and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) before
 editing. Keep Servo and the personal-browser scope. Private browsing, extensions
@@ -73,6 +74,33 @@ Each Sol branch has regression-first evidence and passing local JVM tests, lint,
 debug/release assembly, documentation and diff checks. See its exact PR revision
 for CI/review status. These checks do not prove deployed service compatibility.
 
+MiMo fixes, also left open for the owner:
+
+- #36 `mimo/recent-visit-identity` — a tab without a renderer keeps its page in
+  Recent: navigating an evicted/restored tab, or one an address refusal sends
+  home, clears `currentVisitId` at both detach sites (one
+  `TabEntity.withDetachedCurrentPage` helper); the commit path re-attaches it.
+  Tests pin both halves and the recovery URL. Complements #41 and Sol #32,
+  which cover the forget path.
+- #37 `mimo/outbox-resilience` — one broken job cycle (storage error, recorder
+  bug) no longer strands the queue or skips its wakeup (guarded steps,
+  `NonCancellable` wakeup booking); a job whose worker dies stops at the attempt
+  limit instead of being reclaimed forever; re-saving a failed job sends the
+  fresh payload; `resume()` restarts the attempt budget; and `claim` marks
+  captures past the age limit EXPIRED at the send point. Overlaps Sol #31's
+  abandoned-claim expiry: pick one of the two, do not merge both blindly.
+- #42 `mimo/quick-links` — the launcher monogram and host quick links on the
+  new-tab page (`BrowserCoordinator.topSites()` ranks hosts by visits in the
+  retention window; pages open tabs show count). Offers the home-surface idea's
+  quick-links half.
+- #52 `mimo/appearance-and-reader-size` — Settings › Display: appearance
+  (follow the system / light / dark) and reader text size (small / default /
+  large), persisted in `BrowserSettings` with unknown-name fallback. Offers the
+  theme-override and reader-size items below.
+- #53 `mimo/swipe-close-tabs` — swipe a tab row in Recent to close it, with the
+  same Undo as the close button. History rows keep their explicit menu:
+  removing a visit has no undo. Offers the swipe part of the close-all item.
+
 ## Correctness still open
 
 History/capture atomicity and abandoned-claim expiry are offered in #32 and #31;
@@ -130,6 +158,9 @@ source candidates before editing; none is a new device reproduction.
     no false prompt. Budget warnings must clear after drain/discard without another
     capture. Include a rejected body exceeding remaining space while queued bytes
     are still below the cap; `queuedBytes >= limit` alone misses that case (#30).
+    FAILED rows also keep their payloads inside the seven-day budget sum
+    (`queuedCaptureBytes`), so one permanently failed large capture blocks new
+    captures until it ages out.
 10. **A service root is not an account identity (Sol S18).** Root fingerprints
     can reuse Saved status across accounts on one server. Key rotation pauses jobs
     but does not identify an account. Establish a supported read-only identity, or
@@ -163,6 +194,49 @@ source candidates before editing; none is a new device reproduction.
     via user confirmation in external native apps instead of triggering `UNSUPPORTED_SCHEME`.
     Keep these optional. Test absent handlers and deliberate user activation;
     unsafe `intent:`, `javascript:`, file/content schemes stay rejected.
+16. **Page controls can be attributed to the wrong page.** `view.controls` is
+    cleared on crash but not when a document commits, so a dialog from the
+    previous document is presented under the new page's host when the engine
+    does not send `ControlHidden`. Clear pending controls when
+    `view.currentDocument` changes, answering them Dismiss. File:
+    `BrowserCoordinator.kt`.
+17. **Coordinator lifecycle edges.** `start()` is not idempotent (a second call
+    starts a second work-queue consumer and breaks the single-consumer ordering
+    invariant); `recent()` computes its retention `since` once per flow, so a
+    long-lived collection's window never slides; `onEngineError` ignores
+    refusals without a request, leaving the coordinator believing a dead view is
+    on screen; and `pendingCaptures`/`pendingArticles` are removed only when a
+    result arrives, so a crashed view leaks them for the process lifetime (fold
+    the last one into item 13's pruning when measured). Each is small and
+    unit-testable like the PR #36 cases. File: `BrowserCoordinator.kt`.
+18. **Destination fingerprints do not canonicalize the host.** `https://h`,
+    `https://h:443` and `https://h.` count as different servers, forcing
+    credential re-entry and re-binding queued work to a "new" destination. Strip
+    default ports and trailing dots in `ServiceUrls.fingerprint` /
+    `normalizeRoot`. Distinct from item 10's account-identity question.
+19. **`ServiceRoutes`' one-request-per-attempt contract is a comment only.** A
+    lambda that sends twice can re-send on failover to the alternate address.
+    Give `AttemptTransport` a single-use guard so misuse cannot double-send.
+    File: `ServiceRoutes.kt`.
+20. **`SecretStore` can race its first Keystore key creation.** Two concurrent
+    first-time configures (Karakeep and Hister hold different mutexes) can race
+    `generateKey`: one write fails or replaces the key and orphans the other's
+    ciphertext. Serialize key creation. File: `SecretStore.kt`.
+21. **Identical content after a failed send is never re-queued.** When
+    `HisterIntegration.captured` sees the dedupe hash matches an earlier
+    capture, it returns early without checking whether that job FAILED or left
+    the queue: the page is silently never captured again. Skip the early return
+    when the matching job is not on its way to the server. File:
+    `HisterIntegration.kt`.
+22. **`SensitiveUrls` misses the commonest credential parameters.** `code`
+    (OAuth authorization codes), `signature`, `sig`, `key`, `ticket`,
+    `authcode` are not in `CREDENTIAL_PARAMETERS`, so an OAuth callback URL can
+    be saved to Karakeep or captured to Hister. Extend the set (names, not #39's
+    encodings). File: `SensitiveUrls.kt`.
+23. **Any page can summon the keyboard without a user gesture.**
+    `native/src/delegate.rs` drops `InputMethodControl.allow_virtual_keyboard`
+    (and text/insertion point): a page-side `focus()` shows the keyboard at any
+    time. Forward the flag and let the app suppress programmatic keyboards.
 
 ## Performance and engine
 
@@ -173,8 +247,11 @@ Do not claim a device reproduction for these. They are from the bridge and
    unbind can be reported as success.** `EngineSurfaceView.surfaceDestroyed`
    calls `send_and_wait` with `ACK_TIMEOUT` of 5 seconds. Acknowledge release
    only after detach. Do not bind the next window until that is true. A timeout
-   is a failure, not a release. Files: `EngineSurfaceView.kt`,
-   `native/src/engine.rs`, `native/src/jni_api.rs`.
+   is a failure, not a release. Worse, `engine.rs` `surface_created` overwrites
+   `self.surface` even when `surface_destroyed` failed to unbind: a still-bound
+   `NativeWindow` is dropped under EGL (the `mem::forget` guard exists for a
+   reason). Keep or forget the old window on failed unbind. Files:
+   `EngineSurfaceView.kt`, `native/src/engine.rs`, `native/src/jni_api.rs`.
 2. **Touch queue, coalescing and tail delivery.** Trace rapid two-pointer input
    through `EngineSurfaceView.kt`, `native/src/commands.rs` and `engine.rs`.
    The engine handles at most 64 commands per turn. If coalescing/throttling is
@@ -185,21 +262,33 @@ Do not claim a device reproduction for these. They are from the bridge and
    timestamp (documented device runs `controls7`/`browsing11`).
 3. **Reader mode clones the whole document before the node budget.**
    `native/src/reader.js` calls `document.cloneNode(true)`, then Readability's
-   `maxElemsToParse`. Refuse an oversized tree before the clone. The script
-   deadline does not interrupt a running script. Prefer trusted engine extraction
+   `maxElemsToParse`. Refuse an oversized tree before the clone. Its DOM walks
+   (`walk`, `blocksIn`, `blockOf`) also recurse by nesting depth: a pathological
+   page throws `RangeError` and the whole capture fails as `script_error`. Use an
+   explicit stack or a depth cap. The script deadline does not interrupt a
+   running script. Prefer trusted engine extraction
    or a genuinely interruptible path; page-controlled getters are not trusted
    execution bounds. Measure ordinary and hostile capture/Readability separately.
 4. **Keyboard text goes to whichever tab is active when the command runs.**
    `ImeCommit` carries only the string. `ime_commit` uses `active_webview()`.
    Carry the view generation and drop the commit if that view is no longer the
-   one with the field.
+   one with the field. Related IME gaps in `EngineSurfaceView.kt`: hiding the
+   keyboard commits the half-typed composition as final text (clear it instead);
+   `showKeyboard` skips `restartInput` when the field kind is unchanged and can
+   reuse a dead `InputConnection`; `ACTION_MULTIPLE` is mapped to `KEY_RELEASE`,
+   emitting bogus releases; `event.metaState` is never forwarded, so hardware-
+   keyboard modifiers type literal characters; `ImeShown.multiline` is parsed but
+   unused, so a `<textarea>` gets single-line input; and `deleteSurroundingText`
+   emits two JNI commands per character with no cap.
 5. **`publish()` Room work.** Reviewed main still publishes ignored events; #24
    offers the inert-event fix. Paint reports are already limited to one per
    second, not 60 per second. After that lands, measure stateful title/load bursts
    before adding a snapshot/dirty flag. Count queries and verify real navigation
    and title events still publish.
 6. **Recent day-grouping allocates a `Calendar` per row.** Reuse one instance, or
-   compute the day boundaries once if profiling warrants it. Search truncation
+   compute the day boundaries once if profiling warrants it. The list also
+   re-sorts on every emission of any of its three flows; SQL ordering would
+   remove the per-emission sort. Search truncation
    is correctness item 8, separate from collector/grouping cost.
 7. **Measure startup before changing initialization.** The actual
    `KeystoreSecretStore` constructor creates its directory; `key()` loads
@@ -240,6 +329,21 @@ Do not claim a device reproduction for these. They are from the bridge and
     PLAN and timing on thousands of good/failed visits. Add a composite
     `visits(failed, lastSeenAt)` index in `BrowserEntities.kt` only if it helps
     beyond existing indexes. A Room migration must preserve tabs, visits and jobs.
+15. **Engine-loop resilience and bounds** (`native/src/`): `start_servo`
+    continues after `create_dir_all` fails and runs with an unwritable profile,
+    silently losing cookies/HSTS (return false); on a `start()` race the losing
+    engine thread spins forever on `recv_timeout` (send `Command::Shutdown`
+    before dropping the losing sender); a persistent `make_current` failure
+    retries and warns at 4 Hz forever (back off and emit one error event);
+    `held` capture reports are silently dropped at `MAX_HELD_REPORTS`, so the
+    app can await a report that never comes (emit an explicit drop); each capture
+    re-expands the ~100 KiB script template with `.replace` (cache it); every
+    pre-start/shutdown call logs at `error!`, flooding logcat during input spam;
+    and `request_navigation` fires for iframe loads too with no frame identity
+    (tag the event with the frame level or filter to top-level).
+16. **`forwardKey` consumes every non-Back key** (`EngineSurfaceView.kt`): the
+    volume rocker is dead while browsing, and mapped-key handling is a Kotlin-
+    side whitelist. Return false for key codes the engine cannot map.
 
 ## Chrome still open
 
@@ -253,14 +357,22 @@ Do not claim a device reproduction for these. They are from the bridge and
   tabs, last rows/pagination, long labels, keyboard and 200% text with TalkBack.
   Local typing stays local; remote requests require an explicit Hister/Karakeep
   scope. Keep local, long-term and web search distinguishable.
+- The Hister and Karakeep panels clear their results on every keystroke while
+  the debounced search waits: the list flickers and empty space flashes. Keep
+  the last answer visible (with the loading line) until the new one arrives.
+  Files: `HisterSearchPanel.kt`, `KarakeepPanel.kt`.
 - Tab badge shows the raw count. Cap the display at "99+" but announce the real
   count. Check 0/1/99/100 without changing logical state.
 - Share sends only the URL. Send the title and the address (`title` then the
-  URL). File: `share()` in the app module.
+  URL). File: `share()` in the app module. Long-press Share can copy the address
+  instead of opening the chooser.
 - Long-press the address chip to copy the full URL, with a short "Copied" and a
   TalkBack announcement.
   Keep a visible alternative. Also confirm link/image-address copying on API
   30–32; avoid duplicate notifications beside newer Android's clipboard preview.
+  Tapping the chip could also reveal the full URL in place (the bar keeps the
+  privacy-friendly host), and a "Paste and go" row in the address sheet when the
+  clipboard holds an address is the same convenience.
 - Recent row menu has Remove and Forget. Add Copy link and Share there, using
   the clipboard and chooser the page UI already uses.
 - The IME bridge does not implement `getTextBeforeCursor` or `getCursorCapsMode`.
@@ -275,14 +387,29 @@ Do not claim a device reproduction for these. They are from the bridge and
   enough. Do not add decoration that competes with the page.
 - The complete palette is offered in #26; reviewed main still partially overrides
   Material defaults. Preserve warm paper/pine and charcoal surfaces, system type
-  in chrome and a restrained Reader measure. Verify sheets, chips, outlines,
+  in chrome and a restrained Reader measure. Beyond roles, the design concept
+  (`docs/design/combray-concepts.fragment.html`) fixes the geometry the app has
+  not adopted: a distinct panel surface over the background instead of
+  `surface = background`, a soft tint for chips/pressed rows/icon tiles, 12 dp
+  chips and fields, 23 dp sheet tops, and the restrained type scale (20/500
+  sheet titles, 14/500 rows, 11–12 meta). Also: Save is a star while Karakeep is
+  a bookmark manager and the concept uses `bookmark`/`bookmark-check`; reader
+  view could take a paper tone in light mode; the loading line could take the
+  accent tint. Verify sheets, chips, outlines,
   disabled/errors, dialogs, Reader and system bars in both modes, including text
   and non-text contrast. Landscape/large text on Recent and Settings is unverified.
 - A theme override (system / light / dark) is not built. System appearance is
   the default. Add an override only if the owner wants the phone and the room
-  to disagree.
+  to disagree. (Offered in #52, together with reader text size.)
   Material You dynamic color on Android 12+ is another optional variant; keep
   pine/paper as the deliberate default.
+- Local history completion in the address editor: titles and hosts from Recent,
+  clearly on-device (the plan's "no autosuggest" covers search typing and server
+  contact). Selecting a completion fills the field; it never submits.
+- The address chip's security icon comes from the URL scheme string, not from
+  engine data; the plan asks for engine-derived state. Today only `loadFailed` is
+  engine truth in that chip, and #43 governs the label's honesty. Do not draw a
+  lock the engine did not confirm.
 - Touch targets: Audit icon buttons in `BottomBar` and `RecentSheet` to ensure
   48x48dp minimum interactive component size (`Modifier.minimumInteractiveComponentSize()`).
   Bottom-bar checks already exist; prioritize Recent and Settings and measure
@@ -308,7 +435,8 @@ Do not claim a device reproduction for these. They are from the bridge and
 
 Measure landscape, keyboard and 200% text before changing list sizing. An
 unweighted LazyColumn alone does not prove clipping; avoid blanket weight fixes
-without reproducing the last-row/pagination problem.
+without reproducing the last-row/pagination problem. A two-column Recent at
+landscape/tablet widths is an option to evaluate with the same measurements.
 
 ## Ideas, not Chromium parity
 
@@ -333,9 +461,10 @@ without reproducing the last-row/pagination problem.
 - On the new-tab surface, one line: the last page you can reopen, and the open
   tabs. That is the Recent-home idea in miniature. Do not retire the sheet.
   A quiet wordmark/search/Recent variant is another experiment; the owner has not
-  selected a final Recent-home layout. Avoid a busy dashboard.
+  selected a final Recent-home layout. Avoid a busy dashboard. (#42 offers the
+  monogram and host quick links on that surface.)
 - Reader text size, A− / A+, remembered locally. Body text is fixed at 18 sp.
-  Not a theme system.
+  Not a theme system. (Offered in #52 as a three-way setting.)
   Reading seam: preserve Reader scroll across a brief departure only for the
   same tab/document; invalidate it when content is replaced. A quiet local reading-
   time estimate can join byline metadata; do not assume an English word rate.
@@ -349,7 +478,23 @@ without reproducing the last-row/pagination problem.
   loaded in settings.
 - Time buckets finer than days in Recent ("this morning").
 - Close all tabs, or close other tabs, from Recent. A swipe may be extra. It
-  must not be the only way to close a tab.
+  must not be the only way to close a tab. (#53 offers the swipe; the close
+  button and Undo stay.)
+- Open copied link: when the new-tab page is up and the clipboard holds a URL
+  (or text containing one), show one chip to open it. Android shows its own
+  clipboard notice; never read the clipboard in the background.
+- A Kagi bangs hint under the new-tab buttons: queries already go to Kagi, so
+  `!w`, `!gh` and friends work for free. One muted line, no maintenance.
+- Long-press the Recent button opens Recent straight on the Hister scope (the
+  owner's long-term memory lives there), as the alternative to the previous-tab
+  experiment above.
+- One haptic tick when a save lands (the Saved transition only — not on every
+  routine action), and a calm morph of the Save icon instead of the spinner
+  overlay.
+- `ACTION_SEND` into Combray: share a link to the app to open it, or offer
+  "Save to Karakeep" from the share target.
+- Hardware keyboard shortcuts (Ctrl+T/W/L/R, Ctrl+F) once the engine forwards
+  modifiers (engine item 4 drops `metaState` today).
 - Favicons in Recent or the address chip only if the embedder already has them.
   Do not fetch icons through another stack.
 - A compact, non-color-only mark for whether this page will be captured
