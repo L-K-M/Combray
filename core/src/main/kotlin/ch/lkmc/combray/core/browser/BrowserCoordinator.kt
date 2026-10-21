@@ -414,7 +414,9 @@ class BrowserCoordinator(
         view.controls.addLast(ShownControl(event.control, event.content, offerBlocking = dialog && view.dialogCount > 1))
     }
 
-    private suspend fun onHistory(view: LiveView, event: EngineEvent.HistoryChanged) {
+    private suspend fun onHistory(view: LiveView, reported: EngineEvent.HistoryChanged) {
+        // A tab's and a visit's URL are shown, shared, searched and reopened: never store sign-in credentials in them.
+        val event = reported.copy(url = HostNames.withoutCredentials(reported.url))
         view.canGoBack = event.canGoBack
         view.canGoForward = event.canGoForward
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return

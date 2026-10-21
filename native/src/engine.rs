@@ -46,6 +46,7 @@ use crate::events::{
 };
 use crate::native_window::NativeWindow;
 use crate::panic_policy;
+use crate::profile;
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -464,6 +465,12 @@ impl Engine {
 
         if let Err(error) = std::fs::create_dir_all(&self.config.profile_dir) {
             self.error(format!("creating the profile directory failed: {error}"));
+        }
+        // Before Servo reads them back: saved sign-ins last one run (see `profile`).
+        match profile::forget_saved_sign_ins(&self.config.profile_dir) {
+            Ok(0) => {},
+            Ok(_) => info!("deleted the sign-ins saved by an earlier run"),
+            Err(error) => self.error(format!("deleting saved sign-ins failed: {error}")),
         }
         let mut opts = Opts::default();
         opts.config_dir = Some(self.config.profile_dir.clone());

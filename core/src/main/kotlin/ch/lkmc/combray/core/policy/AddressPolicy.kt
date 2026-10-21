@@ -292,4 +292,21 @@ object HostNames {
         val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase()
         return scheme == "http" || scheme == "https"
     }
+
+    /**
+     * A web [url] without `user:password@`; the host, port, path, query and fragment stay as
+     * they are. Servo 0.6.0 writes an HTTP sign-in's credentials into the page's URL. The engine
+     * bridge removes them; this keeps them out of Recent, Share and restore if one gets through.
+     */
+    fun withoutCredentials(url: String): String {
+        if (!isWeb(url)) return url
+        val scheme = url.substringBefore(':')
+        if (!url.startsWith("://", scheme.length)) return url
+        val start = scheme.length + "://".length
+        val authority = url.substring(start).takeWhile { it != '/' && it != '?' && it != '#' && it != '\\' }
+        // The last "@" ends the credentials; one inside them is percent-encoded.
+        val at = authority.lastIndexOf('@')
+        if (at < 0) return url
+        return url.substring(0, start) + url.substring(start + at + 1)
+    }
 }

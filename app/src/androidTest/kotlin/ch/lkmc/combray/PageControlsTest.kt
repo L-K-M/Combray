@@ -132,8 +132,9 @@ class PageControlsTest {
     }
 
     /**
-     * One flow, because Servo keeps accepted credentials for the session: cancelling shows the
-     * server's own 401 page, then signing in through the dialog loads the protected page.
+     * One flow: cancelling shows the server's own 401 page, then signing in through the dialog
+     * loads the protected page. Servo 0.6.0 keeps the answer in the page's URL
+     * (`http://ada:lovelace@...`), not in its auth cache; the tab and Recent must not show it.
      */
     @Test
     fun aSignInFromTheDialogReachesTheServer() {
@@ -153,6 +154,10 @@ class PageControlsTest {
         compose.onNodeWithText("Sign in").performClick()
         device.awaitState { it.activeTab?.title == "AUTH:ada" }
         assertEquals(null, device.browser.browserState.value.pageControl)
+
+        assertEquals(protected, device.browser.browserState.value.activeTab?.url)
+        val recent = device.recent().mapNotNull { it.url }
+        assertTrue(recent.toString(), protected in recent && recent.none { "ada:" in it || "ada@" in it || "lovelace" in it })
     }
 
     private fun awaitText(text: String) =

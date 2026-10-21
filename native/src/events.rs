@@ -3,11 +3,13 @@
 //! Every event that concerns a tab carries a [`ViewKey`]: the logical tab ID chosen by the
 //! application plus the engine generation of the native view. Document-related events also carry
 //! the document ID (Servo's pipeline ID for the top-level document). Events cross the JNI
-//! boundary as one JSON object each, so the Kotlin side never sees a native handle.
+//! boundary as one JSON object each, so the Kotlin side never sees a native handle. Every URL
+//! is serialized without `user:password@` (see [`crate::userinfo`]).
 
 use serde_json::{Value, json};
 
 use crate::controls::ControlDescription;
+use crate::userinfo::strip_userinfo;
 
 /// One native incarnation of a logical tab.
 ///
@@ -299,11 +301,15 @@ impl EngineEvent {
             ),
             EngineEvent::NavigationRequested { view, request, url } => with_view(
                 view,
-                json!({ "type": "navigation_requested", "request": request, "url": url }),
+                json!({
+                    "type": "navigation_requested",
+                    "request": request,
+                    "url": strip_userinfo(url),
+                }),
             ),
             EngineEvent::PageNavigationRequested { view, url } => with_view(
                 view,
-                json!({ "type": "page_navigation_requested", "url": url }),
+                json!({ "type": "page_navigation_requested", "url": strip_userinfo(url) }),
             ),
             EngineEvent::History {
                 view,
@@ -319,7 +325,7 @@ impl EngineEvent {
                     "type": change.name(),
                     "document": document,
                     "sequence": sequence,
-                    "url": url,
+                    "url": strip_userinfo(url),
                     "index": index,
                     "length": length,
                 }),
@@ -443,7 +449,7 @@ fn with_view(view: &ViewKey, mut value: Value) -> Value {
 fn capture_json(report: &CaptureReport) -> Value {
     let content = report.content.as_ref().map(|content| {
         json!({
-            "url": content.url,
+            "url": strip_userinfo(&content.url),
             "title": content.title,
             "text": content.text,
             "text_bytes": content.text_bytes,
@@ -464,7 +470,7 @@ fn capture_json(report: &CaptureReport) -> Value {
             "status": report.status.name(),
             "elapsed_ms": report.elapsed_ms as u64,
             "content": content,
-            "observed_url": report.observed_url,
+            "observed_url": report.observed_url.as_deref().map(strip_userinfo),
             "detail": report.detail,
         }),
     )
@@ -500,5 +506,74 @@ mod tests {
                 "generation": 9,
             })
         );
+    }
+
+    /// After an HTTP sign-in, Servo 0.6.0 reports the page (and every relative link on it)
+    /// with the credentials in its URL; none of them may reach the application.
+    #[test]
+    fn reported_urls_leave_out_sign_in_credentials() {
+        let view = ViewKey {
+            tab: 1,
+            generation: 2,
+        };
+        let signed_in = "http://ada:lovelace@localhost:8766/auth.html?q=a@b#c";
+        let content = CapturedContent {
+            url: signed_in.into(),
+            title: "AUTH:ada".into(),
+            text: "signed in".into(),
+            text_bytes: 9,
+            sha256: String::new(),
+            truncated_in_page: false,
+            truncated_natively: false,
+            nodes_visited: 3,
+            node_budget_exhausted: false,
+        };
+        let capture = |content: Option<CapturedContent>, observed_url: Option<String>| {
+            EngineEvent::Capture(CaptureReport {
+                capture: 4,
+                view,
+                document: 5,
+                status: CaptureStatus::Captured,
+                elapsed_ms: 0,
+                content,
+                observed_url,
+                detail: None,
+            })
+        };
+        let events = [
+            EngineEvent::History {
+                view,
+                change: HistoryChange::NewDocument,
+                document: 5,
+                sequence: 1,
+                url: signed_in.into(),
+                index: 0,
+                length: 1,
+            },
+            EngineEvent::NavigationRequested {
+                view,
+                request: 6,
+                url: signed_in.into(),
+            },
+            EngineEvent::PageNavigationRequested {
+                view,
+                url: signed_in.into(),
+            },
+            capture(Some(content), None),
+            capture(None, Some(signed_in.into())),
+        ];
+
+        let expected = "http://localhost:8766/auth.html?q=a@b#c";
+        for event in events {
+            let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+            let url = json
+                .get("url")
+                .or_else(|| json["content"].get("url"))
+                .or_else(|| json.get("observed_url"))
+                .filter(|url| !url.is_null())
+                .unwrap_or_else(|| panic!("no URL in {json}"));
+            assert_eq!(url, expected, "in {json}");
+            assert!(!json.to_string().contains("lovelace"), "{json}");
+        }
     }
 }

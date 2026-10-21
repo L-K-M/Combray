@@ -207,8 +207,9 @@ private fun ScriptDialog(
 
 /**
  * HTTP sign-in. Names the server asking, not the page that linked there, and warns when the
- * password would travel unencrypted. Nothing is stored: the fields use plain [remember], so a
- * password never reaches saved instance state, and a rotation clears them.
+ * password would travel unencrypted. The dialog keeps nothing: the fields use plain [remember],
+ * so a password never reaches saved instance state, and a rotation clears them. What Servo
+ * keeps of an answer is in docs/ENGINE_SPIKE.md section 13.
  */
 @Composable
 private fun SignInDialog(id: Long, content: PageControlContent.SignIn, onAnswer: (ControlResponse) -> Unit) {

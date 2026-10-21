@@ -22,6 +22,8 @@ use serde::Deserialize;
 use serde_json::error::Category;
 use serde_json::{Value, json};
 
+use crate::userinfo::strip_userinfo;
+
 /// Page-chosen strings are shown in a dialog, not stored: keep them readable and bounded.
 pub const MAX_MESSAGE_CHARS: usize = 4_000;
 pub const MAX_LABEL_CHARS: usize = 300;
@@ -135,9 +137,12 @@ impl ControlDescription {
                     .collect();
                 json!({ "kind": "files", "multiple": multiple, "extensions": extensions })
             },
-            ControlDescription::LinkMenu { link, image } => {
-                json!({ "kind": "link_menu", "link": link, "image": image })
-            },
+            // Links on a page signed in to over HTTP carry its credentials (see `userinfo`).
+            ControlDescription::LinkMenu { link, image } => json!({
+                "kind": "link_menu",
+                "link": link.as_deref().map(strip_userinfo),
+                "image": image.as_deref().map(strip_userinfo),
+            }),
             ControlDescription::SignIn { origin, proxy } => {
                 json!({ "kind": "sign_in", "origin": bounded(origin, MAX_LABEL_CHARS), "proxy": proxy })
             },
@@ -309,6 +314,20 @@ mod tests {
         assert_eq!(json["kind"], "link_menu");
         assert_eq!(json["link"], "https://a.test/");
         assert_eq!(json["image"], Value::Null);
+    }
+
+    /// Links on a page signed in to over HTTP inherit the credentials Servo put in its URL.
+    #[test]
+    fn link_menus_leave_out_sign_in_credentials() {
+        let json = link_menu(
+            Some("http://ada:lovelace@localhost:8766/next.html"),
+            Some("http://ada@localhost:8766/a.png"),
+        )
+        .unwrap()
+        .to_json();
+
+        assert_eq!(json["link"], "http://localhost:8766/next.html");
+        assert_eq!(json["image"], "http://localhost:8766/a.png");
     }
 
     #[test]

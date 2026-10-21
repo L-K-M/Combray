@@ -89,9 +89,13 @@
       return String(node.tagName).toUpperCase();
     }
 
+    // After an HTTP sign-in, Servo puts the credentials into the document URL, so relative links
+    // resolve to user:password@host. Leave them out, as the engine does for every URL it
+    // reports (native/src/userinfo.rs).
     function linkOf(anchor) {
       var href = anchor.href;
-      return typeof href === "string" && /^https?:/i.test(href) ? href : undefined;
+      if (typeof href !== "string" || !/^https?:/i.test(href)) return undefined;
+      return href.replace(/^(https?:\/\/)[^\/?#\\]*@/i, "$1");
     }
 
     // Counts an element against the node budget; false once it is spent.

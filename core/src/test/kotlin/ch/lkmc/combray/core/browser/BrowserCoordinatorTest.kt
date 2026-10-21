@@ -719,6 +719,27 @@ class BrowserCoordinatorTest {
         assertEquals(1L to ControlResponse.Credentials("ada", "wrong"), engine.responses.last())
     }
 
+    /** Servo 0.6.0 commits a page signed in to over HTTP with the credentials in its URL. */
+    @Test
+    fun signInCredentialsInACommittedAddressAreNeverStored() {
+        ready()
+        browser.openUrl("http://localhost:8766/auth.html", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "http://ada:lovelace@localhost:8766/auth.html")
+        commit(1, 11, "http://ada:lovelace@localhost:8766/next.html#a@b", index = 1, length = 2)
+        commit(1, 11, "http://ada@localhost:8766/next.html?to=ada@example.org", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
+
+        assertEquals("http://localhost:8766/next.html?to=ada@example.org", state().activeTab?.url)
+        assertEquals(
+            setOf("http://localhost:8766/next.html?to=ada@example.org", "http://localhost:8766/next.html#a@b", "http://localhost:8766/auth.html"),
+            recent().map { it.url }.toSet(),
+        )
+        val stored = database.openHelper.readableDatabase.query("SELECT url FROM tabs UNION ALL SELECT url FROM visits").use { rows ->
+            generateSequence { if (rows.moveToNext()) rows.getString(0) else null }.toList()
+        }
+        assertEquals(4, stored.size)
+        assertTrue(stored.toString(), stored.none { "ada:" in it || "lovelace" in it || "ada@localhost" in it })
+    }
+
     @Test
     fun aHiddenTabWaitingForAnAnswerKeepsItsRenderer() {
         engine = FakeEngine()
