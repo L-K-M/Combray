@@ -124,6 +124,8 @@ pub enum Command {
     ImeCommit {
         text: String,
     },
+    /// The user hid the keyboard while a page field had it.
+    ImeDismissed,
     /// Long-press at a surface point on the active view.
     ContextClick {
         x: f32,

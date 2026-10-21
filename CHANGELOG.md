@@ -80,6 +80,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The page keyboard: a field a page focuses on load (as search pages do) no
+  longer covers the page with the keyboard before you touch it; tapping the
+  field opens it. A keyboard you closed with Back reopens when you tap the
+  field again. The keyboard now closes when a form sent with Enter loads its
+  results, when you switch tabs or go home, and when the tab closes, and a
+  background tab's field can no longer take it.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

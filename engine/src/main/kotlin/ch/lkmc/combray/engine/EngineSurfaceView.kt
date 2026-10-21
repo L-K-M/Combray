@@ -75,6 +75,9 @@ class EngineSurfaceView(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressCheck)
+        // The keyboard goes with the window (rotation recreates the Activity): the page must not
+        // keep a field that thinks it has one, or a tap on that field could not reopen it.
+        if (pageKeyboard != PageKeyboard.NONE) keyboardDismissed()
         super.onDetachedFromWindow()
     }
 
@@ -131,6 +134,9 @@ class EngineSurfaceView(
     /** Type of the focused page field ("password", "email", ...), from the engine's ime_shown. */
     private var fieldKind = TEXT
 
+    /** Whether the keyboard is a page field's, so that its closing can be told apart. */
+    private var pageKeyboard = PageKeyboard.NONE
+
     override fun onCheckIsTextEditor(): Boolean = engineRunning()
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
@@ -155,15 +161,57 @@ class EngineSurfaceView(
     fun showKeyboard(kind: String = TEXT) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
-        if (kind != fieldKind) {
-            fieldKind = kind
-            keyboard.restartInput(this)
-        }
+        useFieldKind(kind, keyboard)
+        // Focus moving between fields keeps a keyboard that is already open.
+        if (pageKeyboard == PageKeyboard.NONE) pageKeyboard = PageKeyboard.REQUESTED
         keyboard.showSoftInput(this, 0)
     }
 
+    /**
+     * A page field of [kind] has focus but the keyboard stays closed (the page focused it before
+     * the user used the page); the engine asks for [showKeyboard] when the user taps the field.
+     * Focus is not taken: a sheet the user is typing in keeps it.
+     */
+    fun prepareKeyboard(kind: String) {
+        useFieldKind(kind, context.getSystemService(InputMethodManager::class.java))
+    }
+
     fun hideKeyboard() {
+        pageKeyboard = PageKeyboard.NONE
         context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+    }
+
+    /**
+     * The keyboard opened or closed ([visible]: it takes part of the window). Closing while a page
+     * field had it, other than through [hideKeyboard], is the user's (Back, or the keyboard's own
+     * key). Servo asks for a keyboard only when a field gains focus, so the engine makes the field
+     * give up focus: a tap on it then opens the keyboard again.
+     */
+    fun keyboardVisibilityChanged(visible: Boolean) {
+        if (visible) {
+            if (pageKeyboard == PageKeyboard.REQUESTED) pageKeyboard = PageKeyboard.OPEN
+            return
+        }
+        if (pageKeyboard == PageKeyboard.OPEN) keyboardDismissed()
+    }
+
+    private fun keyboardDismissed() {
+        pageKeyboard = PageKeyboard.NONE
+        if (engineRunning()) NativeEngine.imeDismissed()
+    }
+
+    private fun useFieldKind(kind: String, keyboard: InputMethodManager) {
+        if (kind == fieldKind) return
+        fieldKind = kind
+        keyboard.restartInput(this)
+    }
+
+    private enum class PageKeyboard {
+        NONE,
+
+        /** Asked for; it counts as the page's once it is on screen. */
+        REQUESTED,
+        OPEN,
     }
 
     private companion object {

@@ -55,6 +55,9 @@ pub enum DelegateEvent {
         control: EmbedderControlId,
         multiline: bool,
         kind: &'static str,
+        /// False until the user has used the page: a field focused by script on load must not
+        /// cover the page with the keyboard.
+        allow_keyboard: bool,
     },
     /// A `<select>` picker, script dialog or file picker; kept whole until answered.
     PageControl {
@@ -232,6 +235,7 @@ impl WebViewDelegate for TabDelegate {
             control: input_method.id(),
             multiline: input_method.multiline(),
             kind,
+            allow_keyboard: input_method.allow_virtual_keyboard(),
         });
     }
 

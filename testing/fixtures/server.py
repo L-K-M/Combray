@@ -121,6 +121,14 @@ CONTROL_PAGES = {
         "f.onchange=function(){var file=f.files[0];var r=new FileReader();"
         "r.onload=function(){document.title='FILE:'+file.name+':'+r.result};r.readAsText(file)}})</script>",
     ),
+    # A search field the page focuses on load, as search pages do; Enter sends it to /echo.
+    "/autofocus.html": (
+        "AUTOFOCUS",
+        "<form action='/echo'><input class='c' type='search' name='q' id='q'></form>",
+        "<script>addEventListener('load',function(){var q=document.getElementById('q');"
+        "q.onfocus=function(){document.title='AUTOFOCUS:focused'};"
+        "q.onblur=function(){document.title='AUTOFOCUS:blurred'};q.focus()})</script>",
+    ),
 }
 
 

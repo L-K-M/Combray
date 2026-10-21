@@ -8,15 +8,17 @@
 //!                         ├─ delegate: per-view WebViewDelegate → queue
 //!                         ├─ controls: select pickers, script dialogs, file pickers
 //!                         ├─ capture: bounded in-page text snapshot
+//!                         ├─ keyboard: taps that open the keyboard for a focused field
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `events`, `panic_policy` and the pure parts of `capture` build on any host so their tests run
-//! without Servo.
+//! `events`, `keyboard`, `panic_policy` and the pure parts of `capture` build on any host so their
+//! tests run without Servo.
 
 pub mod capture;
 pub mod controls;
 pub mod events;
+pub mod keyboard;
 mod panic_policy;
 
 #[cfg(target_os = "android")]

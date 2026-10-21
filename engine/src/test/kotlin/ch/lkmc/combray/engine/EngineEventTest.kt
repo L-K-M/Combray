@@ -55,6 +55,16 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesAFieldThatGetsNoKeyboardBeforeThePageIsUsed() {
+        val event = EngineEvent.parse(
+            """{"type":"ime_shown","document":4294967331,"multiline":false,"kind":"search","show_keyboard":false,""" +
+                """"tab":1,"generation":2,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.ImeShown(ViewRef(1, 2), 4294967331L, multiline = false, kind = "search", showKeyboard = false), event)
+    }
+
+    @Test
     fun keepsUnknownTypesAsOther() {
         assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"type":"default_handled","request":"x"}"""))
     }
