@@ -37,6 +37,9 @@ object Fixtures {
     /** A news-style page with navigation, an aside and a footer around its article. */
     const val ARTICLE = "$BASE/article.html"
 
+    /** Titled `IO:visible` once IntersectionObserver reports its text on screen, `IO:missing` without it. */
+    const val INTERSECTION = "$BASE/intersection.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

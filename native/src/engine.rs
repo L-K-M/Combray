@@ -469,6 +469,9 @@ impl Engine {
         opts.config_dir = Some(self.config.profile_dir.clone());
         let mut preferences = Preferences::default();
         preferences.set_value("viewport_meta_enabled", PrefValue::Bool(true));
+        // Off by default in Servo 0.6.0 (servoshell lists it as experimental), but sites built
+        // on Next.js call it on start-up and show an error page without it.
+        preferences.set_value("dom_intersection_observer_enabled", PrefValue::Bool(true));
 
         let servo = ServoBuilder::default()
             .opts(opts)

@@ -212,6 +212,13 @@ class BrowsingTest {
         assertEquals("ECHO:$query", state.activeTab?.title)
     }
 
+    @Test
+    fun pagesCanObserveWhatIsOnScreen() {
+        device.browser.openUrl(Fixtures.INTERSECTION, Placement.CURRENT_TAB)
+        val state = device.awaitState { it.activeTab?.title in setOf(INTERSECTION_VISIBLE, INTERSECTION_MISSING) }
+        assertEquals(INTERSECTION_VISIBLE, state.activeTab?.title)
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -225,5 +232,7 @@ class BrowsingTest {
 
     private companion object {
         const val STOP_TIMEOUT_MS = 10_000L
+        const val INTERSECTION_VISIBLE = "IO:visible"
+        const val INTERSECTION_MISSING = "IO:missing"
     }
 }

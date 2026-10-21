@@ -89,6 +89,17 @@ ARTICLE_BODY = (
     "<aside>READER-ASIDE-TEXT related stories</aside><footer>READER-FOOTER-TEXT</footer>"
 )
 
+# Reports in its title whether the page can observe that an element is on screen. Sites built on
+# Next.js (anthropic.com, openai.com) fail to start without IntersectionObserver.
+INTERSECTION_PAGE = page(
+    "IO:waiting",
+    "<p id='target'>observed</p><script>"
+    "if (!('IntersectionObserver' in window)) { document.title = 'IO:missing'; } else {"
+    " new IntersectionObserver(function (entries) {"
+    "  if (entries.some(function (e) { return e.isIntersecting; })) document.title = 'IO:visible';"
+    " }).observe(document.getElementById('target')); }</script>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -187,6 +198,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/article.html":
             # Reader view keeps the article and drops the navigation, aside and footer around it.
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
+        if path == "/intersection.html":
+            return self.send(200, INTERSECTION_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
