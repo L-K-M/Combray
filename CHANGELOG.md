@@ -63,6 +63,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A complete pine and ivory palette in light and dark mode: sheets,
+  dialogs, menus, snackbars and the tab count no longer show Material's
+  default purple or red, and the bottom bar's color reaches the screen
+  edge under the navigation bar.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.

@@ -15,6 +15,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
+        // The bottom bar's own color runs under the navigation bar and gives its buttons their
+        // contrast, so three-button navigation needs no system scrim over it.
+        window.isNavigationBarContrastEnforced = false
         super.onCreate(savedInstanceState)
         // Only a fresh launch carries a new link. Recreation (rotation, process restore) does not,
         // nor a relaunch from Recents, which replays the task's original intent.

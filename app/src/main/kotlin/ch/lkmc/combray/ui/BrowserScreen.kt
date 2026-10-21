@@ -213,8 +213,6 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser)) } },
                 onRecent = { sheet = Sheet.RECENT },
                 onMore = { sheet = Sheet.MORE },
-                // Clear of the navigation bar and, in landscape, of a display cutout.
-                modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
             )
         }
         // Above the keyboard too: a page field can hold it while a Save error shows. Recent is a

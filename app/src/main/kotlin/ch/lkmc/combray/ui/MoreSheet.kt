@@ -87,5 +87,6 @@ private fun MoreRow(icon: ImageVector, label: Int, onClick: () -> Unit) {
         headlineContent = { Text(stringResource(label)) },
         leadingContent = { Icon(icon, contentDescription = null) },
         modifier = Modifier.clickable(onClick = onClick),
+        colors = sheetListItemColors(),
     )
 }
