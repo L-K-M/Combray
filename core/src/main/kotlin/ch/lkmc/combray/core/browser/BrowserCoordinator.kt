@@ -391,7 +391,11 @@ class BrowserCoordinator(
             is EngineEvent.EngineError -> onEngineError(event)
             else -> Unit
         }
-        publish()
+        // Paint heartbeats, surface echoes, navigation confirmations and diagnostics cannot
+        // change what publish() reads; publishing anyway would run three Room reads on the
+        // serialized queue for nothing (Painted alone arrives once per second per tab, and
+        // user commands wait behind those reads).
+        if (changesPublishedState(event)) publish()
     }
 
     private fun onControlShown(view: LiveView, event: EngineEvent.ControlShown) {
@@ -810,7 +814,7 @@ class BrowserCoordinator(
         // Reader view belongs to the tab it was opened for: moving to another tab leaves it.
         if (reader != null && reader?.tabId != tab?.id) reader = null
         val view = tab?.let { liveByTab[it.id] }
-        val openCount = dao.openTabs().size
+        val openCount = dao.openTabCount()
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -908,4 +912,26 @@ enum class UnusedTabs { KEEP, CLOSE }
 /** Proposed default: closed history kept seven days after its last interaction. */
 data class Retention(val closedHistoryDays: Int = 7) {
     val closedHistoryMillis get() = closedHistoryDays * 24L * 60 * 60 * 1000
+}
+
+/**
+ * Whether an engine event can change what [BrowserCoordinator]'s publish step reads. The
+ * engine's heartbeat (Painted), surface echoes, navigation confirmations and diagnostics
+ * cannot, so handling them skips the three Room reads publish would otherwise run on the
+ * serialized command queue. Unknown future event kinds stay conservative and publish.
+ */
+internal fun changesPublishedState(event: EngineEvent): Boolean = when (event) {
+    is EngineEvent.Painted,
+    is EngineEvent.SurfaceBound,
+    is EngineEvent.SurfaceUnbound,
+    is EngineEvent.TabSelected,
+    is EngineEvent.NavigationRequested,
+    is EngineEvent.PageNavigationRequested,
+    is EngineEvent.LateCaptureResult,
+    is EngineEvent.EvaluationResult,
+    is EngineEvent.ShutdownComplete,
+    is EngineEvent.ProfilePersisted,
+    is EngineEvent.Other,
+    -> false
+    else -> true
 }
