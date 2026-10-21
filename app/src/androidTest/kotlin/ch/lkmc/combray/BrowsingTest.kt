@@ -228,6 +228,16 @@ class BrowsingTest {
         assertEquals(ANIMATE_OK, state.activeTab?.title)
     }
 
+    @Test
+    fun aSwipeOverAFixedLayerScrollsThePage() {
+        device.browser.openUrl(Fixtures.FIXED_LAYER, Placement.CURRENT_TAB)
+        device.awaitPage(Fixtures.FIXED_LAYER)
+        assertScreen(Device.RED)
+
+        swipeUp()
+        assertScreen(Device.GREEN)
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -239,6 +249,23 @@ class BrowsingTest {
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))
     }
 
+    /** A slow upward drag over the page's middle: the page should follow the finger. */
+    private fun swipeUp() {
+        device.dismissSystemDialogs()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val metrics = compose.activity.resources.displayMetrics
+        val x = metrics.widthPixels / 2f
+        val fromY = metrics.heightPixels * 0.6f
+        val toY = metrics.heightPixels * 0.3f
+        val down = SystemClock.uptimeMillis()
+        instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, fromY, 0))
+        for (step in 1..SWIPE_STEPS) {
+            val y = fromY + (toY - fromY) * step / SWIPE_STEPS
+            instrumentation.sendPointerSync(MotionEvent.obtain(down, down + step * SWIPE_STEP_MS, MotionEvent.ACTION_MOVE, x, y, 0))
+        }
+        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + (SWIPE_STEPS + 1) * SWIPE_STEP_MS, MotionEvent.ACTION_UP, x, toY, 0))
+    }
+
     private companion object {
         const val STOP_TIMEOUT_MS = 10_000L
         const val INTERSECTION_VISIBLE = "IO:visible"
@@ -246,5 +273,7 @@ class BrowsingTest {
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val SWIPE_STEPS = 10
+        const val SWIPE_STEP_MS = 50L
     }
 }
