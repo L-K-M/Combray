@@ -192,8 +192,10 @@ class BrowserCoordinator(
     private suspend fun navigateTab(tab: TabEntity, url: String) {
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
-            engine.navigate(view.nativeTab, nextRequest++, url)
+            val request = nextRequest++
+            engine.navigate(view.nativeTab, request, url)
             awaitCommit(view)
+            view.awaitedRequest = request
             return
         }
         // No renderer yet (new tab, restored tab): the request becomes the recovery address.
@@ -569,6 +571,7 @@ class BrowserCoordinator(
      */
     private fun awaitCommit(view: LiveView) {
         view.awaitingCommit = true
+        view.awaitedRequest = null
         val request = ++view.commitRequests
         scope.launch {
             delay(navigationTimeoutMs)
@@ -759,7 +762,8 @@ class BrowserCoordinator(
         val view = event.tab?.let { liveByNative[it] } ?: return
         if (view.generation != null) {
             if (event.request != null) {
-                view.awaitingCommit = false
+                // A refusal of an earlier address must not end the wait for a newer one.
+                if (event.request == view.awaitedRequest) view.awaitingCommit = false
                 state.update { it.copy(notice = Notice.AddressNotOpened) }
             }
             return
@@ -884,6 +888,9 @@ class BrowserCoordinator(
         /** The app requested a page that has not committed yet (see awaitCommit). */
         var awaitingCommit = false
         var commitRequests = 0L
+
+        /** The engine request of the awaited address, so only its refusal ends the wait. */
+        var awaitedRequest: Long? = null
         var canGoBack = false
         var canGoForward = false
         var crashed = false

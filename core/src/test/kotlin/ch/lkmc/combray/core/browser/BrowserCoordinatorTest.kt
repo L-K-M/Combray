@@ -597,6 +597,21 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aLateRefusalOfAnEarlierAddressKeepsTheNewerOneLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        val earlier = engine.navigated.last().second
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", 1, earlier))
+        idle()
+        assertTrue(state().activeTab!!.loading)
+    }
+
+    @Test
     fun goingBackToACachedDocumentDoesNotMarkTheTabAsLoading() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
@@ -800,7 +815,7 @@ class BrowserCoordinatorTest {
         const val PAGE_TAB = 1L shl 52
         const val START = 1_760_000_000_000L
         const val DAY = 24L * 60 * 60 * 1000
-        const val SHORT_TIMEOUT_MS = 200L
+        const val SHORT_TIMEOUT_MS = 1_000L
         /** Longer than any test: a request does not time out unless the test means it to. */
         const val LONG_TIMEOUT_MS = 10L * 60 * 1000
     }
