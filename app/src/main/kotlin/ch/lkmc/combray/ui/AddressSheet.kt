@@ -36,15 +36,22 @@ import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.core.policy.RejectReason
 
 /**
- * Address and search editor above the keyboard. The current address starts selected for
- * replacement; the button says what submitting will do, and the other reading is one tap away.
- * [target] is the tab the editor was opened for (null: a new tab); typed text survives rotation.
+ * Address and search editor above the keyboard. [initialText] (the current address, or text
+ * another app sent) starts selected for replacement; the button says what submitting will do,
+ * and the other reading is one tap away. [target] is the tab the editor was opened for (null: a
+ * new tab); typed text survives rotation. A new [restartKey] starts over with [initialText].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddressSheet(target: String?, currentUrl: String?, onDecision: (AddressDecision) -> Unit, onDismiss: () -> Unit) {
-    val initial = currentUrl.orEmpty()
-    var field by rememberSaveable(target, stateSaver = TextFieldValue.Saver) {
+fun AddressSheet(
+    target: String?,
+    initialText: String?,
+    restartKey: Int,
+    onDecision: (AddressDecision) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val initial = initialText.orEmpty()
+    var field by rememberSaveable(target, restartKey, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
     }
     val interpretation = AddressPolicy.interpret(field.text)

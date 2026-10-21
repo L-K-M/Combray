@@ -61,7 +61,7 @@ import java.util.Calendar
 import java.util.Date
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
-private enum class RecentScope(val label: Int) {
+enum class RecentScope(val label: Int) {
     OPEN(R.string.recent_filter_open),
     ALL(R.string.recent_filter_all),
     HISTER(R.string.recent_scope_hister),
@@ -69,21 +69,24 @@ private enum class RecentScope(val label: Int) {
 }
 
 /**
- * Open tabs and recently visited pages in one most-recently-used list (R5), opening on the
- * tabs. Filtering them stays on the device; Hister and Karakeep are separate, labeled scopes.
+ * Open tabs and recently visited pages in one most-recently-used list (R5), opening on
+ * [initialScope] (normally the tabs); a new [restartKey] returns to it. Filtering them stays on
+ * the device; Hister and Karakeep are separate, labeled scopes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentSheet(
     browser: BrowserCoordinator,
     integrations: Integrations,
+    initialScope: RecentScope,
+    restartKey: Int,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     snackbar: SnackbarHostState,
     onDismiss: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
+    var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
     val items by remember(query) { browser.recent(query) }.collectAsStateWithLifecycle(emptyList())
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
     val shown = if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items

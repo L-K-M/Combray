@@ -36,6 +36,47 @@
                 <data android:scheme="http" />
                 <data android:scheme="https" />
             </intent-filter>
+            <!-- Shared text: its first link opens in a new tab; other text waits in the address
+                 editor, as does a web search request (IncomingIntents). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.WEB_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- "Search with Kagi" in other apps' text selection menu: chosen there, so it searches at once. -->
+        <activity-alias
+            android:name=".SearchWithKagi"
+            android:exported="true"
+            android:label="@string/process_text_search_kagi"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- "Save to Karakeep" share target without UI. An empty task affinity keeps it out of
+             the browser's task, so sharing does not bring the browser forward. -->
+        <activity
+            android:name=".SaveToKarakeepActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/share_save_to_karakeep"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

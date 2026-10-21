@@ -70,6 +70,7 @@
     <string name="save_state_saved">Saved to Karakeep</string>
     <string name="save_state_pending">Saving to Karakeep</string>
     <string name="save_state_attention">Saving needs attention</string>
+    <string name="save_no_link">No link to save</string>
     <string name="action_open_settings">Settings</string>
 
     <!-- Recent -->
@@ -111,6 +112,11 @@
     <string name="page_info_https">HTTPS: the connection to this site is encrypted. Certificate details are not available from the engine yet.</string>
     <string name="page_info_http">HTTP: the connection is not encrypted. Others on the network can read and change this page.</string>
     <string name="share_chooser">Share page</string>
+
+    <!-- Other apps and the launcher -->
+    <string name="share_save_to_karakeep">Save to Karakeep</string>
+    <string name="process_text_search_kagi">Search with Kagi</string>
+    <string name="shortcut_search_history">Search history</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

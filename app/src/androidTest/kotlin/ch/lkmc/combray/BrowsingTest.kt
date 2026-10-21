@@ -174,6 +174,22 @@ class BrowsingTest {
     }
 
     @Test
+    fun aSharedLinkOpensInANewTab() {
+        open(Device.GREEN)
+        val url = Fixtures.solid(Device.OCHRE)
+        // As a chat app shares it: inside a sentence, a full stop after it. Explicit, because the
+        // Save to Karakeep target takes shared text too.
+        val share = Intent(Intent.ACTION_SEND).setClass(compose.activity, MainActivity::class.java)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, "Look at $url.")
+        compose.activity.startActivity(share)
+        device.awaitPage(url)
+        assertEquals(2, device.browser.browserState.value.openTabCount)
+        assertTrue(device.browser.browserState.value.activeTab!!.openedByOtherApp)
+        assertScreen(Device.OCHRE)
+    }
+
+    @Test
     fun backFromAnotherAppsLinkLeavesTheAppAndKeepsThePageInHistoryOnly() {
         open(Device.GREEN)
         val url = Fixtures.solid(Device.OCHRE)
