@@ -441,7 +441,13 @@ class BrowserCoordinator(
                 }
             }
             visit?.let { view.documentVisits[event.document] = it.id }
-            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = visit?.title))
+            if (current != null && visit?.id != current.id) retireVisit(tab, current, now)
+
+            // Navigating in the focused tab is using it, so its Recent row stays above the pages it
+            // left. A hidden tab loading pages is not in use: closing unused tabs still closes it.
+            val focused = dao.session()?.activeTabId == tab.id
+            val lastFocusedAt = if (focused) now else tab.lastFocusedAt
+            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = visit?.title, lastFocusedAt = lastFocusedAt))
         }
     }
 
@@ -686,10 +692,7 @@ class BrowserCoordinator(
         val now = clock.now()
         database.withTransaction {
             val focused = dao.session()?.activeTabId == tab.id
-            val lastUse = if (focused) now - 1 else tab.lastFocusedAt
-            tab.currentVisitId?.let { id ->
-                dao.visit(id)?.let { dao.updateVisit(it.copy(lastSeenAt = maxOf(it.lastSeenAt, lastUse))) }
-            }
+            tab.currentVisitId?.let { dao.visit(it) }?.let { retireVisit(tab, it, now) }
             dao.updateTab(tab.copy(state = TabState.CLOSED, closedAt = now))
             if (focused) {
                 val successor = dao.openTabs().firstOrNull()
@@ -699,6 +702,17 @@ class BrowserCoordinator(
         }
         liveByTab[tab.id]?.let { closeView(it) }
         if (otherAppTab == tab.id) otherAppTab = null
+    }
+
+    /**
+     * [tab] leaves [visit] by navigating elsewhere or closing. The page takes its place in history,
+     * and its retention counts, from the tab's last use: the focused tab was in use until now, like
+     * a tab focus leaves ([activate]). The max keeps a later time, such as a hidden tab's own commit.
+     */
+    private suspend fun retireVisit(tab: TabEntity, visit: VisitEntity, now: Long) {
+        val focused = dao.session()?.activeTabId == tab.id
+        val lastUse = if (focused) now - 1 else tab.lastFocusedAt
+        dao.updateVisit(visit.copy(lastSeenAt = maxOf(visit.lastSeenAt, lastUse)))
     }
 
     private fun closeView(view: LiveView) {
