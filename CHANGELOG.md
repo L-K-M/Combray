@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Volume, menu and other system keys work while browsing again: the page
+  only receives printable characters and editing/navigation keys, instead
+  of every key the surface happened to see after the first touch.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

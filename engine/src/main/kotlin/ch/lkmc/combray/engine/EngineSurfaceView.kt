@@ -124,6 +124,10 @@ class EngineSurfaceView(
     private fun forwardKey(event: KeyEvent, action: Int): Boolean {
         // Back stays with Android so the Activity can handle navigation and dismissal.
         if (event.keyCode == KeyEvent.KEYCODE_BACK || !engineRunning()) return false
+        // System keys (volume, menu, search, power-adjacent, function keys) stay with
+        // Android too: consuming them here would take volume control away after the
+        // first tap on the page, and the engine drops them anyway.
+        if (!isPageKey(event.keyCode, event.unicodeChar)) return false
         NativeEngine.key(action, event.keyCode, event.unicodeChar)
         return true
     }
@@ -233,3 +237,33 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
         NativeEngine.key(NativeEngine.KEY_RELEASE, keyCode, 0)
     }
 }
+
+/**
+ * Whether a hardware key may reach the page. Printable characters go through (the engine
+ * maps their unicode), plus the named keys navigation and editing need. Everything else —
+ * volume, menu, search, function and power-adjacent keys — stays with Android: the surface
+ * takes focus on the first touch, and unconsumed system keys would otherwise be swallowed
+ * while the engine drops them anyway.
+ */
+internal fun isPageKey(keyCode: Int, unicodeChar: Int): Boolean {
+    if (unicodeChar != 0) return true
+    return keyCode in PAGE_KEYS
+}
+
+private val PAGE_KEYS = setOf(
+    KeyEvent.KEYCODE_DEL,
+    KeyEvent.KEYCODE_FORWARD_DEL,
+    KeyEvent.KEYCODE_ENTER,
+    KeyEvent.KEYCODE_NUMPAD_ENTER,
+    KeyEvent.KEYCODE_TAB,
+    KeyEvent.KEYCODE_ESCAPE,
+    KeyEvent.KEYCODE_MOVE_HOME,
+    KeyEvent.KEYCODE_MOVE_END,
+    KeyEvent.KEYCODE_PAGE_UP,
+    KeyEvent.KEYCODE_PAGE_DOWN,
+    KeyEvent.KEYCODE_DPAD_UP,
+    KeyEvent.KEYCODE_DPAD_DOWN,
+    KeyEvent.KEYCODE_DPAD_LEFT,
+    KeyEvent.KEYCODE_DPAD_RIGHT,
+    KeyEvent.KEYCODE_DPAD_CENTER,
+)
