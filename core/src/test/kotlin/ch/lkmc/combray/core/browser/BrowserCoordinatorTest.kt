@@ -236,6 +236,43 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aViewlessTabsPreviousPageStaysInRecentWhileItNavigates() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single().tabId
+
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.releaseHiddenViews(); idle()
+        assertTrue(1L in engine.closed)
+
+        // Navigating the renderer-less tab must not hide its old page from Recent: the tab is
+        // not showing it while the new address waits for a renderer.
+        browser.openUrlInTab(tabA, "https://a2.test/"); idle()
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+    }
+
+    @Test
+    fun aTabThatReturnsHomeKeepsItsPreviousPageInRecent() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single().tabId
+
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.releaseHiddenViews(); idle()
+
+        // An address the engine cannot open returns the tab to the internal home.
+        engine.refusedUrls += "https://bad.test/"
+        browser.openUrlInTab(tabA, "https://bad.test/"); idle()
+        idle() // the refusal event is queued from inside the work queue
+        assertNull(state().activeTab?.url)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+    }
+
+    @Test
     fun closedHistoryExpiresButOpenTabsDoNot() {
         ready()
         browser.openUrl("https://old-open.test/", Placement.NEW_TAB); idle()
