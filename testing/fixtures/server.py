@@ -12,6 +12,8 @@ Pages
   /cookie-echo               title COOKIE:<Cookie header>
   /opener.html               link with target=_blank to /solid/3b4f8a.html
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
+  /once.html?k=<alnum>       title ONCE on the first request per key; later ones close unanswered
+                             (a reload that fails like a lost connection)
   /private.html              page for exclusion checks
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
@@ -60,6 +62,7 @@ def fresh_lists():
 
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": []}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
+once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 
 
 def page(title, body, head=""):
@@ -205,6 +208,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("EMPTY", ""))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
+        if path == "/once.html":
+            key = "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:40]
+            with lock:
+                first = key not in once_served
+                once_served.add(key)
+            if first:
+                return self.send(200, page("ONCE", "<p>ONCE</p>"))
+            # No response at all: the engine sees a network failure and commits its error page.
+            self.close_connection = True
+            return None
         if path == "/auth.html":
             expected = "Basic " + base64.b64encode(":".join(SIGN_IN).encode()).decode()
             if self.headers.get("Authorization") == expected:
@@ -261,6 +274,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state["lists"].update(fresh_lists())
                 state["hister"].clear()
                 state["log"].clear()
+                once_served.clear()
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})

@@ -4,7 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
+import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
+import ch.lkmc.combray.core.data.VisitEntity
+import ch.lkmc.combray.core.data.VisitKind
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
@@ -76,7 +79,7 @@ class BrowserCoordinatorTest {
         idle()
     }
 
-    private fun title(native: Long, document: Long, title: String, attribution: Attribution = Attribution.CURRENT) {
+    private fun title(native: Long, document: Long, title: String?, attribution: Attribution = Attribution.CURRENT) {
         engine.emit(EngineEvent.TitleChanged(engine.view(native), document, title, attribution))
         idle()
     }
@@ -163,13 +166,46 @@ class BrowserCoordinatorTest {
         browser.closeTab(tabC); idle()
         // A was focused after B, so A is the successor.
         assertEquals(tabA, state().activeTab?.id)
-        assertEquals(Notice.TabClosed(tabC, null), state().notice)
+        assertEquals(Notice.TabClosed(tabC, null, wasActive = true), state().notice)
         // Its page stays in Recent as history.
         assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://c.test/" })
 
-        browser.reopenTab(tabC); idle()
+        browser.reopenTab(tabC, ReopenFocus.FOCUS); idle()
         assertEquals(tabC, state().activeTab?.id)
         assertEquals(4L to "https://c.test/", engine.created.last())
+    }
+
+    @Test
+    fun undoAfterClosingABackgroundTabKeepsTheCurrentOne() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = state().activeTab!!.id
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val tabB = state().activeTab!!.id
+        now += 1_000
+        browser.openUrl("https://c.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://c.test/")
+        val tabC = state().activeTab!!.id
+        now += 1_000
+        browser.selectTab(tabA); idle()
+
+        // Recent's close on a row that is not the current tab.
+        browser.closeTab(tabB); idle()
+        assertEquals(tabA, state().activeTab?.id)
+        assertEquals(Notice.TabClosed(tabB, null, wasActive = false), state().notice)
+        now += 1_000
+        browser.reopenTab(tabB, ReopenFocus.KEEP_CURRENT); idle()
+
+        assertEquals(tabA, state().activeTab?.id)
+        assertEquals(1L, engine.selected.last())
+        // Back in its old place among the open tabs, loaded only once it is selected.
+        assertEquals(listOf(tabA, tabC, tabB), recent().filterIsInstance<RecentItem.OpenTab>().map { it.tabId })
+        assertEquals(3, engine.created.size)
+        browser.selectTab(tabB); idle()
+        assertEquals(4L to "https://b.test/", engine.created.last())
     }
 
     @Test
@@ -236,6 +272,76 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aFailedReloadKeepsTheEarlierVisitAndItsTitle() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        title(1, 10, "Article")
+
+        // Reload offline: Servo reports a null, then an empty title for every new document
+        // before its own, here the error page's.
+        commit(1, 11, "https://a.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "", Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+        assertTrue(state().activeTab!!.loadFailed)
+        assertEquals("Error loading page", state().activeTab?.title)
+
+        browser.closeTab(state().activeTab!!.id); idle()
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://a.test/" to "Article", visit.url to visit.title)
+    }
+
+    @Test
+    fun aReloadKeepsThePageTitleUntilTheNewDocumentReportsItsOwn() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        title(1, 10, "Article")
+
+        commit(1, 11, "https://a.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "", Attribution.HELD_UNTIL_COMMIT)
+        assertEquals("Article", state().activeTab?.title)
+        title(1, 11, "Article, updated")
+        assertEquals("Article, updated", state().activeTab?.title)
+    }
+
+    @Test
+    fun aFailedReloadOfAFailedPageStaysOutOfHistory() {
+        ready()
+        browser.openUrl("https://down.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://down.test/")
+        title(1, 10, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 10, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+        commit(1, 11, "https://down.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+
+        commit(1, 12, "https://up.test/")
+        assertTrue(recent().none { it is RecentItem.Visit })
+    }
+
+    @Test
+    fun aReloadThatLoadsAFailedPageRecordsItEvenWithoutATitle() {
+        ready()
+        browser.openUrl("https://down.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://down.test/")
+        title(1, 10, "Error loading page")
+
+        // Back online; the page has no <title>, so the error page's title must not stay.
+        commit(1, 11, "https://down.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "", Attribution.HELD_UNTIL_COMMIT)
+        assertFalse(state().activeTab!!.loadFailed)
+        assertNull(state().activeTab?.title)
+
+        commit(1, 12, "https://up.test/")
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://down.test/" to null, visit.url to visit.title)
+    }
+
+    @Test
     fun closedHistoryExpiresButOpenTabsDoNot() {
         ready()
         browser.openUrl("https://old-open.test/", Placement.NEW_TAB); idle()
@@ -251,6 +357,25 @@ class BrowserCoordinatorTest {
         assertTrue(items.any { it is RecentItem.OpenTab && it.url == "https://old-open.test/" })
         assertTrue(items.none { it.url == "https://old-closed.test/" })
         assertEquals(1, runBlocking { database.browser().openTabs() }.size)
+    }
+
+    @Test
+    fun searchingRecentLooksAtEveryRetainedVisitNotOnlyTheNewest() {
+        idle() // start-up maintenance must not remove the tab before its visits exist
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            (0 until 600).forEach { index ->
+                val (host, title) = if (index == 0) "recipe.test" to "Lentil soup" else "other.test" to "Page $index"
+                dao.insertVisit(VisitEntity("visit$index", "closed", "https://$host/$index", host, title, null, VisitKind.DOCUMENT, START + index, START + index, false))
+            }
+        }
+
+        assertEquals(500, recent().size)
+        assertTrue(recent().none { it.title == "Lentil soup" })
+        // The oldest visit is still within retention, so a search finds it.
+        assertEquals(listOf("Lentil soup"), recent("lentil").map { it.title })
+        assertEquals(500, recent("page").size)
     }
 
     @Test
@@ -525,7 +650,7 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.TabClosed(engine.view(2))); idle()
         assertEquals(1, state().openTabCount)
         assertEquals(tabA, state().activeTab?.id)
-        assertEquals(Notice.TabClosed(tabB, null), state().notice)
+        assertEquals(Notice.TabClosed(tabB, null, wasActive = true), state().notice)
         // The page destroyed the view itself; the coordinator must not close it again.
         assertTrue(engine.closed.isEmpty())
         assertEquals(1L, engine.selected.last())

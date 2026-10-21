@@ -88,6 +88,13 @@ All notable changes to this project are documented here. The format follows
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
   Each patch is now checked to have landed.
 - A page's prompt dialog labels its text field, so TalkBack names it.
+- A reload that fails, such as offline or when a tab is restored, no longer
+  hides the page from Recent or renames it "Error loading page", and a
+  reload no longer blanks the page's title while the new one loads.
+- Searching Recent finds every page in local history, not only the newest
+  500 visits.
+- Undo after closing a tab other than the current one reopens it in the
+  background instead of switching to it.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.
