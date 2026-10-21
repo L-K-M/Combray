@@ -176,7 +176,15 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
-                onBack = browser::goBack,
+                onBack = {
+                    when {
+                        tab?.canGoBack == true -> browser.goBack()
+                        tab?.openedByOtherApp == true -> {
+                            browser.returnToOtherApp(tab.id)
+                            onLeave()
+                        }
+                    }
+                },
                 onAddress = editAddress,
                 onSave = {
                     // Snapshot now: switching tabs right after the tap must not change what is saved.
