@@ -378,7 +378,8 @@ class BrowserCoordinator(
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
             is EngineEvent.Crashed -> view(event.view)?.let {
-                Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
+                // Category only: a crash reason can quote the page address.
+                Log.w(LOG_TAG, "renderer crashed")
                 it.crashed = true
                 it.loading = false
                 it.controls.clear()
@@ -728,7 +729,8 @@ class BrowserCoordinator(
      * leave a dead tab with the previous page still shown: the tab returns to the internal home.
      */
     private suspend fun onEngineError(event: EngineEvent.EngineError) {
-        Log.w(LOG_TAG, "engine refused a request: ${event.message}")
+        // Category only: the message can be "cannot open <url>", including a token in the query.
+        Log.w(LOG_TAG, "engine refused a request")
         val view = event.tab?.let { liveByNative[it] } ?: return
         if (view.generation != null) {
             if (event.request != null) state.update { it.copy(notice = Notice.AddressNotOpened) }

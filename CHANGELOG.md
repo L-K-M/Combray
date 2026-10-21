@@ -80,6 +80,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Engine refusal and crash logs no longer include the raw message.
+  That text can contain the page address, including a sign-in token.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
