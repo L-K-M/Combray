@@ -74,6 +74,7 @@
 
     <!-- Recent -->
     <string name="recent_title">Recent</string>
+    <string name="recent_subtitle">Your open pages and the ones you left.</string>
     <string name="recent_filter_all">All</string>
     <string name="recent_filter_open">Open tabs</string>
     <string name="recent_scope_hister">Hister</string>
@@ -82,6 +83,9 @@
     <string name="recent_open_marker">Open</string>
     <string name="recent_active_marker">Current tab</string>
     <string name="recent_close_tab">Close tab: %1$s</string>
+    <!-- TalkBack: "Double-tap to switch to tab". -->
+    <string name="recent_switch_to_tab">Switch to tab</string>
+    <string name="recent_open_in_new_tab">Open in new tab</string>
     <string name="recent_row_actions">Actions for %1$s</string>
     <string name="recent_remove">Remove from Recent</string>
     <string name="recent_forget_site">Forget %1$s</string>
@@ -91,6 +95,9 @@
     <string name="recent_forget_confirm">Forget</string>
     <string name="recent_empty">No open tabs or recent pages yet.</string>
     <string name="recent_no_matches">Nothing in Recent matches.</string>
+    <string name="recent_open_empty">No open tabs.</string>
+    <string name="recent_open_no_matches">No open tab matches, but recent pages do.</string>
+    <string name="recent_show_all">Show all recent pages</string>
     <string name="recent_today">Today</string>
     <string name="recent_yesterday">Yesterday</string>
     <string name="recent_new_tab_row">New tab</string>
@@ -189,7 +196,7 @@
     <string name="action_resume_capture">Resume history capture</string>
 
     <!-- Search all history -->
-    <string name="search_all_hint">Search your Hister history</string>
+    <string name="search_all_hint">Words you remember, searched in Hister…</string>
     <string name="search_all_not_configured">Connect Hister in Settings to search all history.</string>
     <string name="search_all_empty">No results in Hister.</string>
     <plurals name="search_all_count">

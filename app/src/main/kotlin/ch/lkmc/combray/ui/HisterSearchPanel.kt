@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,6 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -118,20 +120,24 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         }
     }
 
+    val highlight = matchStyle()
     LazyColumn(Modifier.fillMaxWidth()) {
         items(hits, key = { it.url }) { hit ->
             ListItem(
-                headlineContent = { Text(hit.title ?: displayHost(hit.url), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                headlineContent = {
+                    Text(highlightMatches(hit.title ?: displayHost(hit.url), query, highlight), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 supportingContent = {
                     Column {
                         // Plain text only: stored excerpts are never rendered as HTML.
-                        hit.excerpt?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        hit.excerpt?.let { Text(highlightMatches(it, query, highlight), maxLines = 2, overflow = TextOverflow.Ellipsis) }
                         Text(
                             listOfNotNull(displayHost(hit.url), if (hit.fromHistory) stringResource(R.string.search_all_from_history) else null).joinToString(" · "),
                             maxLines = 1,
                         )
                     }
                 },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier.clickable { onOpen(hit.url) },
             )
         }

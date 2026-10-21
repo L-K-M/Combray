@@ -60,6 +60,8 @@ All notable changes to this project are documented here. The format follows
   for what you type; a result opens in a new tab.
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
+- Recent, Hister and Karakeep results mark the words you typed, ignoring
+  case and accents.
 
 ### Changed
 
@@ -77,9 +79,22 @@ All notable changes to this project are documented here. The format follows
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- Recent rows show the site's initial and, for open tabs too, when you
+  last used them, so two tabs on one page can be told apart. Only the
+  current tab is highlighted. Day headers name the weekday for the past
+  week. TalkBack announces the scope chips as tabs and says what tapping
+  a row does.
+- The Hister field's hint reads "Words you remember, searched in Hister…".
 
 ### Fixed
 
+- Recent's Open tabs said there were no recent pages, or that nothing
+  matched, while All had some. It now says there is no open tab and
+  offers to show all recent pages.
+- Relative times and Today/Yesterday in Recent went stale while the sheet
+  stayed open; they now update every 30 seconds.
+- After scrolling Recent, a new filter or scope could leave its first
+  matches out of view; the list now starts at the top.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
