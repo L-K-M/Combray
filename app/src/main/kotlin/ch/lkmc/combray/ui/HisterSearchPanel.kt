@@ -144,6 +144,8 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
             item {
                 TextButton(
                     onClick = {
+                        // Two taps in one frame both see the button still enabled.
+                        if (loadingMore) return@TextButton
                         val mine = generation
                         loadingMore = true
                         scope.launch {
