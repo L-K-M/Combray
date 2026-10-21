@@ -732,7 +732,12 @@ class BrowserCoordinator(
         val tab = event.tab
         if (tab == null) {
             // Engine-level: the native error() path emits with no tab, refusals carry one.
-            Log.e(LOG_TAG, "engine-level failure: ${event.message}")
+            // Only startup failure is fatal here, so only that one is an ERROR.
+            if (state.value.engine == EngineStatus.STARTING) {
+                Log.e(LOG_TAG, "engine-level failure: ${event.message}")
+            } else {
+                Log.w(LOG_TAG, "engine-level failure: ${event.message}")
+            }
             // While the app still waits for engine_ready, "starting" would never resolve —
             // fail into the overlay that already renders it. After ready, engine-level
             // errors are recoverable or benign (a failed surface bind retries on the next
