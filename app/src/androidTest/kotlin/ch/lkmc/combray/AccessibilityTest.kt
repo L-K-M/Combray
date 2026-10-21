@@ -20,6 +20,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -85,8 +86,9 @@ class AccessibilityTest {
         }
 
         assertTargetsAreAccessible()
+        // The rows scroll when they outgrow the window: bring each into view before checking it.
         for (label in listOf("Close tab", "Pause history capture", "Settings")) {
-            compose.onNodeWithText(label).assertIsDisplayed()
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
     }
 
