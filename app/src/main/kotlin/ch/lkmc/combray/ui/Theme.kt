@@ -45,7 +45,7 @@ fun CombrayTheme(appearance: Appearance = Appearance.SYSTEM, content: @Composabl
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
             val bars = WindowCompat.getInsetsController(window, view)
             bars.isAppearanceLightStatusBars = !dark
             bars.isAppearanceLightNavigationBars = !dark

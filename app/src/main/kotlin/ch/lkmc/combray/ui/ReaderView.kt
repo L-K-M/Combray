@@ -104,7 +104,7 @@ private fun ArticleText(article: Article, readerSize: ReaderTextSize, onOpenLink
 private fun ArticleHeader(article: Article, readerSize: ReaderTextSize) {
     Column(Modifier.articleWidth().padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOfNotNull(article.site, article.byline).distinct().takeIf { it.isNotEmpty() }?.let {
-            Text(it.joinToString(" · "), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(it.joinToString(" · "), style = MaterialTheme.typography.labelLarge.scaled(readerSize), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         article.title?.let {
             Text(it, style = MaterialTheme.typography.headlineSmall.scaled(readerSize), modifier = Modifier.semantics { heading() })
