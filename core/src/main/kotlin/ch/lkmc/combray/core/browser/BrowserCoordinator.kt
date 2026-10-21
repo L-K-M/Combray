@@ -918,7 +918,14 @@ data class Retention(val closedHistoryDays: Int = 7) {
  * Whether an engine event can change what [BrowserCoordinator]'s publish step reads. The
  * engine's heartbeat (Painted), surface echoes, navigation confirmations and diagnostics
  * cannot, so handling them skips the three Room reads publish would otherwise run on the
- * serialized command queue. Unknown future event kinds stay conservative and publish.
+ * serialized command queue.
+ *
+ * The `when` is exhaustive on purpose: a new [EngineEvent] kind does not compile until
+ * someone classifies it here. Contract for the `false` side: the event's branch in
+ * [BrowserCoordinator.onEngineEvent] must not mutate anything publish reads — the tab
+ * projection, reader state, live views or any table publish queries — and no code may rely
+ * on the heartbeat's former implicit ~1 Hz republish: work that changes published inputs
+ * off this queue must publish itself.
  */
 internal fun changesPublishedState(event: EngineEvent): Boolean = when (event) {
     is EngineEvent.Painted,
@@ -933,5 +940,19 @@ internal fun changesPublishedState(event: EngineEvent): Boolean = when (event) {
     is EngineEvent.ProfilePersisted,
     is EngineEvent.Other,
     -> false
-    else -> true
+    is EngineEvent.EngineReady,
+    is EngineEvent.TabCreated,
+    is EngineEvent.TabClosed,
+    is EngineEvent.TabOpened,
+    is EngineEvent.HistoryChanged,
+    is EngineEvent.LoadStatus,
+    is EngineEvent.CaptureResult,
+    is EngineEvent.TitleChanged,
+    is EngineEvent.ImeShown,
+    is EngineEvent.ImeHidden,
+    is EngineEvent.Crashed,
+    is EngineEvent.ControlShown,
+    is EngineEvent.ControlHidden,
+    is EngineEvent.EngineError,
+    -> true
 }
