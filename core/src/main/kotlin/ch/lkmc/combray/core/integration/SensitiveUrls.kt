@@ -24,8 +24,14 @@ object SensitiveUrls {
         "sessid", "oauth",
     )
 
-    /** Pagination cursors that only happen to contain "token". */
-    private val HARMLESS_NAMES = setOf("pagetoken", "nextpagetoken", "prevpagetoken", "continuationtoken")
+    /** Pagination cursors that only happen to contain "token" (Google, AWS, Microsoft Graph). */
+    private val HARMLESS_NAMES = setOf(
+        "pagetoken", "nextpagetoken", "prevpagetoken", "continuationtoken", "nexttoken", "\$skiptoken",
+        "%24skiptoken",
+    )
+
+    /** Separators of parameters: `&`, and `;` in older query strings and in path matrix parameters. */
+    private val PARAMETER_SEPARATORS = Regex("[&;]")
 
     /** An OAuth authorization code (`code`) is a credential when its callback also carries `state`. */
     private const val AUTHORIZATION_CODE = "code"
@@ -38,9 +44,11 @@ object SensitiveUrls {
             return true
         }
         if (uri.rawUserInfo != null) return true
-        // OAuth implicit-flow callbacks carry tokens in the fragment (#access_token=...).
-        return listOfNotNull(uri.rawQuery, uri.rawFragment).any { part ->
-            val names = part.split('&').map { normalized(it.substringBefore('=')) }
+        // OAuth implicit-flow callbacks carry tokens in the fragment (#access_token=...); Java
+        // servlets rewrite session IDs into the path (/cart;jsessionid=...).
+        val matrix = uri.rawPath.orEmpty().split('/').flatMap { it.split(';').drop(1) }.joinToString(";")
+        return listOfNotNull(uri.rawQuery, uri.rawFragment, matrix.ifEmpty { null }).any { part ->
+            val names = part.split(PARAMETER_SEPARATORS).map { normalized(it.substringBefore('=')) }
             names.any(::isCredential) || (AUTHORIZATION_CODE in names && AUTHORIZATION_STATE in names)
         }
     }
