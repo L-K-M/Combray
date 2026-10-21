@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,10 +40,11 @@ fun MoreSheet(
     onPauseCapture: () -> Unit,
     readerOpen: Boolean,
     onReader: () -> Unit,
+    onFind: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
+        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader, onFind)
     }
 }
 
@@ -60,6 +62,7 @@ internal fun MoreActions(
     /** Reader view is open over the page: the row leaves it. */
     readerOpen: Boolean,
     onReader: () -> Unit,
+    onFind: () -> Unit,
 ) {
     val url = tab?.url
     Column(Modifier.padding(bottom = 16.dp)) {
@@ -70,6 +73,8 @@ internal fun MoreActions(
         if (url != null) {
             MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
             MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
+            // Find searches the page itself, which reader view covers.
+            if (!readerOpen) MoreRow(Icons.Filled.Search, R.string.action_find_in_page, onFind)
         }
         // Pausing is one tap; switching capture on goes through Settings, which explains it.
         when (captureEnabled) {

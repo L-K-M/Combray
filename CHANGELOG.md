@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Find in page: More › Find in page opens a bar at the bottom that counts
+  the page's matches, selects and scrolls to each in turn, and removes the
+  selection when it closes.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

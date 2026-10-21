@@ -499,6 +499,38 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_captureArticle<'local
     }));
 }
 
+/// Find in page in the tab's current document; the engine reports `find_result` for `request`.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_find<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    request: jlong,
+    query: JString<'local>,
+    index: jint,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let query = java_string(env, query)?;
+        send(Command::Find {
+            tab,
+            request,
+            query,
+            index,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_clearFind<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+) {
+    send(Command::FindClear { tab });
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_evaluate<'local>(
     mut env: EnvUnowned<'local>,

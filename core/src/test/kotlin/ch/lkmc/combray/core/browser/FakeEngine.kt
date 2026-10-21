@@ -97,4 +97,20 @@ class FakeEngine : EnginePort {
     override fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int) {
         articleCaptures += document to capture
     }
+
+    /** One find request: the view it searches, request ID, query and match index. */
+    data class Find(val tab: Long, val request: Long, val query: String, val index: Int)
+
+    val finds = mutableListOf<Find>()
+
+    /** Views whose find selection was cleared. */
+    val findClears = mutableListOf<Long>()
+
+    override fun find(tab: Long, request: Long, query: String, index: Int) {
+        finds += Find(tab, request, query, index)
+    }
+
+    override fun clearFind(tab: Long) {
+        findClears += tab
+    }
 }

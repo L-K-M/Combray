@@ -102,6 +102,15 @@ object NativeEngine {
     /** Reader view: [document]'s main article as JSON in the result's text (native/src/reader.js). */
     @JvmStatic external fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
 
+    /**
+     * Find in page in the tab's current document: select match [index] of [query] (wrapping;
+     * negative counts from the end). Reported as `find_result` for [request] (native/src/find.js).
+     */
+    @JvmStatic external fun find(tab: Long, request: Long, query: String, index: Int)
+
+    /** Removes the selection [find] made in the tab's current document. */
+    @JvmStatic external fun clearFind(tab: Long)
+
     /** Test support: evaluate [script] in the tab's current document, without a document guard. */
     @JvmStatic external fun evaluate(tab: Long, request: Long, script: String)
 

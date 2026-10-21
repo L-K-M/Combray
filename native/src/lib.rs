@@ -8,15 +8,17 @@
 //!                         ├─ delegate: per-view WebViewDelegate → queue
 //!                         ├─ controls: select pickers, script dialogs, file pickers
 //!                         ├─ capture: bounded in-page text snapshot
+//!                         ├─ find: find in page (bounded in-page search)
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `events`, `panic_policy` and the pure parts of `capture` build on any host so their tests run
-//! without Servo.
+//! `events`, `panic_policy` and the pure parts of `capture` and `find` build on any host so their
+//! tests run without Servo.
 
 pub mod capture;
 pub mod controls;
 pub mod events;
+pub mod find;
 mod panic_policy;
 
 #[cfg(target_os = "android")]

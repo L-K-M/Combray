@@ -42,8 +42,10 @@ use crate::commands::{
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
 use crate::delegate::{DelegateEvent, DelegateQueue, TabDelegate};
 use crate::events::{
-    Attribution, CaptureReport, CaptureStatus, EngineEvent, HistoryChange, LoadPhase, ViewKey,
+    Attribution, CaptureReport, CaptureStatus, EngineEvent, FindStatus, HistoryChange, LoadPhase,
+    ViewKey,
 };
+use crate::find::{self, FindAction};
 use crate::native_window::NativeWindow;
 use crate::panic_policy;
 
@@ -234,6 +236,14 @@ type CaptureResult = (
 type CaptureResults = Rc<RefCell<Vec<CaptureResult>>>;
 type EvaluationResults =
     Rc<RefCell<Vec<(ViewKey, i64, Result<JSValue, JavaScriptEvaluationError>)>>>;
+/// A finished find script: the view, request ID and document it ran in, and its result.
+type FinishedFind = (
+    ViewKey,
+    i64,
+    u64,
+    Result<JSValue, JavaScriptEvaluationError>,
+);
+type FindResults = Rc<RefCell<Vec<FinishedFind>>>;
 
 struct Engine {
     config: EngineConfig,
@@ -252,6 +262,7 @@ struct Engine {
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
     evaluation_results: EvaluationResults,
+    find_results: FindResults,
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
@@ -276,6 +287,7 @@ impl Engine {
             delegate_queue: Default::default(),
             capture_results: Default::default(),
             evaluation_results: Default::default(),
+            find_results: Default::default(),
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
@@ -366,6 +378,13 @@ impl Engine {
                 self.respond_to_control(control, &response)
             },
             Command::Capture(request) => self.start_capture(request),
+            Command::Find {
+                tab,
+                request,
+                query,
+                index,
+            } => self.find(tab, request, &query, index),
+            Command::FindClear { tab } => self.clear_find(tab),
             Command::Evaluate {
                 tab,
                 request,
@@ -388,6 +407,7 @@ impl Engine {
         self.drain_delegate_events();
         self.drain_capture_results();
         self.drain_evaluations();
+        self.drain_find_results();
         self.expire_captures();
         self.paint();
     }
@@ -1027,6 +1047,85 @@ impl Engine {
                 result: result
                     .map(|value| js_to_json(&value, 0))
                     .map_err(|error| format!("{error:?}")),
+            });
+        }
+    }
+
+    // --- Find in page -------------------------------------------------------------------------
+
+    /// Runs the find script in the tab's current document only (Servo refuses it if that document
+    /// is replaced first); the result names that document.
+    fn find(&mut self, tab: i64, request: i64, query: &str, index: i32) {
+        let Some(found) = self.tabs.get(&tab) else {
+            self.emit(EngineEvent::FindResult {
+                view: ViewKey { tab, generation: 0 },
+                document: None,
+                request,
+                status: FindStatus::Failed,
+            });
+            return;
+        };
+        let view = found.view;
+        let Some(document) = found.current_document else {
+            self.emit(EngineEvent::FindResult {
+                view,
+                document: None,
+                request,
+                status: FindStatus::Failed,
+            });
+            return;
+        };
+
+        let results = self.find_results.clone();
+        let ran_in = u64::from(document);
+        found.webview.evaluate_javascript_in_document(
+            document,
+            find::script(query, FindAction::Find { index }),
+            move |result| results.borrow_mut().push((view, request, ran_in, result)),
+        );
+    }
+
+    /// Removes find's selection from the tab's current document; nothing to report.
+    fn clear_find(&mut self, tab: i64) {
+        let Some(found) = self.tabs.get(&tab) else {
+            return;
+        };
+        let Some(document) = found.current_document else {
+            return;
+        };
+        found.webview.evaluate_javascript_in_document(
+            document,
+            find::script("", FindAction::Clear),
+            |_| {},
+        );
+    }
+
+    fn drain_find_results(&mut self) {
+        let results: Vec<_> = self.find_results.borrow_mut().drain(..).collect();
+        for (view, request, document, result) in results {
+            // Re-check after the asynchronous hop, like captures: a replaced document's matches
+            // must not reach the page now shown.
+            let current = self
+                .tabs
+                .get(&view.tab)
+                .filter(|tab| tab.view == view)
+                .map(|tab| tab.current_document.map(u64::from));
+            let status = match current {
+                None => FindStatus::TabClosed,
+                Some(current) if current != Some(document) => FindStatus::StaleDocument,
+                Some(_) => match find::interpret_result(result) {
+                    Ok(counts) => FindStatus::Found(counts),
+                    Err(reason) => {
+                        warn!("find request {request} failed: {reason}");
+                        FindStatus::Failed
+                    },
+                },
+            };
+            self.emit(EngineEvent::FindResult {
+                view,
+                document: Some(document),
+                request,
+                status,
             });
         }
     }

@@ -106,6 +106,8 @@ data class BrowserState(
     val pageControl: PageControl? = null,
     /** Reader view over the focused tab, while it is open. */
     val reader: ReaderState? = null,
+    /** Find in page over the focused tab's page, while the find bar is open. */
+    val find: FindState? = null,
     val notice: Notice? = null,
 )
 

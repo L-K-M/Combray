@@ -43,6 +43,9 @@ object Fixtures {
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 
+    /** "combraneedle" three times far apart; titled `FIND:<scrollY>:<selected text>`. */
+    const val FIND = "$BASE/find.html"
+
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
 

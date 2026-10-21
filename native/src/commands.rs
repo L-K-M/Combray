@@ -135,6 +135,18 @@ pub enum Command {
         response: String,
     },
     Capture(CaptureRequest),
+    /// Find in page: search the tab's current document for `query` and select match `index`
+    /// (wrapping around; negative counts from the end). Outcome: `find_result`.
+    Find {
+        tab: i64,
+        request: i64,
+        query: String,
+        index: i32,
+    },
+    /// Remove the selection find made in the tab's current document. No outcome event.
+    FindClear {
+        tab: i64,
+    },
     /// Test support: run `script` in the tab's current document without a document guard.
     Evaluate {
         tab: i64,
