@@ -63,11 +63,13 @@ scripts/build-native.sh               # cargo build + strip → engine/jniLibs/x
 
 `scripts/build.sh [--debug] [--install]` then runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
 
-Plain Gradle still builds without `build-native.sh` (CI does this); that APK contains no engine and the app says so. `scripts/build.sh` refuses to stage it. Unit tests and lint need no engine:
+Plain Gradle still builds without `build-native.sh` (CI does this); that APK contains no engine and the app says so. `scripts/build.sh` refuses to stage it. Unit tests, lint and compiling the device checks need no engine:
 
 ```sh
-./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
 ```
+
+CI runs these, then fails when the build changed or added a file in `core/schemas`: an entity changed without its exported schema being committed. `MigrationTest` holds the identity hash of every committed schema version, so a committed change to an existing version fails as well; a new version adds its hash there.
 
 Build-script regression checks need Python 3.10+ and no SDK:
 
@@ -147,6 +149,8 @@ Host unit tests for the engine's pure modules (no Servo build needed):
 cd native && cargo test --lib
 ```
 
+They still need the fetched tree, because Cargo reads the Android-only path dependencies into it, so CI does not run them. CI checks what needs no tree: `cargo fmt --check` in `native/`, and that `capture.js`, `reader.js` and the vendored `Readability.js` compile as scripts.
+
 ## Emulator and checks
 
 App checks (instrumented tests against the real engine and `testing/fixtures/server.py`, then a process-death check across a killed process):
@@ -156,6 +160,8 @@ scripts/m0/emulator.sh
 ./gradlew assembleDebug assembleDebugAndroidTest
 scripts/check-app.sh emulator-5560    # or: scripts/check-app.sh emulator-5560 ch.lkmc.combray.SaveTest
 ```
+
+The default run covers every `*Test.kt` class in `app/src/androidTest`, then `ProcessDeathTest`'s two runs around a killed process; `scripts/check-app.sh --list` prints those classes without a device.
 
 Evidence goes to `build/device-checks/<UTC time>/` (or `$COMBRAY_RESULTS`): raw instrumentation output per run, logcat and `summary.md`; the script exits 1 if a check failed, a run reported nothing, or a run stopped early (a crash or not-responding kill marks the test in progress as crashed and counts the rest as not run). Fixture pages are reached at `localhost:8766` through `adb reverse`; the fake services at `10.0.2.2:8766` (the emulator's address for the host), because a service's own host is never captured for Hister. On a physical phone, use a host address the phone reaches.
 
