@@ -22,7 +22,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,14 +51,20 @@ import kotlinx.coroutines.delay
 @Composable
 fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
     var query by rememberSaveable { mutableStateOf(state.query) }
-    val asked by rememberUpdatedState(state.query)
+    // Recorded when asked, not when the answer is published: a Search or a step during the
+    // typing pause must not be followed by a search that jumps back to the first match.
+    var asked by remember { mutableStateOf(state.query) }
+    val ask = { text: String, step: FindStep ->
+        asked = text
+        onFind(text, step)
+    }
     val focus = remember { FocusRequester() }
 
     // One search per pause in typing, not per keystroke; Search or a step may have asked already.
     LaunchedEffect(query) {
         if (query == asked) return@LaunchedEffect
         delay(TYPING_PAUSE_MS)
-        if (query != asked) onFind(query, FindStep.FIRST)
+        if (query != asked) ask(query, FindStep.FIRST)
     }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
@@ -77,7 +82,7 @@ fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () ->
                 singleLine = true,
                 label = { Text(stringResource(R.string.action_find_in_page), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onFind(query, FindStep.NEXT) }),
+                keyboardActions = KeyboardActions(onSearch = { ask(query, FindStep.NEXT) }),
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp).focusRequester(focus),
             )
             // A live region: TalkBack announces each new position or "No matches".
@@ -89,10 +94,10 @@ fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () ->
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 96.dp).padding(horizontal = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
             )
-            IconButton(onClick = { onFind(query, FindStep.PREVIOUS) }, enabled = stepping) {
+            IconButton(onClick = { ask(query, FindStep.PREVIOUS) }, enabled = stepping) {
                 Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.action_find_previous))
             }
-            IconButton(onClick = { onFind(query, FindStep.NEXT) }, enabled = stepping) {
+            IconButton(onClick = { ask(query, FindStep.NEXT) }, enabled = stepping) {
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.action_find_next))
             }
             IconButton(onClick = onClose) {
