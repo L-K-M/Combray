@@ -88,6 +88,9 @@ class BrowserCoordinator(
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
+    /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
+    private val openers = HashMap<String, String>()
+
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
 
@@ -195,6 +198,32 @@ class BrowserCoordinator(
         otherAppTab = null
         val tab = dao.tab(tabId)?.takeIf { it.state == TabState.OPEN } ?: return@submit
         closeLogically(tab)
+        reconcile()
+        publish()
+    }
+
+    /**
+     * Opens a link from the page in [openerTabId] (its link menu) in a new tab. Like a window the
+     * page opened, Back on the new tab's first page returns to the opener ([returnToOpener]).
+     */
+    fun openUrlFromTab(url: String, openerTabId: String) = submit {
+        createTab(url, openerTabId)
+        reconcile()
+        publish()
+    }
+
+    /**
+     * Back on the first page of a tab another tab's page opened: the tab closes without an Undo
+     * notice and its opener gets focus; its page stays in Recent as history. Nothing closes when
+     * the opener is gone, so Back never closes a tab with nowhere to return to.
+     */
+    fun returnToOpener(tabId: String) = submit {
+        val openerId = openers[tabId] ?: return@submit
+        val tab = activeTab()?.takeIf { it.id == tabId } ?: return@submit
+        val opener = dao.tab(openerId)?.takeIf { it.state == TabState.OPEN } ?: return@submit
+        // Focus first: the closing tab then needs no successor, which could be some other tab.
+        focus(opener)
+        closeLogically(dao.tab(tab.id) ?: tab)
         reconcile()
         publish()
     }
@@ -608,7 +637,7 @@ class BrowserCoordinator(
             engine.closeView(event.view.tab)
             return
         }
-        val tabId = createTab(url = null)
+        val tabId = createTab(url = null, openerTabId = opener.tabId)
         val view = LiveView(tabId, event.view.tab).also { it.generation = event.view.generation }
         liveByTab[tabId] = view
         liveByNative[view.nativeTab] = view
@@ -716,7 +745,7 @@ class BrowserCoordinator(
     private suspend fun activeTab(): TabEntity? =
         dao.session()?.activeTabId?.let { dao.tab(it) }?.takeIf { it.state == TabState.OPEN }
 
-    private suspend fun createTab(url: String?): String {
+    private suspend fun createTab(url: String?, openerTabId: String? = null): String {
         val now = clock.now()
         val tab = TabEntity(
             id = newId(),
@@ -728,6 +757,9 @@ class BrowserCoordinator(
             lastFocusedAt = now,
             closedAt = null,
         )
+        // Recorded before focus moves to the new tab, so that keeps the opener's own way back;
+        // only for an opener still open (a page window can race its opener's close).
+        openerTabId?.takeIf { dao.tab(it)?.state == TabState.OPEN }?.let { openers[tab.id] = it }
         database.withTransaction {
             dao.insertTab(tab)
             activate(tab.id, now)
@@ -755,6 +787,23 @@ class BrowserCoordinator(
         }
         dao.setSession(SessionEntity(activeTabId = tabId))
         if (tabId != otherAppTab) otherAppTab = null
+        keepOpenersFor(tabId)
+    }
+
+    /**
+     * Focus moved to [tabId]. Opener relations survive within its chain: on its way back (the tab,
+     * its opener, that tab's opener, ...) and below it (tabs whose way back passes [tabId]). A
+     * chain of page-opened tabs unwinds one Back at a time, and focusing a tab outside it ends the
+     * relation, as for [otherAppTab].
+     */
+    private fun keepOpenersFor(tabId: String?) {
+        // Bounded: an opener always existed before its tab, but a cycle must not hang the queue.
+        val bound = openers.size + 1
+        fun wayBack(from: String?) = generateSequence(from) { openers[it] }.take(bound)
+        val onWayBack = wayBack(tabId).toSet()
+        // Decided before removing anything, so no chain is walked while it changes.
+        val ended = openers.keys.filter { child -> child !in onWayBack && wayBack(child).none { it == tabId } }
+        ended.forEach(openers::remove)
     }
 
     /**
@@ -774,11 +823,13 @@ class BrowserCoordinator(
                 val successor = dao.openTabs().firstOrNull()
                 successor?.let { dao.updateTab(it.copy(lastFocusedAt = now)) }
                 dao.setSession(SessionEntity(activeTabId = successor?.id))
+                keepOpenersFor(successor?.id)
             }
             focused
         }
         liveByTab[tab.id]?.let { closeView(it) }
         if (otherAppTab == tab.id) otherAppTab = null
+        openers.entries.removeAll { (child, opener) -> child == tab.id || opener == tab.id }
         return wasFocused
     }
 
@@ -933,6 +984,7 @@ class BrowserCoordinator(
         if (reader != null && reader?.tabId != tab?.id) reader = null
         val view = tab?.let { liveByTab[it.id] }
         val openCount = dao.openTabCount()
+        val returnsToOpener = tab?.let { openers[it.id] }?.let { dao.tab(it)?.state == TabState.OPEN } ?: false
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -947,6 +999,7 @@ class BrowserCoordinator(
                         hasView = view != null,
                         loadFailed = view?.currentDocument?.let { it in view.errorDocuments } ?: false,
                         openedByOtherApp = active.id == otherAppTab,
+                        returnsToOpener = returnsToOpener,
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->

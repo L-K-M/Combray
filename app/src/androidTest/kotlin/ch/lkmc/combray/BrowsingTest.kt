@@ -163,7 +163,7 @@ class BrowsingTest {
     }
 
     @Test
-    fun aWindowOpenedByThePageBecomesAFocusedTab() {
+    fun aWindowOpenedByThePageBecomesAFocusedTabThatBackReturnsFrom() {
         val opener = "${Fixtures.BASE}/opener.html"
         device.browser.openUrl(opener, Placement.CURRENT_TAB)
         device.awaitState { it.activeTab?.title == "OPENER" && it.activeTab?.loading == false }
@@ -176,6 +176,15 @@ class BrowsingTest {
         assertNotEquals(openerTab, device.browser.browserState.value.activeTab?.id)
         assertEquals(2, device.browser.browserState.value.openTabCount)
         assertScreen(Device.BLUE)
+
+        // Back on its first page closes it and returns to the opener, without leaving the app.
+        assertTrue(device.browser.browserState.value.activeTab!!.returnsToOpener)
+        compose.waitForIdle()
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        val state = device.awaitState { it.openTabCount == 1 }
+        assertEquals(openerTab, state.activeTab?.id)
+        assertScreen(Device.VIOLET)
+        assertEquals(Lifecycle.State.RESUMED, compose.activityRule.scenario.state)
     }
 
     @Test

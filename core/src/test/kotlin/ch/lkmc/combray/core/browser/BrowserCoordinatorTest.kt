@@ -846,6 +846,130 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun backOnAPageOpenedWindowClosesItAndReturnsToItsOpener() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://popup.test/")
+        val popup = state().activeTab!!
+        assertTrue(popup.returnsToOpener)
+
+        browser.returnToOpener(popup.id); idle()
+        assertEquals(opener, state().activeTab?.id)
+        assertFalse(state().activeTab!!.returnsToOpener)
+        assertEquals(1, state().openTabCount)
+        assertEquals(1L, engine.selected.last())
+        // No Undo: Back is not a close the user might regret; the page stays in history.
+        assertNull(state().notice)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://popup.test/" })
+    }
+
+    @Test
+    fun aLinkOpenedInANewTabFromThePageReturnsToItsOpenerEvenAfterNavigating() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+
+        browser.openUrlFromTab("https://b.test/", opener); idle()
+        commit(2, 20, "https://b.test/")
+        assertTrue(state().activeTab!!.returnsToOpener)
+        // Its own history goes first (the UI checks canGoBack); the way back to the opener stays.
+        commit(2, 21, "https://b.test/next", index = 1, length = 2)
+        assertTrue(state().activeTab!!.canGoBack)
+        assertTrue(state().activeTab!!.returnsToOpener)
+
+        browser.returnToOpener(state().activeTab!!.id); idle()
+        assertEquals(opener, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun lookingAtAnEarlierTabOfAChainKeepsTheWholeWayBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val first = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://b.test/")
+        val second = state().activeTab!!.id
+        engine.openWindow(opener = PAGE_TAB, tab = PAGE_TAB + 1); idle()
+        commit(PAGE_TAB + 1, 60, "https://c.test/")
+        val third = state().activeTab!!.id
+
+        // A, which opened B, which opened C: looking at A is inside that chain.
+        browser.selectTab(first); idle()
+        browser.selectTab(third); idle()
+        assertTrue(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(third); idle()
+        assertEquals(second, state().activeTab?.id)
+        assertTrue(state().activeTab!!.returnsToOpener)
+    }
+
+    @Test
+    fun focusingAThirdTabEndsTheWayBackToTheOpener() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+        browser.openUrl("https://other.test/", Placement.NEW_TAB); idle()
+        val other = state().activeTab!!.id
+        browser.selectTab(opener); idle()
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        val popup = state().activeTab!!.id
+
+        // Looking at the opener and coming back keeps the pair.
+        browser.selectTab(opener); idle()
+        browser.selectTab(popup); idle()
+        assertTrue(state().activeTab!!.returnsToOpener)
+
+        browser.selectTab(other); idle()
+        browser.selectTab(popup); idle()
+        assertFalse(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(popup); idle()
+        assertEquals(popup, state().activeTab?.id)
+        assertEquals(3, state().openTabCount)
+    }
+
+    @Test
+    fun aPageOpenedWindowWhoseOpenerClosedStaysOpenOnBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        val popup = state().activeTab!!.id
+
+        browser.closeTab(opener); idle()
+        assertFalse(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(popup); idle()
+        assertEquals(popup, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun aChainOfPageOpenedWindowsUnwindsOneBackAtATime() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val first = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://b.test/")
+        val second = state().activeTab!!.id
+        engine.openWindow(opener = PAGE_TAB, tab = PAGE_TAB + 1); idle()
+        commit(PAGE_TAB + 1, 60, "https://c.test/")
+
+        browser.returnToOpener(state().activeTab!!.id); idle()
+        assertEquals(second, state().activeTab?.id)
+        assertTrue(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(second); idle()
+        assertEquals(first, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+    }
+
+    @Test
     fun profileIsPersistedOnlyOnceTheEngineRuns() {
         browser.persistProfile(); idle()
         assertEquals(0, engine.persisted)

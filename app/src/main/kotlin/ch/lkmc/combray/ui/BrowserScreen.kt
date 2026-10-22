@@ -138,10 +138,22 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         sheet = Sheet.ADDRESS
     }
 
-    // Back: close the open sheet or reader view first, then go back in the page, then leave
-    // the app. A tab another app opened closes on the way out: its page stays in history only.
+    // Back: close the open sheet or reader view first, then go back in the page, then return to
+    // the tab whose page opened this one, then leave the app. A tab another app opened closes on
+    // the way out: its page stays in history only.
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
-    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack == true) { browser.goBack() }
+    // One action for system Back and the bar's Back button, so the two cannot drift apart.
+    val backInPage = {
+        tab?.let {
+            when {
+                it.canGoBack -> browser.goBack()
+                it.returnsToOpener -> browser.returnToOpener(it.id)
+            }
+        }
+    }
+    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && (tab?.canGoBack == true || tab?.returnsToOpener == true)) {
+        backInPage()
+    }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
         tab?.let { browser.returnToOtherApp(it.id) }
         onLeave()
@@ -186,7 +198,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
-                onBack = browser::goBack,
+                onBack = { backInPage() },
                 onAddress = editAddress,
                 onSave = {
                     // Snapshot now: switching tabs right after the tap must not change what is saved.
@@ -328,7 +340,13 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
             canOpenInNewTab = { url -> navigation(url) != null },
-            onOpenInNewTab = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.NEW_TAB) } },
+            // The control belongs to the focused tab's page: Back on the new tab returns there.
+            onOpenInNewTab = { url ->
+                navigation(url)?.let { link ->
+                    val opener = tab?.id
+                    if (opener != null) browser.openUrlFromTab(link.url, opener) else browser.openUrl(link.url, Placement.NEW_TAB)
+                }
+            },
             onShare = { url -> share(context, url, resources.getString(R.string.share_chooser)) },
         )
     }

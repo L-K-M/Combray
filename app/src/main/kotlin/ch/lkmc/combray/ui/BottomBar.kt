@@ -93,7 +93,7 @@ fun BottomBar(
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
+                IconButton(onClick = onBack, enabled = tab?.canGoBack == true || tab?.returnsToOpener == true) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                 }
                 AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))
