@@ -69,6 +69,9 @@ object Fixtures {
 
     const val EXTERNAL_STILL_HERE = "EXTERNAL:still-here"
 
+    /** [Device.GREEN] in a light appearance, [Device.BLUE] when the page is told the theme is dark. */
+    const val SCHEME = "$BASE/scheme.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 
@@ -114,6 +117,7 @@ class Device(private val frame: () -> Unit = {}) {
     val app: CombrayApplication = ApplicationProvider.getApplicationContext()
     val browser get() = app.graph.browser
     val integrations get() = app.graph.integrations
+    val settings get() = app.graph.settings
 
     fun awaitState(timeoutMs: Long = LOAD_TIMEOUT_MS, predicate: (BrowserState) -> Boolean): BrowserState =
         runBlocking { withTimeout(timeoutMs) { browser.browserState.first(predicate) } }

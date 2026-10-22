@@ -41,6 +41,9 @@ interface EnginePort {
     /** Writes cookies and other profile state now, so logins survive a killed process. */
     fun persistProfile()
 
+    /** Pages see [appearance] as `prefers-color-scheme`, now and in views created later. */
+    fun setAppearance(appearance: Appearance)
+
     /** Answers a [EngineEvent.ControlShown]; ignored once the control was hidden. */
     fun respondToControl(control: Long, response: ControlResponse)
 
@@ -63,6 +66,9 @@ interface EnginePort {
     /** Removes the selection [find] made in [page]'s document, if it is still shown. */
     fun clearFind(page: PageRef)
 }
+
+/** The system's light or dark theme, which pages follow through `prefers-color-scheme`. */
+enum class Appearance { LIGHT, DARK }
 
 enum class EngineStart {
     STARTED,

@@ -30,7 +30,7 @@ use servo::{
     EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
     Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
     NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
-    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog,
+    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme,
     TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
     WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
@@ -40,8 +40,8 @@ use crate::activation::{OpeningTap, TapRecognizer};
 use crate::animations;
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
-    CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, ScrollEdge,
-    Throttling, TouchPhase,
+    Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
+    ScrollEdge, Throttling, TouchPhase,
 };
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
 use crate::controls::{LeavePageAnswer, LeavePageDecision, PageActivation, TabVisibility};
@@ -312,6 +312,8 @@ struct Engine {
     /// The user's last tap or key press: in which tab, on which of its documents, and when.
     last_activation: Option<(i64, Option<PipelineId>, Instant)>,
     taps: TapRecognizer,
+    /// Given to every view, so pages match the app's light or dark theme.
+    appearance: Appearance,
 }
 
 impl Engine {
@@ -342,6 +344,7 @@ impl Engine {
             page_zoom: page_zoom::DEFAULT_ZOOM,
             last_activation: None,
             taps,
+            appearance: Appearance::Light,
         }
     }
 
@@ -399,6 +402,7 @@ impl Engine {
             Command::SelectTab { tab } => self.select_tab(tab),
             Command::SelectNone => self.select_none(),
             Command::PersistProfile => self.persist_profile(),
+            Command::SetAppearance { appearance } => self.set_appearance(appearance),
             Command::CloseTab { tab } => self.close_tab(tab),
             Command::Navigate { tab, request, url } => self.navigate(tab, request, &url),
             Command::GoBack { tab } => {
@@ -715,6 +719,8 @@ impl Engine {
     ) -> String {
         webview.hide();
         webview.set_page_zoom(self.page_zoom);
+        // Servo starts every view light; documents it loads later inherit the view's theme.
+        webview.notify_theme_change(servo_theme(self.appearance));
         let webview_id = format!("{:?}", webview.id());
         self.tabs.insert(
             view.tab,
@@ -799,6 +805,13 @@ impl Engine {
         }
         // The shown page lays out again; paint it, as the other visual changes here do.
         self.needs_paint = true;
+    }
+
+    fn set_appearance(&mut self, appearance: Appearance) {
+        self.appearance = appearance;
+        for tab in self.tabs.values() {
+            tab.webview.notify_theme_change(servo_theme(appearance));
+        }
     }
 
     fn persist_profile(&mut self) {
@@ -2022,6 +2035,13 @@ fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption
         }
     }
     options
+}
+
+fn servo_theme(appearance: Appearance) -> Theme {
+    match appearance {
+        Appearance::Light => Theme::Light,
+        Appearance::Dark => Theme::Dark,
+    }
 }
 
 /// Maps an Android key (character plus key code) to a DOM key.

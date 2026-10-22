@@ -22,8 +22,8 @@ use log::{LevelFilter, error, info};
 
 use crate::capture::CaptureKind;
 use crate::commands::{
-    ACK_TIMEOUT, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
-    ScrollEdge, Throttling, TouchPhase,
+    ACK_TIMEOUT, Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck,
+    SURFACE_EPOCH, ScrollEdge, Throttling, TouchPhase,
 };
 use crate::engine::{self, EngineConfig, EventSink};
 use crate::events::EngineEvent;
@@ -367,6 +367,21 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_persistProfile<'local
     _class: JClass<'local>,
 ) {
     send(Command::PersistProfile);
+}
+
+/// Queued; applies to every view now and to views created later.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setDarkAppearance<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    dark: jboolean,
+) {
+    let appearance = if dark {
+        Appearance::Dark
+    } else {
+        Appearance::Light
+    };
+    send(Command::SetAppearance { appearance });
 }
 
 #[unsafe(no_mangle)]

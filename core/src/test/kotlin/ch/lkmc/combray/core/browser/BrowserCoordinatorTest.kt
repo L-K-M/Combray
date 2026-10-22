@@ -8,6 +8,7 @@ import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
@@ -213,6 +214,24 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ExternalLink(engine.view(1), "tel:+41000000000"))
         idle()
         assertNull(state().externalLink)
+    }
+
+    @Test
+    fun pagesGetTheAppearanceBeforeTheFirstViewAndOnEveryChange() {
+        browser.setAppearance(Appearance.DARK)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertTrue(engine.appearances.isEmpty())
+
+        // Sent once the engine runs, before the restored tab gets its view.
+        ready()
+        assertEquals(listOf(Appearance.DARK to 0), engine.appearances)
+        assertEquals(1, engine.created.size)
+
+        browser.setAppearance(Appearance.DARK)
+        browser.setAppearance(Appearance.LIGHT)
+        idle()
+        assertEquals(listOf(Appearance.DARK to 0, Appearance.LIGHT to 1), engine.appearances)
     }
 
     @Test

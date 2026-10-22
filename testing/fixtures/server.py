@@ -29,6 +29,7 @@ Pages
                              title turns EXTERNAL:still-here 3 s later if the page is still shown
   /popup.html                calls window.open on load, without a tap; the title turns
                              POPUP:still-here 3 s later
+  /scheme.html               page in #2e6b4f, or #3b4f8a when it matches prefers-color-scheme: dark
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
@@ -254,6 +255,14 @@ POPUP_PAGE = page(
     "setTimeout(function(){document.title='POPUP:still-here';},3000);});</script>",
 )
 
+# The page's color says which theme it was told: light #2e6b4f, dark #3b4f8a.
+SCHEME_PAGE = page(
+    "SCHEME",
+    "<p>scheme</p>",
+    "<style>html,body{margin:0;min-height:100%;background:#2e6b4f}"
+    "@media (prefers-color-scheme: dark){html,body{background:#3b4f8a}}</style>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -400,6 +409,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, external_page(to, auto, blank))
         if path == "/popup.html":
             return self.send(200, POPUP_PAGE)
+        if path == "/scheme.html":
+            return self.send(200, SCHEME_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

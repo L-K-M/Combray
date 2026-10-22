@@ -9,6 +9,7 @@ import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
 import ch.lkmc.combray.core.policy.HostNames
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.CaptureStatus
 import ch.lkmc.combray.engine.ControlResponse
@@ -116,6 +117,9 @@ class BrowserCoordinator(
 
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
+
+    /** What pages see as `prefers-color-scheme`; the engine gets it as soon as it runs. */
+    private var appearance = Appearance.LIGHT
 
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
@@ -470,6 +474,13 @@ class BrowserCoordinator(
         selectedNative?.let { engine.setThrottled(it, visibility == AppVisibility.BACKGROUND) }
     }
 
+    /** Pages follow the app's light or dark theme, like the chrome around them. */
+    fun setAppearance(appearance: Appearance) = submit {
+        if (appearance == this.appearance) return@submit
+        this.appearance = appearance
+        if (engineReady) engine.setAppearance(appearance)
+    }
+
     /**
      * Opens reader view for the focused tab: the engine reads the main article of the document
      * shown now, in that document only.
@@ -583,6 +594,8 @@ class BrowserCoordinator(
                 // Before any view exists, so the first page lays out at the chosen size.
                 engine.setPageZoom(textSize().zoom)
                 state.update { it.copy(engine = EngineStatus.READY) }
+                // Before reconcile creates views: a dark page must not start light.
+                engine.setAppearance(appearance)
                 reconcile()
             }
             is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { it.generation = event.view.generation }

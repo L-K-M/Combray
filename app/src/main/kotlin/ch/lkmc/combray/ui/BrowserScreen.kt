@@ -78,6 +78,7 @@ import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -193,6 +194,11 @@ fun BrowserScreen(
             onDismiss = { appLink = null },
         )
     }
+
+    // Pages follow the app's light or dark theme, the in-app Appearance choice included, like
+    // the chrome around them.
+    val dark = LocalDarkTheme.current
+    LaunchedEffect(dark) { browser.setAppearance(if (dark) Appearance.DARK else Appearance.LIGHT) }
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
     var addressTab by rememberSaveable { mutableStateOf<String?>(null) }

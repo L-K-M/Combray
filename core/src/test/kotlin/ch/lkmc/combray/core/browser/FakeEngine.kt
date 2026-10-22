@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.browser
 
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
@@ -33,6 +34,9 @@ class FakeEngine : EnginePort {
     val refusedUrls = mutableSetOf<String>()
     var persisted = 0
 
+    /** Each appearance sent, with how many views existed then. */
+    val appearances = mutableListOf<Pair<Appearance, Int>>()
+
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
         this.listener = listener
         return EngineStart.STARTED
@@ -62,6 +66,10 @@ class FakeEngine : EnginePort {
 
     override fun persistProfile() {
         persisted++
+    }
+
+    override fun setAppearance(appearance: Appearance) {
+        appearances += appearance to created.size
     }
 
     /** What the native bridge does for `window.open`: a view with an engine-chosen ID. */

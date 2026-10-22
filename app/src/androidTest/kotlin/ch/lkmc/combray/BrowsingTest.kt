@@ -2,6 +2,7 @@ package ch.lkmc.combray
 
 import android.app.UiAutomation
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -19,7 +20,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.ReopenFocus
+import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.Appearance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -416,6 +419,35 @@ class BrowsingTest {
         val state = device.awaitPage(url)
         assertScreen(Device.OCHRE)
         return state.activeTab!!.id
+    }
+
+    @Test
+    fun pagesFollowTheDarkAppearanceAndItsChanges() {
+        try {
+            device.browser.setAppearance(Appearance.DARK)
+            device.browser.openUrl(Fixtures.SCHEME, Placement.CURRENT_TAB)
+            device.awaitPage(Fixtures.SCHEME)
+            assertScreen(Device.BLUE)
+
+            // A change reaches the page already shown, without a reload.
+            device.browser.setAppearance(Appearance.LIGHT)
+            assertScreen(Device.GREEN)
+        } finally {
+            // Back to what BrowserScreen told the engine: the app's theme as it resolved it.
+            device.browser.setAppearance(appTheme())
+        }
+    }
+
+    /** The app's theme: the in-app choice, or the system's night mode when it follows the system. */
+    private fun appTheme(): Appearance {
+        val night = compose.activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+            Configuration.UI_MODE_NIGHT_YES
+        val dark = when (device.settings.themeMode.value) {
+            ThemeMode.SYSTEM -> night
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+        }
+        return if (dark) Appearance.DARK else Appearance.LIGHT
     }
 
     private fun tapPageCenter() {

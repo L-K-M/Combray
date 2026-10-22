@@ -49,6 +49,8 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun persistProfile() = NativeEngine.persistProfile()
 
+    override fun setAppearance(appearance: Appearance) = NativeEngine.setDarkAppearance(appearance == Appearance.DARK)
+
     override fun closeView(tab: Long) = NativeEngine.closeTab(tab)
 
     override fun navigate(tab: Long, request: Long, url: String) = NativeEngine.navigate(tab, request, url)
