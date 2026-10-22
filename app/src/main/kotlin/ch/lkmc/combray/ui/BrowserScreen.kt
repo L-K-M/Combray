@@ -124,14 +124,16 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         val link = state.externalLink ?: return@LaunchedEffect
         val outcome = ExternalLinks.open(context, link.url)
         browser.externalLinkHandled(link)
+        val noApp = { scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) } }
         when (outcome) {
             ExternalOutcome.Opened -> Unit
             is ExternalOutcome.Fallback -> {
                 val page = AddressPolicy.interpret(outcome.url).primary as? AddressDecision.Navigate
                 val shown = tab?.id
-                if (page != null && shown != null) browser.openUrlInTab(shown, page.url)
+                // A fallback that is no web page, or no tab to show it in: say so, as without one.
+                if (page != null && shown != null) browser.openUrlInTab(shown, page.url) else noApp()
             }
-            ExternalOutcome.NoApp -> scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) }
+            ExternalOutcome.NoApp -> noApp()
         }
     }
 

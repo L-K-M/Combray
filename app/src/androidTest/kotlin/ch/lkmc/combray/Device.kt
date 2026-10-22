@@ -20,6 +20,9 @@ enum class Orientation { PORTRAIT, LANDSCAPE }
 /** Who follows a fixture's link: the user's tap or the page's script. */
 enum class LinkTrigger { TAP, SCRIPT }
 
+/** Where a fixture's link opens: in its own page or in a new window (`target=_blank`). */
+enum class LinkTarget { SAME_WINDOW, NEW_WINDOW }
+
 /** Synthetic pages and fake services from testing/fixtures/server.py, through `adb reverse`. */
 object Fixtures {
     /** Pages (through `adb reverse`). */
@@ -44,12 +47,14 @@ object Fixtures {
     const val INTERSECTION = "$BASE/intersection.html"
 
     /**
-     * A page-filling [Device.OCHRE] link to another app's link or a file ([to]: market, intent
-     * or file), followed on a tap or, with [LinkTrigger.SCRIPT], by the page's own script.
-     * Titled [EXTERNAL_STILL_HERE] 3 s later if the page is still shown.
+     * A page-filling [Device.OCHRE] link to another app's link or a file ([to]: market, intent,
+     * badfallback or file), followed on a tap or, with [LinkTrigger.SCRIPT], by the page's own
+     * script, into [target]. Titled [EXTERNAL_STILL_HERE] 3 s later if the page is still shown.
      */
-    fun external(to: String, trigger: LinkTrigger = LinkTrigger.TAP) =
-        "$BASE/external.html?to=$to" + if (trigger == LinkTrigger.SCRIPT) "&auto=1" else ""
+    fun external(to: String, trigger: LinkTrigger = LinkTrigger.TAP, target: LinkTarget = LinkTarget.SAME_WINDOW) =
+        "$BASE/external.html?to=$to" +
+            (if (trigger == LinkTrigger.SCRIPT) "&auto=1" else "") +
+            (if (target == LinkTarget.NEW_WINDOW) "&blank=1" else "")
 
     const val EXTERNAL_STILL_HERE = "EXTERNAL:still-here"
 

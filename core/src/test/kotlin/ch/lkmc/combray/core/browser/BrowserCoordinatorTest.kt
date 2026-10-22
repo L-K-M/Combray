@@ -104,6 +104,28 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aWindowOpenedForAnAppLinkClosesAndItsOpenerTakesTheLink() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+
+        // What the engine sends for <a target=_blank href=mailto:...>: the window, its close,
+        // then the link for the opener.
+        engine.openWindow(opener = 1, tab = PAGE_TAB)
+        idle()
+        engine.emit(EngineEvent.TabClosed(engine.view(PAGE_TAB)))
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+
+        assertEquals(1, state().openTabCount)
+        assertEquals(opener, state().activeTab?.id)
+        assertEquals(1L, engine.selected.last())
+        assertEquals("mailto:ada@example.org", state().externalLink?.url)
+    }
+
+    @Test
     fun aHiddenTabCannotHandALinkToAnotherApp() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)

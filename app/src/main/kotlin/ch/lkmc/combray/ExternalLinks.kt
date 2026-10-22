@@ -19,20 +19,23 @@ sealed interface ExternalOutcome {
 /**
  * Opens a page's link for another app: `mailto:`, `tel:`, `geo:`, `market:` as plain views, and
  * Android `intent:` links the way Chrome does. A page wrote the intent, so it may only reach
- * apps that accept browsable links: no explicit component or selector, no URI permission grants.
+ * other apps that accept browsable links: no explicit component or selector, no flags (task
+ * changes, URI permission grants), not Combray itself.
  */
 object ExternalLinks {
     private const val INTENT_SCHEME = "intent:"
     private const val FALLBACK_EXTRA = "browser_fallback_url"
 
-    /** URI grants a page could use to hand Combray's own files to another app. */
-    private const val URI_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
-        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+    /** The schemes the engine hands on (`native/src/navigation.rs`); anything else is not launched. */
+    private val APP_LINK_SCHEMES = setOf("mailto", "tel", "sms", "smsto", "mms", "geo", "market", "intent")
+
+    /** Whether [url] has one of the schemes the engine hands to the application for another app. */
+    internal fun isAppLink(url: String): Boolean =
+        url.substringBefore(':', missingDelimiterValue = "").lowercase() in APP_LINK_SCHEMES
 
     fun open(context: Context, url: String): ExternalOutcome {
-        val intent = intentFor(url) ?: return ExternalOutcome.NoApp
+        if (!isAppLink(url)) return ExternalOutcome.NoApp
+        val intent = intentFor(url, context.packageName) ?: return ExternalOutcome.NoApp
         return try {
             context.startActivity(intent)
             ExternalOutcome.Opened
@@ -41,10 +44,15 @@ object ExternalLinks {
                 ?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
                 ?.let { ExternalOutcome.Fallback(it) }
                 ?: ExternalOutcome.NoApp
+        } catch (refused: SecurityException) {
+            // The app that matched does not let Combray start it (not exported, or it needs a
+            // permission Combray lacks).
+            ExternalOutcome.NoApp
         }
     }
 
-    private fun intentFor(url: String): Intent? {
+    /** The intent for [url]; null when it is malformed or names [ownPackage], Combray itself. */
+    internal fun intentFor(url: String, ownPackage: String): Intent? {
         if (!url.startsWith(INTENT_SCHEME, ignoreCase = true)) {
             return Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
         }
@@ -54,11 +62,13 @@ object ExternalLinks {
         } catch (malformed: URISyntaxException) {
             return null
         }
+        if (parsed.`package` == ownPackage) return null
         return parsed.apply {
             addCategory(Intent.CATEGORY_BROWSABLE)
             component = null
             selector = null
-            flags = flags and URI_GRANTS.inv()
+            // Plain links carry no flags either: no CLEAR_TASK or CLEAR_TOP, no URI grants.
+            flags = 0
         }
     }
 }

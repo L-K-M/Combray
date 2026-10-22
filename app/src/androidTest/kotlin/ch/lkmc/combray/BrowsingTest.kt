@@ -223,7 +223,7 @@ class BrowsingTest {
 
     @Test
     fun aLinkForAnotherAppKeepsThePageAndSaysWhenNoAppTakesIt() {
-        openExternal("market")
+        openExternal(Fixtures.external("market"))
 
         // No app takes market: links on the emulator. Combray says so; the page stays as it was.
         val noApp = compose.activity.getString(R.string.no_app_for_link)
@@ -234,8 +234,32 @@ class BrowsingTest {
     }
 
     @Test
+    fun anAppLinkForANewWindowKeepsOneTabAndSaysWhenNoAppTakesIt() {
+        val url = Fixtures.external("market", target = LinkTarget.NEW_WINDOW)
+        val tab = openExternal(url)
+
+        // The window the link opened closes again; the notice is for the page the user tapped.
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.openTabCount == 1 && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(tab, state.activeTab?.id)
+        assertEquals(url, state.activeTab?.url)
+        assertFalse(state.activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun anAppLinkWhoseFallbackIsNoPageSaysNoAppTakesIt() {
+        openExternal(Fixtures.external("badfallback"))
+
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("badfallback"), state.activeTab?.url)
+    }
+
+    @Test
     fun anAppLinkWithoutItsAppOpensItsFallbackPageInTheSameTab() {
-        val tab = openExternal("intent")
+        val tab = openExternal(Fixtures.external("intent"))
         tapLinkUntil { device.browser.browserState.value.activeTab?.url == Fixtures.solid(Device.GREEN) }
 
         val state = device.awaitPage(Fixtures.solid(Device.GREEN))
@@ -245,11 +269,17 @@ class BrowsingTest {
 
     @Test
     fun pagesCannotOpenFilesOrHandLinksToAppsByThemselves() {
-        openExternal("file")
+        openExternal(Fixtures.external("file"))
         // The title changes only after the page's own click handler ran and the page stayed.
         tapLinkUntil { device.browser.browserState.value.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
         var state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
         assertEquals(Fixtures.external("file"), state.activeTab?.url)
+
+        // Nor by the page's own script: the page stays, without an error page.
+        val scriptedFile = Fixtures.external("file", LinkTrigger.SCRIPT)
+        device.browser.openUrl(scriptedFile, Placement.CURRENT_TAB)
+        state = device.awaitState { it.activeTab?.url == scriptedFile && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertFalse(state.activeTab!!.loadFailed)
 
         // Without a tap, the page's own script cannot send the user to another app.
         val scripted = Fixtures.external("market", LinkTrigger.SCRIPT)
@@ -279,10 +309,10 @@ class BrowsingTest {
         throw AssertionError("tapping the link had no effect")
     }
 
-    /** Opens an external-link fixture and waits until it is painted; returns its tab. */
-    private fun openExternal(to: String): String {
-        device.browser.openUrl(Fixtures.external(to), Placement.CURRENT_TAB)
-        val state = device.awaitPage(Fixtures.external(to))
+    /** Opens an external-link fixture ([Fixtures.external]) and waits until it is painted; returns its tab. */
+    private fun openExternal(url: String): String {
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        val state = device.awaitPage(url)
         assertScreen(Device.OCHRE)
         return state.activeTab!!.id
     }

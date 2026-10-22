@@ -14,6 +14,7 @@
 //! `events`, `panic_policy` and the pure parts of `capture` build on any host so their tests run
 //! without Servo.
 
+pub mod activation;
 pub mod capture;
 pub mod controls;
 pub mod events;
