@@ -28,14 +28,15 @@ use servo::CreateNewWebViewRequest;
 use servo::{
     AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
     EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
-    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts,
-    PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
-    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType,
-    TouchId, TouchPointerType, UserContentManager, UserScript, WebView, WebViewBuilder,
-    WebViewPoint, WindowRenderingContext,
+    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
+    NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
+    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog,
+    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
+    WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
+use crate::activation::TapRecognizer;
 use crate::animations;
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
@@ -51,6 +52,7 @@ use crate::events::{
 };
 use crate::find::{self, FindAction};
 use crate::native_window::NativeWindow;
+use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
 use crate::panic_policy;
 
@@ -76,6 +78,9 @@ const PAINT_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_COMMANDS_PER_ITERATION: usize = 64;
 /// Nesting limit when converting test evaluation results to JSON.
 const MAX_JSON_DEPTH: usize = 64;
+/// How long a tap or key press lets the page hand one link to another app (as Chromium's
+/// transient user activation).
+const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// First tab ID for views that pages open (`window.open`). Applications number their own tabs
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
@@ -185,6 +190,12 @@ struct Tab {
     /// The document the user last touched or typed into. A page may ask to confirm leaving only
     /// while this is still its current document (browsers' sticky activation).
     interacted_document: Option<PipelineId>,
+    /// The view whose page opened this one (`target=_blank`, `window.open`); None for the
+    /// application's tabs.
+    opener: Option<ViewKey>,
+    /// Whether a document other than the initial `about:blank` committed: a window opened just
+    /// for an app link has none and closes (`navigation::refusal`).
+    shown: Shown,
 }
 
 impl Tab {
@@ -295,10 +306,15 @@ struct Engine {
     next_control: u64,
     /// Page zoom of every view (`SetPageZoom`); kept here so views created later start at it.
     page_zoom: f32,
+    /// The user's last tap or key press: in which tab and when.
+    last_activation: Option<(i64, Instant)>,
+    taps: TapRecognizer,
 }
 
 impl Engine {
     fn new(config: EngineConfig, wake: Sender<Command>, sink: Box<dyn EventSink + Send>) -> Self {
+        // Touches arrive in the view's device pixels.
+        let taps = TapRecognizer::new(config.density);
         Self {
             config,
             wake,
@@ -321,6 +337,8 @@ impl Engine {
             page_controls: HashMap::new(),
             next_control: 1,
             page_zoom: page_zoom::DEFAULT_ZOOM,
+            last_activation: None,
+            taps,
         }
     }
 
@@ -665,7 +683,7 @@ impl Engine {
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
 
-        let webview_id = self.insert_tab(view, webview);
+        let webview_id = self.insert_tab(view, webview, None);
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
@@ -675,7 +693,7 @@ impl Engine {
     /// Registers a new view, hidden until selected so two shown views never overlap, at the
     /// page zoom every view uses. Servo builds a view at 100%, so its first document may lay out
     /// once more when the zoom arrives (as a resize).
-    fn insert_tab(&mut self, view: ViewKey, webview: WebView) -> String {
+    fn insert_tab(&mut self, view: ViewKey, webview: WebView, opener: Option<ViewKey>) -> String {
         webview.hide();
         webview.set_page_zoom(self.page_zoom);
         let webview_id = format!("{:?}", webview.id());
@@ -693,6 +711,8 @@ impl Engine {
                 frames_painted: 0,
                 last_paint_report: None,
                 interacted_document: None,
+                opener,
+                shown: Shown::InitialBlank,
             },
         );
         webview_id
@@ -723,7 +743,7 @@ impl Engine {
             .user_content_manager(runtime.user_content.clone())
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
-        self.insert_tab(view, webview);
+        self.insert_tab(view, webview, Some(opener));
         self.emit(EngineEvent::TabOpened { view, opener });
     }
 
@@ -865,6 +885,22 @@ impl Engine {
         if phase == TouchPhase::Up {
             self.note_interaction();
         }
+        // Followed even without a view to deliver to, so no gesture is left half seen.
+        let tapped = match phase {
+            TouchPhase::Down => {
+                self.taps.down(pointer, x, y);
+                false
+            },
+            TouchPhase::Move => {
+                self.taps.moved(pointer, x, y);
+                false
+            },
+            TouchPhase::Up => self.taps.up(pointer, x, y),
+            TouchPhase::Cancel => {
+                self.taps.cancel(pointer);
+                false
+            },
+        };
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -880,6 +916,27 @@ impl Engine {
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        // Only a tap: the end of a scroll, fling or pinch must not let the page open an app.
+        if tapped {
+            self.note_activation();
+        }
+    }
+
+    fn note_activation(&mut self) {
+        self.last_activation = self.active.map(|tab| (tab, Instant::now()));
+    }
+
+    /// Whether the user tapped or pressed a key moments ago in one of `tabs`, and one of them is
+    /// still the visible tab. Using it up means one tap hands at most one link to another app.
+    fn take_activation(&mut self, tabs: &[i64]) -> bool {
+        let recent = self.active.is_some_and(|shown| tabs.contains(&shown))
+            && self.last_activation.is_some_and(|(activated, at)| {
+                tabs.contains(&activated) && at.elapsed() <= USER_ACTIVATION_WINDOW
+            });
+        if recent {
+            self.last_activation = None;
+        }
+        recent
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
@@ -899,6 +956,9 @@ impl Engine {
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             state, key,
         )));
+        if action == KeyAction::Press {
+            self.note_activation();
+        }
     }
 
     /// A long-press: a secondary-button click, which makes Servo fire `contextmenu` and, unless
@@ -1294,14 +1354,7 @@ impl Engine {
                     self.emit(EngineEvent::UnattributedTitle { view, title });
                 }
             },
-            DelegateEvent::PageNavigationRequested { view, url } => {
-                if self.live_tab(view).is_some() {
-                    self.emit(EngineEvent::PageNavigationRequested {
-                        view,
-                        url: url.into(),
-                    });
-                }
-            },
+            DelegateEvent::PageNavigation { view, request } => self.page_navigation(view, request),
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
@@ -1378,6 +1431,69 @@ impl Engine {
             view,
             document: u64::from(document),
         });
+    }
+
+    /// Web addresses load. A link for another app goes to the application only right after the
+    /// user's own tap or key press in the visible tab, so a page or an embedded ad cannot open
+    /// apps by itself; the page stays on screen either way. Anything else (`file:` ...) is
+    /// refused. A window a page opened just for such a link closes instead of staying blank.
+    fn page_navigation(&mut self, view: ViewKey, request: NavigationRequest) {
+        let url = request.url.clone();
+        match navigation::classify(url.scheme()) {
+            PageNavigation::Allow => {
+                request.allow();
+                if self.live_tab(view).is_some() {
+                    self.emit(EngineEvent::PageNavigationRequested {
+                        view,
+                        url: url.into(),
+                    });
+                }
+            },
+            PageNavigation::Deny => {
+                request.deny();
+                // No address: it is the page's. The scheme says what it tried to open.
+                info!("{} navigation refused", url.scheme());
+                let Some(tab) = self.live_tab(view) else {
+                    return;
+                };
+                if navigation::refusal(view, tab.opener, tab.shown).close {
+                    self.close_tab(view.tab);
+                }
+            },
+            PageNavigation::External => {
+                request.deny();
+                let bounded = url.as_str().chars().count() <= controls::MAX_URL_CHARS;
+                let Some(tab) = self.live_tab(view) else {
+                    return;
+                };
+                let refusal = navigation::refusal(view, tab.opener, tab.shown);
+                // Only a link that can be handed over may use up the user's tap.
+                let deliverable = bounded && self.live_tab(refusal.owner).is_some();
+                // Before closing the window, which may be the visible tab: the user tapped in
+                // the opener, or in the window itself.
+                let tapped = deliverable && self.take_activation(&[refusal.owner.tab, view.tab]);
+                if refusal.close {
+                    // Reported like a page closing its own window, and before the link: the
+                    // application drops the tab and shows the opener again, which then takes it.
+                    self.close_tab(view.tab);
+                }
+                if !deliverable {
+                    return;
+                }
+                if !tapped {
+                    // No address: it is the page's. The scheme says what kind of app it wanted.
+                    info!(
+                        "{} link without the user's tap in the visible tab: refused",
+                        url.scheme()
+                    );
+                    return;
+                }
+                self.emit(EngineEvent::ExternalLink {
+                    view: refusal.owner,
+                    url: url.into(),
+                });
+            },
+        }
     }
 
     fn show_page_control(&mut self, view: ViewKey, control: ControlHandle) {
@@ -1528,7 +1644,15 @@ impl Engine {
             },
             ControlHandle::LeavePage { request, .. } => {
                 match controls::leave_page_answer(&response) {
-                    Some(LeavePageAnswer::Leave) => request.allow(),
+                    Some(LeavePageAnswer::Leave) => {
+                        request.allow();
+                        // The answer stands in for the tap that started the navigation, which
+                        // may be older than the activation window by now: a link for another
+                        // app still goes through (#80).
+                        if self.active == Some(pending.view.tab) {
+                            self.note_activation();
+                        }
+                    },
                     Some(LeavePageAnswer::Stay) => request.deny(),
                     None => {
                         request.deny();
@@ -1614,6 +1738,7 @@ impl Engine {
             }
             // A traversal can make an older document current again.
             tab.retired.remove(&document);
+            tab.shown = tab.shown.after_commit(url.as_ref().map_or("", Url::as_str));
             HistoryChange::NewDocument
         } else if tab.current_url != url {
             HistoryChange::SameDocumentUrl

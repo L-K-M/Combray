@@ -14,15 +14,17 @@
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `animations`, `events`, `media`, `page_zoom`, `panic_policy` and the pure parts of `capture`
-//! and `find` build on any host so their tests run without Servo.
+//! `activation`, `animations`, `events`, `media`, `navigation`, `page_zoom`, `panic_policy` and
+//! the pure parts of `capture` and `find` build on any host so their tests run without Servo.
 
+pub mod activation;
 mod animations;
 pub mod capture;
 pub mod controls;
 pub mod events;
 pub mod find;
 mod media;
+pub mod navigation;
 mod page_zoom;
 mod panic_policy;
 

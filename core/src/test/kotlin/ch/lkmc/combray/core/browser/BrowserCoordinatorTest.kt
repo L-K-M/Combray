@@ -134,6 +134,64 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aLinkForAnotherAppFromTheShownPageIsHandedOnOnce() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+        val link = state().externalLink!!
+        assertEquals("mailto:ada@example.org", link.url)
+        assertEquals("https://a.test/", state().activeTab?.url)
+
+        browser.externalLinkHandled(link)
+        assertNull(state().externalLink)
+
+        // The same address again is a new request, not the one already handled.
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+        assertEquals(link.url, state().externalLink?.url)
+        assertNotEquals(link, state().externalLink)
+    }
+
+    @Test
+    fun aWindowOpenedForAnAppLinkClosesAndItsOpenerTakesTheLink() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+
+        // What the engine sends for <a target=_blank href=mailto:...>: the window, its close,
+        // then the link for the opener.
+        engine.openWindow(opener = 1, tab = PAGE_TAB)
+        idle()
+        engine.emit(EngineEvent.TabClosed(engine.view(PAGE_TAB)))
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+
+        assertEquals(1, state().openTabCount)
+        assertEquals(opener, state().activeTab?.id)
+        assertEquals(1L, engine.selected.last())
+        assertEquals("mailto:ada@example.org", state().externalLink?.url)
+    }
+
+    @Test
+    fun aHiddenTabCannotHandALinkToAnotherApp() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB)
+        idle()
+
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "tel:+41000000000"))
+        idle()
+        assertNull(state().externalLink)
+    }
+
+    @Test
     fun viewsAreCreatedOnlyOnceTheEngineIsReady() {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()

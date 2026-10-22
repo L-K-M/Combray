@@ -45,9 +45,11 @@ pub enum DelegateEvent {
         view: ViewKey,
         title: Option<String>,
     },
-    PageNavigationRequested {
+    /// A link, form or script leaving the page. Kept whole: the engine allows or denies it after
+    /// the spin (dropping the request would allow it).
+    PageNavigation {
         view: ViewKey,
-        url: Url,
+        request: NavigationRequest,
     },
     FrameReady {
         view: ViewKey,
@@ -189,11 +191,9 @@ impl WebViewDelegate for TabDelegate {
     }
 
     fn request_navigation(&self, _webview: WebView, navigation_request: NavigationRequest) {
-        // M0 allows every page-initiated navigation (dropping the request allows it) but reports
-        // it, so tests can tell page navigations from embedder requests.
-        self.push(DelegateEvent::PageNavigationRequested {
+        self.push(DelegateEvent::PageNavigation {
             view: self.view,
-            url: navigation_request.url.clone(),
+            request: navigation_request,
         });
     }
 

@@ -58,6 +58,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.AppGraph
+import ch.lkmc.combray.ExternalLinks
+import ch.lkmc.combray.ExternalOutcome
 import ch.lkmc.combray.LaunchRequest
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
@@ -154,6 +156,25 @@ fun BrowserScreen(
             KeyboardRequest.Hide -> if (state.find == null) view.hideKeyboard()
         }
         browser.keyboardHandled(request)
+    }
+
+    // A page link for another app: Android opens it, or the link's own fallback page loads in
+    // the tab. Handled before clearing, which restarts this effect.
+    LaunchedEffect(state.externalLink) {
+        val link = state.externalLink ?: return@LaunchedEffect
+        val outcome = ExternalLinks.open(context, link.url)
+        browser.externalLinkHandled(link)
+        val noApp = { scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) } }
+        when (outcome) {
+            ExternalOutcome.Opened -> Unit
+            is ExternalOutcome.Fallback -> {
+                val page = AddressPolicy.interpret(outcome.url).primary as? AddressDecision.Navigate
+                val shown = tab?.id
+                // A fallback that is no web page, or no tab to show it in: say so, as without one.
+                if (page != null && shown != null) browser.openUrlInTab(shown, page.url) else noApp()
+            }
+            ExternalOutcome.NoApp -> noApp()
+        }
     }
 
     // The address editor submits to the tab it was opened for; null opens a new tab.

@@ -24,6 +24,15 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesAnExternalLink() {
+        val event = EngineEvent.parse(
+            """{"type":"external_link","url":"mailto:ada@example.org","tab":3,"generation":4,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.ExternalLink(ViewRef(3, 4), "mailto:ada@example.org"), event)
+    }
+
+    @Test
     fun parsesStaleTitleWithNullTitle() {
         val event = EngineEvent.parse(
             """{"type":"title","document":7,"title":null,"attribution":"stale","tab":3,"generation":4,"schema":1}""",

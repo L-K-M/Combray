@@ -216,6 +216,11 @@ pub enum EngineEvent {
         view: ViewKey,
         url: String,
     },
+    /// The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed.
+    ExternalLink {
+        view: ViewKey,
+        url: String,
+    },
     History {
         view: ViewKey,
         change: HistoryChange,
@@ -343,6 +348,9 @@ impl EngineEvent {
                 view,
                 json!({ "type": "page_navigation_requested", "url": url }),
             ),
+            EngineEvent::ExternalLink { view, url } => {
+                with_view(view, json!({ "type": "external_link", "url": url }))
+            },
             EngineEvent::History {
                 view,
                 change,

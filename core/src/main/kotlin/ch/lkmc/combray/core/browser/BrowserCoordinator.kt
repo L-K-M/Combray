@@ -571,6 +571,9 @@ class BrowserCoordinator(
     /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
+    /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
+    fun externalLinkHandled(link: ExternalLink) = state.update { if (it.externalLink == link) it.copy(externalLink = null) else it }
+
     // --- Engine events ----------------------------------------------------------------------------
 
     private fun onEngineEvent(event: EngineEvent) = submit {
@@ -595,6 +598,11 @@ class BrowserCoordinator(
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.FindResult -> onFindResult(event)
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
+            // The engine sends these only right after the user's tap; still, only the shown page's.
+            is EngineEvent.ExternalLink -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                val link = ExternalLink(nextRequest++, event.url)
+                state.update { it.copy(externalLink = link) }
+            }
             is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 state.update { it.copy(keyboard = KeyboardRequest.Show(event.kind)) }
             }

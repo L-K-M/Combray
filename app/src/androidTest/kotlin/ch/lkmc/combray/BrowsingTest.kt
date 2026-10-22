@@ -8,7 +8,9 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -301,6 +303,102 @@ class BrowsingTest {
         assertEquals("media responses sent in full", 0, media.getInt("completed"))
     }
 
+    @Test
+    fun aLinkForAnotherAppKeepsThePageAndSaysWhenNoAppTakesIt() {
+        openExternal(Fixtures.external("market"))
+
+        // No app takes market: links on the emulator. Combray says so; the page stays as it was.
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("market"), state.activeTab?.url)
+        assertFalse(state.activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun anAppLinkForANewWindowKeepsOneTabAndSaysWhenNoAppTakesIt() {
+        val url = Fixtures.external("market", target = LinkTarget.NEW_WINDOW)
+        val tab = openExternal(url)
+
+        // The window the link opened closes again; the notice is for the page the user tapped.
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.openTabCount == 1 && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(tab, state.activeTab?.id)
+        assertEquals(url, state.activeTab?.url)
+        assertFalse(state.activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun anAppLinkWhoseFallbackIsNoPageSaysNoAppTakesIt() {
+        openExternal(Fixtures.external("badfallback"))
+
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("badfallback"), state.activeTab?.url)
+    }
+
+    @Test
+    fun anAppLinkWithoutItsAppOpensItsFallbackPageInTheSameTab() {
+        val tab = openExternal(Fixtures.external("intent"))
+        tapLinkUntil { device.browser.browserState.value.activeTab?.url == Fixtures.solid(Device.GREEN) }
+
+        val state = device.awaitPage(Fixtures.solid(Device.GREEN))
+        assertEquals(tab, state.activeTab?.id)
+        assertScreen(Device.GREEN)
+    }
+
+    @Test
+    fun pagesCannotOpenFilesOrHandLinksToAppsByThemselves() {
+        openExternal(Fixtures.external("file"))
+        // The title changes only after the page's own click handler ran and the page stayed.
+        tapLinkUntil { device.browser.browserState.value.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        var state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("file"), state.activeTab?.url)
+
+        // Nor by the page's own script: the page stays, without an error page.
+        val scriptedFile = Fixtures.external("file", LinkTrigger.SCRIPT)
+        device.browser.openUrl(scriptedFile, Placement.CURRENT_TAB)
+        state = device.awaitState { it.activeTab?.url == scriptedFile && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertFalse(state.activeTab!!.loadFailed)
+
+        // Without a tap, the page's own script cannot send the user to another app.
+        val scripted = Fixtures.external("market", LinkTrigger.SCRIPT)
+        device.browser.openUrl(scripted, Placement.CURRENT_TAB)
+        state = device.awaitState { it.activeTab?.url == scripted && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertFalse(state.activeTab!!.loadFailed)
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        assertTrue(compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * Taps the page-filling fixture link until [done]. Under software emulation a tap right after
+     * the first paint can arrive before the page can hit-test it, and is then lost.
+     */
+    private fun tapLinkUntil(done: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + Device.LOAD_TIMEOUT_MS
+        while (SystemClock.uptimeMillis() < deadline) {
+            tapPageCenter()
+            // Not waitForIdle: it fast-forwards the clock past a snackbar's display time.
+            try {
+                compose.waitUntil(TAP_OUTCOME_MS) { done() }
+                return
+            } catch (noEffect: ComposeTimeoutException) {
+                continue
+            }
+        }
+        throw AssertionError("tapping the link had no effect")
+    }
+
+    /** Opens an external-link fixture ([Fixtures.external]) and waits until it is painted; returns its tab. */
+    private fun openExternal(url: String): String {
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        val state = device.awaitPage(url)
+        assertScreen(Device.OCHRE)
+        return state.activeTab!!.id
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -327,6 +425,8 @@ class BrowsingTest {
         /** Under the fixture's SLOW_PAGE_SECONDS, so the check runs before the answer. */
         const val SLOW_ANSWER_MS = 5_000L
         const val STOP_TIMEOUT_MS = 10_000L
+        /** How long one tap may take to show its effect before the next try. */
+        const val TAP_OUTCOME_MS = 15_000L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"
         const val ANIMATE_PREFIX = "WA:"

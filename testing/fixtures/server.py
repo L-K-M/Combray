@@ -23,6 +23,10 @@ Pages
   /leave.html[?auto]         link to /solid/2e6b4f.html above a <textarea>; its beforeunload handler
                              always asks to stay (title LEAVE:<times asked>); ?auto follows the link
                              by script a second after load, without any user input
+  /external.html?to=market|intent|badfallback|file[&auto=1][&blank=1]
+                             page-filling #8a5a2b link (or, with auto, a script on load) to another
+                             app's link or a file, with blank in a new window (target=_blank); the
+                             title turns EXTERNAL:still-here 3 s later if the page is still shown
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
@@ -217,6 +221,30 @@ FIND_PAGE = page(
     "<style>body{margin:0 16px;font-size:20px}</style>",
 )
 
+# Links a page may not follow inside Combray: no app on the emulator takes the market: link, the
+# intent: link names a fallback page (/solid/2e6b4f.html), badfallback one that is no address
+# ("http://"), and file: is refused.
+EXTERNAL_LINKS = {
+    "market": "market://details?id=ch.lkmc.combray.fixture",
+    "intent": "intent://fixture#Intent;scheme=combray-fixture;"
+              "S.browser_fallback_url=http%3A%2F%2Flocalhost%3A8766%2Fsolid%2F2e6b4f.html;end",
+    "badfallback": "intent://fixture#Intent;scheme=combray-fixture;S.browser_fallback_url=http%3A%2F%2F;end",
+    "file": "file:///system/etc/hosts",
+}
+STILL_HERE = "setTimeout(function(){document.title='EXTERNAL:still-here';},3000);"
+
+
+def external_page(to, automatic, blank):
+    href = json.dumps(EXTERNAL_LINKS[to])
+    target = " target='_blank'" if blank else ""
+    if automatic:
+        body = f"<p>external</p><script>addEventListener('load',function(){{location.href={href};{STILL_HERE}}});</script>"
+    else:
+        body = (f"<a id='l' href='{html.escape(EXTERNAL_LINKS[to])}'{target} onclick=\"{STILL_HERE}\" "
+                "style='display:block;height:100vh;font-size:48px;color:#fff'>other app</a>")
+    return page("EXTERNAL", body, "<style>html,body{margin:0;background:#8a5a2b}</style>")
+
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -355,6 +383,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, ZOOM_PAGE)
         if path == "/find.html":
             return self.send(200, FIND_PAGE)
+        if path == "/external.html":
+            to = query.get("to", [""])[0]
+            if to not in EXTERNAL_LINKS:
+                return self.send(400, page("bad link", ""))
+            auto, blank = (query.get(name, [""])[0] == "1" for name in ("auto", "blank"))
+            return self.send(200, external_page(to, auto, blank))
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
