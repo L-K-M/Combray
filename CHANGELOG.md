@@ -101,6 +101,9 @@ All notable changes to this project are documented here. The format follows
   after the last page, or under "No results in Hister." While more results
   load, the button waits under a progress bar; if they fail, the reason
   shows above the results.
+- Changing Karakeep's server address cancelled every unsent save without
+  a word. Those saves now wait in Settings, which offers to send them to
+  the current address or discard them.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

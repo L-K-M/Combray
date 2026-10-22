@@ -105,8 +105,15 @@ interface IntegrationDao {
     @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED')")
     suspend fun unfinishedJobs(service: ServiceKind): List<OutboxJobEntity>
 
-    @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED')")
+    /** Every job not finished yet, parked ones included: a removal or forgetting reaches them too. */
+    @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED', 'DESTINATION_CHANGED')")
     suspend fun openJobs(service: ServiceKind): List<OutboxJobEntity>
+
+    @Query("SELECT * FROM outbox WHERE service = :service AND state = 'DESTINATION_CHANGED' ORDER BY sequence")
+    suspend fun parkedJobs(service: ServiceKind): List<OutboxJobEntity>
+
+    @Query("SELECT * FROM outbox WHERE service = :service AND state = 'DESTINATION_CHANGED' ORDER BY sequence")
+    fun observeParkedJobs(service: ServiceKind): Flow<List<OutboxJobEntity>>
 
     @Query("SELECT * FROM outbox WHERE kind = :kind AND state = 'FAILED'")
     suspend fun failedJobs(kind: JobKind): List<OutboxJobEntity>
@@ -161,4 +168,8 @@ interface IntegrationDao {
         """,
     )
     fun observeLatestSave(fingerprint: String, url: String): Flow<OutboxJobEntity?>
+
+    /** A save of [url] parked for an earlier main address, whatever that address was. */
+    @Query("SELECT * FROM outbox WHERE kind = 'KARAKEEP_SAVE' AND dedupeKey = :url AND state = 'DESTINATION_CHANGED' ORDER BY sequence DESC LIMIT 1")
+    fun observeParkedSave(url: String): Flow<OutboxJobEntity?>
 }

@@ -167,6 +167,13 @@
     <string name="action_discard">Discard</string>
     <string name="action_resume_all">Send paused saves with the current key</string>
     <string name="action_resume_captures">Send paused captures with the current token</string>
+    <plurals name="queue_parked">
+        <item quantity="one">%1$d save was queued for the previous address.</item>
+        <item quantity="other">%1$d saves were queued for the previous address.</item>
+    </plurals>
+    <string name="action_send_to_current_address">Send to the current address</string>
+    <string name="action_discard_parked">Discard the saves queued for the previous address</string>
+    <string name="discard_parked_title">Discard these saves?</string>
 
     <!-- Hister -->
     <string name="hister_title">Hister</string>

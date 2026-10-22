@@ -150,24 +150,111 @@ class IntegrationsTest {
         assertEquals(1, server.bookmarks.size)
     }
 
-    @Test
-    fun switchingToAnotherServerCancelsUnsentSaves() {
+    /** A save stuck retrying against the first server: the usual reason to fix the address. */
+    private fun queueARetryingSave() {
         configure()
         server.fault = FakeKarakeep.Fault.SERVER_ERROR
         server.faultCount = 100
-        runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
+        assertEquals(SaveRequest.Queued, save())
         drain()
         assertEquals(JobState.RETRY_WAIT, job().state)
+    }
+
+    private fun parked() = runBlocking { integrations.parkedJobs(ServiceKind.KARAKEEP).first() }
+
+    @Test
+    fun changingTheAddressParksUnsentSavesAndSendsThemNowhere() {
+        queueARetryingSave()
+        val oldFingerprint = job().fingerprint
         val requestsBefore = server.requests.size
 
-        FakeKarakeep().use { other ->
-            assertEquals(Configured.Saved, configure(root = other.root))
-            assertEquals(JobState.CANCELLED, job().state)
+        FakeKarakeep(NEW_KEY).use { other ->
+            assertEquals(Configured.Saved, configure(root = other.root, key = NEW_KEY))
+            assertEquals(JobState.DESTINATION_CHANGED, job().state)
+            assertEquals(oldFingerprint, job().fingerprint)
+            assertEquals(listOf("job0"), parked().map { it.id })
+            assertEquals(SaveStatus.NeedsAttention("destination_changed"), status())
+
             now += 24 * 60 * 60_000
             drain()
+            assertEquals(JobState.DESTINATION_CHANGED, job().state)
             assertTrue(other.requests.isEmpty())
         }
         assertEquals(requestsBefore, server.requests.size)
+    }
+
+    @Test
+    fun parkedSavesSentToTheCurrentAddressArriveThereWithItsKey() {
+        queueARetryingSave()
+        val requestsBefore = server.requests.size
+
+        FakeKarakeep(NEW_KEY).use { other ->
+            configure(root = other.root, key = NEW_KEY)
+            runBlocking { integrations.sendParkedToCurrent(ServiceKind.KARAKEEP).join() }
+            drain()
+
+            assertEquals(JobState.SUCCEEDED, job().state)
+            assertEquals(service().fingerprint, job().fingerprint)
+            assertEquals(1, job().attempts)
+            // FakeKarakeep(NEW_KEY) stores a bookmark only for a request carrying NEW_KEY.
+            assertEquals(setOf(URL), other.bookmarks.keys)
+            assertTrue(parked().isEmpty())
+            assertEquals(SaveStatus.Saved, status())
+        }
+        assertEquals(requestsBefore, server.requests.size)
+    }
+
+    @Test
+    fun discardingParkedSavesCancelsThem() {
+        queueARetryingSave()
+        FakeKarakeep(NEW_KEY).use { other ->
+            configure(root = other.root, key = NEW_KEY)
+            runBlocking { integrations.discardParked(ServiceKind.KARAKEEP).join() }
+            drain()
+
+            assertEquals(JobState.CANCELLED, job().state)
+            assertTrue(parked().isEmpty())
+            assertEquals(SaveStatus.Unsaved, status())
+            assertTrue(other.requests.isEmpty())
+        }
+    }
+
+    @Test
+    fun removingKarakeepCancelsParkedSaves() {
+        queueARetryingSave()
+        FakeKarakeep(NEW_KEY).use { other -> configure(root = other.root, key = NEW_KEY) }
+        runBlocking { integrations.removeKarakeep() }
+        assertEquals(JobState.CANCELLED, job().state)
+        assertTrue(parked().isEmpty())
+    }
+
+    @Test
+    fun savingAParkedPageAgainSendsItOnceToTheCurrentAddress() {
+        queueARetryingSave()
+        FakeKarakeep(NEW_KEY).use { other ->
+            configure(root = other.root, key = NEW_KEY)
+            assertEquals(SaveRequest.Queued, save())
+            assertEquals(JobState.SUPERSEDED, job().state)
+            assertTrue(parked().isEmpty())
+            drain()
+            assertEquals(1, other.requests.size)
+            assertEquals(SaveStatus.Saved, status())
+        }
+    }
+
+    @Test
+    fun parkedSavesBackOnTheirFirstAddressPauseUntilResumed() {
+        queueARetryingSave()
+        val first = server.root
+        FakeKarakeep(NEW_KEY).use { other -> configure(root = other.root, key = NEW_KEY) }
+        server.faultCount = 0
+
+        configure(root = first)
+        assertEquals(JobState.AUTH_REQUIRED, job().state)
+        assertEquals("credential_changed", job().error)
+        runBlocking { integrations.resume(ServiceKind.KARAKEEP).join() }
+        drain()
+        assertEquals(JobState.SUCCEEDED, job().state)
     }
 
     @Test
@@ -658,5 +745,6 @@ class IntegrationsTest {
 
     private companion object {
         const val URL = "https://news.example/article?id=7#comments"
+        const val NEW_KEY = "new-server-key"
     }
 }
