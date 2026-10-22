@@ -288,8 +288,10 @@ Verification on Linux x86_64, JDK 21, Rust 1.97.1 and NDK r29:
 - Passed: `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` with `ANDROID_HOME=/home/paseo/android-sdk`. Gesture checks cover reversal, jitter, horizontal movement, taps and cancellation; coordinator checks cover same-address reloads, generation mismatch, hidden/closed/crashed tabs and reader view.
 - Passed: `cargo fmt --check` and `cargo test --lib` in `native/` (20 host checks).
 - Passed: `scripts/build-native.sh` for `x86_64-linux-android` (release), using `ANDROID_SDK_ROOT=/home/paseo/android-sdk`, the host compiler wrappers described in [BUILDING.md](BUILDING.md#host-prerequisites), and `CARGO_BUILD_JOBS=4`. The local worktree reused the prepared Servo tree through a symlink; its source paths caused a fresh Servo rebuild. The updated native library was then packaged by Gradle.
-- Passed on `emulator-5560` (Android 11/API 30, x86_64, software emulation/SwiftShader): `ReaderScrollTest`, `AccessibilityTest#scrollButtonsHaveLabeledUncrowdedTouchTargets`, and the existing `BrowsingTest#pagesCanObserveWhatIsOnScreen` baseline (`build/device-checks/scroll-baseline/`).
-- Painted page endpoint and reload checks: pending. `scroll-painted` was interrupted by another APK install at 04:46 UTC (`installPackageLI` killed the instrumented app): one check crashed, one did not run. This is not an engine-crash result.
+- Passed on `emulator-5560` (Android 11/API 30, x86_64, software emulation/SwiftShader): `ReaderScrollTest`, `AccessibilityTest#scrollButtonsHaveLabeledUncrowdedTouchTargets`, and the existing `BrowsingTest#pagesCanObserveWhatIsOnScreen` baseline (`scroll-baseline`).
+- Passed on the same emulator: both `ScrollTest` checks, rendered top/bottom jumps and same-address reload reset (`scroll-verified`, 113.7 s). The app APK SHA-256 was `a1e671e0d105eb49dda9a40a7445a0dc0f91f480c27aca806dc1b25d66f2d94a`.
+
+Local reports, logcat, device identity and APK digests are retained under `build/device-checks/scroll-edge-controls-20261022/` in the original checkout. Earlier run `scroll-painted` was interrupted by another APK install at 04:46 UTC (`installPackageLI` killed the instrumented app): one check crashed, one did not run. This was not an engine crash; `scroll-verified` ran with the device reserved.
 
 Reproduce the focused device checks after `scripts/build-native.sh` and `./gradlew assembleDebug assembleDebugAndroidTest`:
 
