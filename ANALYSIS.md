@@ -11,7 +11,9 @@ This version also incorporates the independent Fusion review in `fusion.md`
 #95-#97 on 22 October 2026 and remain open for the owner). Its source findings
 are not phone benchmarks. Earlier contributors' PR descriptions are retained
 as provenance, not re-verified PR status; no other contributor's PR was
-inspected during this pass. Read
+inspected during this pass. This pass also folds in the Inkling review
+(`inkling.md`, kept as the review record); its five code slices were published
+as PRs #98-#102 on 22 October 2026 and remain open for the owner. Read
 `AGENTS.md` and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) before
 editing. Keep Servo and the personal-browser scope. Private browsing, extensions
 and ad blocking are separate proposals; Stop, downloads and connection-security
@@ -112,6 +114,30 @@ MiMo fixes, also left open for the owner:
 - #53 `mimo/swipe-close-tabs` — swipe a tab row in Recent to close it, with the
   same Undo as the close button. History rows keep their explicit menu:
   removing a visit has no undo. Offers the swipe part of the close-all item.
+
+Inkling fixes, also left open for the owner. Each is an independent
+implementation of a topic already recorded above, so merge one of the pair, not
+both. They were written without reading the concurrent branches and do not
+change them:
+
+- #98 `inkling/theme-aesthetics` — Settings › Theme: follow the system (Material
+  You dynamic color on Android 12+), light, dark, or a pitch-black OLED dark
+  surface, persisted in `BrowserSettings` and driving `CombrayTheme` via a
+  `ThemeMode` enum. `BrowserSettingsTest` pins persistence. Covers the
+  theme-override and OLED-pitch-black items in the chrome section (and #52's
+  appearance half).
+- #99 `inkling/page-info-fix` — the page-info sheet dismisses from a keyed
+  effect only when there is no URL, and is gated at the source so no empty sheet
+  flashes. Same topic as #48 and correctness item 1.
+- #100 `inkling/karakeep-pagination-key` — the Karakeep panel keys its load on
+  the service fingerprint and config `generation`, not the mutable entity, so a
+  transient update no longer resets pagination. Same topic as #40.
+- #101 `inkling/reader-close-button-v2` — a floating reader close button with a
+  rounded surface scrim, held at the physical top-right for RTL articles and
+  inset below the status bar. Same topic as #27.
+- #102 `inkling/share-title` — sharing a page sends the title then the address
+  and sets `EXTRA_SUBJECT`. Same topic as the chrome section's share-title item
+  (and #51).
 
 ## Completed On Main
 
@@ -766,6 +792,18 @@ landscape/tablet widths is an option to evaluate with the same measurements.
 - A low-opacity launcher glyph behind the empty Home headline (nothing on a
   populated screen, no animation before first paint) as the one decorative
   flourish the chrome section's restraint note allows.
+
+- Reader scroll progress: a thin bar that fills as you move through the article,
+  beside the quiet reading-time estimate above. Derived from the existing
+  `article` blocks; no server contact.
+- Quiet reading: while Reader is Ready and idle, hold back snackbars and outbox
+  badges for a stretch; restore on scroll, close, or a sheet. Local to Reader;
+  no capture-policy change.
+- Bookmark memory: a one-line "last saved from this site" hint in the Save
+  dialog, from existing `SavedItem` rows. Recall, not a recommendation feed.
+- Reader paper themes: Sepia and Solarized (and an E-Ink serif) palettes for
+  Reader only, applied through a local `MaterialTheme` override. Pages are not
+  recolored.
 
 Skip: pull-to-refresh (it fights the surface), edge-swipe as the only close,
 and any second renderer. Keep reduced motion and avoid decorative animation or
