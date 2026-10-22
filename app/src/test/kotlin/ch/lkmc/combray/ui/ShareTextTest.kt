@@ -22,4 +22,12 @@ class ShareTextTest {
             shareText("https://example.org/sailing", "  How to\nSail  "),
         )
     }
+
+    @Test
+    fun unicodeSeparatorsCollapseToo() {
+        assertEquals(
+            "How to Sail\nhttps://example.org/sailing",
+            shareText("https://example.org/sailing", "How\u2028to\u2029Sail"),
+        )
+    }
 }

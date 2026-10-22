@@ -18,7 +18,8 @@ fun relativeTime(time: Long, now: Long): String =
  */
 fun shareTitle(title: String?): String? = title?.trim()?.replace(WHITESPACE, " ")?.takeIf { it.isNotEmpty() }
 
-private val WHITESPACE = Regex("\\s+")
+/** Java's `\s` is ASCII-only; the Unicode line and paragraph separators belong with it. */
+private val WHITESPACE = Regex("[\\s\\u2028\\u2029]+")
 
 /** What a share carries: the title as the first line (when there is one), then the address. */
 fun shareText(url: String, title: String?): String =
