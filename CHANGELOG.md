@@ -107,6 +107,9 @@ All notable changes to this project are documented here. The format follows
 - Changing Karakeep's server address cancelled every unsent save without
   a word. Those saves now wait in Settings, which offers to send them to
   the current address or discard them.
+- In Recent, the current tab stays above the pages you browsed in it and
+  under the right day. A page you navigate away from is kept for seven days
+  from when you left it, not from when it loaded.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

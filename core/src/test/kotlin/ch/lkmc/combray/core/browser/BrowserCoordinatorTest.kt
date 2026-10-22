@@ -293,6 +293,69 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun theFocusedTabStaysAboveThePagesItNavigatedAwayFrom() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        now += DAY
+        commit(1, 11, "https://b.test/", index = 1, length = 2)
+        now += 1_000
+        commit(1, 12, "https://c.test/", index = 2, length = 3)
+
+        val items = recent()
+        // Browsing in the focused tab is using it: its row leads, on the day of its last navigation.
+        assertEquals(listOf("https://c.test/", "https://b.test/", "https://a.test/"), items.map { it.url })
+        assertTrue(items.first() is RecentItem.OpenTab)
+        assertEquals(now, items.first().time)
+    }
+
+    @Test
+    fun aHiddenTabLoadingAPageIsNotInUse() {
+        unusedTabs = UnusedTabs.CLOSE
+        ready()
+        browser.openUrl("https://hidden.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://hidden.test/")
+        browser.openUrl("https://focused.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://focused.test/")
+        now += 8 * DAY
+
+        // A script navigates the hidden tab: that is not the user using it.
+        commit(1, 11, "https://hidden.test/next", index = 1, length = 2)
+        browser.runMaintenance(); idle()
+        assertEquals(1, state().openTabCount)
+        assertEquals("https://focused.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aPageLeftAfterDaysOfUseCountsItsRetentionFromThen() {
+        ready()
+        browser.openUrl("https://long-read.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://long-read.test/")
+        now += 6 * DAY
+        commit(1, 11, "https://next.test/", index = 1, length = 2)
+        now += 2 * DAY
+
+        browser.runMaintenance(); idle()
+        // It was in use until the tab left it six days in: retention counts from then, not from loading.
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://long-read.test/", visit.url)
+        assertEquals(START + 6 * DAY - 1, visit.time)
+    }
+
+    @Test
+    fun aPageLeftForANonWebDocumentCountsItsRetentionFromThen() {
+        ready()
+        browser.openUrl("https://long-read.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://long-read.test/")
+        now += 6 * DAY
+        commit(1, 11, "about:blank", index = 1, length = 2)
+        now += 2 * DAY
+
+        browser.runMaintenance(); idle()
+        assertEquals(listOf("https://long-read.test/"), recent().filterIsInstance<RecentItem.Visit>().map { it.url })
+    }
+
+    @Test
     fun unusedTabsCloseOnlyWhenChosenAndNeverTheFocusedOne() {
         ready()
         browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()

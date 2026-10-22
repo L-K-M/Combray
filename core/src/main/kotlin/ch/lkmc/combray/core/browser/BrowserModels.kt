@@ -115,7 +115,7 @@ sealed interface RecentItem {
     val url: String?
     val title: String?
 
-    /** Time used for ordering: last focus for tabs, last interaction for history. */
+    /** Time used for ordering: last use for tabs (focus, or navigation in focus), last interaction for history. */
     val time: Long
 
     data class OpenTab(
