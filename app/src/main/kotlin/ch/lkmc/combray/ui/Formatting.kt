@@ -12,6 +12,9 @@ fun displayHost(url: String): String {
 fun relativeTime(time: Long, now: Long): String =
     DateUtils.getRelativeTimeSpanString(time, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
 
+/** The share's subject: the page's trimmed title, or null when it has nothing usable. */
+fun shareTitle(title: String?): String? = title?.trim()?.takeIf { it.isNotEmpty() }
+
 /** What a share carries: the title as the first line (when there is one), then the address. */
 fun shareText(url: String, title: String?): String =
-    listOfNotNull(title?.takeIf { it.isNotBlank() }, url).joinToString("\n")
+    listOfNotNull(shareTitle(title), url).joinToString("\n")

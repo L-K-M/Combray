@@ -374,6 +374,6 @@ private fun share(context: Context, url: String, title: String?, chooserTitle: S
     val send = Intent(Intent.ACTION_SEND)
         .setType("text/plain")
         .putExtra(Intent.EXTRA_TEXT, shareText(url, title))
-    title?.takeIf { it.isNotBlank() }?.let { send.putExtra(Intent.EXTRA_SUBJECT, it) }
+    shareTitle(title)?.let { send.putExtra(Intent.EXTRA_SUBJECT, it) }
     context.startActivity(Intent.createChooser(send, chooserTitle))
 }
