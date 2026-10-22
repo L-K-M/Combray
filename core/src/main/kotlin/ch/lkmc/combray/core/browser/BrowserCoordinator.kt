@@ -488,7 +488,9 @@ class BrowserCoordinator(
             // left. A hidden tab loading pages is not in use: closing unused tabs still closes it.
             val focused = dao.session()?.activeTabId == tab.id
             val lastFocusedAt = if (focused) now else tab.lastFocusedAt
-            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = visit?.title, lastFocusedAt = lastFocusedAt))
+            // A forgotten page stays open without a visit: a history-list update leaves its label.
+            val title = if (visit == null && event.kind == HistoryKind.LIST_UPDATED) tab.title else visit?.title
+            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt))
         }
     }
 
@@ -530,8 +532,9 @@ class BrowserCoordinator(
         if (current != null && current.url.substringBefore('#') == event.url.substringBefore('#')) {
             return current.copy(url = event.url, lastSeenAt = now).also { dao.updateVisit(it) }
         }
+        // Same document, same title; a forgotten page has no visit left, so the tab keeps it.
         return newVisit(tab, event.url, documentKey(view, event.document), VisitKind.SAME_DOCUMENT, now)
-            .copy(title = current?.title)
+            .copy(title = current?.title ?: tab.title)
             .also { dao.updateVisit(it) }
     }
 

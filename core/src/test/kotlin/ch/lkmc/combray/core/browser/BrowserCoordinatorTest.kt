@@ -494,6 +494,39 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aForgottenSitesCurrentPageDoesNotReturnWhenItsTabCloses() {
+        ready()
+        browser.openUrl("https://sub.example.com/4", Placement.NEW_TAB)
+        idle()
+        commit(1, 10, "https://sub.example.com/4")
+        val tabId = state().activeTab!!.id
+        browser.forgetSite("example.com", includeSubdomains = true)
+        idle()
+
+        browser.closeTab(tabId)
+        idle()
+
+        assertFalse(recent().map { it.url }.contains("https://sub.example.com/4"))
+    }
+
+    @Test
+    fun aForgottenPageKeepsItsTitleWhileItStaysOpen() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.NEW_TAB)
+        idle()
+        commit(1, 10, "https://example.com/4")
+        title(1, 10, "Four")
+        browser.forgetSite("example.com", includeSubdomains = false)
+        idle()
+
+        commit(1, 10, "https://example.com/4", HistoryKind.LIST_UPDATED)
+        assertEquals("Four", state().activeTab?.title)
+
+        commit(1, 10, "https://example.com/4#notes", HistoryKind.SAME_DOCUMENT)
+        assertEquals("Four", state().activeTab?.title)
+    }
+
+    @Test
     fun aRestartRestoresOpenTabsAndRecreatesOnlyTheFocusedView() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()

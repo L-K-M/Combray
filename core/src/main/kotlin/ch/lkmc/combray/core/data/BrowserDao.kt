@@ -92,7 +92,11 @@ interface BrowserDao {
     )
     suspend fun detachVisitsForHost(host: String, subdomainSuffix: String?)
 
-    /** Removes history for a host, including the page an open tab is showing. */
+    /**
+     * Removes history for a host, including the page an open tab is showing. Call
+     * [detachVisitsForHost] first in the same transaction, or that tab keeps a dangling
+     * `currentVisitId`.
+     */
     @Query(
         """
         DELETE FROM visits WHERE host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
