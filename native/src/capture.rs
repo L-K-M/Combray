@@ -116,6 +116,25 @@ pub fn defer_while_touched(
     touching || since_last_touch.is_some_and(|since| since < QUIET_AFTER_TOUCH)
 }
 
+/// How long until a deferred capture of the page on screen may run: once the quiet period after
+/// the last touch ends (a finger still down wakes the engine with its own events), and at the
+/// latest when the longest-waiting capture has waited [`MAX_DEFERRAL`]. The engine wakes for it,
+/// so deferral does not depend on an idle tick.
+pub fn next_deferred_attempt(
+    touching: bool,
+    since_last_touch: Option<Duration>,
+    longest_wait: Duration,
+) -> Duration {
+    let forced = MAX_DEFERRAL.saturating_sub(longest_wait);
+    if touching {
+        return forced;
+    }
+    let quiet = since_last_touch.map_or(Duration::ZERO, |since| {
+        QUIET_AFTER_TOUCH.saturating_sub(since)
+    });
+    quiet.min(forced)
+}
+
 /// Fingers on the page on screen, and when the last touch event came.
 ///
 /// The pointer ids down, not a count: a count leaks when an up never comes. The long-press
@@ -297,6 +316,33 @@ pub fn js_value_kind(value: &JSValue) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_deferred_capture_wakes_the_engine_when_it_may_run() {
+        // Quiet for a second: half a second of the quiet period is left.
+        assert_eq!(
+            next_deferred_attempt(false, Some(Duration::from_secs(1)), Duration::from_secs(1)),
+            QUIET_AFTER_TOUCH - Duration::from_secs(1)
+        );
+        // Quiet long enough, or never touched: now.
+        assert_eq!(
+            next_deferred_attempt(false, Some(QUIET_AFTER_TOUCH), Duration::ZERO),
+            Duration::ZERO
+        );
+        assert_eq!(
+            next_deferred_attempt(false, None, Duration::ZERO),
+            Duration::ZERO
+        );
+        // A finger down: only the forced run, which no capture waits past.
+        assert_eq!(
+            next_deferred_attempt(true, Some(Duration::ZERO), Duration::from_secs(4)),
+            MAX_DEFERRAL - Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_deferred_attempt(true, Some(Duration::ZERO), MAX_DEFERRAL * 2),
+            Duration::ZERO
+        );
+    }
     use super::*;
 
     #[test]

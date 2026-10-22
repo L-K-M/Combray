@@ -381,11 +381,25 @@ impl Engine {
             .page_controls
             .values()
             .filter_map(|pending| pending.control.deadline());
+        // A capture waiting for the user to stop touching the page wakes the engine itself.
+        let deferred = self
+            .deferred_captures
+            .iter()
+            .map(|(_, since)| now.saturating_duration_since(*since))
+            .max()
+            .map(|longest| {
+                capture::next_deferred_attempt(
+                    self.touches.touching(now),
+                    self.touches.since_last(now),
+                    longest,
+                )
+            });
         self.pending_captures
             .values()
             .map(|pending| pending.deadline)
             .chain(controls)
             .map(|deadline| deadline.saturating_duration_since(now))
+            .chain(deferred)
             .min()
             .map_or(IDLE_TICK, |until_deadline| until_deadline.min(IDLE_TICK))
     }
