@@ -136,35 +136,52 @@ Rows that name a PR in "closes when" stay open until that PR lands.
 | #55 | Superseded by #62 | None (its optional surface-ladder test was not taken) |
 | #60 | Duplicate of #56, less accurate (it forwarded keys `servo_key` drops) | Its tests and modifier KDoc are in #56 |
 | #79 | Duplicate of #63, weaker tap semantics | Single subscription, address-policy filter, "On this device" heading and gate tests are in #63 |
-| #85 | Covered by #90's SHOW_REFUSED path | Its scenario becomes a KeyboardTest case in #90; closes when #90 lands |
+| #85 | Covered by #90's SHOW_REFUSED path | Its scenario is to become a KeyboardTest case for #90 |
 | #98 | Owner chose no Material You default and no pitch-black variant | #52 carries the override |
 | #99 | Equivalent to #48 | Its comment note is in #48 |
 | #101 | Owner chose no floating Reader close button | None |
 | #102 | Duplicate of #51 | Its trailing default parameter is in #51 |
 | #105 | Regression: freezes the address the dialog opened with | None |
 
-### Still open
+### Wave 3
 
-Wave 3 needs one native build and a full `scripts/check-app.sh` emulator pass
-on the integrated tree; no native PR has been device-run on current main.
-Owner decisions are Confirmed for #80, #84, #86, #89 and #103's direction;
-Proposed for one text-size control (#87) and #103's hiding.
+Wave 3, the native PRs, is integrated on one branch. Every merge was compiled
+against the pinned Servo for x86_64 (`scripts/build-native.sh`), and
+`cargo test --lib`, the JVM tests, lint and assembly pass. It has had no
+device run: `scripts/check-app.sh` on an emulator must pass on the integrated
+tree before it counts as landed, and the PRs' device evidence is from their own
+branches. Owner decisions are Confirmed for #80, #84, #86, #89 and #103's
+direction; Proposed for one text-size control (#87). #103's proposed hiding
+after scrolling stops is not done: its device checks rely on the button
+staying, so the change needs its own device run.
+
+| PR | Branch | What it changes |
+| --- | --- | --- |
+| #82 | `opus/screen-geometry` | Pages read a real screen and window size (`screen_geometry`) |
+| #83 | `opus/media-cancel` | Audio, video and text-track loads are cancelled before downloading; one notice per page |
+| #93 | `opus/leave-page` | "Leave this page?" for a touched page's `beforeunload`; Stay also ends #92's loading wait |
+| #87 | `opus/page-zoom` | More › Text size zooms every page; Reader view scales by the same step (one text control, Proposed) |
+| #103 | `feat/scroll-edge-controls` | Scroll to top while scrolling up, to bottom while scrolling down, on pages and in Reader view |
+| #86 | `opus/find-in-page` | Find in page, bound to the document on screen (view, generation and document in every request) |
+| #80 | `opus/external-app-links` | Links for other apps ask first, then hand off; malformed `intent:` links are refused instead of crashing; `file:` navigations refused |
+| #84 | `opus/popup-blocking` | Windows only after a tap on the document the user tapped; one window per tap |
+| #89 | `opus/sign-in-userinfo` | HTTP sign-in credentials stay out of page URLs, Recent and shares; capture and save stay allowed (owner) |
+| #54 | `opus/page-dark-mode` | Pages see `prefers-color-scheme: dark` from the app's resolved theme, the in-app choice included |
+| #81 | `opus/capture-budget` | Capture holds the page on screen at most 400 ms and waits while it is touched; the engine wakes for a deferred capture |
+| #90 | `opus/keyboard-activation` | Page keyboards open only on user activation; per-tab fields; a dismissal acts only on an open keyboard |
+
+Before a device run, check in particular: #90's reopen-after-Back check (it
+failed once on its branch), #86's `FindTest` (its scroll assertions read
+`scrollY`, which #103 found stale after programmatic scrolls), #80's and #84's
+tests through the new "Open this link in another app?" question, and #85's
+scenario for #90 (a page focusing its field while the address sheet is open),
+which is not written yet.
+
+### Still open
 
 | PR | Before it lands | Line |
 | --- | --- | --- |
-| #82 | Rebase | 3 |
-| #83 | Rebase; CI on the head | 3 |
-| #93 | On #92 (landed): clear the reload wait on Stay or hide only when `reload()` started it | 3 |
-| #87 | Rebase onto #58's `MoreAction`; its device run predates `needs_paint` | 3 |
-| #86 | Bind find to the shown document; land after #103 and #87, adopt #103's `PageRef` and add `MoreAction.FIND` to #58's enum; gate page keyboard requests while the find field is focused; re-run FindTest | 3 |
-| #80 | Catch the `Intent.parseUri` crash on a malformed `intent:` link; ask before opening another app; no "Tab closed" notice for a pop-up that never committed | 3 |
-| #84 | Make activation per document, so a tapped link's destination cannot open a pop-up on load; CI against main after #80 | 3 |
-| #89 | Keep capture and save behind an HTTP sign-in, as written; `warn!` on a deletion failure | 3 |
-| #54 | Follow the in-app theme from #52, not `isSystemInDarkTheme()` | 3 |
-| #81 | Add the deferred-capture deadline to `next_timeout` | 3 |
-| #90 | Guard `ime_dismissed` on an open keyboard; re-run the failed reopen-after-Back check; add #85's scenario | 3 |
-| #103 | Hide the button shortly after scrolling stops; renumber its ENGINE_SPIKE section to 15 and fix the plan's anchor | 3 |
-| #88 | Stays a draft: throttling does not work yet, and #96 supersedes its Kotlin half. Fix ThrottlingTest's metric (read `window.ticks` through `NativeEngine.evaluate`) before blaming Servo; split `wakeup.rs` out later with a deferred-capture input to `sleep_limit` | Not landing |
+| #88 | Stays a draft: throttling does not work yet, and #96 supersedes its Kotlin half. Fix ThrottlingTest's metric (read `window.ticks` through `NativeEngine.evaluate`) before blaming Servo; split `wakeup.rs` out later; #81's deferred captures now wake the engine themselves | Not landing |
 | #42 | Waiting on the owner: a launcher monogram and host quick links on the new-tab page, ranked by visits in the retention window | Undecided |
 
 Notes for the open work:
@@ -307,11 +324,11 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
 15. **Links to other apps.** Decided: `mailto:`, `tel:`, `intent:`, `market:`
     and similar links ask before Combray hands them to Android
     ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
-    Open #80, with #84 stacked on it (wave 3), hands such links to Android on a
-    tap without asking: #80 must add that confirmation and catch the
-    `Intent.parseUri` crash on a malformed `intent:` link, and #84 must make
-    activation per document. On main, `AddressPolicy.EXTERNAL_SCHEMES` allows
-    only `mailto:` and `tel:`, and the end-to-end gap (Fusion 5) is not just
+    Wave 3 integrates #80 and #84: such a link reaches Android only after a tap
+    and the "Open this link in another app?" question, a malformed `intent:`
+    link is refused instead of crashing, and a window needs a tap on the
+    document the user tapped (device run pending). Before wave 3,
+    `AddressPolicy.EXTERNAL_SCHEMES` allowed only `mailto:` and `tel:`, and the end-to-end gap (Fusion 5) is not just
     missing scheme names: `native/src/delegate.rs::request_navigation` allows
     page requests and the coordinator ignores `PageNavigationRequested`, so
     clicked mail/tel links never reach the typed-input external decision. Carry
@@ -367,11 +384,11 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     `native/src/delegate.rs` drops `InputMethodControl.allow_virtual_keyboard`
     (and text/insertion point): a page-side `focus()` shows the keyboard at any
     time. Forward the flag and let the app suppress programmatic keyboards.
-    Open #90 (wave 3) forwards the flag, so the keyboard opens only after user
-    activation, and keeps one field per tab; its SHOW_REFUSED path covers the
-    app-side half that closed #85 proposed. Its reopen-after-Back device check
-    failed and must be re-run. Until it lands, `ime_owner` is a single slot
-    shared across views (performance item 4).
+    #90, integrated in wave 3, forwards the flag, so the keyboard opens only
+    after user activation, and keeps one field per tab; its SHOW_REFUSED path
+    covers the app-side half that closed #85 proposed. Its reopen-after-Back
+    device check failed once on its branch and must be re-run. Before wave 3,
+    `ime_owner` was a single slot shared across views (performance item 4).
 24. **Settings queue rows decode whole payloads during composition.**
     `Integrations.jobUrl` (`Integrations.kt:135-138`) JSON-decodes the full
     capture payload (up to 256 KiB of page text) to read one URL, and
@@ -659,8 +676,8 @@ Do not claim a device reproduction for these. They are from the bridge and
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   An in-app Follow the system / Light / Dark choice; pine and ivory stay the
   default, with no Material You default and no pitch-black variant. #52 landed
-  it (Settings › Display › Appearance, `ThemeMode`); open #54 (wave 3) must
-  follow the in-app theme for pages.
+  it (Settings › Display › Appearance, `ThemeMode`); #54, integrated in
+  wave 3, gives pages the app's resolved theme.
 - Local history completion in the address editor: decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   A history row opens in the tab being edited (a new tab when the editor is for
@@ -880,8 +897,8 @@ haptics on every routine action.
   that fights the surface.
   Pinch touches are already forwarded; verify behavior before adding another
   gesture recognizer. Find in page deserves a bounded, document-scoped engine
-  path with bottom search/count/next/previous/dismiss controls. Open #86
-  (wave 3) runs find in the page; the owner accepted that the page can observe
+  path with bottom search/count/next/previous/dismiss controls. #86,
+  integrated in wave 3, runs find in the page, bound to the document shown; the owner accepted that the page can observe
   the query and the selection
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   Test Unicode,
