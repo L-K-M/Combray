@@ -25,6 +25,17 @@ class EngineKeysTest {
             KeyEvent.KEYCODE_ENDCALL,
             KeyEvent.KEYCODE_MENU,
             KeyEvent.KEYCODE_BACK,
+            KeyEvent.KEYCODE_SEARCH,
+            // The launcher key, not the text-cursor Home: that is MOVE_HOME.
+            KeyEvent.KEYCODE_HOME,
+            KeyEvent.KEYCODE_POWER,
+            KeyEvent.KEYCODE_APP_SWITCH,
+            KeyEvent.KEYCODE_F1,
+            KeyEvent.KEYCODE_TV,
+            // Bare modifiers: see the known limit on EngineKeys.
+            KeyEvent.KEYCODE_CTRL_LEFT,
+            KeyEvent.KEYCODE_SHIFT_LEFT,
+            KeyEvent.KEYCODE_ALT_LEFT,
         )
         for (keyCode in systemKeys) {
             assertFalse("key code $keyCode", EngineKeys.handles(keyCode, NO_CHARACTER))
@@ -37,6 +48,9 @@ class EngineKeysTest {
         assertTrue(EngineKeys.handles(KeyEvent.KEYCODE_A, 'A'.code))
         assertTrue(EngineKeys.handles(KeyEvent.KEYCODE_SPACE, ' '.code))
         assertTrue(EngineKeys.handles(KeyEvent.KEYCODE_1, '1'.code))
+        // Shifted punctuation arrives with its own character; no modifier mapping is needed.
+        assertTrue(EngineKeys.handles(KeyEvent.KEYCODE_COMMA, '<'.code))
+        assertFalse(EngineKeys.handles(KeyEvent.KEYCODE_SPACE, NO_CHARACTER))
         // The character decides, whatever key produced it.
         assertTrue(EngineKeys.handles(KeyEvent.KEYCODE_UNKNOWN, 'é'.code))
         assertTrue(EngineKeys.handles(KeyEvent.KEYCODE_UNKNOWN, EMOJI))

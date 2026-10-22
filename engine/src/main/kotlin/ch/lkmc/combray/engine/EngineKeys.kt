@@ -7,6 +7,10 @@ import android.view.KeyEvent
  * `native/src/engine.rs`: change both together. The page surface consumes only these, so
  * every other key (volume, media, headset, camera, call, shortcuts Servo ignores) falls
  * through to Android instead of being dropped.
+ *
+ * Known limit: bare Ctrl, Alt and Meta are not forwarded. They carry no character and the
+ * engine has no modifier channel, so page shortcuts such as Ctrl+F need native work first.
+ * Shift works because Android puts it into the character of the key it modifies.
  */
 internal object EngineKeys {
     /** Keys servo_key maps by code because they produce no printable character. */
