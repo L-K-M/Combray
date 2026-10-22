@@ -79,6 +79,7 @@
     <string name="recent_scope_hister">Hister</string>
     <string name="recent_scope_karakeep">Karakeep</string>
     <string name="recent_filter_hint">Filter tabs and history on this device</string>
+    <string name="recent_switch_previous">Switch to the previous tab</string>
     <string name="recent_open_marker">Open</string>
     <string name="recent_active_marker">Current tab</string>
     <string name="recent_close_tab">Close tab: %1$s</string>

@@ -212,6 +212,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 },
                 onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser)) } },
                 onRecent = { sheet = Sheet.RECENT },
+                onRecentLongPress = browser::focusPreviousTab,
                 onMore = { sheet = Sheet.MORE },
                 // Clear of the navigation bar and, in landscape, of a display cutout.
                 modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),

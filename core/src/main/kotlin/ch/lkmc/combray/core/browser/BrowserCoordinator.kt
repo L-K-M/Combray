@@ -215,6 +215,18 @@ class BrowserCoordinator(
         publish()
     }
 
+    /**
+     * Quick switch: focuses the open tab used most recently before the focused one (the
+     * runner-up by `lastFocusedAt`, which [activate] keeps just behind the focused tab).
+     */
+    fun focusPreviousTab() = submit {
+        val active = activeTab()
+        val previous = dao.openTabs().firstOrNull { it.id != active?.id } ?: return@submit
+        focus(previous)
+        reconcile()
+        publish()
+    }
+
     /** Closes [tabId]; its pages stay in Recent as history. Focus moves to the last used tab. */
     fun closeTab(tabId: String) = submit {
         val tab = dao.tab(tabId)?.takeIf { it.state == TabState.OPEN } ?: return@submit

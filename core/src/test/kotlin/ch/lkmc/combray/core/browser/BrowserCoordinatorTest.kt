@@ -143,6 +143,27 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aQuickSwitchFocusesTheTabUsedBeforeTheFocusedOneAndBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val tabB = state().activeTab!!.id
+
+        browser.focusPreviousTab(); idle()
+        val tabA = state().activeTab!!.id
+        assertNotEquals(tabB, tabA)
+        assertEquals(1L, engine.selected.last())
+
+        // Back on the older tab, the same shortcut returns to the one just left.
+        browser.focusPreviousTab(); idle()
+        assertEquals(tabB, state().activeTab?.id)
+        assertEquals(2L, engine.selected.last())
+    }
+
+    @Test
     fun closingTheActiveTabFocusesTheMostRecentlyUsedOneAndUndoReopensIt() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()

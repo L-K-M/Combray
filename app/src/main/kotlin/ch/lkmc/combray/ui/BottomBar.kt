@@ -1,5 +1,7 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +40,7 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -48,6 +51,7 @@ import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.integration.SaveStatus
 
 /** Back, address, Save, Share, Recent and More: every routine action within thumb reach. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BottomBar(
     tab: ActiveTab?,
@@ -58,6 +62,8 @@ fun BottomBar(
     onSave: () -> Unit,
     onShare: () -> Unit,
     onRecent: () -> Unit,
+    /** Long-press shortcut: focus the tab used before the focused one. */
+    onRecentLongPress: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -76,7 +82,22 @@ fun BottomBar(
                     Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
                 }
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
-                IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
+                val switchPrevious = stringResource(R.string.recent_switch_previous)
+                // Combined click/long-click: IconButton has no long-press overload. Same 48dp
+                // target and role; the long-press is a shortcut beside the Recent sheet's rows.
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .combinedClickable(
+                            role = Role.Button,
+                            onClickLabel = recentLabel,
+                            onLongClickLabel = switchPrevious,
+                            onClick = onRecent,
+                            onLongClick = onRecentLongPress,
+                        )
+                        .semantics { contentDescription = recentLabel },
+                ) {
                     BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
