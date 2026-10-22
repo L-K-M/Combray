@@ -1,18 +1,23 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -76,20 +82,29 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
             }
             is ReaderState.Ready -> {
                 val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
-                CompositionLocalProvider(LocalLayoutDirection provides direction) {
-                    Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
+                    // The article lays itself out in its own direction; the close control stays at the
+                    // physical top-right for every article.
+                    CompositionLocalProvider(LocalLayoutDirection provides direction) {
                         ArticleText(state.article, onOpenLink)
-                        IconButton(
-                            onClick = onClose,
-                            modifier = Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp)
-                                .widthIn(min = 48.dp).heightIn(min = 48.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = stringResource(R.string.action_close),
-                                modifier = Modifier.padding(4.dp),
-                            )
-                        }
+                    }
+                    // A scrim keeps the close control legible over text scrolled beneath it and gives
+                    // links in that corner a tappable surface. Status-bar insets clear edge-to-edge.
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(top = 16.dp, end = 16.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                            .widthIn(min = 48.dp).heightIn(min = 48.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.action_close),
+                            modifier = Modifier.padding(4.dp),
+                        )
                     }
                 }
             }
