@@ -10,7 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
-  editor and a blank tab offers no copy action.
+  editor and a blank tab offers no copy action. Copied addresses are marked
+  sensitive so Android 13+ redacts the system clipboard preview.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

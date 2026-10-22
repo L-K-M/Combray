@@ -2,10 +2,12 @@ package ch.lkmc.combray.ui
 
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PersistableBundle
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -219,8 +221,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 onCopyAddress = {
                     // The rendered address as shown (a recovery URL before a commit), copied whole.
                     tab?.url?.let { url ->
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText(resources.getString(R.string.page_info_address), url))
+                        copyAddressToClipboard(context, resources.getString(R.string.page_info_address), url)
                         // Android 13+ shows its own clipboard confirmation; below it we must.
                         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
                             notify(resources.getString(R.string.address_copied))
@@ -384,4 +385,18 @@ private fun openExternally(context: Context, url: String, noApp: String, notify:
 private fun share(context: Context, url: String, title: String) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
     context.startActivity(Intent.createChooser(send, title))
+}
+
+/**
+ * Copied addresses can carry one-time tokens (a recovery URL before a commit), so they are
+ * marked sensitive: Android 13+ redacts the system preview and well-behaved keyboards keep
+ * them out of suggestions/history. A rendering hint, not access control.
+ */
+internal fun copyAddressToClipboard(context: Context, label: String, url: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText(label, url)
+    clip.description.extras = PersistableBundle().apply {
+        putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+    }
+    clipboard.setPrimaryClip(clip)
 }
