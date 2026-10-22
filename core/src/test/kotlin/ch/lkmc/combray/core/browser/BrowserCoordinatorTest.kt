@@ -317,6 +317,22 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aRestoredPageTheEngineRefusesStaysInRecent() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        // After a restart the tab is restored without a renderer; recreating it is refused.
+        browser = newCoordinator()
+        engine.refusedUrls += "https://a.test/"
+        ready()
+        idle() // the refusal event is queued from inside the work queue
+
+        assertNull(state().activeTab?.url)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+    }
+
+    @Test
     fun closedHistoryExpiresButOpenTabsDoNot() {
         ready()
         browser.openUrl("https://old-open.test/", Placement.NEW_TAB); idle()

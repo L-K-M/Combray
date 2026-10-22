@@ -215,7 +215,7 @@ class BrowserCoordinator(
         }
         // No renderer yet (new tab, restored tab): the request becomes the recovery address.
         view?.let { closeView(it) }
-        dao.updateTab(tab.withDetachedCurrentPage(url))
+        detachCurrentPage(tab, url)
     }
 
     /** Focuses an unused new tab, creating one only when none exists. */
@@ -820,7 +820,7 @@ class BrowserCoordinator(
         val wasShown = selectedNative == view.nativeTab
         forgetView(view)
         if (wasShown) engine.showNone()
-        dao.tab(view.tabId)?.let { dao.updateTab(it.withDetachedCurrentPage(null)) }
+        dao.tab(view.tabId)?.let { detachCurrentPage(it, null) }
         state.update { it.copy(notice = Notice.AddressNotOpened) }
     }
 
@@ -878,11 +878,13 @@ class BrowserCoordinator(
 
     /**
      * The tab stops displaying its current page and shows [recoveryUrl] (or the internal home):
-     * that page becomes plain Recent history again. Recommitting a document sets
-     * `currentVisitId` again in [onHistory].
+     * that page becomes plain Recent history again, retired with the tab's last use like a page
+     * left by navigating (#71). Recommitting a document sets `currentVisitId` again in [onHistory].
      */
-    private fun TabEntity.withDetachedCurrentPage(recoveryUrl: String?): TabEntity =
-        copy(url = recoveryUrl, title = null, currentVisitId = null)
+    private suspend fun detachCurrentPage(tab: TabEntity, recoveryUrl: String?) {
+        tab.currentVisitId?.let { dao.visit(it) }?.let { retireVisit(tab, it, clock.now()) }
+        dao.updateTab(tab.copy(url = recoveryUrl, title = null, currentVisitId = null))
+    }
 
     private suspend fun maintain() {
         val cutoff = clock.now() - retention.closedHistoryMillis
