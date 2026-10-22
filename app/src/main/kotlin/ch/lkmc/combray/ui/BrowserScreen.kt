@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.PersistableBundle
+import android.content.res.Resources
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -97,6 +98,8 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
     val undo = stringResource(R.string.action_undo)
+    val openedInBackground = stringResource(R.string.notice_opened_in_background)
+    val show = stringResource(R.string.action_show)
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
         browser.noticeShown(notice)
@@ -111,6 +114,12 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 }
                 is Notice.Problem -> snackbar.showSnackbar(notice.message)
                 Notice.AddressNotOpened -> snackbar.showSnackbar(notOpened)
+                is Notice.OpenedInBackground -> {
+                    // As for a close, a newer notice replaces the last Show instead of queuing behind it.
+                    snackbar.currentSnackbarData?.dismiss()
+                    val result = snackbar.showSnackbar(openedInBackground, actionLabel = show, duration = SnackbarDuration.Short)
+                    if (result == SnackbarResult.ActionPerformed) browser.selectTab(notice.tabId)
+                }
             }
         }
     }
@@ -160,6 +169,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
 
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    val openSettings = { sheet = Sheet.SETTINGS }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.fillMaxSize().imePadding()) {
@@ -206,31 +216,8 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                     val url = tab?.url
                     val title = tab?.title
                     scope.launch {
-                        when (graph.integrations.save(url, title)) {
-                            SaveRequest.NotConfigured -> {
-                                // Timed, not Indefinite (the default with an action): it must not block later notices.
-                                snackbar.currentSnackbarData?.dismiss()
-                                val result = snackbar.showSnackbar(
-                                    resources.getString(R.string.save_not_set_up),
-                                    actionLabel = resources.getString(R.string.action_open_settings),
-                                    duration = SnackbarDuration.Long,
-                                )
-                                if (result == SnackbarResult.ActionPerformed) sheet = Sheet.SETTINGS
-                            }
-                            SaveRequest.NotSaveable -> snackbar.showSnackbar(resources.getString(R.string.save_not_saveable))
-                            SaveRequest.Sensitive -> snackbar.showSnackbar(resources.getString(R.string.save_sensitive))
-                            SaveRequest.AlreadyQueued -> snackbar.showSnackbar(resources.getString(R.string.save_already_queued))
-                            SaveRequest.NeedsAttention -> {
-                                snackbar.currentSnackbarData?.dismiss()
-                                val result = snackbar.showSnackbar(
-                                    resources.getString(R.string.save_needs_attention),
-                                    actionLabel = resources.getString(R.string.action_open_settings),
-                                    duration = SnackbarDuration.Long,
-                                )
-                                if (result == SnackbarResult.ActionPerformed) sheet = Sheet.SETTINGS
-                            }
-                            SaveRequest.Queued -> Unit
-                        }
+                        // The Save icon shows a queued save of the page itself.
+                        reportSave(graph.integrations.save(url, title), snackbar, resources, queued = null, onOpenSettings = openSettings)
                     }
                 },
                 onShare = {
@@ -342,7 +329,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             uploadScope = graph.scope,
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
-            canOpenInNewTab = { url -> navigation(url) != null },
+            isWebAddress = { url -> navigation(url) != null },
             // The control belongs to the focused tab's page: Back on the new tab returns there.
             onOpenInNewTab = { url ->
                 navigation(url)?.let { link ->
@@ -350,8 +337,57 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                     if (opener != null) browser.openUrlFromTab(link.url, opener) else browser.openUrl(link.url, Placement.NEW_TAB)
                 }
             },
+            onOpenInBackground = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.BACKGROUND_TAB) } },
+            onSaveLink = { url ->
+                navigation(url)?.let { link ->
+                    scope.launch {
+                        // No title: the link's page is not loaded, and Karakeep fills it in when it fetches the page.
+                        val request = graph.integrations.save(link.url, null)
+                        reportSave(request, snackbar, resources, queued = resources.getString(R.string.link_save_queued), onOpenSettings = openSettings)
+                    }
+                }
+            },
             onShare = { url -> share(context, url, resources.getString(R.string.share_chooser)) },
+            onNotify = notify,
         )
+    }
+}
+
+/**
+ * Tells the user what became of a Karakeep save, the same way for the bar's Save and a link's.
+ * [queued] confirms a queued save, or is null where the Save icon already shows it.
+ */
+private suspend fun reportSave(
+    request: SaveRequest,
+    snackbar: SnackbarHostState,
+    resources: Resources,
+    queued: String?,
+    onOpenSettings: () -> Unit,
+) {
+    when (request) {
+        SaveRequest.NotConfigured -> {
+            // Timed, not Indefinite (the default with an action): it must not block later notices.
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar(
+                resources.getString(R.string.save_not_set_up),
+                actionLabel = resources.getString(R.string.action_open_settings),
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) onOpenSettings()
+        }
+        SaveRequest.NotSaveable -> snackbar.showSnackbar(resources.getString(R.string.save_not_saveable))
+        SaveRequest.Sensitive -> snackbar.showSnackbar(resources.getString(R.string.save_sensitive))
+        SaveRequest.AlreadyQueued -> snackbar.showSnackbar(resources.getString(R.string.save_already_queued))
+        SaveRequest.NeedsAttention -> {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar(
+                resources.getString(R.string.save_needs_attention),
+                actionLabel = resources.getString(R.string.action_open_settings),
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) onOpenSettings()
+        }
+        SaveRequest.Queued -> queued?.let { snackbar.showSnackbar(it) }
     }
 }
 

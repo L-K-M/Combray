@@ -27,6 +27,9 @@ All notable changes to this project are documented here. The format follows
   the Java/Kotlin libraries, checked and listed by the Licensee plugin.
 - Long-press on a link or image: open in a new tab, copy or share the
   address.
+- Long-press on a link: open it in the background, where it loads when you
+  switch to it, or save it to Karakeep without leaving the page. Android 11
+  and 12 now confirm a copied address.
 - HTTP sign-in: a dialog naming the server asks for a username and
   password, warns on unencrypted connections and stores nothing.
 - Device check that the bottom bar, More menu and page dialogs keep 48dp,

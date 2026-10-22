@@ -244,6 +244,43 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aBackgroundTabKeepsFocusWhereItIsAndLoadsWhenSelected() {
+        ready()
+        browser.openUrl("https://older.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://older.test/")
+        now += 1_000
+        browser.openUrl("https://reading.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://reading.test/")
+        val reading = state().activeTab!!.id
+        now += 1_000
+
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+        assertEquals(reading, state().activeTab?.id)
+        assertEquals(3, state().openTabCount)
+        // No renderer until it is selected, and the page being read stays shown.
+        assertEquals(2, engine.created.size)
+        assertEquals(2L, engine.selected.last())
+        val later = (state().notice as Notice.OpenedInBackground).tabId
+        // Right after the focused tab in Recent, before the tabs used earlier.
+        val order = recent().filterIsInstance<RecentItem.OpenTab>().map { it.url }
+        assertEquals(listOf("https://reading.test/", "https://later.test/", "https://older.test/"), order)
+
+        browser.selectTab(later); idle()
+        assertEquals(later, state().activeTab?.id)
+        assertEquals(3L to "https://later.test/", engine.created.last())
+        assertEquals(3L, engine.selected.last())
+    }
+
+    @Test
+    fun aBackgroundTabTakesFocusWhenNoTabHasIt() {
+        ready()
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+        assertEquals("https://later.test/", state().activeTab?.url)
+        assertEquals(listOf(1L to "https://later.test/"), engine.created)
+        assertNull(state().notice)
+    }
+
+    @Test
     fun closingTheLastTabShowsHomeAndReleasesTheView() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
