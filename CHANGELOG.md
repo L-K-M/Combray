@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
   sensitive so Android 13+ redacts the system clipboard preview.
 - Share sends the page's title with its address (as the share's subject and
   first line); sharing a link from the page's own menu keeps the address only.
+- Swiping a tab row in Recent closes the tab, with the same Undo as its
+  close button. History rows keep their explicit menu: removing a visit
+  has no undo.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

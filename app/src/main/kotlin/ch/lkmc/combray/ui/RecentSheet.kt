@@ -3,16 +3,17 @@ package ch.lkmc.combray.ui
 import android.text.format.DateFormat as AndroidDateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,6 +41,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -48,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -258,21 +265,31 @@ private fun LocalRecent(
                 item(key = "day:$day") { DayHeader(day, today) }
             }
             item(key = item.key) {
-                RecentRow(
-                    item = item,
-                    query = query,
-                    now = now,
-                    onOpen = {
-                        when (item) {
-                            is RecentItem.OpenTab -> browser.selectTab(item.tabId)
-                            is RecentItem.Visit -> browser.openVisit(item.visitId)
-                        }
-                        onDismiss()
-                    },
-                    onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
-                    onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
-                    onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
-                )
+                val row: @Composable () -> Unit = {
+                    RecentRow(
+                        item = item,
+                        query = query,
+                        now = now,
+                        onOpen = {
+                            when (item) {
+                                is RecentItem.OpenTab -> browser.selectTab(item.tabId)
+                                is RecentItem.Visit -> browser.openVisit(item.visitId)
+                            }
+                            onDismiss()
+                        },
+                        onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
+                        onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
+                        onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                    )
+                }
+                if (item is RecentItem.OpenTab) {
+                    // A swipe closes the tab exactly like its close button, with the Undo
+                    // snackbar as the way back. History rows keep their explicit menu: removing
+                    // a visit has no undo, so it must stay a deliberate tap.
+                    SwipeToCloseTab(onClose = { browser.closeTab(item.tabId) }, row = row)
+                } else {
+                    row()
+                }
             }
         }
     }
@@ -289,6 +306,44 @@ private fun EmptyRecent(empty: RecentEmpty, onShowAll: () -> Unit) {
                 Text(stringResource(if (empty == RecentEmpty.NO_OPEN_TAB_MATCHES) R.string.recent_show_matching else R.string.recent_show_all))
             }
         }
+    }
+}
+
+/**
+ * A tab row that a start-to-end swipe closes. The state is remembered, not saved: after Undo
+ * the same row key comes back and must not restore as already dismissed. The row is drawn on
+ * the sheet's colour so the close background shows only beside it while it moves.
+ */
+@Composable
+private fun SwipeToCloseTab(onClose: () -> Unit, row: @Composable () -> Unit) {
+    val threshold = SwipeToDismissBoxDefaults.positionalThreshold
+    val state = remember { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, threshold) }
+    val close by rememberUpdatedState(onClose)
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd) CloseRowBackground()
+        },
+        enableDismissFromEndToStart = false,
+        onDismiss = { close() },
+    ) {
+        Box(Modifier.fillMaxWidth().background(BottomSheetDefaults.ContainerColor)) { row() }
+    }
+}
+
+/** Behind a swiped tab row: closing, with the row's own close icon in the error tint. */
+@Composable
+private fun CloseRowBackground() {
+    Box(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(start = 20.dp),
+        )
     }
 }
 
