@@ -386,7 +386,7 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     time. Forward the flag and let the app suppress programmatic keyboards.
     #90, integrated in wave 3, forwards the flag, so the keyboard opens only
     after user activation, and keeps one field per tab; its SHOW_REFUSED path
-    covers the app-side half that closed #85 proposed. Its reopen-after-Back
+    covers the app-side half proposed by #85, now closed. Its reopen-after-Back
     device check failed once on its branch and must be re-run. Before wave 3,
     `ime_owner` was a single slot shared across views (performance item 4).
 24. **Settings queue rows decode whole payloads during composition.**

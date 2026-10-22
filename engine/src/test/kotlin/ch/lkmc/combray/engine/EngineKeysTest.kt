@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class EngineKeysTest {
     /** Volume, media, headset, camera and call keys must reach Android, not the page. */
@@ -85,11 +86,26 @@ class EngineKeysTest {
         assertFalse(EngineKeys.handles(KeyEvent.KEYCODE_UNKNOWN, DEAD_ACUTE_ACCENT))
     }
 
-    /** Guards the mirror: exactly the key codes servo_key in native/src/engine.rs names. */
+    /**
+     * Guards the mirror in both directions: exactly the key codes servo_key names, read from
+     * native/src/engine.rs itself (Android-only, so no host Rust test can see it).
+     */
     @Test
     fun namedKeyCodesMatchServoKey() {
         val handled = (0..HIGHEST_PROBED_KEY_CODE).filter { EngineKeys.handles(it, NO_CHARACTER) }.toSet()
-        assertEquals(SERVO_KEY_NAMED_CODES, handled)
+        assertEquals(servoKeyNamedCodes(), handled)
+    }
+
+    private fun servoKeyNamedCodes(): Set<Int> {
+        // Gradle runs unit tests in the module directory; walk up to the repository root.
+        val engineRs = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "native/src/engine.rs") }
+            .first { it.isFile }
+            .readText()
+        val body = engineRs.substringAfter("fn servo_key(").substringBefore("\n}\n")
+        val codes = Regex("""(\d+) => NamedKey::""").findAll(body).map { it.groupValues[1].toInt() }.toSet()
+        assertTrue("no named codes parsed from servo_key", codes.isNotEmpty())
+        return codes
     }
 
     private companion object {
@@ -105,8 +121,5 @@ class EngineKeysTest {
 
         /** Above every KEYCODE_* constant (the highest is 340 in API 37). */
         const val HIGHEST_PROBED_KEY_CODE = 1_000
-
-        /** The literal codes in servo_key's match, copied so a one-sided edit fails here. */
-        val SERVO_KEY_NAMED_CODES = setOf(19, 20, 21, 22, 61, 66, 67, 111, 112, 122, 123)
     }
 }

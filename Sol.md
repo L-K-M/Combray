@@ -165,7 +165,7 @@ Ship these as separate experiments after the correctness and layout checks. Resp
 
 **Acceptance:** Delay the first configured-service emission and verify no false setup prompt. Fill the queue, reject a capture, drain/discard it, and verify the warning clears without needing another page capture.
 
-Additional retry-policy check found while consolidating: `DispatchResult.kt:48–51` multiplies Retry-After seconds before clamping. `Long.MAX_VALUE` seconds overflows to a zero delay instead of the six-hour ceiling. Clamp before multiplication and test huge, invalid, negative and ordinary values; this remains backlog work.
+Additional retry-policy check found while consolidating: `DispatchResult.kt:48–51` multiplies Retry-After seconds before clamping. `Long.MAX_VALUE` seconds overflows to a zero delay instead of the six-hour ceiling. Clamp before multiplication and test huge, invalid, negative and ordinary values. Fixed after this review by [#107](https://github.com/L-K-M/Combray/pull/107), which clamps the seconds first and adds those tests.
 
 ### S18. A server URL does not identify a service account
 
