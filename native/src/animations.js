@@ -68,9 +68,13 @@
       installPolyfill();
       addComputedTiming();
       addDocumentAnimations();
-      if (typeof Element.prototype.animate !== "function") {
-        throw new Error("Combray: web-animations-js did not define Element.prototype.animate");
-      }
+      // Both are what the stubs above promised; a polyfill that provides one and not the other
+      // would leave the second as a TypeError with nothing to say why.
+      ["animate", "getAnimations"].forEach(function (name) {
+        if (typeof Element.prototype[name] !== "function") {
+          throw new Error("Combray: web-animations-js did not define Element.prototype." + name);
+        }
+      });
     } catch (error) {
       // Without this, every later call says "this.animate is not a function" and blames the page.
       failWith(error);
@@ -105,7 +109,8 @@
       configurable: true,
       writable: true,
       value: function getAnimations() {
-        return document.timeline ? document.timeline.getAnimations() : [];
+        var timeline = document.timeline;
+        return timeline && typeof timeline.getAnimations === "function" ? timeline.getAnimations() : [];
       }
     });
   }
