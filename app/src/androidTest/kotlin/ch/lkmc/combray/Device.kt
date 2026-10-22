@@ -60,6 +60,9 @@ object Fixtures {
     /** A `<video>` and an `<audio>` element; titled `MEDIA:errors:2` once both failed. */
     const val MEDIA = "$BASE/media.html"
 
+    /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
+    const val ZOOM = "$BASE/zoom.html"
+
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
 

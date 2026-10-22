@@ -29,6 +29,8 @@ Pages
                              error events
   /media/slow.bin            512 KiB served over about eight seconds; /_admin/state "media" counts the
                              requests that arrived and the responses sent in full
+  /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
+                             (page zoom checks)
   (the four control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -188,6 +190,14 @@ MEDIA_PAGE = page(
     "<script>var errors = 0; function failed() { errors++; document.title = 'MEDIA:errors:' + errors; }</script>",
 )
 
+# Reports its layout viewport: page zoom changes both the CSS width and the device pixel ratio.
+ZOOM_PAGE = page(
+    "ZOOM-WAITING",
+    "<p>zoom</p><script>"
+    "function report() { document.title = 'ZOOM:' + innerWidth + ':' + devicePixelRatio; }"
+    "addEventListener('load', report); addEventListener('resize', report);</script>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -309,6 +319,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, MEDIA_PAGE)
         if path == "/media/slow.bin":
             return self.send_slow_media()
+        if path == "/zoom.html":
+            return self.send(200, ZOOM_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

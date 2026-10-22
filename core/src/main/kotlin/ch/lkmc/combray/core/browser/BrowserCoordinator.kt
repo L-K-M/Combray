@@ -75,6 +75,8 @@ class BrowserCoordinator(
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
     /** How long a request may wait for its page before the tab stops showing it as loading. */
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
+    /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
+    private val textSize: () -> TextSize = { TextSize.DEFAULT },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -438,6 +440,11 @@ class BrowserCoordinator(
         if (engineReady) engine.persistProfile()
     }
 
+    /** The text size setting changed: every page, open or opened later, lays out at it. */
+    fun applyTextSize() = submit {
+        if (engineReady) engine.setPageZoom(textSize().zoom)
+    }
+
     /**
      * Process visibility from the lifecycle owner: while backgrounded the shown renderer is
      * throttled too (hidden ones already are). Purely a hint; no logical state changes. Servo
@@ -504,6 +511,8 @@ class BrowserCoordinator(
         when (event) {
             is EngineEvent.EngineReady -> {
                 engineReady = true
+                // Before any view exists, so the first page lays out at the chosen size.
+                engine.setPageZoom(textSize().zoom)
                 state.update { it.copy(engine = EngineStatus.READY) }
                 reconcile()
             }

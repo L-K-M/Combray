@@ -46,10 +46,11 @@ fun MoreSheet(
     onPauseCapture: () -> Unit,
     readerOpen: Boolean,
     onReader: () -> Unit,
+    onTextSize: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
+        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader, onTextSize)
     }
 }
 
@@ -68,6 +69,7 @@ internal fun MoreActions(
     /** Reader view is open over the page: the row leaves it. */
     readerOpen: Boolean,
     onReader: () -> Unit,
+    onTextSize: () -> Unit,
 ) {
     // Scrolls when the rows are taller than the window, as in landscape, so Settings stays reachable.
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
@@ -80,6 +82,7 @@ internal fun MoreActions(
                 MoreAction.PAGE_INFO -> MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
                 MoreAction.READER ->
                     MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
+                MoreAction.TEXT_SIZE -> MoreRow(TextSizeIcon, R.string.action_text_size, onTextSize)
                 MoreAction.PAUSE_CAPTURE -> MoreRow(PauseIcon, R.string.action_pause_capture, onPauseCapture)
                 MoreAction.RESUME_CAPTURE -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
                 MoreAction.SETTINGS -> MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
@@ -89,7 +92,7 @@ internal fun MoreActions(
 }
 
 /** A row of the More sheet. */
-internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, PAUSE_CAPTURE, RESUME_CAPTURE, SETTINGS }
+internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, TEXT_SIZE, PAUSE_CAPTURE, RESUME_CAPTURE, SETTINGS }
 
 /** The rows More offers for [tab], in order. */
 internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAction> = buildList {
@@ -104,6 +107,8 @@ internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAc
         add(MoreAction.PAGE_INFO)
         add(MoreAction.READER)
     }
+    // Every page, not just this one: offered on the home screen too.
+    add(MoreAction.TEXT_SIZE)
     // Pausing is one tap. Resuming leads to Settings, which explains what is sent: paused
     // capture stays as visible here as the switch that paused it.
     when (captureEnabled) {

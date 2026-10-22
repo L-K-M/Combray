@@ -356,6 +356,17 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setThrottled<'local>(
     send(Command::SetThrottling { tab, throttling });
 }
 
+/// Page zoom of every view, now and for views created later (1.0 is 100%). Values that are not a
+/// zoom factor are refused with an `error` event; the engine clamps the rest to Servo's 10%–1000%.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setPageZoom<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    zoom: jfloat,
+) {
+    send(Command::SetPageZoom { zoom });
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_touch<'local>(
     _env: EnvUnowned<'local>,

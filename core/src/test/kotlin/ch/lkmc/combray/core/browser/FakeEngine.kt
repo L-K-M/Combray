@@ -86,6 +86,13 @@ class FakeEngine : EnginePort {
         throttling += tab to throttled
     }
 
+    /** Each page zoom requested, in order, with the number of views created before it. */
+    val pageZooms = mutableListOf<Pair<Float, Int>>()
+
+    override fun setPageZoom(zoom: Float) {
+        pageZooms += zoom to created.size
+    }
+
     val responses = mutableListOf<Pair<Long, ControlResponse>>()
 
     override fun respondToControl(control: Long, response: ControlResponse) {

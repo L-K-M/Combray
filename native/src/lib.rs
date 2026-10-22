@@ -9,17 +9,19 @@
 //!                         ├─ controls: select pickers, script dialogs, file pickers
 //!                         ├─ capture: bounded in-page text snapshot
 //!                         ├─ animations: Element.animate() for every page
+//!                         ├─ page_zoom: the layout zoom of every view
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `animations`, `events`, `media`, `panic_policy` and the pure parts of `capture` build on any
-//! host so their tests run without Servo.
+//! `animations`, `events`, `media`, `page_zoom`, `panic_policy` and the pure parts of `capture`
+//! build on any host so their tests run without Servo.
 
 mod animations;
 pub mod capture;
 pub mod controls;
 pub mod events;
 mod media;
+mod page_zoom;
 mod panic_policy;
 
 #[cfg(target_os = "android")]

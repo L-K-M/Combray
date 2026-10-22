@@ -76,7 +76,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
-private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
+private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -350,6 +350,7 @@ fun BrowserScreen(
                 dismiss()
                 if (state.reader != null) browser.closeReader() else browser.openReader()
             },
+            onTextSize = { sheet = Sheet.TEXT_SIZE },
             onDismiss = dismiss,
         )
         Sheet.SETTINGS -> SettingsSheet(
@@ -372,6 +373,17 @@ fun BrowserScreen(
                 // composition and the pending dismissal is cancelled with it.
                 LaunchedEffect(Unit) { dismiss() }
             }
+        }
+        Sheet.TEXT_SIZE -> {
+            val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
+            TextSizeDialog(
+                size = textSize,
+                onChange = { size ->
+                    graph.settings.setTextSize(size)
+                    browser.applyTextSize()
+                },
+                onDismiss = dismiss,
+            )
         }
     }
 

@@ -122,6 +122,7 @@ class AppGraph(application: Application) {
         retention = retention,
         capture = integrations.hister,
         unusedTabs = { settings.unusedTabs.value },
+        textSize = { settings.textSize.value },
     )
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
     val notices = ThirdPartyNotices(application.assets)

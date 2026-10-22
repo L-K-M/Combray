@@ -48,6 +48,7 @@ class BrowserCoordinatorTest {
     private var now = START
     private var ids = 0
     private var unusedTabs = UnusedTabs.KEEP
+    private var textSize = TextSize.DEFAULT
 
     @Before
     fun setUp() {
@@ -66,6 +67,7 @@ class BrowserCoordinatorTest {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
+            textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
         ).also { it.start() }
     }
@@ -919,6 +921,24 @@ class BrowserCoordinatorTest {
 
         browser.runMaintenance(); idle()
         assertEquals(listOf("https://long-read.test/"), recent().filterIsInstance<RecentItem.Visit>().map { it.url })
+    }
+
+    @Test
+    fun theTextSizeReachesTheEngineBeforeTheFirstViewAndOnEveryChange() {
+        textSize = TextSize.PERCENT_125
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        browser.applyTextSize(); idle()
+        // Nothing to zoom before the engine runs; readiness applies the setting.
+        assertTrue(engine.pageZooms.isEmpty())
+
+        ready()
+        // Before the first view, so its first page lays out at the chosen size.
+        assertEquals(listOf(1.25f to 0), engine.pageZooms)
+        assertEquals(1, engine.created.size)
+
+        textSize = TextSize.PERCENT_80
+        browser.applyTextSize(); idle()
+        assertEquals(listOf(1.25f to 0, 0.8f to 1), engine.pageZooms)
     }
 
     @Test

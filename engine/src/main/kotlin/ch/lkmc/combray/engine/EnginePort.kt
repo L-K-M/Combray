@@ -29,6 +29,12 @@ interface EnginePort {
 
     fun setThrottled(tab: Long, throttled: Boolean)
 
+    /**
+     * Page zoom of every view, now and for views created later (1.0 is 100%). Pages lay out
+     * again at the new size; a view keeps its zoom across navigations.
+     */
+    fun setPageZoom(zoom: Float)
+
     /** Writes cookies and other profile state now, so logins survive a killed process. */
     fun persistProfile()
 

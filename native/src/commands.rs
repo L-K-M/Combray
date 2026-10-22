@@ -111,6 +111,10 @@ pub enum Command {
         tab: i64,
         throttling: Throttling,
     },
+    /// Page zoom of every view, now and for views created later (1.0 is 100%).
+    SetPageZoom {
+        zoom: f32,
+    },
     Touch {
         phase: TouchPhase,
         pointer: i32,

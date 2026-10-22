@@ -61,6 +61,8 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun setThrottled(tab: Long, throttled: Boolean) = NativeEngine.setThrottled(tab, throttled)
 
+    override fun setPageZoom(zoom: Float) = NativeEngine.setPageZoom(zoom)
+
     override fun respondToControl(control: Long, response: ControlResponse) =
         NativeEngine.respondToControl(control, response.toJson())
 

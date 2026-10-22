@@ -49,6 +49,7 @@ use crate::events::{
     Attribution, CaptureReport, CaptureStatus, EngineEvent, HistoryChange, LoadPhase, ViewKey,
 };
 use crate::native_window::NativeWindow;
+use crate::page_zoom;
 use crate::panic_policy;
 
 /// Receives engine events on the engine thread.
@@ -281,6 +282,8 @@ struct Engine {
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// Page zoom of every view (`SetPageZoom`); kept here so views created later start at it.
+    page_zoom: f32,
 }
 
 impl Engine {
@@ -305,6 +308,7 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            page_zoom: page_zoom::DEFAULT_ZOOM,
         }
     }
 
@@ -385,6 +389,7 @@ impl Engine {
                         .set_throttled(throttling == Throttling::Throttled);
                 }
             },
+            Command::SetPageZoom { zoom } => self.set_page_zoom(zoom),
             Command::Touch {
                 phase,
                 pointer,
@@ -619,9 +624,12 @@ impl Engine {
         });
     }
 
-    /// Registers a new view, hidden until selected so two shown views never overlap.
+    /// Registers a new view, hidden until selected so two shown views never overlap, at the
+    /// page zoom every view uses. Servo builds a view at 100%, so its first document may lay out
+    /// once more when the zoom arrives (as a resize).
     fn insert_tab(&mut self, view: ViewKey, webview: WebView) -> String {
         webview.hide();
+        webview.set_page_zoom(self.page_zoom);
         let webview_id = format!("{:?}", webview.id());
         self.tabs.insert(
             view.tab,
@@ -678,6 +686,21 @@ impl Engine {
         }
         self.active = None;
         self.release_leave_page_questions_off_screen();
+        self.needs_paint = true;
+    }
+
+    /// Applies `requested` to every view and keeps it for views created later. Servo lays each
+    /// page out again and keeps a view's zoom across its navigations.
+    fn set_page_zoom(&mut self, requested: f32) {
+        let Some(zoom) = page_zoom::accepted(requested) else {
+            self.error(format!("page zoom {requested} is not a zoom factor"));
+            return;
+        };
+        self.page_zoom = zoom;
+        for tab in self.tabs.values() {
+            tab.webview.set_page_zoom(zoom);
+        }
+        // The shown page lays out again; paint it, as the other visual changes here do.
         self.needs_paint = true;
     }
 
