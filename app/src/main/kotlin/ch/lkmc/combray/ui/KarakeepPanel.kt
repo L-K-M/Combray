@@ -61,7 +61,9 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    // Key on query and the service identity/fingerprint, not the mutable entity instance
+    // (whose updatedAt changes on every configuration or outbox event and would reset pagination).
+    LaunchedEffect(query, service?.baseUrl, service?.fingerprint) {
         val mine = ++generation
         ui = BookmarksUi.Idle
         bookmarks = emptyList()
