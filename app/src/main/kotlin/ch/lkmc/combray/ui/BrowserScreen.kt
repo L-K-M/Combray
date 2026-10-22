@@ -260,7 +260,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onForward = { dismiss(); browser.goForward() },
             onReload = { dismiss(); browser.reload() },
             onNewTab = editNewTab,
-            onPageInfo = { sheet = Sheet.PAGE_INFO },
+            onPageInfo = { if (tab?.url != null) sheet = Sheet.PAGE_INFO },
             onSettings = { sheet = Sheet.SETTINGS },
             captureEnabled = histerService?.captureEnabled,
             onPauseCapture = {
@@ -283,11 +283,13 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         )
         Sheet.PAGE_INFO -> {
             val infoUrl = tab?.url
+            // Close only when there is nothing to show. Keying the effect on the URL cancels a
+            // pending dismissal if a page appears before the effect body runs.
+            LaunchedEffect(infoUrl) {
+                if (infoUrl == null) dismiss()
+            }
             if (infoUrl != null) {
                 PageInfoDialog(url = infoUrl, onDismiss = dismiss)
-            } else {
-                // No URL to show: close the sheet after composition (not during it).
-                LaunchedEffect(Unit) { dismiss() }
             }
         }
     }
