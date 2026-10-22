@@ -110,6 +110,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
 
     // Device checks against the real engine (scripts/check-app.sh).
     androidTestImplementation(platform(libs.androidx.compose.bom))

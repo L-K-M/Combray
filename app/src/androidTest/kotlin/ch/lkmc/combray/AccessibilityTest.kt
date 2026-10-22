@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.contentDescription
@@ -20,6 +21,8 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -34,6 +37,9 @@ import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
 import kotlinx.coroutines.MainScope
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
@@ -57,7 +63,7 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnAPageIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(PAGE, openTabs = 3, SaveStatus.Pending, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            BottomBar(PAGE, openTabs = 3, SaveStatus.Pending, {}, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()
@@ -68,9 +74,56 @@ class AccessibilityTest {
     }
 
     @Test
+    fun addressCopyIsAnAccessibleLongClick() {
+        show(DEFAULT_FONT) {
+            BottomBar(PAGE, openTabs = 1, SaveStatus.Unsaved, {}, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+        }
+
+        val node = compose.onNodeWithContentDescription("example.org", substring = true).fetchSemanticsNode()
+        val action = node.config.getOrNull(SemanticsActions.OnLongClick)
+        assertNotNull("the address chip must expose a long-click copy action", action)
+        assertEquals("Copy address", action!!.label)
+    }
+
+    @Test
+    fun copyingTheAddressDoesNotOpenTheEditor() {
+        var copies = 0
+        var edits = 0
+        show(DEFAULT_FONT) {
+            BottomBar(PAGE, openTabs = 1, SaveStatus.Unsaved, {}, { edits++ }, {}, {}, {}, {}, { copies++ }, Modifier.width(NARROW_WIDTH))
+        }
+
+        // The exposed semantics action: this is not proof of the physical gesture or clipboard.
+        compose.onNodeWithContentDescription("example.org", substring = true)
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        assertEquals(1, copies)
+        assertEquals(0, edits)
+
+        compose.onNodeWithContentDescription("example.org", substring = true).performClick()
+        assertEquals(1, edits)
+        assertEquals(1, copies)
+    }
+
+    @Test
+    fun aNewTabHasNoAddressCopyAction() {
+        var copies = 0
+        var edits = 0
+        show(DEFAULT_FONT) {
+            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, { edits++ }, {}, {}, {}, {}, { copies++ }, Modifier.width(NARROW_WIDTH))
+        }
+
+        val node = compose.onNodeWithContentDescription("Edit address", substring = true).fetchSemanticsNode()
+        assertNull(node.config.getOrNull(SemanticsActions.OnLongClick))
+
+        compose.onNodeWithContentDescription("Edit address", substring = true).performClick()
+        assertEquals(1, edits)
+        assertEquals(0, copies)
+    }
+
+    @Test
     fun theBottomBarOnANewTabIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()
