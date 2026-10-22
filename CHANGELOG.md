@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Long-press Recent to switch to the tab you used before this one, and
+  swipe sideways along the bottom bar to step through your open tabs in
+  Recent's order. Repeated swipes keep going back; after a pause they
+  start from the tab you are on.
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
   editor and a blank tab offers no copy action. Copied addresses are marked
