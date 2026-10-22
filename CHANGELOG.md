@@ -258,8 +258,9 @@ All notable changes to this project are documented here. The format follows
   Each patch is now checked to have landed.
 - Settings' "Capture is paused" notice for the 20 MB budget cleared only
   when another page was captured. It now follows the queue: it shows
-  while the waiting text leaves no room for a full-size capture, and
-  clears once sent, expired or discarded captures make room.
+  while the waiting text leaves no room for a full-size capture, or for
+  the largest one refused so far, and clears once sent, expired or
+  discarded captures make room.
 - Abandoned Hister captures expire after seven days, including when a
   running queue crosses the age limit. Expiry clears page bodies and
   rejects late results without invalidating a live request's lease.
@@ -297,8 +298,9 @@ All notable changes to this project are documented here. The format follows
   finish list membership, or stop with a visible failure.
 - A `data:` page could make the address chip, Recent and its dialog titles
   name another site by putting `://` and that site's name in its own
-  address. Pages without a host now show only their scheme ("data:",
-  "about:blank", "file:"), and their dialogs say "This page says".
+  address. Pages without a host now show a fixed label chosen by their
+  scheme alone ("data:", "file:", "about:blank"), never text from their
+  address, and their dialogs say "This page says".
 - A typed home-server address opens over plain HTTP when that is likely:
   `192.168.1.10`, `10.0.0.2:8080`, `localhost` and other private or
   loopback addresses now go to `http://`, with HTTPS one tap away. Names

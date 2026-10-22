@@ -69,7 +69,7 @@ Plain Gradle still builds without `build-native.sh` (CI does this); that APK con
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
 ```
 
-CI runs these, then fails when the build changed or added a file in `core/schemas`: an entity changed without its exported schema being committed. `MigrationTest` holds the identity hash of every committed schema version, so a committed change to an existing version fails as well; a new version adds its hash there.
+CI runs these, then fails when the build changed or added a file in `core/schemas`: an entity changed without its exported schema being committed. `MigrationTest` holds the identity hash of every committed schema version, so a committed change to an existing version fails as well; add each new version's hash there by hand.
 
 Build-script regression checks need Python 3.10+ and no SDK:
 

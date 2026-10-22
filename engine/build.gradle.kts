@@ -31,3 +31,8 @@ dependencies {
 
     testImplementation(libs.junit4)
 }
+
+tasks.withType<Test>().configureEach {
+    // EngineKeysTest reads servo_key's key codes from the Rust source it mirrors.
+    inputs.file(rootProject.file("native/src/engine.rs")).withPathSensitivity(PathSensitivity.RELATIVE)
+}

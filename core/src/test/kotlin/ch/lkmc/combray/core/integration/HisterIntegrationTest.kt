@@ -25,6 +25,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -257,7 +258,7 @@ class HisterIntegrationTest {
         enable()
         capture("https://a.example/", "old text")
         runBlocking { hister.setCaptureEnabled(false) }
-        now += 8L * 24 * 60 * 60 * 1000
+        now += 8 * DAY_MS
         drain()
         assertEquals(JobState.EXPIRED, jobs().single().state)
         enable()
@@ -336,13 +337,32 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun theBudgetWarningShowsWhileALargerThanEstimatedCaptureIsRefused() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        repeat(78) { capture("https://a.example/$it", "$text$it") }
+        // Leave room for the estimated largest payload, but less than this page needs: quotes
+        // in a JSON document's text are escaped, so its payload outgrows the 256 KiB text cap.
+        val fillerUrl = "https://a.example/filler"
+        val framing = Json.encodeToString(CapturePayload.serializer(), CapturePayload(fillerUrl, "Title", "")).length
+        val room = HisterIntegration.MAX_QUEUED_CAPTURE_BYTES - runBlocking { database.integrations().queuedCaptureBytes() }
+        capture(fillerUrl, "y".repeat((room - 310_000 - framing).toInt()))
+        assertFalse(runBlocking { hister.captureBudgetReached.first() })
+        val data = "\"name\": \"value\", ".repeat(256 * 1024 / 17 + 1).take(256 * 1024)
+        capture("https://a.example/data.json", data)
+
+        assertTrue(jobs().none { it.payload.contains("data.json") })
+        assertTrue(runBlocking { hister.captureBudgetReached.first() })
+    }
+
+    @Test
     fun theBudgetWarningClearsWhenTheQueueDrainsWithoutNewCaptures() {
         enable()
         val text = "x".repeat(256 * 1024)
         repeat(90) { capture("https://a.example/$it", "$text$it") }
         assertTrue(runBlocking { hister.captureBudgetReached.first() })
         // The queue drains by expiring: no new capture arrives to clear the flag.
-        now += 8L * 24 * 60 * 60 * 1000
+        now += 8 * DAY_MS
         drain()
         assertFalse(runBlocking { hister.captureBudgetReached.first() })
     }

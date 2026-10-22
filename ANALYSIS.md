@@ -369,9 +369,9 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     time. Forward the flag and let the app suppress programmatic keyboards.
     Open #90 (wave 3) forwards the flag, so the keyboard opens only after user
     activation, and keeps one field per tab; its SHOW_REFUSED path covers the
-    app-side half that closed #85 proposed. Its reopen-after-Back device check
-    failed and must be re-run. Until it lands, `ime_owner` is a single slot
-    shared across views (performance item 4).
+    app-side half proposed by #85, now closed. Its reopen-after-Back device
+    check failed and must be re-run. Until it lands, `ime_owner` is a single
+    slot shared across views (performance item 4).
 24. **Settings queue rows decode whole payloads during composition.**
     `Integrations.jobUrl` (`Integrations.kt:135-138`) JSON-decodes the full
     capture payload (up to 256 KiB of page text) to read one URL, and

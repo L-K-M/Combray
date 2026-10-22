@@ -146,6 +146,15 @@ class ReaderTest {
 
         article(1, 10, capture, ARTICLE)
         assertTrue(state().reader is ReaderState.Unavailable)
+
+        // The replacement renderer (view 2) commits the page again; reader view reads that document.
+        commit(2, 11, URL)
+        browser.openReader(); idle()
+        val (document, fresh) = engine.articleCaptures.last()
+        assertEquals(2, engine.articleCaptures.size)
+        assertEquals(11L, document)
+        article(2, 11, fresh, ARTICLE)
+        assertTrue(state().reader is ReaderState.Ready)
     }
 
     @Test
