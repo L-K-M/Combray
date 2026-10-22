@@ -27,6 +27,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Logical-state invariants (docs/IMPLEMENTATION_PLAN.md section 4) against a fake engine. */
 @RunWith(RobolectricTestRunner::class)
@@ -79,6 +80,35 @@ class BrowserCoordinatorTest {
     private fun title(native: Long, document: Long, title: String, attribution: Attribution = Attribution.CURRENT) {
         engine.emit(EngineEvent.TitleChanged(engine.view(native), document, title, attribution))
         idle()
+    }
+
+    /**
+     * Heartbeats and echoes skip publish()'s Room reads on the serialized queue; an event that
+     * can move published state still publishes. Counted as SELECTs, so the gate is pinned by
+     * what it saves, not by a copy of its list.
+     */
+    @Test
+    fun heartbeatsAndEchoesSkipThePublishReads() {
+        val reads = AtomicInteger()
+        database.close()
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ -> if (sql.trimStart().startsWith("SELECT", ignoreCase = true)) reads.incrementAndGet() }, Runnable::run)
+            .build()
+        browser = newCoordinator()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        reads.set(0)
+
+        engine.emit(EngineEvent.Painted(engine.view(1), frames = 3))
+        engine.emit(EngineEvent.TabSelected(engine.view(1)))
+        engine.emit(EngineEvent.SurfaceUnbound)
+        idle()
+        assertEquals(0, reads.get())
+
+        engine.emit(EngineEvent.ImeHidden(engine.view(1)))
+        idle()
+        assertTrue(reads.get() > 0)
     }
 
     @Test

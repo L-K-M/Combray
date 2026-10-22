@@ -388,13 +388,28 @@ class BrowserCoordinator(
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
             is EngineEvent.EngineError -> onEngineError(event)
-            else -> Unit
+            // Heartbeats, echoes, navigation confirmations and diagnostics cannot change what
+            // publish() reads, so they skip its three Room reads on this serialized queue
+            // (Painted alone arrives once per second per painting tab, and user commands wait
+            // behind those reads). TabSelected only echoes a selection the coordinator made:
+            // the engine emits it solely from its SelectTab command handler (engine.rs).
+            // Every kind is listed, so a new EngineEvent does not compile until it is handled
+            // above or placed here. Placing one here means its handling must never touch the
+            // tab projection, reader state, live views or any table publish() reads.
+            is EngineEvent.Painted,
+            is EngineEvent.TabSelected,
+            is EngineEvent.SurfaceBound,
+            is EngineEvent.SurfaceUnbound,
+            is EngineEvent.NavigationRequested,
+            is EngineEvent.PageNavigationRequested,
+            is EngineEvent.EvaluationResult,
+            is EngineEvent.LateCaptureResult,
+            is EngineEvent.ProfilePersisted,
+            is EngineEvent.ShutdownComplete,
+            is EngineEvent.Other,
+            -> return@submit
         }
-        // Paint heartbeats, surface echoes, navigation confirmations and diagnostics cannot
-        // change what publish() reads; publishing anyway would run three Room reads on the
-        // serialized queue for nothing (Painted alone arrives once per second per tab, and
-        // user commands wait behind those reads).
-        if (changesPublishedState(event)) publish()
+        publish()
     }
 
     private fun onControlShown(view: LiveView, event: EngineEvent.ControlShown) {
@@ -952,47 +967,4 @@ enum class UnusedTabs { KEEP, CLOSE }
 /** Proposed default: closed history kept seven days after its last interaction. */
 data class Retention(val closedHistoryDays: Int = 7) {
     val closedHistoryMillis get() = closedHistoryDays * 24L * 60 * 60 * 1000
-}
-
-/**
- * Whether an engine event can change what [BrowserCoordinator]'s publish step reads. The
- * engine's heartbeat (Painted), surface echoes, navigation confirmations and diagnostics
- * cannot, so handling them skips the three Room reads publish would otherwise run on the
- * serialized command queue.
- *
- * The `when` is exhaustive on purpose: a new [EngineEvent] kind does not compile until
- * someone classifies it here. Contract for the `false` side: the event's branch in
- * [BrowserCoordinator.onEngineEvent] must not mutate anything publish reads — the tab
- * projection, reader state, live views or any table publish queries — and no code may rely
- * on the heartbeat's former implicit ~1 Hz republish: work that changes published inputs
- * off this queue must publish itself.
- */
-internal fun changesPublishedState(event: EngineEvent): Boolean = when (event) {
-    is EngineEvent.Painted,
-    is EngineEvent.SurfaceBound,
-    is EngineEvent.SurfaceUnbound,
-    is EngineEvent.TabSelected,
-    is EngineEvent.NavigationRequested,
-    is EngineEvent.PageNavigationRequested,
-    is EngineEvent.LateCaptureResult,
-    is EngineEvent.EvaluationResult,
-    is EngineEvent.ShutdownComplete,
-    is EngineEvent.ProfilePersisted,
-    is EngineEvent.Other,
-    -> false
-    is EngineEvent.EngineReady,
-    is EngineEvent.TabCreated,
-    is EngineEvent.TabClosed,
-    is EngineEvent.TabOpened,
-    is EngineEvent.HistoryChanged,
-    is EngineEvent.LoadStatus,
-    is EngineEvent.CaptureResult,
-    is EngineEvent.TitleChanged,
-    is EngineEvent.ImeShown,
-    is EngineEvent.ImeHidden,
-    is EngineEvent.Crashed,
-    is EngineEvent.ControlShown,
-    is EngineEvent.ControlHidden,
-    is EngineEvent.EngineError,
-    -> true
 }
