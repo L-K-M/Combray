@@ -8,6 +8,8 @@
 //!
 //! These parts are pure, so their tests run on any host.
 
+use std::collections::HashSet;
+
 /// Servo's tap/pan threshold (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`): a
 /// finger that moves further than this on either axis pans, and Servo sends no click.
 const TAP_SLOP_DP: f32 = 10.0;
@@ -24,6 +26,8 @@ struct Press {
 pub struct TapTracker {
     /// Device pixels per axis.
     slop: f32,
+    /// The fingers on the surface. A gesture that had more than one is no tap until all lift.
+    fingers: HashSet<i32>,
     press: Option<Press>,
 }
 
@@ -32,16 +36,17 @@ impl TapTracker {
     pub fn new(density: f32) -> Self {
         Self {
             slop: TAP_SLOP_DP * density,
+            fingers: HashSet::new(),
             press: None,
         }
     }
 
     pub fn down(&mut self, pointer: i32, x: f32, y: f32) {
-        // A second finger while the first is down makes the gesture multi-touch.
-        self.press = match self.press {
-            None => Some(Press { pointer, x, y }),
-            Some(_) => None,
-        };
+        // Only a gesture's first finger can tap. Any other makes the gesture multi-touch for
+        // good: a finger put down after the second one lifted must not start a press again.
+        let first = self.fingers.is_empty();
+        self.fingers.insert(pointer);
+        self.press = first.then_some(Press { pointer, x, y });
     }
 
     pub fn moved(&mut self, pointer: i32, x: f32, y: f32) {
@@ -55,6 +60,7 @@ impl TapTracker {
 
     /// The point of the tap this lift completes, if it completes one.
     pub fn up(&mut self, pointer: i32, x: f32, y: f32) -> Option<(f32, f32)> {
+        self.fingers.remove(&pointer);
         let press = self.press.take()?;
         if press.pointer != pointer || self.beyond_slop(press, x, y) {
             return None;
@@ -62,7 +68,9 @@ impl TapTracker {
         Some((x, y))
     }
 
+    /// Android sends no lifts after a cancel: the gesture ends for every finger.
     pub fn cancel(&mut self) {
+        self.fingers.clear();
         self.press = None;
     }
 
@@ -126,6 +134,42 @@ mod tests {
         assert_eq!(taps.up(0, 100.0, 200.0), None);
 
         // The next gesture starts fresh.
+        taps.down(0, 100.0, 200.0);
+        assert_eq!(taps.up(0, 100.0, 200.0), Some((100.0, 200.0)));
+    }
+
+    #[test]
+    fn a_third_finger_does_not_make_a_pinch_a_tap() {
+        let mut taps = TapTracker::new(DENSITY);
+        taps.down(0, 100.0, 200.0);
+        taps.down(1, 300.0, 400.0);
+        taps.down(2, 500.0, 600.0);
+        assert_eq!(taps.up(2, 500.0, 600.0), None);
+    }
+
+    #[test]
+    fn a_second_finger_put_down_again_is_no_tap() {
+        let mut taps = TapTracker::new(DENSITY);
+        taps.down(0, 100.0, 200.0);
+        taps.down(1, 300.0, 400.0);
+        assert_eq!(taps.up(1, 300.0, 400.0), None);
+        taps.down(1, 300.0, 400.0);
+        assert_eq!(taps.up(1, 300.0, 400.0), None);
+        assert_eq!(taps.up(0, 100.0, 200.0), None);
+
+        // With every finger up, a plain tap is a tap again.
+        taps.down(0, 100.0, 200.0);
+        assert_eq!(taps.up(0, 100.0, 200.0), Some((100.0, 200.0)));
+    }
+
+    #[test]
+    fn a_cancel_ends_the_gesture_for_every_finger() {
+        let mut taps = TapTracker::new(DENSITY);
+        taps.down(0, 100.0, 200.0);
+        taps.down(1, 300.0, 400.0);
+        taps.cancel();
+
+        // Android sends no lifts after a cancel; the next press starts a new gesture.
         taps.down(0, 100.0, 200.0);
         assert_eq!(taps.up(0, 100.0, 200.0), Some((100.0, 200.0)));
     }

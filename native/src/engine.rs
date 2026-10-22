@@ -805,6 +805,24 @@ impl Engine {
     // --- Input (always to the active view) ---------------------------------------------------
 
     fn touch(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) {
+        // Every touch counts for the gesture, with or without a page shown: a lift the tracker
+        // missed would leave its finger down, and no later touch would be a tap.
+        let tap = match phase {
+            TouchPhase::Down => {
+                self.taps.down(pointer, x, y);
+                None
+            },
+            TouchPhase::Move => {
+                self.taps.moved(pointer, x, y);
+                None
+            },
+            TouchPhase::Up => self.taps.up(pointer, x, y),
+            TouchPhase::Cancel => {
+                self.taps.cancel();
+                None
+            },
+        };
+
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -821,21 +839,6 @@ impl Engine {
             TouchPointerType::Touch,
         )));
 
-        let tap = match phase {
-            TouchPhase::Down => {
-                self.taps.down(pointer, x, y);
-                None
-            },
-            TouchPhase::Move => {
-                self.taps.moved(pointer, x, y);
-                None
-            },
-            TouchPhase::Up => self.taps.up(pointer, x, y),
-            TouchPhase::Cancel => {
-                self.taps.cancel();
-                None
-            },
-        };
         if let Some((x, y)) = tap {
             self.check_tap_on_field(x, y);
         }

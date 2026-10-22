@@ -77,6 +77,12 @@ class KeyboardTest {
 
         tapField()
         awaitKeyboard(visible = true)
+        awaitTitle(FOCUSED_TITLE)
+
+        // The reopened keyboard is the field's too: closing it again reaches the page.
+        shell("input keyevent KEYCODE_BACK")
+        awaitKeyboard(visible = false)
+        awaitTitle(BLURRED_TITLE)
     }
 
     @Test
