@@ -431,6 +431,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Forget and exclusion cancel queued and in-flight captures | Passed in unit tests | `HisterIntegrationTest` |
 | Server switch cancels unsent captures; credentials bound to their server | Passed in unit tests | `HisterIntegrationTest`, `IntegrationsTest` |
 | Newer content supersedes unsent older content per document key | Passed in unit tests | `IntegrationsTest` |
+| Captured-body expiry after worker death and during a long drain | Passed in Room/fake-Hister tests (21 October 2026): abandoned claims and bodies crossing seven days expire before dispatch; live leases and fenced completion stay intact | `HisterIntegrationTest` |
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
 | Test against a deployed Hister; cleanup of the test document | **Not run** | — |
 

@@ -124,6 +124,8 @@ class Outbox(
     /** Claims the next due job under a lease of [leaseMs], or returns null. */
     suspend fun claim(owner: String, leaseMs: Long): Claim? = database.withTransaction {
         val now = clock.now()
+        // Earlier requests in this drain may have taken another body past its deadline.
+        expireCaptures(now)
         val due = dao.nextDue(now) ?: return@withTransaction null
         if (due.state == JobState.RUNNING) {
             // The previous claimant's request may still have reached the server: ambiguous.
@@ -243,9 +245,13 @@ class Outbox(
     /** Unsent captures expire after a week; finished rows are kept a week for status, then removed. */
     suspend fun prune() {
         val now = clock.now()
+        expireCaptures(now)
+        dao.deleteFinishedBefore(now - FINISHED_RETENTION_MS)
+    }
+
+    private suspend fun expireCaptures(now: Long) {
         dao.expireCapturesBefore(now - CAPTURE_MAX_AGE_MS, now)
         dao.dropFinishedCapturePayloads()
-        dao.deleteFinishedBefore(now - FINISHED_RETENTION_MS)
     }
 
     /**
