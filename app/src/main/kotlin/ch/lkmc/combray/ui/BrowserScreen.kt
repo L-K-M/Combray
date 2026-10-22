@@ -135,7 +135,11 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
 
     // Back: close the open sheet or reader view first, then go back in the page, then leave
     // the app. A tab another app opened closes on the way out: its page stays in history only.
-    BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
+    // It also drops a page-info dialog's captured address, like its own close button does.
+    BackHandler(enabled = sheet != Sheet.NONE) {
+        pageInfoUrl = null
+        sheet = Sheet.NONE
+    }
 
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack == true) { browser.goBack() }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
