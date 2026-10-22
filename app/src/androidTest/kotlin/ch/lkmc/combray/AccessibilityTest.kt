@@ -29,10 +29,12 @@ import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
+import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
+import ch.lkmc.combray.ui.ScrollEdgeButton
 import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertThrows
 import org.junit.Rule
@@ -86,6 +88,19 @@ class AccessibilityTest {
 
         assertTargetsAreAccessible()
         compose.onNodeWithText("Settings").assertIsDisplayed()
+    }
+
+    @Test
+    fun scrollButtonsHaveLabeledUncrowdedTouchTargets() {
+        show(LARGE_FONT) {
+            Column {
+                ScrollEdgeButton(ScrollEdge.TOP, {})
+                ScrollEdgeButton(ScrollEdge.BOTTOM, {})
+            }
+        }
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Scroll to top").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Scroll to bottom").assertIsDisplayed()
     }
 
     @Test

@@ -145,6 +145,8 @@ if [ "$#" -gt 1 ]; then
     for class in "${@:2}"; do run "${class##*.}" -e class "$class"; done
 else
     run browsing -e class ch.lkmc.combray.BrowsingTest
+    run scrolling -e class ch.lkmc.combray.ScrollTest
+    run reader-scrolling -e class ch.lkmc.combray.ReaderScrollTest
     run saves -e class ch.lkmc.combray.SaveTest
     run page-controls -e class ch.lkmc.combray.PageControlsTest
     run about -e class ch.lkmc.combray.AboutTest

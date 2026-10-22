@@ -198,6 +198,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/article.html":
             # Reader view keeps the article and drops the navigation, aside and footer around it.
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
+        if path == "/scroll.html":
+            # Distinct endpoints and a live title prove root-page jumps, not just button state.
+            return self.send(200, page("SCROLL-TOP",
+                "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
+                "<section style='height:500vh;background:#8a5a2b'>MIDDLE</section>"
+                "<section style='height:100vh;background:#3b4f8a'>BOTTOM</section>",
+                "<style>html,body{margin:0;scroll-behavior:smooth}</style>"
+                "<script>addEventListener('scroll',()=>{const s=document.scrollingElement;"
+                "document.title=s.scrollTop<=1?'SCROLL-TOP':"
+                "s.scrollTop+innerHeight>=s.scrollHeight-1?'SCROLL-BOTTOM':'SCROLL-MIDDLE'});</script>"))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
         if path == "/empty.html":

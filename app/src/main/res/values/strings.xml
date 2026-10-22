@@ -6,6 +6,8 @@
     <string name="action_back">Back</string>
     <string name="action_forward">Forward</string>
     <string name="action_reload">Reload</string>
+    <string name="action_scroll_top">Scroll to top</string>
+    <string name="action_scroll_bottom">Scroll to bottom</string>
     <string name="action_new_tab">New tab</string>
     <string name="action_share">Share</string>
     <string name="action_page_info">Page info</string>

@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A bottom-left button jumps to the top when scrolling up or the bottom
+  when scrolling down, on pages and in reader view.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

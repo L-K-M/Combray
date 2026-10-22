@@ -36,8 +36,8 @@ use url::Url;
 
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
-    CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
-    TouchPhase,
+    CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, ScrollEdge,
+    Throttling, TouchPhase,
 };
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
 use crate::delegate::{DelegateEvent, DelegateQueue, TabDelegate};
@@ -347,6 +347,11 @@ impl Engine {
                     tab.webview.reload();
                 }
             },
+            Command::ScrollToEdge {
+                view,
+                document,
+                edge,
+            } => self.scroll_to_edge(view, document, edge),
             Command::SetThrottling { tab, throttling } => {
                 if let Some(tab) = self.tab(tab) {
                     tab.webview
@@ -404,6 +409,28 @@ impl Engine {
         self.active
             .and_then(|tab| self.tabs.get(&tab))
             .map(|tab| &tab.webview)
+    }
+
+    fn scroll_to_edge(&self, view: ViewKey, document_id: u64, edge: ScrollEdge) {
+        if self.active != Some(view.tab) {
+            return;
+        }
+        let Some(tab) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
+            return;
+        };
+        let Some(&document) = tab.documents.get(&document_id) else {
+            return;
+        };
+        if tab.current_document != Some(document) {
+            return;
+        }
+        // Servo checks again at execution: a queued tap cannot jump the next document.
+        tab.webview
+            .evaluate_javascript_in_document(document, edge.script(), |result| {
+                if result.is_err() {
+                    warn!("scroll-to-edge failed");
+                }
+            });
     }
 
     // --- Surface lifecycle -------------------------------------------------------------------

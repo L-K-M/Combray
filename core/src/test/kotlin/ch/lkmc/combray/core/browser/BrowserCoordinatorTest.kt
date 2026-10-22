@@ -10,6 +10,7 @@ import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,6 +92,65 @@ class BrowserCoordinatorTest {
         ready()
         assertEquals(listOf(1L to "https://a.test/"), engine.created)
         assertEquals(1L, engine.selected.last())
+    }
+
+    @Test
+    fun edgeJumpsKeepTheirOriginalDocumentAndView() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertNull(state().activeTab!!.page)
+        commit(1, 10, "https://a.test/")
+        val page = state().activeTab!!.page!!
+        browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        browser.scrollToEdge(page, ScrollEdge.TOP)
+        idle()
+        assertEquals(listOf(page to ScrollEdge.BOTTOM, page to ScrollEdge.TOP), engine.scrolled)
+
+        // Same address, different document: a button from before the reload is stale.
+        commit(1, 11, "https://a.test/")
+        browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        val replacement = state().activeTab!!.page!!
+        browser.scrollToEdge(replacement.copy(view = replacement.view.copy(generation = -1)), ScrollEdge.BOTTOM)
+        idle()
+        assertEquals(2, engine.scrolled.size)
+    }
+
+    @Test
+    fun edgeJumpsCannotReachHiddenClosedOrCrashedPages() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val firstTab = state().activeTab!!.id
+        val first = state().activeTab!!.page!!
+        browser.openUrl("https://a.test/", Placement.NEW_TAB)
+        idle()
+        commit(2, 20, "https://a.test/")
+        val secondTab = state().activeTab!!.id
+        val second = state().activeTab!!.page!!
+        browser.scrollToEdge(first, ScrollEdge.BOTTOM)
+        browser.closeTab(firstTab)
+        browser.scrollToEdge(first, ScrollEdge.TOP)
+        engine.emit(EngineEvent.Crashed(engine.view(2), "fixture"))
+        browser.scrollToEdge(second, ScrollEdge.BOTTOM)
+        idle()
+        assertTrue(engine.scrolled.isEmpty())
+        assertEquals(secondTab, state().activeTab!!.id)
+        assertNull(state().activeTab!!.page)
+    }
+
+    @Test
+    fun readerViewPreventsJumpsOfThePageUnderIt() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val page = state().activeTab!!.page!!
+        browser.openReader()
+        browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        idle()
+        assertTrue(engine.scrolled.isEmpty())
     }
 
     @Test

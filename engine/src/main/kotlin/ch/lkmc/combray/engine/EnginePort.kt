@@ -27,6 +27,9 @@ interface EnginePort {
 
     fun reload(tab: Long)
 
+    /** Scrolls the whole page, only while [page] remains selected and current. */
+    fun scrollToEdge(page: PageRef, edge: ScrollEdge)
+
     fun setThrottled(tab: Long, throttled: Boolean)
 
     /** Writes cookies and other profile state now, so logins survive a killed process. */

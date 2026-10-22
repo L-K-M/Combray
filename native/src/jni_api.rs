@@ -23,7 +23,7 @@ use log::{LevelFilter, error, info};
 use crate::capture::CaptureKind;
 use crate::commands::{
     ACK_TIMEOUT, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
-    Throttling, TouchPhase,
+    ScrollEdge, Throttling, TouchPhase,
 };
 use crate::engine::{self, EngineConfig, EventSink};
 use crate::events::EngineEvent;
@@ -322,6 +322,34 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_reload<'local>(
     tab: jlong,
 ) {
     send(Command::Reload { tab });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_scrollToEdge<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    document: jlong,
+    edge: jint,
+) {
+    // Codes shared with engine/PageScroll.kt.
+    const TOP: jint = 0;
+    const BOTTOM: jint = 1;
+    let edge = match edge {
+        TOP => ScrollEdge::Top,
+        BOTTOM => ScrollEdge::Bottom,
+        _ => return,
+    };
+    let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+    else {
+        return;
+    };
+    send(Command::ScrollToEdge {
+        view: crate::events::ViewKey { tab, generation },
+        document,
+        edge,
+    });
 }
 
 #[unsafe(no_mangle)]
