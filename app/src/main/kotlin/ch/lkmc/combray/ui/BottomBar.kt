@@ -6,6 +6,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,15 +40,18 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -58,9 +64,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.TabStep
 import ch.lkmc.combray.core.integration.SaveStatus
 
-/** Back, address, Save, Share, Recent and More: every routine action within thumb reach. */
+/**
+ * Back, address, Save, Share, Recent and More: every routine action within thumb reach. A
+ * sideways swipe along the bar steps through open tabs ([onSwipeTab]); the Recent sheet stays
+ * the visible way to switch, so nothing depends on the gesture.
+ */
 @Composable
 fun BottomBar(
     tab: ActiveTab?,
@@ -73,10 +84,31 @@ fun BottomBar(
     onSave: () -> Unit,
     onShare: () -> Unit,
     onRecent: () -> Unit,
+    /** Long-press shortcut: focus the tab used before the focused one. */
+    onRecentLongPress: () -> Unit,
     onMore: () -> Unit,
     onCopyAddress: () -> Unit,
+    onSwipeTab: (TabStep) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // A drag along the bar is a swipe once it covers TAB_SWIPE_DISTANCE; shorter drags and taps
+    // keep their meaning, and a drag that starts on a button cancels that button's click. A
+    // swipe from the screen edge never arrives: Android keeps it for its Back gesture.
+    val swipeDistance = with(LocalDensity.current) { TAB_SWIPE_DISTANCE.toPx() }
+    var dragged by remember { mutableFloatStateOf(0f) }
+    val swipe = Modifier.draggable(
+        orientation = Orientation.Horizontal,
+        state = rememberDraggableState { delta -> dragged += delta },
+        onDragStarted = { dragged = 0f },
+        onDragStopped = {
+            // Physical directions, like going back and forward: right is the older tab.
+            when {
+                dragged >= swipeDistance -> onSwipeTab(TabStep.OLDER)
+                dragged <= -swipeDistance -> onSwipeTab(TabStep.NEWER)
+            }
+            dragged = 0f
+        },
+    )
     // The bar's color runs under the navigation bar and, in landscape, a cutout; only its
     // actions keep clear of them. A hairline along its top edge separates it from the page.
     // Explicit content colours: contentColorFor matches by value, and a role sharing a tier's
@@ -90,6 +122,7 @@ fun BottomBar(
             Row(
                 Modifier
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                    .then(swipe)
                     .fillMaxWidth()
                     .heightIn(min = 64.dp)
                     .padding(horizontal = 4.dp),
@@ -104,7 +137,23 @@ fun BottomBar(
                     Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
                 }
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
-                IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
+                val switchPrevious = stringResource(R.string.recent_switch_previous)
+                // Combined click/long-click: IconButton has no long-press overload. Same 48dp
+                // target, role and ripple; the long-press is a shortcut beside the Recent sheet's rows.
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .combinedClickable(
+                            interactionSource = null,
+                            indication = ripple(bounded = false, radius = 20.dp),
+                            role = Role.Button,
+                            onLongClickLabel = switchPrevious,
+                            onClick = onRecent,
+                            onLongClick = onRecentLongPress,
+                        )
+                        .semantics { contentDescription = recentLabel },
+                ) {
                     // A count, not an alert: pine rather than Material's error red.
                     BadgedBox(
                         badge = {
@@ -238,6 +287,9 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
         }
     }
 }
+
+/** How far a drag along the bar must go to switch tabs: well past a tap's slop, short of the bar. */
+private val TAB_SWIPE_DISTANCE = 56.dp
 
 /** Beyond this many open tabs the badge shows a capped label instead of the count. */
 private const val BADGE_LIMIT = 99

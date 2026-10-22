@@ -308,8 +308,10 @@ class AccessibilityTest {
         onSave = {},
         onShare = {},
         onRecent = {},
+        onRecentLongPress = {},
         onMore = {},
         onCopyAddress = onCopyAddress,
+        onSwipeTab = {},
         modifier = Modifier.width(NARROW_WIDTH),
     )
 

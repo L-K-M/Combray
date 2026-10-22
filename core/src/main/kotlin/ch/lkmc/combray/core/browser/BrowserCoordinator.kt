@@ -97,6 +97,10 @@ class BrowserCoordinator(
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
+    /** The open tabs in Recent order when the current run of bar swipes began, and its last swipe. */
+    private var swipeRun: List<String> = emptyList()
+    private var swipeRunAt = Long.MIN_VALUE
+
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
 
@@ -287,6 +291,41 @@ class BrowserCoordinator(
     fun selectTab(tabId: String) = submit {
         val tab = dao.tab(tabId)?.takeIf { it.state == TabState.OPEN } ?: return@submit
         focus(tab)
+        reconcile()
+        publish()
+    }
+
+    /**
+     * Quick switch: focuses the open tab used most recently before the focused one (the
+     * runner-up by `lastFocusedAt`, which [activate] keeps just behind the focused tab).
+     */
+    fun focusPreviousTab() = submit {
+        val active = activeTab()
+        val previous = dao.openTabs().firstOrNull { it.id != active?.id } ?: return@submit
+        focus(previous)
+        reconcile()
+        publish()
+    }
+
+    /**
+     * A swipe along the bottom bar: focuses the [step] neighbour of the focused tab in Recent
+     * order. Focusing reorders Recent, so a run of swipes walks the order as the run found it:
+     * repeated swipes go further back instead of flipping between the two newest tabs. A pause
+     * of [SWIPE_RUN_MS] starts the next run from the order as it is then.
+     */
+    fun stepTab(step: TabStep) = submit {
+        val now = clock.now()
+        val open = dao.openTabs()
+        if (now - swipeRunAt > SWIPE_RUN_MS) swipeRun = open.map { it.id }
+        swipeRunAt = now
+        // Tabs closed during the run drop out; tabs opened during it wait for the next run.
+        val order = swipeRun.filter { id -> open.any { it.id == id } }
+        val index = order.indexOf(activeTab()?.id)
+        val target = when (step) {
+            TabStep.OLDER -> order.getOrNull(index + 1)
+            TabStep.NEWER -> if (index > 0) order[index - 1] else null
+        } ?: return@submit
+        focus(open.first { it.id == target })
         reconcile()
         publish()
     }
@@ -1102,6 +1141,9 @@ class BrowserCoordinator(
         const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val PROCESS_KEY_LENGTH = 8
+
+        /** How long a pause between bar swipes keeps them one run over the same order. */
+        const val SWIPE_RUN_MS = 3_000L
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */
         val SERVO_ERROR_TITLES = setOf("Error loading page", "Certificate error")
 

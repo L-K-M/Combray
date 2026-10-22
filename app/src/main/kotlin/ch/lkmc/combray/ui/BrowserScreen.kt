@@ -259,6 +259,8 @@ fun BrowserScreen(
                     tab?.let { page -> page.url?.let { url -> share(context, url, resources.getString(R.string.share_chooser), page.title.takeUnless { page.loadFailed }) } }
                 },
                 onRecent = { openRecent(RecentScope.OPEN) },
+                onRecentLongPress = { browser.focusPreviousTab() },
+                onSwipeTab = { step -> browser.stepTab(step) },
                 onMore = { sheet = Sheet.MORE },
                 onCopyAddress = {
                     // The rendered address as shown (a recovery URL before a commit), copied whole.

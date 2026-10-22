@@ -141,6 +141,9 @@ data class BrowserState(
  * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
  * must reach every retained visit, or a match older than the newest rows would be missed.
  */
+/** A step along the open tabs in Recent order, as a swipe along the bottom bar asks for one. */
+enum class TabStep { OLDER, NEWER }
+
 enum class HistoryDepth {
     NEWEST,
     ALL_RETAINED,

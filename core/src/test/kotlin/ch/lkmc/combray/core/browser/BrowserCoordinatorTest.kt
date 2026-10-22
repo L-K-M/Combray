@@ -181,6 +181,104 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aQuickSwitchFocusesTheTabUsedBeforeTheFocusedOneAndBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val tabB = state().activeTab!!.id
+
+        browser.focusPreviousTab(); idle()
+        val tabA = state().activeTab!!.id
+        assertNotEquals(tabB, tabA)
+        assertEquals(1L, engine.selected.last())
+
+        // Back on the older tab, the same shortcut returns to the one just left.
+        browser.focusPreviousTab(); idle()
+        assertEquals(tabB, state().activeTab?.id)
+        assertEquals(2L, engine.selected.last())
+    }
+
+    /** Opens a.test, b.test and c.test a second apart; c.test ends focused. Returns their tab ids. */
+    private fun openThreeTabs(): List<String> = listOf("a", "b", "c").mapIndexed { index, name ->
+        if (index > 0) now += 1_000
+        browser.openUrl("https://$name.test/", Placement.NEW_TAB); idle()
+        commit(index + 1L, (index + 1L) * 10, "https://$name.test/")
+        state().activeTab!!.id
+    }
+
+    @Test
+    fun aQuickSwitchFollowsFocusOrderNotCreationOrder() {
+        ready()
+        val (a, b, _) = openThreeTabs()
+        now += 1_000
+        browser.selectTab(b); idle()
+        now += 1_000
+        browser.selectTab(a); idle()
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(b, state().activeTab?.id)
+    }
+
+    @Test
+    fun aQuickSwitchWithOneTabIsANoOp() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        val only = state().activeTab!!.id
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(only, state().activeTab?.id)
+    }
+
+    @Test
+    fun aHiddenTabNavigatingDoesNotBecomeThePreviousTab() {
+        ready()
+        val (_, b, _) = openThreeTabs()
+        // a.test loads another page while hidden: that is not using it (#71).
+        now += 1_000
+        commit(1, 11, "https://a.test/next")
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(b, state().activeTab?.id)
+    }
+
+    @Test
+    fun aRunOfBarSwipesWalksBackThroughRecentOrder() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+
+        // Each swipe focuses a tab and so reorders Recent; the run keeps walking the old order.
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+        // Nothing older than the oldest tab.
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(b, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(c, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(c, state().activeTab?.id)
+    }
+
+    @Test
+    fun aPauseBetweenSwipesStartsFromTheNewOrder() {
+        ready()
+        val (_, b, c) = openThreeTabs()
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+
+        // After a pause b.test is the newest tab, so the next swipe goes back to c.test.
+        now += 4_000 // longer than a run's pause (SWIPE_RUN_MS)
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(c, state().activeTab?.id)
+    }
+
+    @Test
     fun closingTheActiveTabFocusesTheMostRecentlyUsedOneAndUndoReopensIt() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
