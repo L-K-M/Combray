@@ -92,6 +92,10 @@ All notable changes to this project are documented here. The format follows
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
+- Hister search no longer shows a "More results" button that does nothing
+  after the last page, or under "No results in Hister." While more results
+  load, the button waits under a progress bar; if they fail, the reason
+  shows above the results.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
