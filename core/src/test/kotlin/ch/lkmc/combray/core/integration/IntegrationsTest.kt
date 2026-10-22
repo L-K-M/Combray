@@ -208,6 +208,11 @@ class IntegrationsTest {
     }
 
     @Test
+    fun withoutKarakeepConfiguredSetupIsTheAnswerEvenForASensitiveAddress() {
+        assertEquals(SaveRequest.NotConfigured, save("https://kagi.com/search?q=x&token=secret"))
+    }
+
+    @Test
     fun aWorkerThatLostItsLeaseCannotFinishTheJob() {
         configure()
         val outbox = integrations.outbox

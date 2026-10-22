@@ -246,8 +246,11 @@ class Integrations(
     /** One tap on Save: durable before this returns, then sent in the background. */
     suspend fun save(url: String?, title: String?): SaveRequest {
         if (url == null || !HostNames.isWeb(url)) return SaveRequest.NotSaveable
-        if (SensitiveUrls.looksSensitive(url)) return SaveRequest.Sensitive
+        // The setup state first: without a service, nothing would be sent anyway, and
+        // "set Karakeep up" is the message that helps; the sensitive guard only
+        // matters when a request would otherwise be queued.
         val service = dao.service(ServiceKind.KARAKEEP) ?: return SaveRequest.NotConfigured
+        if (SensitiveUrls.looksSensitive(url)) return SaveRequest.Sensitive
         val payload = json.encodeToString(SavePayload.serializer(), SavePayload(url, title))
         val enqueued = outbox.enqueue(JobKind.KARAKEEP_SAVE, service, Binding.CURRENT, dedupeKey = url, payload = payload, supersede = false)
         kick()

@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Tapping Save with Karakeep not set up now says so even when the address
+  looks like it carries a login token, instead of claiming the address was
+  withheld for safety.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
