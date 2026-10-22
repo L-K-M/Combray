@@ -562,19 +562,24 @@ Consolidate the remaining work into ANALYSIS.md without deleting unresolved
 items merely because someone opened a PR. Keep completed work out of the
 future implementation queue only after it is actually present on main.
 
-## Implementation results (local, unpublished)
+## Implementation Results (22 October 2026 Snapshot)
 
-| Branch / tip | Status |
+Initial publication snapshot; these hashes are the tips at publication, not a
+promise they stay latest.
+
+| PR / branch | Status and frozen regression evidence |
 | --- | --- |
-| `fusion/encoded-credential-keys` / `6e57bd8` | Fusion 1 prepared; failing-first then green unit regressions. |
-| `fusion/startup-error-state` / `54d752f` | Fusion 3 prepared; 41 coordinator tests pass on the branch. |
-| `fusion/background-throttling` / `fbd3dfa` | Fusion 7 prepared; 43 coordinator tests pass on the branch. |
-| `fusion/copy-address` / `f908d84` | First part of Fusion 20 prepared; 3 new + 2 existing chrome tests pass on emulator. |
+| [#95](https://github.com/L-K-M/Combray/pull/95) `fusion/encoded-credential-keys` | Fusion 1; initial published tip `4032736` (original `6e57bd8`). Failing-first, then green percent-decode policy, Karakeep-save and Hister-capture regressions. |
+| `fusion/startup-error-state` / `54d752f` | Fusion 3; 41 coordinator tests passed on the original branch. Superseded: an equivalent fix is on main via #65 (commits `79c42b9`, `3a5f759`, `abdd972`); no duplicate PR opened. |
+| [#96](https://github.com/L-K-M/Combray/pull/96) `fusion/background-throttling` | Fusion 7; initial published tip `d22f1c3` (original `fbd3dfa`). 43 coordinator tests passed on the original branch; updated coordinator and app checks passed 22 October. |
+| [#97](https://github.com/L-K-M/Combray/pull/97) `fusion/copy-address` | First part of Fusion 20; initial published tip `3cd454f` (original `f908d84`). 3 new plus 2 existing emulator chrome tests passed historically; updated app/assembly checks green 22 October. |
 
-The unpublished combined Kotlin/lint/assemble gate passed offline. I have not pushed these branches, opened their PRs, or applied them to main.
-Publication and GitHub/GLM review remain pending network approval; remote PR
-status has not been queried. Findings describe the audited baseline, not a
-claim about the unqueried live remote.
+The 21 October pre-publication combined Kotlin/lint/assemble gate passed
+offline. Network approval arrived 22 October; the branches were merged with
+locally checked main `752d7da`, pushed, and opened as PRs #95/#96/#97, each
+green on the prescribed narrow offline checks; CI/review status is tracked on
+the PRs, no steady-state claim is made. Findings describe the audited `4105c28`
+baseline, not a re-audit of current main.
 Native engine, physical device, real gesture/clipboard, live services and
 battery/FPS remain unvalidated.
 

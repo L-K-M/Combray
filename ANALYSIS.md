@@ -3,13 +3,15 @@
 Shovel-ready list for the next session. Consolidated 21 October 2026 from the
 earlier roadmap (`SWE2.md`), `Grok.md` (discarded after its merge),
 `GeminiFlash.md`, the [Sol review](https://github.com/L-K-M/Combray/pull/28),
-and the MiMo review (`MiMo.md`, folded in below).
+the MiMo review (`MiMo.md`, folded in below), and the Muse review
+(`MuseSpark.md`, folded in below and discarded). Sol's and Muse's source
+citations refer to `e5cf8ed`/`4105c28`; later handoffs record re-verification.
 This version also incorporates the independent Fusion review in `fusion.md`
-(source baseline `4105c28`, followed by the prepared branches below). Its
-source findings are not phone benchmarks. Earlier contributors' PR descriptions
-are retained as provenance, not re-verified PR status; no other contributor's
-PR was inspected during this pass.
-Sol's source citations refer to `e5cf8ed`; its handoff records later verification. Read
+(source baseline `4105c28`; its three code slices were published as PRs
+#95-#97 on 22 October 2026 and remain open for the owner). Its source findings
+are not phone benchmarks. Earlier contributors' PR descriptions are retained
+as provenance, not re-verified PR status; no other contributor's PR was
+inspected during this pass. Read
 `AGENTS.md` and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) before
 editing. Keep Servo and the personal-browser scope. Private browsing, extensions
 and ad blocking are separate proposals; Stop, downloads and connection-security
@@ -32,7 +34,7 @@ proposals, not additional confirmed requirements.
 
 Leave these alone unless the owner declines them. Rationale stays in the PR.
 Other contributors' descriptions are retained from the roadmap; their PRs were
-not inspected during the Sol pass.
+not inspected during the Sol pass or the Muse pass (titles only).
 
 Earlier session:
 
@@ -111,27 +113,57 @@ MiMo fixes, also left open for the owner:
   same Undo as the close button. History rows keep their explicit menu:
   removing a visit has no undo. Offers the swipe part of the close-all item.
 
-## Prepared Fusion Changes
+## Completed On Main
 
-These changes are committed on local branches prepared against locally known
-`origin/main` at `1cc2da9`. I have not published them, opened their PRs, or
-applied them to main. Network approval is pending; no GitHub CI/GLM review or
-steady-state claim is made. Do not start a second implementation of these
-slices while the owner decides how to publish/merge them.
-
-| Branch / tip | Implemented scope and evidence |
+| PR / branch | Scope and verification |
 | --- | --- |
-| `fusion/encoded-credential-keys` / `6e57bd8` | Fusion 1: percent-decode query/fragment names once before the shared sensitive-URL guard. Values and double encoding are not rewritten. Failing-first pure, Karakeep-save and Hister-capture regressions pass. This is an independent alternative to the already-recorded #39, not a claim about that PR's implementation; choose one rather than merge both blindly. |
-| `fusion/startup-error-state` / `54d752f` | Fusion 3: an unscoped startup error leaves STARTING for FAILED without deleting tabs/session; later EngineReady recovers. All 41 coordinator tests on this branch pass. READY diagnostics and tab-scoped refusals retain their handling. |
-| `fusion/background-throttling` / `fbd3dfa` | Fusion 7: process visibility reaches the serialized coordinator. New/restored views stay throttled while backgrounded; resume unthrottles only the selected view. All 43 coordinator tests on this branch pass. These are emitted hints, not measured battery savings. |
-| `fusion/copy-address` / `f908d84` | First part of Fusion 20: long-press address copies the exact current URL; tap still edits; a blank tab has no copy action. Three failing-first/new semantics regressions pass; Android 13+ uses its own clipboard confirmation. Title-aware sharing and previous-tab switching remain future work. |
+| #65 `muse/engine-failed-status` | **Merged 21 October.** An engine-level error (native `error()`, no tab) received while `STARTING` moves the status to `FAILED` instead of showing "starting" forever; logs ERROR only for the fatal startup phase; classification keys on the missing tab alone, and `EngineEvent.EngineError` documents that contract. Four coordinator tests incl. a request-carrying tab-less error and post-ready non-failure. Deferred from its round-3 thread: include `event.request` in the engine-level log line. Fusion's equivalent startup branch `54d752f` was superseded by this; no duplicate PR was opened. |
 
-The unpublished combined source gate also passed Kotlin unit tests, lint,
+## Open pull requests (Muse)
+
+Muse session (21 October 2026). Six remain open for the owner's review and
+merging:
+
+| PR / branch | Scope and verification |
+| --- | --- |
+| #55 `muse/theme-roles` | Full Material3 role ladder in pine/ivory for both modes: sheets, checkboxes, radios, switches and snackbars stop falling back to baseline purple. `ThemeContrastTest` pins WCAG 4.5:1 on every text pair the UI can show, 3:1 outline contrast against all six surface steps in both schemes, and ladder ordering incl. `surfaceDim`/`surfaceBright`. Unit + lint green; no device screenshot yet. Overlaps #26 and #62 by title; owner picks one. |
+| #60 `muse/key-whitelist` | `forwardKey` sends only printable input and editing/navigation keys (performance item 16). `KeyForwardingTest` rejects volume/menu/search/launcher-Home/back modifiers and accepts the named page keys; bare Ctrl/Alt/Meta remain undocumented-as-known-limit on the KDoc. Overlaps #56 by title. |
+| #66 `muse/inert-event-publish` | `changesPublishedState` is an exhaustive `when` over all twenty-five `EngineEvent` kinds (a new kind is a compile error), gating `publish()`'s three Room reads off eleven inert events; `openTabCount()` is `COUNT(*)`. Both test lists mirror the classifier. Overlaps #24 by title. |
+| #67 `muse/recent-single-flow` | `recent()` subscribes once per sheet open and the sheet filters a remembered list (overlaps #25); `RecentItem.matches` moved onto the model; `RecentItemMatchTest` covers the matcher. The retention `since` is now fixed for the sheet's life — recorded under correctness item 17. |
+| #79 `muse/address-suggestions` | Local completion under the address editor while the text differs from what it opened with: newest first, one row per address, five max, local only, taps run the address policy. `AddressSuggestionsTest` (4 tests). Variant note: this **opens** the page like a Recent row; the chrome section's older proposal fills the field instead — the owner should pick one behavior. Overlaps #63 by title. |
+| #85 `muse/keyboard-ownership` | While any sheet or page dialog is open, page `KeyboardRequest` show/hide is dropped instead of applied, so autofocus timers cannot yank the IME out of the address editor or a sign-in dialog (the UI half of correctness item 23). No existing IME device coverage; an emulator flow is the honest follow-up. Overlaps #90 by title (native activation gating is complementary). |
+
+All six open ones: `testDebugUnitTest`, `lintDebug`, `scripts/check_docs.py` and
+`git diff --check` green locally; CI green on each. Titles of other open PRs at
+21 October, not inspected (metadata only, to keep future passes from
+duplicating): #51 share title, #54 page dark mode, #57 back-to-opener, #58 more
+close tab, #59 link menu, #61 share-to-Combray, #68 Hister paging, #69
+home-server HTTP, #70 data: host display, #71 recent order, #72 history fixes,
+#73 saves address change, #74 outbox patience, #75 CI checks, #76 icons and
+haptics, #77 reader typography, #78 restored splash, #80 external app links,
+#81 capture budget, #82 screen geometry, #83 media cancel, #84 popup blocking,
+#86 find in page, #87 page zoom, #88 tab throttling, #89 sign-in userinfo, #90
+keyboard activation.
+
+## Fusion Changes
+
+Three code PRs were published on 22 October 2026 and left open for the owner;
+none is implemented on main. Live CI/GLM review status is tracked on the PRs,
+not claimed here. Do not start a second implementation of these slices while
+the owner decides.
+
+| PR / branch | Implemented scope and evidence |
+| --- | --- |
+| [#95](https://github.com/L-K-M/Combray/pull/95) `fusion/encoded-credential-keys` | Fusion 1: percent-decode query/fragment names once before the shared sensitive-URL guard. Values and double encoding are not rewritten. Failing-first pure, Karakeep-save and Hister-capture regressions pass. Independent alternative to the already-recorded #39; choose one rather than merge both blindly. |
+| [#96](https://github.com/L-K-M/Combray/pull/96) `fusion/background-throttling` | Fusion 7: process visibility reaches the serialized coordinator. New/restored views stay throttled while backgrounded; resume unthrottles only the selected view. Emitted hints, not measured battery savings. The roadmap also lists #88 by title, not inspected. |
+| [#97](https://github.com/L-K-M/Combray/pull/97) `fusion/copy-address` | First part of Fusion 20: long-press address copies the exact current URL; tap still edits; a blank tab has no copy action. Three failing-first/new semantics regressions pass; Android 13+ uses its own clipboard confirmation. Title-aware sharing and previous-tab switching remain future work. |
+
+The 21 October pre-publication combined source gate also passed Kotlin unit tests, lint,
 debug/release assembly and five targeted emulator chrome checks, including
 large-font/48dp/non-overlap regressions. The initial integration-only test
 insertion conflict needed its missing closing brace and annotation restored;
 no independent feature logic changed. Builds deliberately omitted Servo.
-See Verification below and `fusion.md` for limits; an open/prepared branch is
+See Verification below and `fusion.md` for limits; an open PR is
 not implemented behavior on main.
 
 ## Correctness still open
@@ -278,9 +310,8 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     result arrives, so a crashed view leaks them for the process lifetime (fold
     the last one into item 13's pruning when measured). Each is small and
     unit-testable like the PR #36 cases. File: `BrowserCoordinator.kt`. The narrow
-    unscoped-STARTING failure path is prepared in
-    `fusion/startup-error-state` (Fusion 3, Prepared Fusion Changes above); it is
-    not a fresh implementation task here and does not claim all runtime errors.
+    unscoped-STARTING failure path is already fixed on main by #65 (see
+    Completed On Main); it does not claim all runtime errors and is not a task.
 18. **Destination fingerprints do not canonicalize the host.** `https://h`,
     `https://h:443` and `https://h.` count as different servers, forcing
     credential re-entry and re-binding queued work to a "new" destination. Strip
@@ -309,6 +340,65 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     `native/src/delegate.rs` drops `InputMethodControl.allow_virtual_keyboard`
     (and text/insertion point): a page-side `focus()` shows the keyboard at any
     time. Forward the flag and let the app suppress programmatic keyboards.
+    The app-side half (dropping page show/hide while an overlay owns the IME)
+    is offered in #85; the native flag still needs forwarding, and
+    `ime_owner` is a single slot shared across views (performance item 4).
+24. **Settings queue rows decode whole payloads during composition.**
+    `Integrations.jobUrl` (`Integrations.kt:129-132`) JSON-decodes the full
+    capture payload (up to 256 KiB of page text) to read one URL, and
+    `SettingsSheet.kt:490` calls it per row inside composition;
+    `observeOpenJobs` re-emits on every outbox write. The same decode runs
+    inside `HisterIntegration.jobHost`'s transaction when forgetting a site.
+    Persist a `url`/`host` column on the job at enqueue (schema, migration,
+    backfill) and never parse payloads in composition. Tests: migration with a
+    populated queue, a Settings screen over a full Hister queue stays responsive.
+25. **Switching Recent's scope auto-sends the local filter to a server.**
+    `RecentSheet.kt:132-135` seeds the Hister/Karakeep panels with
+    `initialQuery = query`, and their debounced effect fires the seeded text
+    with no further user action. The panels promise "only text typed here is
+    sent"; the mental model does not include "my local filter is now a server
+    query". Prefill the field but require an explicit Search for the first
+    request; debounced typing only after the user types in the panel. Test that
+    scope entry with a non-blank local filter sends nothing until submitted.
+26. **The work-queue consumer survives `Exception` but not `Error`.**
+    `BrowserCoordinator.kt:101-111` catches `Exception`; an `OOM` or
+    `StackOverflowError` (article JSON is parsed on that same queue) cancels
+    the consumer and the browser silently stops processing commands forever,
+    while `CancellationException` on shutdown is logged as a failure and posts
+    a spurious notice. Catch `Throwable`, rethrow cancellation, restart or
+    degrade visibly. Test with a throwing job that the next command still runs.
+27. **`lastFocusedAt` uses `now - 1`, collapsing ties and inverting recency.**
+    Tabs losing focus in the same millisecond get identical values
+    (`BrowserCoordinator.kt:669-676`), and a tab focused at exactly `now` is
+    rewritten to a smaller value; `openTabs()` orders by that column, so Recent
+    order and `closeLogically`'s successor choice become rowid-dependent when
+    links open fast. Use a monotonic focus sequence or `max(old, now - 1)` with
+    a tiebreaker. Test two same-millisecond focus changes.
+28. **`onDone` runs inside the `finish` transaction.** `Integrations.kt:329-333`
+    decodes the payload inside `Outbox.finish`'s `withTransaction`; a decode
+    throw rolls the finish back, so the job stays RUNNING, its lease expires,
+    and it is re-claimed and re-sent forever while success is never recorded.
+    Decode defensively or run `onDone` after the commit. Overlaps #37's guarded
+    steps — check what it already covers before implementing.
+29. **Retention is wall-clock with no forward-jump guard.** `maintain()` deletes
+    everything older than seven days at every start; a device clock set far
+    forward (manual date, bad NTP) wipes all local history and closes unused
+    tabs in one go. Clamp `now` against the newest stored timestamp, or record
+    the assumption. Test with a clock an year ahead of the newest row.
+30. **Page-opened windows become unbounded tabs.** `native/src/engine.rs:607-631`
+    adopts `window.open` from the active view with no user-activation check
+    (Servo 0.6 does not report activation) and each becomes a full logical tab;
+    `releaseViewsBeyond` evicts renderers, not tabs. Cap adoptations per opener
+    per time window, or require the coordinator's last real input time. #84
+    targets the same surface from the native side — check it first.
+31. **`BrowserSettings.apply()` can lose a just-toggled setting.** Process death
+    right after the tap reverts it silently (`BrowserSettings.kt:18`). Use
+    `commit()` for this tiny write, or document the loss.
+32. **`onCheckIsTextEditor()` is always true while the engine runs.**
+    `EngineSurfaceView.kt:134`: TalkBack announces the whole page area as an
+    editable field, and the IME can re-show after a window refocus with no page
+    field. Return whether the engine reports an active field (last ImeShown
+    without ImeHidden).
 
 ## Performance and engine
 
@@ -404,7 +494,7 @@ Do not claim a device reproduction for these. They are from the bridge and
     memory, idle CPU, thermals and background timers on a real GPU. The loop polls
     at 250ms and selection survives backgrounding; use lifecycle evidence before
     changing suspension, frame scheduling or the live-view budget. The missing
-    visibility hint is offered by `fusion/background-throttling`; remaining work
+    visibility hint is offered by PR #96 `fusion/background-throttling`; remaining work
     is real-GPU validation, not another implementation of that hint. No measured
     CPU/FPS/battery numbers.
 14. **History index candidate.** For `BrowserDao.observeHistory`, run EXPLAIN QUERY
@@ -425,7 +515,30 @@ Do not claim a device reproduction for these. They are from the bridge and
     (tag the event with the frame level or filter to top-level).
 16. **`forwardKey` consumes every non-Back key** (`EngineSurfaceView.kt`): the
     volume rocker is dead while browsing, and mapped-key handling is a Kotlin-
-    side whitelist. Return false for key codes the engine cannot map.
+    side whitelist. Return false for key codes the engine cannot map. Offered
+    in #60 (with #56).
+17. **Every state emission recomposes the whole screen, open sheet included,
+    through freshly allocated lambdas.** `BrowserScreen.kt:75` collects one
+    `browserState` at the top; each engine-event pass rebuilds `dismiss`,
+    `notify`, the `onDecision` tree and every sheet callback, so an open
+    Address/Recent/Settings sheet fully recomposes for events it does not
+    display. The device suite already records Recent's first open exceeding
+    Espresso's idle timeout on the software emulator. Hoist sheet content below
+    the state read or give callbacks stable identities. Measure with the
+    recomposition compiler report before and after.
+18. **Small query waste beyond the history index.** `releaseViewsBeyond` runs
+    one `dao.tab()` per live view after `openTabs()` (`BrowserCoordinator.kt:
+    775-784`); `openTabs()` filters `state='OPEN' ORDER BY lastFocusedAt` with
+    no composite index; `observeOpenJobs` has no index on `service`;
+    `deleteVisitsForHost` mixes `host =` with `substr(host, …)` and defeats its
+    index; `HisterIntegration.eligible()` runs service + exclusion queries on
+    every capture decision and every dispatch. Cheap individually — fold into
+    item 14's EXPLAIN pass or cache exclusions behind a flow snapshot.
+19. **Every HTTP request pays a fresh handshake.** `HttpTransport.kt:77-84`
+    `disconnect()`s per call, so each save or search is a new TCP+TLS setup;
+    `HisterClient.boundedBody` rebuilds the full ~1 MiB string per truncation
+    iteration. Reuse one connection per destination (still with redirects off
+    and the existing caps) after measuring; keep credential isolation explicit.
 
 ## Chrome still open
 
@@ -454,7 +567,7 @@ Do not claim a device reproduction for these. They are from the bridge and
 - Share sends only the URL. Send the title and the address (`title` then the
   URL). File: `share()` in the app module. Long-press Share can copy the address
   instead of opening the chooser.
-- Address-copy long press is prepared in `fusion/copy-address` (Fusion 20),
+- Address-copy long press is in open PR #97 `fusion/copy-address` (Fusion 20),
   with a labeled accessibility action, no copy action on home, and no duplicate
   Android 13+ confirmation. Do not implement that slice again. Still verify a
   physical long press, real clipboard contents and TalkBack on the owner's
@@ -497,6 +610,36 @@ Do not claim a device reproduction for these. They are from the bridge and
 - Local history completion in the address editor: titles and hosts from Recent,
   clearly on-device (the plan's "no autosuggest" covers search typing and server
   contact). Selecting a completion fills the field; it never submits.
+  #79 implements the other variant — one tap opens the page like a Recent row,
+  shown only while the text differs from what the editor opened with; pick one
+  behavior when merging, do not ship both.
+- The More sheet's pause row uses `Close` (X) for "Pause history capture"
+  (`MoreSheet.kt:76`): X reads as remove, not pause. Hand-build a pause glyph
+  the way `StarBorder` already does, or pick accurate semantics.
+- Home and the engine-failure overlays are fixed centered columns with no
+  scroll (`BrowserScreen.kt:324-360`): at 200% font on a 320 dp screen the
+  headline and two 240 dp buttons clip with no way to reach them. Wrap them in
+  a scroll container.
+- "Not configured" notices inside the Hister/Karakeep panels are static text
+  (`HisterSearchPanel.kt:98`, `KarakeepPanel.kt:98`) where the save path
+  correctly offers a Settings action. Make them one tap from the fix.
+- A queue row with no URL falls back to showing the raw `dedupeKey`
+  (`SettingsSheet.kt:490`); use a neutral "Unknown page". The Hister exclusion
+  list has no empty state and removes rows instantly (`SettingsSheet.kt:443-453`)
+  against the app's own confirm-or-undo standard.
+- The local Recent filter field sets no IME action (`RecentSheet.kt:122-128`):
+  plain Enter, keyboard stays up, unlike the panels' `ImeAction.Search`.
+- TalkBack gaps: the More and Address sheets have no heading node (focus lands
+  in a list/field with no context, unlike Recent and Settings); overlay states
+  (engine missing/failed/starting, page crashed) have no live region, so a
+  crash is silent until exploration. The loading indicator's "Loading" is not
+  announced as a start either.
+- Sheet gutters disagree: 16 dp (Address, Recent), 24 dp (Settings), default
+  list inset (More). Pick one rule and apply it.
+- Record the frozen palette tokens and their measured contrast in
+  `docs/design/tokens.md` once a palette PR lands (#55/#26/#62 pick one); the
+  design README asked for on-device validation before freezing, and none is
+  recorded.
 - The address chip's security icon comes from the URL scheme string, not from
   engine data; the plan asks for engine-derived state. Today only `loadFailed` is
   engine truth in that chip, and #43 governs the label's honesty. Do not draw a
@@ -602,6 +745,27 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   to fill a badge.
 - Named Undo: `Notice.TabClosed` carries a title. Show a bounded title with an
   untitled fallback, preserving exact tab identity and a reachable Undo action.
+- Host letter-tiles instead of favicons: a 24–32 dp tile with the host's first
+  letter in Recent rows and the address chip, tinted deterministically from the
+  pine/ivory family. Solves "two same-host tabs are indistinguishable" with no
+  network (favicons are a privacy surface) and no engine work. Pure function of
+  `displayHost`; keep it quiet.
+- Undo for forgetting: `forgetVisit`/`forgetSite` delete local history and
+  cancel queued captures with no recovery path, while tab close has Undo.
+  A short-lived restore needs the deleted row and its captures back in one
+  transaction — coordinate with #32 so the semantics stay atomic.
+- A notification when a queue needs attention (`SaveStatus.NeedsAttention`,
+  Hister auth pause): today the state is visible only inside Settings. Minimal
+  content (host only), WorkManager is already wired; coalesce, never notify
+  per automatic capture.
+- Keep a local offline copy of captured pages: the capture pipeline already
+  extracts bounded readable text and then throws it away on upload success.
+  "Read this later on this device" reuses it and gives `LIBRARY_MISSING` and
+  airplane mode something honest to show. Privacy stance must be explicit:
+  local-only is not Hister capture and never uploads.
+- A low-opacity launcher glyph behind the empty Home headline (nothing on a
+  populated screen, no animation before first paint) as the one decorative
+  flourish the chrome section's restraint note allows.
 
 Skip: pull-to-refresh (it fights the surface), edge-swipe as the only close,
 and any second renderer. Keep reduced motion and avoid decorative animation or
@@ -626,6 +790,13 @@ haptics on every routine action.
   many/no matches, large/changing documents and Back/IME. No full-page copy on
   every keystroke and no Hister/Kagi request for local page search. Site-data
   controls also need verified engine storage and privacy semantics.
+  The pinned `servo-checkout` does expose candidates for these — none wired,
+  none Combray-tested: `WebView::adjust_pinch_zoom` / `set_page_zoom`
+  (`components/servo/webview.rs`), `accesskit_tree_id` /
+  `set_accessibility_active` for TalkBack, `notify_scroll_event` plus
+  `status_text`/favicon hooks for scroll feedback and page marks, and
+  `clipboard_delegate` for a future selection copy. Treat them as leads for the
+  zoom/accessibility/find work, not as verified behavior.
 
 ## Verification still open
 
@@ -669,7 +840,7 @@ completed visual/accessibility pass. Exact commands/limits are in the report PR'
 ## Fusion validation
 
 Independent branch regressions were failing-first, then green after the fix.
-The combined unpublished gate `./gradlew --offline testDebugUnitTest lintDebug
+The 21 October pre-publication combined unpublished gate `./gradlew --offline testDebugUnitTest lintDebug
 assembleDebug assembleRelease :app:assembleDebugAndroidTest` succeeded with no
 lint errors. Five selected AccessibilityTest cases passed on our API 30 x86_64
 software emulator (3 copy-action cases plus 2 large-font/48dp/non-overlap
@@ -677,10 +848,24 @@ cases). Lint retains the existing targetSdk/Espresso/ChromeOS/monochrome-icon
 and EngineSurfaceView tooling/performClick warnings. No native engine was
 staged; no signed usable release, native device behavior, physical gesture,
 actual clipboard contents, live integrations or phone battery/FPS were
-validated. Logs: `build/fusion-audit/final-kotlin-gate.log`,
-`build/fusion-audit/final-accessibility.log`, `build/fusion-audit/final-xml/`
-and the union patch `build/fusion-audit/verification-union.diff` (all local,
-inside the audit worktree).
+validated. Additional 22 October narrow checks on the merged 752d7da trees:
+the encoded policy+integration suites green, the background coordinator suite
+plus app compile green, and the copy slice's app unit/debug/instrumentation
+assembly green. Logs/diffs: `build/fusion-audit/final-kotlin-gate.log`,
+`final-accessibility.log`, `final-xml/`, `verification-union.diff` and
+`{encoded,background,copy}-vs-752d7da.{log,diff}`; local artifacts are archived
+under `~/.local/share/devin/cli/combray-fusion-artifacts-20261021/` rather than
+left to ephemeral /tmp.
+
+Unit-test gaps found by the Muse pass, each cheap and each missing today:
+retention enforced at claim time (item: RUNNING rows past the age limit),
+a drain whose `prune`/`claim`/`finish` throws still scheduling its wakeup,
+`Notice.Problem` ever reaching the snackbar, Recent ordering ties and the
+500-row cap, `SERVO_ERROR_TITLES` asserted against the real engine on a
+device, and one emulator flow of the address sheet: type, receive a #79
+suggestion, open it, rotate with the IME up. Dark-mode screenshots of the
+finished palette (sheets, checkboxes, switches, chips) are still the missing
+visual evidence for the palette work.
 
 ## How to check
 
@@ -703,6 +888,11 @@ inside the audit worktree).
 - Preserve URL/document identity and credentials at every boundary. Avoid
   unescaped SQL LIKE for local search, token-based account identities, or
   timestamps presented as a server latest-wins guarantee.
+- Protect the bridge invariants while editing: one serialized command queue in
+  `BrowserCoordinator`, generation/document identity on every engine event,
+  fenced outbox claims, epoch-guarded surface painting, and secrets bound to
+  their server fingerprint. Changes that relax any of these need tests that
+  fail without them.
 - Add policy tests for pasted URL tabs/newlines before changing normalization;
   blindly replacing every whitespace character with a space can change meaning.
   Count ambiguous attempts conservatively: counting only returned failures can
