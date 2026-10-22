@@ -121,6 +121,16 @@ class AccessibilityTest {
     }
 
     @Test
+    fun aSaveWaitingForKarakeepIsLabeledAsSuch() {
+        show(LARGE_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Waiting)
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Waiting for Karakeep").assertIsDisplayed()
+    }
+
+    @Test
     fun theBottomBarOnANewTabIsAccessible() {
         show(LARGE_FONT) {
             Bar(null, openTabs = 0, SaveStatus.NotConfigured)

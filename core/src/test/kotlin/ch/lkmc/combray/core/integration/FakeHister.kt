@@ -15,6 +15,9 @@ class FakeHister(private val token: String = TOKEN) : AutoCloseable {
     // Like the pinned server: page_key is always present and empty when there is no next page.
     @Volatile var searchBody = """{"documents":[],"history":[],"total":0,"page_key":""}"""
 
+    /** An answer to authorized adds instead of storing them, such as 406 (skip rules) or 422. */
+    @Volatile var refusal: Int? = null
+
     val root get() = "http://127.0.0.1:${server.address.port}/h"
 
     init {
@@ -22,9 +25,11 @@ class FakeHister(private val token: String = TOKEN) : AutoCloseable {
         server.createContext("/h/api/add") { exchange ->
             val body = exchange.requestBody.readBytes()
             requestSizes += body.size
+            val refused = refusal
             when {
                 exchange.requestHeaders.getFirst("X-Access-Token") != token -> reply(exchange, 401, "")
                 exchange.requestHeaders.getFirst("Origin") != "hister://" -> reply(exchange, 403, "")
+                refused != null -> reply(exchange, refused, "refused")
                 else -> {
                     added += body.toString(Charsets.UTF_8)
                     reply(exchange, 201, "")

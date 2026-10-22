@@ -49,6 +49,8 @@ data class Claim(val job: OutboxJobEntity, val owner: String)
  * newer capture of the same key: unsent older jobs -> SUPERSEDED
  * destination changed: unfinished saves -> DESTINATION_CHANGED (sent only after the user
  *   rebinds them), unfinished captures -> CANCELLED; never sent elsewhere silently
+ * refused on purpose by the service (Declined): -> CANCELLED, captured text dropped
+ * Retry that could not connect: RETRY_WAIT, not counted toward the attempt limit
  * ```
  */
 class Outbox(
@@ -95,7 +97,7 @@ class Outbox(
                 // The user saved this page again: its current title travels, not the stale one.
                 payload = payload, payloadBytes = payloadBytes,
                 leaseOwner = null, leaseUntil = null,
-            )
+            ).restarted(now)
             dao.updateJob(retried)
             failed.filter { it.id != retried.id }.forEach { dao.updateJob(it.copy(state = JobState.SUPERSEDED, error = "superseded", updatedAt = now)) }
             return@withTransaction Enqueued.Queued(retried)
@@ -194,10 +196,21 @@ class Outbox(
     private fun transition(released: OutboxJobEntity, current: OutboxJobEntity, result: DispatchResult, now: Long): OutboxJobEntity =
         when (result) {
             is DispatchResult.Done -> released.copy(state = JobState.SUCCEEDED, remoteId = result.remoteId, error = result.note)
-            is DispatchResult.Retry -> if (current.attempts >= retry.maxAttempts) {
-                released.copy(state = JobState.FAILED, error = "${result.category}_after_${current.attempts}_attempts")
-            } else {
-                released.copy(
+            is DispatchResult.Retry -> when {
+                // A server out of reach for a week is gone or misaddressed, not briefly away.
+                result.delivery == Delivery.NOT_SENT && now - current.createdAt >= UNREACHABLE_LIMIT_MS ->
+                    released.copy(state = JobState.FAILED, error = "$UNREACHABLE_PREFIX${result.category}_for_${UNREACHABLE_LIMIT_DAYS}_days")
+                // Nothing was sent: claim() counted this attempt, but it does not use up the limit.
+                // A save waits for its server, a capture until it expires; the wait still backs off.
+                result.delivery == Delivery.NOT_SENT -> released.copy(
+                    state = JobState.RETRY_WAIT,
+                    attempts = (current.attempts - 1).coerceAtLeast(0),
+                    error = UNREACHABLE_PREFIX + result.category,
+                    nextAttemptAt = now + retry.delayWithoutConnectionMs(now - current.createdAt),
+                )
+                current.attempts >= retry.maxAttempts ->
+                    released.copy(state = JobState.FAILED, error = "${result.category}_after_${current.attempts}_attempts")
+                else -> released.copy(
                     state = JobState.RETRY_WAIT,
                     error = result.category,
                     nextAttemptAt = now + retry.delayMs(current.attempts, result.retryAfterMs),
@@ -205,6 +218,8 @@ class Outbox(
             }
             is DispatchResult.AuthRequired -> released.copy(state = JobState.AUTH_REQUIRED, error = result.category)
             is DispatchResult.Rejected -> released.copy(state = JobState.FAILED, error = result.category)
+            // Refused on purpose: retrying cannot help, and captured text is not kept for it.
+            is DispatchResult.Declined -> released.copy(state = JobState.CANCELLED, error = result.category)
             is DispatchResult.Cancelled -> released.copy(state = JobState.CANCELLED, error = result.category)
         }
 
@@ -213,7 +228,8 @@ class Outbox(
         val job = dao.job(jobId) ?: return@withTransaction
         val service = dao.service(job.service)
         if (job.state !in RESUMABLE || service == null || service.fingerprint != job.fingerprint) return@withTransaction
-        dao.updateJob(job.copy(state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = clock.now(), error = null, updatedAt = clock.now()))
+        val now = clock.now()
+        dao.updateJob(job.copy(state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now).restarted(now))
     }
 
     /** User action: give up on a job. A job being sent cannot be recalled; it is left alone. */
@@ -263,7 +279,7 @@ class Outbox(
                 job.copy(
                     state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
                     leaseOwner = null, leaseUntil = null,
-                ),
+                ).restarted(now),
             )
         }
     }
@@ -285,7 +301,7 @@ class Outbox(
                 else -> job.copy(
                     state = JobState.PENDING, fingerprint = service.fingerprint, generation = service.generation,
                     attempts = 0, nextAttemptAt = now, error = null,
-                )
+                ).restarted(now)
             }
             dao.updateJob(update.copy(updatedAt = now))
         }
@@ -298,6 +314,15 @@ class Outbox(
     }
 
     suspend fun nextWakeup(): Long? = dao.nextWakeup(clock.now())
+
+    /**
+     * A user action starts a save's week of waiting for its server over: measured from the
+     * original [OutboxJobEntity.createdAt], a re-saved eight-day-old failure would fail again
+     * after one offline attempt. A capture keeps its createdAt, which also bounds how long its
+     * page text may be kept and which forget requests cover it.
+     */
+    private fun OutboxJobEntity.restarted(now: Long): OutboxJobEntity =
+        if (kind == JobKind.KARAKEEP_SAVE) copy(createdAt = now) else this
 
     /** Unsent captures expire after a week; finished rows are kept a week for status, then removed. */
     suspend fun prune() {
@@ -331,6 +356,13 @@ class Outbox(
         private const val LOG_TAG = "CombrayOutbox"
         private const val FINISHED_RETENTION_MS = 7L * 24 * 60 * 60 * 1000
 
+        /** Error prefix of a job whose last attempt could not connect, as in `unreachable_network`. */
+        private const val UNREACHABLE_PREFIX = "unreachable_"
+
+        /** How long unsent work waits for its server before it needs the user's attention. */
+        private const val UNREACHABLE_LIMIT_DAYS = 7L
+        private const val UNREACHABLE_LIMIT_MS = UNREACHABLE_LIMIT_DAYS * 24 * 60 * 60 * 1000
+
         /** Proposed transient body limit: captured text is not kept as a hidden archive. */
         const val CAPTURE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
 
@@ -338,6 +370,11 @@ class Outbox(
             JobKind.KARAKEEP_SAVE -> ServiceKind.KARAKEEP
             JobKind.HISTER_ADD -> ServiceKind.HISTER
         }
+
+        /** Whether [job] waits for its server to be reachable: its last attempt sent nothing. */
+        fun waitsForConnection(job: OutboxJobEntity) =
+            job.state == JobState.RETRY_WAIT && job.error?.startsWith(UNREACHABLE_PREFIX) == true
+
         private val RESUMABLE = setOf(JobState.FAILED, JobState.AUTH_REQUIRED, JobState.RETRY_WAIT)
         private val DISCARDABLE = setOf(JobState.PENDING, JobState.RETRY_WAIT, JobState.AUTH_REQUIRED, JobState.FAILED)
 

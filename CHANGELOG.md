@@ -153,6 +153,13 @@ All notable changes to this project are documented here. The format follows
   matches out of view; the list now starts at the top.
 - Starting the app with open tabs no longer shows "New tab" for a moment
   before the restored page, as if the tabs were lost.
+- A save or capture made while its server cannot be reached no longer stops
+  after ten tries: attempts that could not connect sent nothing and do not
+  count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
+  and asks for attention once its server has not answered for a week.
+- A page Hister refuses on purpose (its skip rules, or sensitive content) is
+  dropped with its text instead of staying as a stopped capture that counts
+  against the capture budget.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

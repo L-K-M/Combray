@@ -36,6 +36,9 @@ sealed interface SaveStatus {
     /** Recorded durably; waiting for (or in) delivery. */
     data object Pending : SaveStatus
 
+    /** Recorded durably; the last attempt could not reach Karakeep, so nothing was sent yet. */
+    data object Waiting : SaveStatus
+
     /** The server acknowledged the link (not that crawling or tagging finished). */
     data object Saved : SaveStatus
 
@@ -278,6 +281,7 @@ class Integrations(
                 when {
                     job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
+                    job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
                     job != null -> SaveStatus.Pending
                     saved != null -> SaveStatus.Saved
                     // Queued for an earlier address: Settings offers to send it here or discard it.
