@@ -29,5 +29,16 @@ class ShareTextTest {
             "How to Sail\nhttps://example.org/sailing",
             shareText("https://example.org/sailing", "How\u2028to\u2029Sail"),
         )
+        assertEquals("How to Sail", shareTitle("\u0085How\u0085to Sail"))
+    }
+
+    @Test
+    fun aLongTitleIsCappedWithoutSplittingACharacter() {
+        val words = "word ".repeat(100)
+        assertEquals("word ".repeat(40).trimEnd() + "\u2026", shareTitle(words))
+
+        // An emoji straddling the cut is dropped whole rather than leaving half a surrogate pair.
+        val emoji = "a".repeat(199) + "\uD83D\uDE00" + "tail"
+        assertEquals("a".repeat(199) + "\u2026", shareTitle(emoji))
     }
 }

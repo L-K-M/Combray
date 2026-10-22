@@ -63,7 +63,7 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnAPageIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(PAGE, openTabs = 3, SaveStatus.Pending, {}, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            Bar(PAGE, openTabs = 3, SaveStatus.Pending)
         }
 
         assertTargetsAreAccessible()
@@ -76,7 +76,7 @@ class AccessibilityTest {
     @Test
     fun addressCopyIsAnAccessibleLongClick() {
         show(DEFAULT_FONT) {
-            BottomBar(PAGE, openTabs = 1, SaveStatus.Unsaved, {}, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
         }
 
         val node = compose.onNodeWithContentDescription("example.org", substring = true).fetchSemanticsNode()
@@ -90,7 +90,7 @@ class AccessibilityTest {
         var copies = 0
         var edits = 0
         show(DEFAULT_FONT) {
-            BottomBar(PAGE, openTabs = 1, SaveStatus.Unsaved, {}, { edits++ }, {}, {}, {}, {}, { copies++ }, Modifier.width(NARROW_WIDTH))
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, onAddress = { edits++ }, onCopyAddress = { copies++ })
         }
 
         // The exposed semantics action: this is not proof of the physical gesture or clipboard.
@@ -109,7 +109,7 @@ class AccessibilityTest {
         var copies = 0
         var edits = 0
         show(DEFAULT_FONT) {
-            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, { edits++ }, {}, {}, {}, {}, { copies++ }, Modifier.width(NARROW_WIDTH))
+            Bar(null, openTabs = 0, SaveStatus.NotConfigured, onAddress = { edits++ }, onCopyAddress = { copies++ })
         }
 
         val node = compose.onNodeWithContentDescription("Edit address", substring = true).fetchSemanticsNode()
@@ -123,7 +123,7 @@ class AccessibilityTest {
     @Test
     fun theBottomBarOnANewTabIsAccessible() {
         show(LARGE_FONT) {
-            BottomBar(null, openTabs = 0, SaveStatus.NotConfigured, {}, {}, {}, {}, {}, {}, {}, Modifier.width(NARROW_WIDTH))
+            Bar(null, openTabs = 0, SaveStatus.NotConfigured)
         }
 
         assertTargetsAreAccessible()
@@ -241,6 +241,31 @@ class AccessibilityTest {
             node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
         return label.firstOrNull { it.isNotBlank() }
     }
+
+    /**
+     * The bar at the narrow width, every action a no-op unless given. Named arguments keep a new
+     * `() -> Unit` parameter from silently shifting the callbacks a test means to observe.
+     */
+    @Composable
+    private fun Bar(
+        tab: ActiveTab?,
+        openTabs: Int,
+        saveStatus: SaveStatus,
+        onAddress: () -> Unit = {},
+        onCopyAddress: () -> Unit = {},
+    ) = BottomBar(
+        tab = tab,
+        openTabs = openTabs,
+        saveStatus = saveStatus,
+        onBack = {},
+        onAddress = onAddress,
+        onSave = {},
+        onShare = {},
+        onRecent = {},
+        onMore = {},
+        onCopyAddress = onCopyAddress,
+        modifier = Modifier.width(NARROW_WIDTH),
+    )
 
     private companion object {
         const val DEFAULT_FONT = 1f

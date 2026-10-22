@@ -53,12 +53,24 @@ fun relativeTime(time: Long, now: Long): String =
 
 /**
  * The share's subject: the page's title with its whitespace collapsed (a title's line break
- * must not become a second line of the share), or null when it has nothing usable.
+ * must not become a second line of the share) and capped, or null when it has nothing usable.
+ * The page chooses its title, so it is bounded before it goes into the share twice.
  */
-fun shareTitle(title: String?): String? = title?.trim()?.replace(WHITESPACE, " ")?.takeIf { it.isNotEmpty() }
+fun shareTitle(title: String?): String? =
+    title?.replace(TITLE_WHITESPACE, " ")?.trim()?.takeIf { it.isNotEmpty() }?.let(::capped)
 
-/** Java's `\s` is ASCII-only; the Unicode line and paragraph separators belong with it. */
-private val WHITESPACE = Regex("[\\s\\u2028\\u2029]+")
+/** Java's `\s` is ASCII-only; NEL and the Unicode line and paragraph separators belong with it. */
+private val TITLE_WHITESPACE = Regex("[\\s\\u0085\\u2028\\u2029]+")
+
+/** Long enough for any real headline, short enough to stay one line in a message. */
+private const val MAX_SHARE_TITLE = 200
+
+/** At most [MAX_SHARE_TITLE] characters plus an ellipsis, never splitting a surrogate pair. */
+private fun capped(title: String): String {
+    if (title.length <= MAX_SHARE_TITLE) return title
+    val end = if (title[MAX_SHARE_TITLE - 1].isHighSurrogate()) MAX_SHARE_TITLE - 1 else MAX_SHARE_TITLE
+    return title.substring(0, end).trimEnd() + "\u2026"
+}
 
 /** What a share carries: the title as the first line (when there is one), then the address. */
 fun shareText(url: String, title: String?): String =

@@ -216,7 +216,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                     }
                 },
                 onShare = {
-                    tab?.let { page -> page.url?.let { url -> share(context, url, page.title, resources.getString(R.string.share_chooser)) } }
+                    tab?.let { page -> page.url?.let { url -> share(context, url, resources.getString(R.string.share_chooser), page.title.takeUnless { page.loadFailed }) } }
                 },
                 onRecent = { sheet = Sheet.RECENT },
                 onMore = { sheet = Sheet.MORE },
@@ -322,7 +322,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
             canOpenInNewTab = { url -> navigation(url) != null },
             onOpenInNewTab = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.NEW_TAB) } },
-            onShare = { url -> share(context, url, null, resources.getString(R.string.share_chooser)) },
+            onShare = { url -> share(context, url, resources.getString(R.string.share_chooser)) },
         )
     }
 }
@@ -393,8 +393,11 @@ private fun openExternally(context: Context, url: String, noApp: String, notify:
     }
 }
 
-/** Shares the address, and the page's title as the subject and first line when it has one. */
-private fun share(context: Context, url: String, title: String?, chooserTitle: String) {
+/**
+ * Shares the address, and the page's title as the subject and first line when it has one.
+ * A failed load's title is the engine's error page, not the page's, so callers leave it out.
+ */
+private fun share(context: Context, url: String, chooserTitle: String, title: String? = null) {
     val send = Intent(Intent.ACTION_SEND)
         .setType("text/plain")
         .putExtra(Intent.EXTRA_TEXT, shareText(url, title))
