@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -178,7 +179,7 @@ fun SettingsSheet(
 @Composable
 private fun ThemeModeSetting(settings: BrowserSettings) {
     val current by settings.themeMode.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp).selectableGroup()) {
         ThemeMode.entries.forEach { mode ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,

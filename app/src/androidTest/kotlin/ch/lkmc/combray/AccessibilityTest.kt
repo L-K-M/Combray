@@ -1,5 +1,6 @@
 package ch.lkmc.combray
 
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -151,7 +152,10 @@ class AccessibilityTest {
 
     private fun show(fontScale: Float, content: @Composable () -> Unit) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val settings = BrowserSettings(context.getSharedPreferences(BrowserSettings.FILE_NAME, android.content.Context.MODE_PRIVATE))
+        // Start every run from a clean theme: the settings are real, persisted preferences.
+        val preferences = context.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        val settings = BrowserSettings(preferences)
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {

@@ -11,6 +11,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import ch.lkmc.combray.core.browser.BrowserSettings
@@ -61,12 +62,17 @@ fun CombrayTheme(settings: BrowserSettings, content: @Composable () -> Unit) {
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val colors = when {
-        mode == ThemeMode.DARK_OLED -> DarkOledColors
-        mode == ThemeMode.SYSTEM && dark && supportsDynamic(context) -> dynamicDarkColorScheme(context)
-        mode == ThemeMode.SYSTEM && !dark && supportsDynamic(context) -> dynamicLightColorScheme(context)
-        dark -> DarkColors
-        else -> LightColors
+    // Material You only in system-following mode; the pine palette otherwise. Remembered so a
+    // recomposition of the wrapper does not rebuild a fresh ColorScheme and force a subtree pass.
+    val dynamic = mode == ThemeMode.SYSTEM && supportsDynamic(context)
+    val colors = remember(mode, dark, dynamic, context) {
+        when {
+            mode == ThemeMode.DARK_OLED -> DarkOledColors
+            dynamic && dark -> dynamicDarkColorScheme(context)
+            dynamic -> dynamicLightColorScheme(context)
+            dark -> DarkColors
+            else -> LightColors
+        }
     }
     MaterialTheme(colorScheme = colors, content = content)
 }
