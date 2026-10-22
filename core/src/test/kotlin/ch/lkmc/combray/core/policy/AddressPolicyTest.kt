@@ -63,6 +63,51 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun aKagiResultsAddressGivesBackItsQuery() {
+        for (query in listOf("servo android build", "Zürich 😀 日本", "a&b=c", "#1 c#", "C++ a+b", "100% %20", "  padded  ")) {
+            assertEquals(query, AddressPolicy.kagiQuery(AddressPolicy.kagiSearchUrl(query)))
+        }
+
+        // Kagi's own search field submits "+" for spaces. Other parameters and the fragment are
+        // ignored, and of two q parameters the first counts.
+        assertEquals("foo bar", AddressPolicy.kagiQuery("https://kagi.com/search?q=foo+bar"))
+        assertEquals("a b", AddressPolicy.kagiQuery("HTTPS://KAGI.com/search?r=ch&q=a%20b&q=c#top"))
+    }
+
+    @Test
+    fun otherAddressesAndMissingQueriesGiveNoKagiQuery() {
+        val others = listOf(
+            "http://kagi.com/search?q=x",
+            "https://www.kagi.com/search?q=x",
+            "https://kagi.com.evil.test/search?q=x",
+            "https://evil.test/search?q=x",
+            "https://evil.test/?u=https://kagi.com/search?q=x",
+            "https://kagi.com:8443/search?q=x",
+            "https://user@kagi.com/search?q=x",
+            "https://kagi.com/search/?q=x",
+            "https://kagi.com/images?q=x",
+            "https://kagi.com/?q=x",
+            // Malformed escapes give nothing rather than text the user never typed.
+            "https://kagi.com/search?q=%zz",
+            "not an address",
+        )
+        val missing = listOf(
+            "https://kagi.com/search",
+            "https://kagi.com/search?r=ch",
+            "https://kagi.com/search?q",
+            "https://kagi.com/search?q=",
+            "https://kagi.com/search?q=%20",
+            "https://kagi.com/search?qq=x",
+            // Parameter names are case-sensitive.
+            "https://kagi.com/search?Q=x",
+            "https://kagi.com/search#q=x",
+        )
+        for (url in others + missing) {
+            assertNull(url, AddressPolicy.kagiQuery(url))
+        }
+    }
+
+    @Test
     fun unsafeSchemesAreRejectedNotSearched() {
         for (input in listOf("javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "intent://x#Intent;end", "ftp://example.org")) {
             assertEquals(input, AddressDecision.Rejected(RejectReason.UNSUPPORTED_SCHEME), primary(input))

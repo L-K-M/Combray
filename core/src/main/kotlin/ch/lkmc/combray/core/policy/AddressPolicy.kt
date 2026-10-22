@@ -3,6 +3,7 @@ package ch.lkmc.combray.core.policy
 import java.net.IDN
 import java.net.URI
 import java.net.URISyntaxException
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.text.Normalizer
 
@@ -50,7 +51,10 @@ data class AddressInterpretation(val primary: AddressDecision, val alternative: 
  * ```
  */
 object AddressPolicy {
-    private const val KAGI_SEARCH = "https://kagi.com/search?q="
+    private const val KAGI_HOST = "kagi.com"
+    private const val KAGI_PATH = "/search"
+    private const val KAGI_QUERY = "q"
+    private const val KAGI_SEARCH = "https://$KAGI_HOST$KAGI_PATH?$KAGI_QUERY="
 
     private val WEB_SCHEMES = setOf("http", "https")
     private val EXTERNAL_SCHEMES = setOf("mailto", "tel")
@@ -89,6 +93,32 @@ object AddressPolicy {
     /** Kagi's normal web results for [query]: UTF-8, percent-encoded exactly once. */
     fun kagiSearchUrl(query: String): String =
         KAGI_SEARCH + URLEncoder.encode(query, "UTF-8").replace("+", "%20")
+
+    /**
+     * The query of a Kagi results page, the inverse of [kagiSearchUrl], so editing a search starts
+     * from its words instead of the encoded address. Only `https://kagi.com/search` qualifies
+     * (exact host and path, no port or user); the first `q` parameter is read, others are
+     * ignored. Null for any other address, or when there is no query.
+     */
+    fun kagiQuery(url: String): String? {
+        val uri = try {
+            URI(url)
+        } catch (malformed: URISyntaxException) {
+            return null
+        }
+        if (!uri.scheme.equals("https", ignoreCase = true) || !uri.host.equals(KAGI_HOST, ignoreCase = true)) return null
+        if (uri.port != -1 || uri.rawUserInfo != null || uri.rawPath != KAGI_PATH) return null
+
+        val parameter = uri.rawQuery?.split('&')?.firstOrNull { it.substringBefore('=') == KAGI_QUERY && '=' in it } ?: return null
+        // The String overload: URLDecoder.decode(String, Charset) needs API 33. It also reads
+        // "+" as a space, as in the form submissions of Kagi's own search field.
+        val query = try {
+            URLDecoder.decode(parameter.substringAfter('='), "UTF-8")
+        } catch (malformed: IllegalArgumentException) {
+            return null
+        }
+        return query.takeIf { it.isNotBlank() }
+    }
 
     private fun search(query: String) = AddressDecision.Search(query, kagiSearchUrl(query))
 

@@ -79,6 +79,9 @@ All notable changes to this project are documented here. The format follows
 - A launch screen with the Combray icon, shown until your open tabs are
   restored (at most two seconds).
 - More › Close tab closes the current tab, with the same Undo as Recent.
+- The address sheet lists up to five open tabs and recent pages that match
+  what you type: a tab switches to that tab, a page opens in a new tab.
+  The matches come from this device; nothing is sent while you type.
 
 ### Changed
 
@@ -120,6 +123,11 @@ All notable changes to this project are documented here. The format follows
   the engine bridge's Rust formatting and page-script syntax.
 - More's "Pause history capture" row has a pause icon instead of an X,
   which read as closing the tab.
+- On a Kagi results page, the address sheet starts with your search words
+  instead of the results address.
+- The address sheet no longer shows an error before you type, and its
+  buttons stay on one line, shortened in the middle, with an icon for
+  search or address.
 
 ### Fixed
 
