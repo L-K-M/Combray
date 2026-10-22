@@ -110,14 +110,14 @@ Rows that name a PR in "closes when" stay open until that PR lands.
 
 Order matters inside each wave 2 line. Wave 3 needs one native build and a full
 `scripts/check-app.sh` emulator pass on the integrated tree; no native PR has
-been device-run on current main. Owner decisions are Confirmed for #50, #52,
-#53, #57, #61, #62, #63, #69, #74, #76, #77, #80, #84, #86, #89, #103's
-direction and #109 (with sideways bar swipes); Proposed for #58, one text-size
-control (#87, #52), #91's breadth and #103's hiding.
+been device-run on current main. Owner decisions are Confirmed for #50, #52's
+Appearance setting, #53, #57, #61, #62, #63, #69, #74, #76, #77, #80, #84, #86,
+#89, #103's direction and #109 (with sideways bar swipes); Proposed for #58,
+one text-size control (#87's, not #52's), #91's breadth and #103's hiding.
 
 | PR | Before it lands | Line |
 | --- | --- | --- |
-| #66 | Take #24's gate: inert kinds listed inside the dispatch `when`. Drop the separate classifier, which breaks compilation of #80, #83, #84 and #86, and its test, which breaks with #90. Keep `openTabCount()` as `COUNT(*)` | 2.0, before wave 3 |
+| #66 | Take #24's gate: inert kinds listed inside the dispatch `when`. Drop the separate classifier (kept, it stops #80, #83, #84 and #86 from compiling) and its test (kept, it fails with #90). Keep `openTabCount()` as `COUNT(*)` | 2.0, before wave 3 |
 | #62 | Rebase; optionally #55's surface-ladder test in Material 3 order | 2 theme and Recent |
 | #64 | Rebase after #62; its rows need that palette | 2 theme and Recent |
 | #53 | Close after the swipe settles, not from `confirmValueChange`; replace the deprecated material3 API; show the background only while swiping, under opaque row content | 2 theme and Recent |
@@ -358,8 +358,8 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     time. Forward the flag and let the app suppress programmatic keyboards.
     Open #90 (wave 3) forwards the flag, so the keyboard opens only after user
     activation, and keeps one field per tab; its SHOW_REFUSED path covers the
-    app-side half that closed #85 proposed. Its reopen-after-Back device check
-    failed and must be re-run. Until it lands, `ime_owner` is a single slot
+    app-side half proposed by #85, now closed. Its reopen-after-Back device
+    check failed and must be re-run. Until it lands, `ime_owner` is a single slot
     shared across views (performance item 4).
 24. **Settings queue rows decode whole payloads during composition.**
     `Integrations.jobUrl` (`Integrations.kt:129-132`) JSON-decodes the full
@@ -484,9 +484,9 @@ Do not claim a device reproduction for these. They are from the bridge and
    silently clip an edit or flush an old composition into the next active field.
 5. **`publish()` Room work.** Main still publishes ignored events; open #66,
    reshaped to #24's gate structure, carries the inert-event fix. Paint reports
-   are already limited to one per second, not 60 per second. After that lands, measure stateful title/load bursts
-   before adding a snapshot/dirty flag. Count queries and verify real navigation
-   and title events still publish.
+   are already limited to one per second, not 60 per second. After that lands,
+   measure stateful title/load bursts before adding a snapshot/dirty flag.
+   Count queries and verify real navigation and title events still publish.
 6. **Recent day-grouping allocates a `Calendar` per row.** Reuse one instance, or
    compute the day boundaries once if profiling warrants it. The list also
    re-sorts on every emission of any of its three flows; SQL ordering would
@@ -625,8 +625,9 @@ Do not claim a device reproduction for these. They are from the bridge and
 - Empty states (home, empty Recent) are plain text. One line of useful copy is
   enough. Do not add decoration that competes with the page.
 - The complete palette is in open #62 (wave 2; it supersedes #26 and #55); main
-  still partially overrides Material defaults. Preserve warm paper/pine and charcoal surfaces, system type
-  in chrome and a restrained Reader measure. Beyond roles, the design concept
+  still partially overrides Material defaults. Preserve warm paper/pine and
+  charcoal surfaces, system type in chrome and a restrained Reader measure.
+  Beyond roles, the design concept
   (`docs/design/combray-concepts.fragment.html`) fixes the geometry the app has
   not adopted: a distinct panel surface over the background instead of
   `surface = background`, a soft tint for chips/pressed rows/icon tiles, 12 dp
