@@ -66,6 +66,8 @@ All notable changes to this project are documented here. The format follows
   for what you type; a result opens in a new tab.
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
+- Recent, Hister and Karakeep results mark the words you typed, ignoring
+  case and accents.
 
 ### Changed
 
@@ -123,6 +125,22 @@ All notable changes to this project are documented here. The format follows
 - In Recent, the current tab stays above the pages you browsed in it and
   under the right day. A page you navigate away from is kept for seven days
   from when you left it, not from when it loaded.
+- Recent rows show the site's initial and, for open tabs too, when you
+  last used them, so two tabs on one page can be told apart. Only the
+  current tab is highlighted. Day headers name the weekday for the past
+  week. TalkBack announces the scope chips as tabs and says what tapping
+  a row does.
+- The Hister field's hint reads "Words you remember, searched in Hister…".
+
+### Fixed
+
+- Recent's Open tabs said there were no recent pages, or that nothing
+  matched, while All had some. It now says there is no open tab and
+  offers to show all recent pages.
+- Relative times and Today/Yesterday in Recent went stale while the sheet
+  stayed open; they now update every 30 seconds.
+- After scrolling Recent, a new filter or scope could leave its first
+  matches out of view; the list now starts at the top.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
