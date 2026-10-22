@@ -103,13 +103,14 @@ MiMo fixes, also left open for the owner:
   same Undo as the close button. History rows keep their explicit menu:
   removing a visit has no undo. Offers the swipe part of the close-all item.
 
-Muse session (21 October 2026), left open for the owner's review and merging:
+Muse session (21 October 2026). All seven left open for the owner's review and
+merging; #65 merged the same night (its commits are on main):
 
 | PR / branch | Scope and verification |
 | --- | --- |
 | #55 `muse/theme-roles` | Full Material3 role ladder in pine/ivory for both modes: sheets, checkboxes, radios, switches and snackbars stop falling back to baseline purple. `ThemeContrastTest` pins WCAG 4.5:1 on every text pair the UI can show, 3:1 outline contrast against all six surface steps in both schemes, and ladder ordering incl. `surfaceDim`/`surfaceBright`. Unit + lint green; no device screenshot yet. Overlaps #26 and #62 by title; owner picks one. |
 | #60 `muse/key-whitelist` | `forwardKey` sends only printable input and editing/navigation keys (performance item 16). `KeyForwardingTest` rejects volume/menu/search/launcher-Home/back modifiers and accepts the named page keys; bare Ctrl/Alt/Meta remain undocumented-as-known-limit on the KDoc. Overlaps #56 by title. |
-| #65 `muse/engine-failed-status` | An engine-level error (native `error()`, no tab) received while `STARTING` moves the status to `FAILED` instead of showing "starting" forever; logs at ERROR with its own prefix; classification keys on the missing tab alone. Four coordinator tests incl. a request-carrying tab-less error and post-ready non-failure. |
+| #65 `muse/engine-failed-status` | **Merged.** An engine-level error (native `error()`, no tab) received while `STARTING` moves the status to `FAILED` instead of showing "starting" forever; logs ERROR only for the fatal startup phase; classification keys on the missing tab alone, and `EngineEvent.EngineError` documents that contract. Four coordinator tests incl. a request-carrying tab-less error and post-ready non-failure. Deferred from its round-3 thread: include `event.request` in the engine-level log line. |
 | #66 `muse/inert-event-publish` | `changesPublishedState` is an exhaustive `when` over all twenty-five `EngineEvent` kinds (a new kind is a compile error), gating `publish()`'s three Room reads off eleven inert events; `openTabCount()` is `COUNT(*)`. Both test lists mirror the classifier. Overlaps #24 by title. |
 | #67 `muse/recent-single-flow` | `recent()` subscribes once per sheet open and the sheet filters a remembered list (overlaps #25); `RecentItem.matches` moved onto the model; `RecentItemMatchTest` covers the matcher. The retention `since` is now fixed for the sheet's life — recorded under correctness item 17. |
 | #79 `muse/address-suggestions` | Local completion under the address editor while the text differs from what it opened with: newest first, one row per address, five max, local only, taps run the address policy. `AddressSuggestionsTest` (4 tests). Variant note: this **opens** the page like a Recent row; the chrome section's older proposal fills the field instead — the owner should pick one behavior. Overlaps #63 by title. |
