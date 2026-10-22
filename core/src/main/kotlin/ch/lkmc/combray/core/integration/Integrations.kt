@@ -324,7 +324,9 @@ class Integrations(
         // The list is the one chosen when sending, not when tapping: after its list was deleted,
         // a save can be retried into another one. Creating again finds the same bookmark (200).
         val listId = service.listId ?: return created
-        val bookmarkId = (created as? DispatchResult.Done)?.remoteId ?: return created
+        if (created !is DispatchResult.Done) return created
+        // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
+        val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
         val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
         return if (added is DispatchResult.Done) created else added
     }
@@ -337,6 +339,7 @@ class Integrations(
 
     companion object {
         private const val LOG_TAG = "CombrayIntegrations"
+        private const val BOOKMARK_ID_MISSING = "bookmark_id_missing"
 
         /** API suffixes users paste with the root; removed so endpoints are not doubled. */
         val KARAKEEP_SUFFIXES = listOf("/api/v1", "/api")

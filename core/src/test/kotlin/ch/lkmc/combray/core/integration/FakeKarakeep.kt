@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.integration
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
@@ -13,7 +14,7 @@ import java.util.concurrent.Executors
  * configurable fault for the next requests.
  */
 class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
-    enum class Fault { NONE, STORE_THEN_HANG, TOO_MANY_REQUESTS, SERVER_ERROR, BAD_REQUEST, REDIRECT, MALFORMED }
+    enum class Fault { NONE, STORE_THEN_HANG, TOO_MANY_REQUESTS, SERVER_ERROR, BAD_REQUEST, REDIRECT, MALFORMED, MISSING_ID }
 
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     val bookmarks = LinkedHashMap<String, String>()
@@ -48,9 +49,14 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
             Fault.SERVER_ERROR -> return reply(exchange, 503, "{}")
             Fault.BAD_REQUEST -> return reply(exchange, 400, """{"error":"bad"}""")
             Fault.REDIRECT -> return reply(exchange, 302, "", "Location" to "https://elsewhere.example/")
-            Fault.MALFORMED -> {
+            Fault.MALFORMED, Fault.MISSING_ID -> {
+                val existing = url in bookmarks
                 bookmarks.getOrPut(url) { "bm${bookmarks.size + 1}" }
-                return reply(exchange, 201, "not json")
+                return reply(
+                    exchange,
+                    if (existing) HttpURLConnection.HTTP_OK else HttpURLConnection.HTTP_CREATED,
+                    if (current == Fault.MALFORMED) "not json" else "{}",
+                )
             }
             Fault.STORE_THEN_HANG -> {
                 bookmarks.getOrPut(url) { "bm${bookmarks.size + 1}" }
