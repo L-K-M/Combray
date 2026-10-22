@@ -100,6 +100,7 @@ class BrowserCoordinatorTest {
         // The same address again is a new request, not the one already handled.
         engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
         idle()
+        assertEquals(link.url, state().externalLink?.url)
         assertNotEquals(link, state().externalLink)
     }
 

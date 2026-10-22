@@ -85,7 +85,8 @@ All notable changes to this project are documented here. The format follows
   that none can; an `intent:` link's fallback page opens instead. A link
   that opens a new window for another app no longer leaves a blank tab.
   Pages can no longer open apps without a tap (the end of a scroll does
-  not count), nor `file:` addresses at all. The page stays on screen, but
+  not count), nor `file:` addresses at all, and `intent:` links may not aim
+  another app at device data (`file:`, `content:`). The page stays on screen, but
   Servo still stops what it was loading: a link tapped before the page
   finished loading leaves it unfinished.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
