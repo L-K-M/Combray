@@ -21,6 +21,10 @@ interface BrowserDao {
     @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC")
     suspend fun openTabs(): List<TabEntity>
 
+    /** The open-tab count without materializing every row; publish() runs this per event. */
+    @Query("SELECT COUNT(*) FROM tabs WHERE state = 'OPEN'")
+    suspend fun openTabCount(): Int
+
     @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC")
     fun observeOpenTabs(): Flow<List<TabEntity>>
 

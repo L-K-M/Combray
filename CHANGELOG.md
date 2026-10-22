@@ -69,6 +69,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Paint heartbeats and other engine events that cannot change anything
+  stop running three database reads on the command queue, and the open
+  tab count is a COUNT query instead of loading every open row; taps
+  and page events share that queue, so it stays short.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.
