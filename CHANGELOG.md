@@ -85,6 +85,9 @@ All notable changes to this project are documented here. The format follows
   still sensitive and is never sent to Karakeep or captured for Hister.
   Double-encoded names and ordinary parameters are unchanged, and escapes the
   decoder rejects remain conservative (sensitive).
+- An engine that fails before it is ready (for example a graphics driver
+  error) now shows the engine-failed message instead of claiming the
+  engine is still starting forever.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
