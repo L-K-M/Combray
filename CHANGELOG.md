@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A huge `Retry-After` header no longer overflows into an immediate
+  retry: the seconds are clamped to the six-hour ceiling before
+  conversion to milliseconds.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
