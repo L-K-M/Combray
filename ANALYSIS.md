@@ -31,7 +31,7 @@ mandatory. Its pinned embedding has no Stop API or JavaScript interruption.
 IntersectionObserver enablement has landed on main (`ba4f947`); it is no longer
 in-flight work.
 
-Prioritize the prepared privacy/state fixes, stale-frame correctness, input and
+Prioritize the remaining privacy/state fixes, stale-frame correctness, input and
 bounded extraction; then readable chrome, accessibility and theme validation.
 An open PR is not an implemented feature on main. Remove completed work only
 after it lands and its acceptance evidence is recorded. New ideas below are
@@ -154,7 +154,7 @@ Proposed for one text-size control (#87) and #103's hiding.
 | --- | --- | --- |
 | #82 | Rebase | 3 |
 | #83 | Rebase; CI on the head | 3 |
-| #93 | After #92: clear the reload wait on Stay or hide only when `reload()` started it | 3 |
+| #93 | On #92 (landed): clear the reload wait on Stay or hide only when `reload()` started it | 3 |
 | #87 | Rebase onto #58's `MoreAction`; its device run predates `needs_paint` | 3 |
 | #86 | Bind find to the shown document; land after #103 and #87, adopt #103's `PageRef` and add `MoreAction.FIND` to #58's enum; gate page keyboard requests while the find field is focused; re-run FindTest | 3 |
 | #80 | Catch the `Intent.parseUri` crash on a malformed `intent:` link; ask before opening another app; no "Tab closed" notice for a pop-up that never committed | 3 |
@@ -169,10 +169,11 @@ Proposed for one text-size control (#87) and #103's hiding.
 
 Notes for the open work:
 
-- **Outbox lease (#37, from #29).** One dispatcher runs per process, so an
-  in-process concurrent reclaim cannot happen, and a longer lease only slows
-  crash recovery. Per-read and connect timeouts are still not an overall
-  request deadline: a slow trickle or DNS can outlast a fixed lease. Test a
+- **Outbox lease (#37, landed; from #29).** One dispatcher runs per process, so
+  an in-process concurrent reclaim cannot happen, and a longer lease only slows
+  crash recovery; #37's `LEASE_MS` KDoc says so. Per-read and connect timeouts
+  are still not an overall request deadline: a slow trickle or DNS can outlast
+  a fixed lease. Test a
   slow live request, expiry and takeover, and its stale late completion; use
   deadlines or renewal and fenced transitions, never an exactly-once promise
   (Fusion 15).
@@ -190,9 +191,13 @@ Notes for the open work:
 History/capture atomicity (#32), abandoned-claim expiry (#31), page-info
 dismissal (#48), Karakeep-panel identity (#100), Retry-After clamping (#107),
 the Retention plumbing (#110), percent-encoded credential names (#95) and
-system keys (#56) landed on main on 22 October 2026; do not implement them
-again. Connection labels are in open #43. Validate the listed source candidates
-before editing; none is a new device reproduction.
+system keys (#56) landed on main on 22 October 2026 in wave 1. Wave 2 added
+outbox resilience (#37), patience with unreachable servers (#74), forgotten
+pages staying out of Recent (#41, #36), Recent search over all retained
+history (#72, #67), broader credential names (#91), malformed Hister answers
+(#45) and honest connection labels (#43). Do not implement them again.
+Validate the listed source candidates before editing; none is a new device
+reproduction.
 
 **First remaining privacy slice: capture pause and durable admission (Fusion 2).**
 The due-job query checks `captureEnabled`; `HisterIntegration.dispatch` does not.
@@ -254,13 +259,11 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     roll back only the failed pick. Test a blocked provider racing cleanup, large
     repeated picks, duplicate names, cancellation and disk-full without deleting
     an active attachment.
-8. **Local search misses retained visits beyond the newest 500 (Sol S02).**
-    `BrowserCoordinator.recent(query)` limits `BrowserDao.observeHistory` before
-    filtering title/URL. Search before limiting. Seed more than 500 retained visits
-    and find the oldest unique match; cover Unicode, literal `%`/`_`, failed visits
-    and current-open-visit deduplication. Keep the unfiltered list bounded. Open
-    #72 filters before the cap; the reworked #67 must keep that (#25's
-    collector change did not solve it).
+8. **Landed in #72 and #67 (Sol S02):** a non-blank Recent filter reads every
+    retained visit (`HistoryDepth.ALL_RETAINED`), matches in memory (no SQL
+    `LIKE`, so `%`/`_` are literal) and caps history rows after the filter; a
+    coordinator test finds the oldest of 600 visits. No search test yet covers
+    Unicode case folding, failed visits or the open tab's current visit.
 9. **Service loading and queue rejection states (Sol S17).**
     `HisterSearchPanel`/`KarakeepPanel` initially collect configuration as null,
     flashing a false setup prompt. Delay the first configured emission and verify
@@ -325,7 +328,10 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
 17. **Coordinator lifecycle edges.** `start()` is not idempotent (a second call
     starts a second work-queue consumer and breaks the single-consumer ordering
     invariant); `recent()` computes its retention `since` once per flow, so a
-    long-lived collection's window never slides; `onEngineError` ignores
+    long-lived collection's window never slides (the triage asked #67 not to
+    freeze it; the landed #67 documents the fixed cutoff instead, and an open
+    Recent sheet keeps one flow per depth, so expired visits stay until it
+    reopens or the filter changes depth); `onEngineError` ignores
     refusals without a request, leaving the coordinator believing a dead view is
     on screen; and `pendingCaptures`/`pendingArticles` are removed only when a
     result arrives, so a crashed view leaks them for the process lifetime (fold
@@ -353,13 +359,11 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     the queue: the page is silently never captured again. Skip the early return
     when the matching job is not on its way to the server. File:
     `HisterIntegration.kt`.
-22. **`SensitiveUrls` misses the commonest credential parameters.** `code`
-    (OAuth authorization codes), `signature`, `sig`, `key`, `ticket`,
-    `authcode` are not in `CREDENTIAL_PARAMETERS`, so an OAuth callback URL can
-    be saved to Karakeep or captured to Hister. Extend the set (names; #95
-    handled encoded names). Open #91 extends it; its breadth is Proposed in the
+22. **Landed in #91:** on #95's decoding, `SensitiveUrls` treats `key`,
+    `ticket`, `sig`, `authcode`, names containing `token`, `secret` or
+    `signature`, and `code` beside `state` (an OAuth callback) as credentials;
+    fragments count only `name=value` pairs. Its breadth is Proposed in the
     [owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026).
-    File: `SensitiveUrls.kt`.
 23. **Any page can summon the keyboard without a user gesture.**
     `native/src/delegate.rs` drops `InputMethodControl.allow_virtual_keyboard`
     (and text/insertion point): a page-side `focus()` shows the keyboard at any
@@ -370,16 +374,16 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     failed and must be re-run. Until it lands, `ime_owner` is a single slot
     shared across views (performance item 4).
 24. **Settings queue rows decode whole payloads during composition.**
-    `Integrations.jobUrl` (`Integrations.kt:129-132`) JSON-decodes the full
+    `Integrations.jobUrl` (`Integrations.kt:135-138`) JSON-decodes the full
     capture payload (up to 256 KiB of page text) to read one URL, and
-    `SettingsSheet.kt:490` calls it per row inside composition;
+    `SettingsSheet.kt:552` calls it per row inside composition;
     `observeOpenJobs` re-emits on every outbox write. The same decode runs
     inside `HisterIntegration.jobHost`'s transaction when forgetting a site.
     Persist a `url`/`host` column on the job at enqueue (schema, migration,
     backfill) and never parse payloads in composition. Tests: migration with a
     populated queue, a Settings screen over a full Hister queue stays responsive.
 25. **Switching Recent's scope auto-sends the local filter to a server.**
-    `RecentSheet.kt:132-135` seeds the Hister/Karakeep panels with
+    `RecentSheet.kt:213-215` seeds the Hister/Karakeep panels with
     `initialQuery = query`, and their debounced effect fires the seeded text
     with no further user action. The panels promise "only text typed here is
     sent"; the mental model does not include "my local filter is now a server
@@ -387,7 +391,7 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     request; debounced typing only after the user types in the panel. Test that
     scope entry with a non-blank local filter sends nothing until submitted.
 26. **The work-queue consumer survives `Exception` but not `Error`.**
-    `BrowserCoordinator.kt:101-111` catches `Exception`; an `OOM` or
+    `BrowserCoordinator.start` catches `Exception`; an `OOM` or
     `StackOverflowError` (article JSON is parsed on that same queue) cancels
     the consumer and the browser silently stops processing commands forever,
     while `CancellationException` on shutdown is logged as a failure and posts
@@ -395,17 +399,17 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     degrade visibly. Test with a throwing job that the next command still runs.
 27. **`lastFocusedAt` uses `now - 1`, collapsing ties and inverting recency.**
     Tabs losing focus in the same millisecond get identical values
-    (`BrowserCoordinator.kt:669-676`), and a tab focused at exactly `now` is
+    (`BrowserCoordinator.activate`), and a tab focused at exactly `now` is
     rewritten to a smaller value; `openTabs()` orders by that column, so Recent
     order and `closeLogically`'s successor choice become rowid-dependent when
     links open fast. Use a monotonic focus sequence or `max(old, now - 1)` with
     a tiebreaker. Test two same-millisecond focus changes.
-28. **`onDone` runs inside the `finish` transaction.** `Integrations.kt:329-333`
+28. **`onDone` runs inside the `finish` transaction.** `Integrations.recordDone`
     decodes the payload inside `Outbox.finish`'s `withTransaction`; a decode
-    throw rolls the finish back, so the job stays RUNNING, its lease expires,
-    and it is re-claimed and re-sent forever while success is never recorded.
-    Decode defensively or run `onDone` after the commit. Overlaps #37's guarded
-    steps — check what it already covers before implementing.
+    throw rolls the finish back. Since #37 the drain then records the cycle as
+    `Retry("cycle_failed")`, so the job is re-sent after its backoff until the
+    attempt limit marks it FAILED, and the save's success is never recorded.
+    Decode defensively or run `onDone` after the commit.
 29. **Retention is wall-clock with no forward-jump guard.** `maintain()` deletes
     everything older than seven days at every start; a device clock set far
     forward (manual date, bad NTP) wipes all local history and closes unused
@@ -415,13 +419,15 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     adopts `window.open` from the active view with no user-activation check
     (Servo 0.6 does not report activation) and each becomes a full logical tab;
     `releaseViewsBeyond` evicts renderers, not tabs. Cap adoptations per opener
-    per time window, or require the coordinator's last real input time. #84
-    targets the same surface from the native side — check it first.
+    per time window, or require the coordinator's last real input time. #57
+    (landed) records the opener for Back but caps nothing. #84 targets the
+    same surface from the native side; check it first.
 31. **`BrowserSettings.apply()` can lose a just-toggled setting.** Process death
-    right after the tap reverts it silently (`BrowserSettings.kt:18`). Use
+    right after the tap reverts it silently (`BrowserSettings.write`, which
+    #52's theme choice uses too). Use
     `commit()` for this tiny write, or document the loss.
 32. **`onCheckIsTextEditor()` is always true while the engine runs.**
-    `EngineSurfaceView.kt:134`: TalkBack announces the whole page area as an
+    `EngineSurfaceView.kt:140`: TalkBack announces the whole page area as an
     editable field, and the IME can re-show after a window refocus with no page
     field. Return whether the engine reports an active field (last ImeShown
     without ImeHidden).
@@ -490,16 +496,16 @@ Do not claim a device reproduction for these. They are from the bridge and
    emoji/surrogates, large ranges, field/tab changes, navigation and dismissal.
    Use bounded view/field-attributed edits or decline unsupported requests; do not
    silently clip an edit or flush an old composition into the next active field.
-5. **`publish()` Room work.** Main still publishes ignored events; open #66,
-   reshaped to #24's gate structure, carries the inert-event fix. Paint reports
-   are already limited to one per second, not 60 per second. After that lands, measure stateful title/load bursts
-   before adding a snapshot/dirty flag. Count queries and verify real navigation
-   and title events still publish.
-6. **Recent day-grouping allocates a `Calendar` per row.** Reuse one instance, or
-   compute the day boundaries once if profiling warrants it. The list also
-   re-sorts on every emission of any of its three flows; SQL ordering would
-   remove the per-emission sort. Search truncation
-   is correctness item 8, separate from collector/grouping cost.
+5. **`publish()` Room work.** #66 (landed, in #24's gate structure) skips
+   `publish()` for inert events such as paint heartbeats, which arrive once per
+   second per painting tab. Measure stateful title/load bursts before adding a
+   snapshot/dirty flag. Count queries and verify real navigation and title
+   events still publish.
+6. **Recent re-sorts on every emission.** #64 (landed) computes day boundaries
+   with `java.time` once per list change, not a `Calendar` per row. The list
+   still re-sorts on every emission of any of its three flows; SQL ordering
+   would remove the per-emission sort. Search truncation landed with #72 and
+   #67 (correctness item 8).
 7. **Measure startup before changing initialization.** The actual
    `KeystoreSecretStore` constructor creates its directory; `key()` loads
    AndroidKeyStore lazily during credential access, not automatically in
@@ -515,13 +521,9 @@ Do not claim a device reproduction for these. They are from the bridge and
 10. **Profile writes block the engine thread** (patch 0004, every five minutes and
     on leaving the app). Measure write-related stalls during a fling. Density is
     also read only at startup: exercise a display-size change within one process.
-11. **`openTabCount()` query optimization**: `publish()` currently runs
-    `dao.openTabs().size`, which executes a full `SELECT * FROM tabs WHERE state = 'OPEN'`
-    loading all `TabEntity` rows into memory on every stateful coordinator event.
-    Replace with `@Query("SELECT COUNT(*) FROM tabs WHERE state = 'OPEN'") suspend fun openTabCount(): Int`
-    if measurements justify it. Prefer the count query before introducing another
-    cache; cached active IDs/counts must stay transactional with tab state.
-    Open #66 adds this count query.
+11. **Landed in #66:** `publish()` reads `dao.openTabCount()` (`SELECT COUNT(*)`)
+    instead of loading every open `TabEntity`. Any later cache of active IDs or
+    counts must stay transactional with tab state.
 12. **Bound acquisition before serialization (Sol S20).**
     `engine.rs:1433–1492` clones select options/optgroups and dialog strings before
     `controls.rs` truncates JSON. Limit acquisition, including selected IDs and
@@ -535,10 +537,10 @@ Do not claim a device reproduction for these. They are from the bridge and
     Measure cold chrome, resident/evicted switches, scroll frames, 1/10/30-tab
     memory, idle CPU, thermals and background timers on a real GPU. The loop polls
     at 250ms and selection survives backgrounding; use lifecycle evidence before
-    changing suspension, frame scheduling or the live-view budget. The missing
-    visibility hint is offered by PR #96 `fusion/background-throttling`; remaining work
-    is real-GPU validation, not another implementation of that hint. No measured
-    CPU/FPS/battery numbers.
+    changing suspension, frame scheduling or the live-view budget. The
+    visibility hint landed with #96 `fusion/background-throttling`, a hint Servo
+    0.6.0 does not reliably honor; remaining work is real-GPU validation, not
+    another implementation of that hint. No measured CPU/FPS/battery numbers.
 14. **History index candidate.** For `BrowserDao.observeHistory`, run EXPLAIN QUERY
     PLAN and timing on thousands of good/failed visits. Add a composite
     `visits(failed, lastSeenAt)` index in `BrowserEntities.kt` only if it helps
@@ -558,7 +560,7 @@ Do not claim a device reproduction for these. They are from the bridge and
 16. **Landed in #56** (with #60's tests): `forwardKey` consumes only keys
     `servo_key` maps, so system keys such as the volume rocker reach Android.
 17. **Every state emission recomposes the whole screen, open sheet included,
-    through freshly allocated lambdas.** `BrowserScreen.kt:75` collects one
+    through freshly allocated lambdas.** `BrowserScreen.kt:95` collects one
     `browserState` at the top; each engine-event pass rebuilds `dismiss`,
     `notify`, the `onDecision` tree and every sheet callback, so an open
     Address/Recent/Settings sheet fully recomposes for events it does not
@@ -567,9 +569,9 @@ Do not claim a device reproduction for these. They are from the bridge and
     the state read or give callbacks stable identities. Measure with the
     recomposition compiler report before and after.
 18. **Small query waste beyond the history index.** `releaseViewsBeyond` runs
-    one `dao.tab()` per live view after `openTabs()` (`BrowserCoordinator.kt:
-    775-784`); `openTabs()` filters `state='OPEN' ORDER BY lastFocusedAt` with
-    no composite index; `observeOpenJobs` has no index on `service`;
+    one `dao.tab()` per live view after `openTabs()`
+    (`BrowserCoordinator.releaseViewsBeyond`); `openTabs()` filters
+    `state='OPEN' ORDER BY lastFocusedAt` with no composite index; `observeOpenJobs` has no index on `service`;
     `deleteVisitsForHost` mixes `host =` with `substr(host, …)` and defeats its
     index; `HisterIntegration.eligible()` runs service + exclusion queries on
     every capture decision and every dispatch. Cheap individually — fold into
@@ -587,9 +589,10 @@ Do not claim a device reproduction for these. They are from the bridge and
   to two lines under a narrow width, or fade the trailing edge.
   File: `RecentSheet.kt`.
   Date separators, active/open text markers and local filtering already exist;
-  improve hierarchy rather than rebuilding them. Open tabs needs its own empty
-  message instead of advertising the history that scope hides. Cover duplicate
-  tabs, last rows/pagination, long labels, keyboard and 200% text with TalkBack.
+  improve hierarchy rather than rebuilding them. Open tabs has its own empty
+  message since #64, which also added weekday headers and site tiles. Cover
+  duplicate tabs, last rows/pagination, long labels, keyboard and 200% text
+  with TalkBack.
   Local typing stays local; remote requests require an explicit Hister/Karakeep
   scope. Keep local, long-term and web search distinguishable.
 - The Hister and Karakeep panels clear their results on every keystroke while
@@ -622,28 +625,28 @@ Do not claim a device reproduction for these. They are from the bridge and
 - Address-sheet focus is requested in `LaunchedEffect` and may run before the
   sheet window is laid out. Confirm the keyboard opens and the field clears it
   on a device.
-- Recent's relative times are frozen at the composition that opened the sheet
-  (`RecentSheet.kt` reads `now` once, and item keys stop rows recomposing on
-  scroll): a sheet kept open says "5 minutes ago" for an hour. Recompute per
-  row, or on a slow ticker, keeping `DateUtils.getRelativeTimeSpanString`.
+- Landed in #64: Recent's relative times and day headers follow a 30-second
+  clock while the sheet stays open.
 - Cold start with a restored tab paints the "Starting the engine…" overlay
   across the whole page area until the engine reports ready
-  (`BrowserScreen.PageOverlay`). The restored page paints shortly after; show
-  nothing (or the home surface) for that sub-second window to avoid the flash.
+  (`BrowserScreen.PageOverlay`). #78's launch screen covers only the session
+  restore (two seconds at most), not engine startup. The restored page paints
+  shortly after; show nothing (or the home surface) for that sub-second window
+  to avoid the flash.
 - Empty states (home, empty Recent) are plain text. One line of useful copy is
   enough. Do not add decoration that competes with the page.
-- The complete palette is in open #62 (wave 2; it supersedes #26 and #55); main
-  still partially overrides Material defaults. Preserve warm paper/pine and charcoal surfaces, system type
+- The complete palette landed in #62 (it superseded #26 and #55): every color
+  role is set, and `ThemeContrastTest` checks text and outline pairs against
+  WCAG. Preserve warm paper/pine and charcoal surfaces, system type
   in chrome and a restrained Reader measure. Beyond roles, the design concept
   (`docs/design/combray-concepts.fragment.html`) fixes the geometry the app has
   not adopted: a distinct panel surface over the background instead of
   `surface = background`, a soft tint for chips/pressed rows/icon tiles, 12 dp
   chips and fields, 23 dp sheet tops, and the restrained type scale (20/500
-  sheet titles, 14/500 rows, 11–12 meta). Also: Save is a star while Karakeep is
-  a bookmark manager and the concept uses `bookmark`/`bookmark-check`; reader
-  view could take a paper tone in light mode; the loading line could take the
-  accent tint. Verify sheets, chips, outlines,
-  disabled/errors, dialogs, Reader and system bars in both modes, including text
+  sheet titles, 14/500 rows, 11–12 meta). Save is a bookmark since #76, as the
+  concept's `bookmark`/`bookmark-check`. Also: reader view could take a paper
+  tone in light mode; the loading line could take the accent tint. Verify
+  sheets, chips, outlines, disabled/errors, dialogs, Reader and system bars in both modes, including text
   and non-text contrast. Landscape/large text on Recent and Settings is unverified.
   Lint also flags the missing monochrome layer in
   `app/src/main/res/mipmap-anydpi/ic_launcher.xml`. If themed launcher icons
@@ -653,63 +656,66 @@ Do not claim a device reproduction for these. They are from the bridge and
 - Theme override: decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   An in-app Follow the system / Light / Dark choice; pine and ivory stay the
-  default, with no Material You default and no pitch-black variant. Open #52
-  implements it (wave 2); #54 must then follow the in-app theme for pages.
+  default, with no Material You default and no pitch-black variant. #52 landed
+  it (Settings › Display › Appearance, `ThemeMode`); open #54 (wave 3) must
+  follow the in-app theme for pages.
 - Local history completion in the address editor: decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   A history row opens in the tab being edited (a new tab when the editor is for
   a new tab); an open-tab row switches to that tab. Rows stay clearly on-device
-  (the plan's "no autosuggest" covers search typing and server contact). Open
-  #63 implements it with #79's grafts (wave 2).
-- The More sheet's pause row uses `Close` (X) for "Pause history capture"
-  (`MoreSheet.kt:76`): X reads as remove, not pause. Hand-build a pause glyph
-  the way `StarBorder` already does, or pick accurate semantics.
-  The sheet also hides Forward conditionally while other rows stay, so its
+  (the plan's "no autosuggest" covers search typing and server contact). #63
+  landed it with #79's grafts.
+- The More sheet's pause row has a hand-built pause glyph since #58.
+  The sheet still hides Forward conditionally while other rows stay, so its
   height changes between tabs; consider fixed rows with disabled states for
   muscle memory, keeping the "only offer what works" intent.
 - Home and the engine-failure overlays are fixed centered columns with no
-  scroll (`BrowserScreen.kt:324-360`): at 200% font on a 320 dp screen the
+  scroll (`BrowserScreen.kt:472-507`): at 200% font on a 320 dp screen the
   headline and two 240 dp buttons clip with no way to reach them. Wrap them in
   a scroll container.
 - "Not configured" notices inside the Hister/Karakeep panels are static text
-  (`HisterSearchPanel.kt:98`, `KarakeepPanel.kt:98`) where the save path
+  (`HisterSearchPanel.kt:100`, `KarakeepPanel.kt:103`) where the save path
   correctly offers a Settings action. Make them one tap from the fix.
 - A queue row with no URL falls back to showing the raw `dedupeKey`
-  (`SettingsSheet.kt:490`); use a neutral "Unknown page". The Hister exclusion
-  list has no empty state and removes rows instantly (`SettingsSheet.kt:443-453`)
+  (`SettingsSheet.kt:552`); use a neutral "Unknown page". The Hister exclusion
+  list has no empty state and removes rows instantly (`SettingsSheet.kt:505-516`)
   against the app's own confirm-or-undo standard.
-- The local Recent filter field sets no IME action (`RecentSheet.kt:122-128`):
+- The local Recent filter field sets no IME action (`RecentSheet.kt:202-208`):
   plain Enter, keyboard stays up, unlike the panels' `ImeAction.Search`.
 - TalkBack gaps: the More and Address sheets have no heading node (focus lands
-  in a list/field with no context, unlike Recent and Settings); overlay states
+  in a list/field with no context, unlike Recent and Settings; #63's "On this
+  device" heading shows only with suggestions); overlay states
   (engine missing/failed/starting, page crashed) have no live region, so a
   crash is silent until exploration. The loading indicator's "Loading" is not
   announced as a start either.
 - Sheet gutters disagree: 16 dp (Address, Recent), 24 dp (Settings), default
   list inset (More). Pick one rule and apply it.
-- Record the frozen palette tokens and their measured contrast in
-  `docs/design/tokens.md` once #62 lands; the
-  design README asked for on-device validation before freezing, and none is
-  recorded.
+- #62 has landed, and `ThemeContrastTest` computes its contrast in a unit
+  test. Record the frozen palette tokens and their measured contrast in
+  `docs/design/tokens.md`; the design README asked for on-device validation
+  before freezing, and none is recorded.
 - The address chip's security icon comes from the URL scheme string, not from
-  engine data; the plan asks for engine-derived state. Today only `loadFailed` is
-  engine truth in that chip, and #43 governs the label's honesty. Do not draw a
-  lock the engine did not confirm.
+  engine data; the plan asks for engine-derived state. Since #43 the chip draws
+  an icon only for a failed load (`loadFailed`, engine truth) or a cleartext
+  `http:` address (the scheme string), and Page Info no longer calls HTTPS
+  verified. Do not draw a lock the engine did not confirm.
 - Touch targets: Audit icon buttons in `BottomBar` and `RecentSheet` to ensure
   48x48dp minimum interactive component size (`Modifier.minimumInteractiveComponentSize()`).
   Bottom-bar checks already exist; prioritize Recent and Settings and measure
   non-overlap before adding blanket modifiers. Five 48dp actions leave roughly
-  64dp for the address surface at 320dp, before its icon/padding. The owner
-  chose #50's own address row below about 400dp
+  64dp for the address surface at 320dp, before its icon/padding. #50 landed
+  the owner's choice of an own address row below about 400dp
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026));
-  verify it preserves readable origin, Share and target sizes.
+  AccessibilityTest checks both layouts at 320dp and 412dp but has not run on
+  a device. Verify it preserves readable origin, Share and target sizes.
   Start ellipsis preserves the string suffix, not necessarily the complete
   registrable domain, despite the source comment (Fusion 12). Check actual
   rendered site identity at 320/360dp, 200% type, RTL, long IDNs/subdomains and
   99/1000 tabs; passing hit-target semantics alone is insufficient.
 - Soft keyboard layout stability: verify existing `imePadding`, focus timing and
   viewport resizing before adding animated insets. Respect reduced motion.
-  Measure snackbar/bar bounds; its fixed 72dp clearance may not fit every font.
+  Since #50 snackbars clear the bar's measured height instead of a fixed 72dp;
+  still measure snackbar/bar bounds with large fonts and the keyboard up.
 - OLED pitch-black option: declined; the owner chose no pitch-black variant
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
 - Configurable retention period: Expose history retention in `SettingsSheet`
@@ -739,18 +745,20 @@ landscape/tablet widths is an option to evaluate with the same measurements.
 - Swipe up on bottom bar to open Recent sheet: Fluid gesture opening Recent/Tabs
   from anywhere on the bottom navigation bar.
   Keep an accessible visible route and avoid Android's system gesture region.
-  Sideways swipes on the bar are decided as tab switching (next item), so an
-  upward swipe must stay distinct from them.
+  Sideways swipes on the bar switch tabs since #109 (next item), so an upward
+  swipe must stay distinct from them.
 
 - Previous tab and tab switching: decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   Long-pressing Recent switches to the previously used tab (`lastFocusedAt`
   already orders tabs), and swiping sideways on the bottom bar switches tabs.
-  Open #109 implements the long-press and takes the swipe in wave 2. Keep a
-  visible action and avoid fighting Back or the page's gestures.
+  #109 landed both: the long-press, and sideways swipes that step through open
+  tabs in Recent order. Keep a visible action and avoid fighting Back or the
+  page's gestures.
 - A pending mark on Save when the outbox still has work, separate from the
-  per-page star.
-  Per-page Pending already has a spinner/live-region label; add another mark only
+  per-page bookmark.
+  Per-page Pending already has a spinner/live-region label, and Waiting a clock
+  (#74, #76); add another mark only
   for distinct useful information. Capture acknowledgment is not proof of indexing.
 - On the new-tab surface, one line: the last page you can reopen, and the open
   tabs. That is the Recent-home idea in miniature. Do not retire the sheet.
@@ -762,8 +770,9 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   monogram and host quick links on that surface; it waits on the owner.)
 - Reader text size: Proposed in the
   [owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)
-  as one control, where page zoom (#87, More › Text size) also scales Reader
-  instead of #52's separate reader size. Body text is fixed at 18 sp today.
+  as one control, where page zoom (#87, More › Text size) also scales Reader;
+  #52 landed without its separate reader size. Body text is a fixed 18 sp
+  serif since #77.
   Reading seam: preserve Reader scroll across a brief departure only for the
   same tab/document; invalidate it when content is replaced. A quiet local reading-
   time estimate can join byline metadata; do not assume an English word rate.
@@ -779,7 +788,7 @@ landscape/tablet widths is an option to evaluate with the same measurements.
 - Close all tabs, or close other tabs, from Recent. Swiping a tab row to close
   it is decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026))
-  and open #53 implements it (wave 2); the close button and Undo stay, so the
+  and #53 landed it; the close button and Undo stay, so the
   swipe is never the only way to close a tab.
 - Open copied link: when the new-tab page is up and the clipboard holds a URL
   (or text containing one), show one chip to open it. Android shows its own
@@ -787,18 +796,19 @@ landscape/tablet widths is an option to evaluate with the same measurements.
 - A Kagi bangs hint under the new-tab buttons: queries already go to Kagi, so
   `!w`, `!gh` and friends work for free. One muted line, no maintenance.
 - Open Recent straight on the Hister scope (the owner's long-term memory lives
-  there). Long-press Recent is taken by the previous tab, so this needs another
-  gesture.
+  there). #61's "Search history" launcher shortcut does this from the launcher.
+  In the app, long-press Recent is taken by the previous tab, so this needs
+  another gesture.
 - Haptics: decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   A tick when a save lands, a distinct one when it is refused, and one on a page
-  long-press; open #76 implements them (wave 2). A calm morph of the Save icon
+  long-press; #76 landed them. A calm morph of the Save icon
   instead of the spinner overlay stays an idea.
 - Share into Combray: decided
   ([owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)).
   Other apps can share links and text into Combray, and "Save to Karakeep" from
-  the share sheet asks for one tap before it saves. Open #61 implements it
-  (wave 2) and must add that confirmation.
+  the share sheet asks for one tap before it saves. #61 landed it with that
+  confirmation, plus launcher shortcuts.
 - Hardware keyboard shortcuts (Ctrl+T/W/L/R, Ctrl+F) once the engine forwards
   modifiers (engine item 4 drops `metaState` today).
 - Favicons in Recent or the address chip only if the embedder already has them.
@@ -814,7 +824,8 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   letter in Recent rows and the address chip, tinted deterministically from the
   pine/ivory family. Solves "two same-host tabs are indistinguishable" with no
   network (favicons are a privacy surface) and no engine work. Pure function of
-  `displayHost`; keep it quiet.
+  `displayHost`; keep it quiet. #64 landed the Recent-row tile in one sage
+  tint; the per-host tint and the address chip remain.
 - Undo for forgetting: `forgetVisit`/`forgetSite` delete local history and
   cancel queued captures with no recovery path, while tab close has Undo.
   A short-lived restore needs the deleted row and its captures back in one
@@ -946,9 +957,10 @@ left to ephemeral /tmp.
 
 Unit-test gaps found by the Muse pass, each cheap and each missing today
 (#31's tests now cover retention at claim time for RUNNING rows past the age
-limit): a drain whose `prune`/`claim`/`finish` throws still scheduling its wakeup,
-`Notice.Problem` ever reaching the snackbar, Recent ordering ties and the
-500-row cap, `SERVO_ERROR_TITLES` asserted against the real engine on a
+limit; #37's `OutboxTest` covers a drain whose storage, claim or finish step
+throws still booking its wakeup; #72 and #67 cover the 500-row cap):
+`Notice.Problem` ever reaching the snackbar, Recent ordering ties,
+`SERVO_ERROR_TITLES` asserted against the real engine on a
 device, and one emulator flow of the address sheet: type, receive a #63
 suggestion, open it, rotate with the IME up. Dark-mode screenshots of the
 finished palette (sheets, checkboxes, switches, chips) are still the missing
@@ -969,9 +981,10 @@ visual evidence for the palette work.
   Use the pinned rustup proxy; prepare Servo before host path-dependency tests.
 - Set `ANDROID_HOME` to the actual SDK. The Sol run used
   `/home/paseo/android-sdk`; `/home/paseo/Android/Sdk` is only a default location.
-- Keep this backlog consolidated. Sol S03/S09/S17 overlap the inert-event (#66),
-  palette (#62) and budget (#30, landed) work; do not start competing
-  implementations. S01/S13/S14/S15 landed with #34, #31, #32 and #35.
+- Keep this backlog consolidated; do not start competing implementations. Sol
+  S03 landed with #66, S09's palette with #62 (its geometry is still open under
+  Chrome) and S17's budget half with #30 (its loading half is correctness
+  item 9). S01/S02/S13/S14/S15 landed with #34, #72 and #67, #31, #32 and #35.
 - Preserve URL/document identity and credentials at every boundary. Avoid
   unescaped SQL LIKE for local search, token-based account identities, or
   timestamps presented as a server latest-wins guarantee.
