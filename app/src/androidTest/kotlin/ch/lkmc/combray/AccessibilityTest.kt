@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -390,7 +391,9 @@ class AccessibilityTest {
         onMore = {},
         onCopyAddress = onCopyAddress,
         onSwipeTab = {},
-        modifier = Modifier.width(width),
+        // Required, not just preferred: the reference emulator is 360dp wide, and a wider bar must
+        // still measure its own width to take the single-row layout.
+        modifier = Modifier.requiredWidth(width),
     )
 
     private companion object {

@@ -11,6 +11,7 @@ import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.ui.displayHost
+import ch.lkmc.combray.ui.shareTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,16 +43,20 @@ class SaveToKarakeepActivity : Activity() {
             return
         }
 
-        // A subject that only holds the link is no title: Karakeep then uses the page's own.
+        // A subject that only holds the link is no title: Karakeep then uses the page's own. The
+        // sharing app chooses the subject, so it is one bounded line, below the real site.
         val title = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
-            ?.takeIf { it.isNotBlank() && IncomingIntents.firstWebAddress(it) == null }
-        AlertDialog.Builder(this)
+            ?.takeIf { IncomingIntents.firstWebAddress(it) == null }
+            ?.let(::shareTitle)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.share_save_confirm)
-            .setMessage(listOfNotNull(title, displayHost(url)).joinToString("\n"))
+            .setMessage(listOfNotNull(displayHost(url), title).joinToString("\n"))
             .setPositiveButton(R.string.action_save) { _, _ -> save(url, title) }
             .setNegativeButton(R.string.action_cancel) { _, _ -> finish() }
             .setOnCancelListener { finish() }
             .show()
+        // Another app's overlay must not trick the tap that saves.
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).filterTouchesWhenObscured = true
     }
 
     private fun save(url: String, title: String?) {

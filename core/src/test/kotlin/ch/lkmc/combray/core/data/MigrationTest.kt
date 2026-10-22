@@ -59,6 +59,24 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun version4KeepsTabsAndMarksNoPageForgotten() {
+        helper.createDatabase(DB, 3).use {
+            it.execSQL(
+                "INSERT INTO tabs (id, state, currentVisitId, url, title, createdAt, lastFocusedAt, closedAt) " +
+                    "VALUES ('t', 'OPEN', NULL, 'https://a.example/', 'A', 1, 2, NULL)",
+            )
+        }
+        helper.runMigrationsAndValidate(DB, 4, true).use { db ->
+            db.query("SELECT url, title, pageForgotten FROM tabs").use { row ->
+                row.moveToFirst()
+                assertEquals("https://a.example/", row.getString(0))
+                assertEquals("A", row.getString(1))
+                assertEquals(0, row.getInt(2))
+            }
+        }
+    }
+
     /**
      * Room rewrites a version's schema file whenever an entity changes, and the tests above read
      * those files, so an entity change without a version bump would pass them and then fail to open
@@ -92,6 +110,7 @@ class MigrationTest {
             1 to "8991a47d48450bc74524c22aa282d21f",
             2 to "1fbbc5b0e479253d149c896b338615ec",
             3 to "ca194eaf23c7010cf9ee87695093f140",
+            4 to "783659b8d5966f6a926345b2bf922f59",
         )
     }
 }

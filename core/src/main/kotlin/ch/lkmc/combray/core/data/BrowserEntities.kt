@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -30,6 +31,12 @@ data class TabEntity(
     val createdAt: Long,
     val lastFocusedAt: Long,
     val closedAt: Long?,
+    /**
+     * The page the tab shows belongs to a forgotten site and has no visit. Until the tab moves to
+     * another page, loading it again (a restored, evicted or crashed renderer, a reload) records
+     * no visit and captures nothing.
+     */
+    @ColumnInfo(defaultValue = "0") val pageForgotten: Boolean = false,
 )
 
 /**

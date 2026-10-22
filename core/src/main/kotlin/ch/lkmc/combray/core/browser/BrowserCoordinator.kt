@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -96,6 +97,8 @@ class BrowserCoordinator(
 
     /** Process visibility; conservatively backgrounded until Android reports onStart. */
     private var visibility = AppVisibility.BACKGROUND
+    /** The tab focused before the focused one, in this process: the quick switch returns there. */
+    private var previousTabId: String? = null
     private val pendingCaptures = HashMap<Long, PendingCapture>()
     private val pendingArticles = HashMap<Long, PendingArticle>()
 
@@ -183,20 +186,29 @@ class BrowserCoordinator(
      * history: the newest [RECENT_HISTORY_LIMIT] visits to browse, or every retained visit
      * to search, so a match older than the newest rows is still found. The filter runs in the
      * caller with [matching] against one subscription per depth, so typing does not restart
-     * three Room observers on every keystroke. The retention cutoff is fixed when the flow is
-     * created: a long-open sheet keeps showing visits until it is opened afresh.
+     * three Room observers on every keystroke. The query reads from the retention cutoff at
+     * subscription; each answer, and a slow clock while nothing changes, applies the cutoff as it
+     * is then, so a visit leaves an open sheet once it passes the retention period.
      */
     fun recent(depth: HistoryDepth = HistoryDepth.NEWEST): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
         val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else Int.MAX_VALUE
+        val ticks = flow {
+            while (true) {
+                emit(Unit)
+                delay(RECENT_CUTOFF_TICK_MS)
+            }
+        }
         return combine(
             dao.observeOpenTabs(),
             dao.observeHistory(since, historyLimit),
             dao.observeSession(),
-        ) { tabs, visits, session ->
+            ticks,
+        ) { tabs, visits, session, _ ->
+            val cutoff = clock.now() - retention.closedHistoryMillis
             val items = tabs.map {
                 RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId)
-            } + visits.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
+            } + visits.filter { it.lastSeenAt >= cutoff }.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
             items.sortedByDescending { it.time }
         }
     }
@@ -290,10 +302,13 @@ class BrowserCoordinator(
     private suspend fun navigateTab(tab: TabEntity, url: String) {
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
+            // Going somewhere else is the user leaving a forgotten page: what loads next is recorded.
+            if (tab.pageForgotten) dao.updateTab(tab.copy(pageForgotten = false))
             val request = nextRequest++
             engine.navigate(view.nativeTab, request, url)
             awaitCommit(view)
             view.awaitedRequest = request
+            view.awaitedUrl = url
             return
         }
         // No renderer yet (new tab, restored tab): the request becomes the recovery address.
@@ -319,12 +334,18 @@ class BrowserCoordinator(
     }
 
     /**
-     * Quick switch: focuses the open tab used most recently before the focused one (the
-     * runner-up by `lastFocusedAt`, which [activate] keeps just behind the focused tab).
+     * Quick switch: focuses the tab the user left for the focused one. A tab opened in the
+     * background ranks right behind the focused tab in Recent without having been used, so the
+     * runner-up by `lastFocusedAt` is only the fallback after a restart, skipping such tabs
+     * ([createBackgroundTab] ranks them before their creation time).
      */
     fun focusPreviousTab() = submit {
         val active = activeTab()
-        val previous = dao.openTabs().firstOrNull { it.id != active?.id } ?: return@submit
+        val open = dao.openTabs().filter { it.id != active?.id }
+        val previous = open.firstOrNull { it.id == previousTabId }
+            ?: open.firstOrNull { it.lastFocusedAt >= it.createdAt }
+            ?: open.firstOrNull()
+            ?: return@submit
         focus(previous)
         reconcile()
         publish()
@@ -721,8 +742,18 @@ class BrowserCoordinator(
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
         val now = clock.now()
 
+        // Before this event: a view that has shown nothing yet is loading its tab's page again.
+        val firstCommit = view.currentDocument == null
+
         database.withTransaction {
             val current = tab.currentVisitId?.let { dao.visit(it) }
+            // A page of a forgotten site stays open without a visit. Loading it again in a new
+            // renderer (restore, eviction, a crash), reloading it or moving within it records
+            // nothing (and requestCapture sends nothing); another page committing in the tab ends that.
+            val forgotten = tab.pageForgotten && when (event.kind) {
+                HistoryKind.DOCUMENT_COMMITTED -> firstCommit || event.url == tab.url
+                HistoryKind.SAME_DOCUMENT, HistoryKind.LIST_UPDATED -> true
+            }
             // A single-page app can replace the article without replacing its document.
             if (reader?.tabId == view.tabId && (event.kind == HistoryKind.DOCUMENT_COMMITTED || event.url != tab.url)) {
                 reader = null
@@ -736,12 +767,14 @@ class BrowserCoordinator(
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
-                    committedVisit(view, tab, current, event, now)
+                    if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
-                    view.awaitingCommit = false
+                    // Only an awaited address within this page (a typed "#part") commits this way:
+                    // the old page rewriting its own address does not answer the request.
+                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) view.awaitingCommit = false
                     scheduleCapture(view, event.document, captureTiming.debounceMs)
-                    sameDocumentVisit(view, tab, current, event, now)
+                    if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
                     if (it.url == event.url) it else it.copy(url = event.url, host = HostNames.of(event.url)).also { updated -> dao.updateVisit(updated) }
@@ -754,9 +787,11 @@ class BrowserCoordinator(
             // left. A hidden tab loading pages is not in use: closing unused tabs still closes it.
             val focused = dao.session()?.activeTabId == tab.id
             val lastFocusedAt = if (focused) now else tab.lastFocusedAt
-            // A forgotten page stays open without a visit: a history-list update leaves its label.
-            val title = if (visit == null && event.kind == HistoryKind.LIST_UPDATED) tab.title else visit?.title
-            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt))
+            // A forgotten page stays open without a visit, under its last title.
+            val title = if (visit == null && (forgotten || event.kind == HistoryKind.LIST_UPDATED)) tab.title else visit?.title
+            dao.updateTab(
+                tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
+            )
         }
     }
 
@@ -888,6 +923,7 @@ class BrowserCoordinator(
     private fun awaitCommit(view: LiveView) {
         view.awaitingCommit = true
         view.awaitedRequest = null
+        view.awaitedUrl = null
         val request = ++view.commitRequests
         scope.launch {
             delay(navigationTimeoutMs)
@@ -906,7 +942,8 @@ class BrowserCoordinator(
         // Servo's error pages carry the failed address but are not that page's content.
         if (document in view.errorDocuments) return
         val generation = view.generation ?: return
-        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
+        // A forgotten page is not sent again while its tab shows it ([TabEntity.pageForgotten]).
+        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && !it.pageForgotten } ?: return
         val url = tab.url ?: return
         val policy = sink.wantsCapture(url) ?: return
         val id = nextRequest++
@@ -925,7 +962,8 @@ class BrowserCoordinator(
         val content = event.content ?: return
         if (content.title in SERVO_ERROR_TITLES) return
         val view = view(event.view)?.takeIf { it.currentDocument == pending.document && pending.document !in it.errorDocuments } ?: return
-        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url } ?: return
+        // A capture that was on its way when the site was forgotten is dropped with it.
+        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url && !it.pageForgotten } ?: return
         capture?.captured(
             CapturedPage(
                 tabId = tab.id,
@@ -986,6 +1024,10 @@ class BrowserCoordinator(
         liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return
         engine.clearFind(searched)
     }
+
+    /** Whether [reported], a same-document change, is [awaited]: the same address up to a fragment. */
+    private fun isSameDocumentTarget(awaited: String, reported: String): Boolean =
+        '#' in awaited && awaited.substringBefore('#') == reported.substringBefore('#')
 
     private fun view(ref: ViewRef): LiveView? =
         liveByNative[ref.tab]?.takeIf { it.generation == ref.generation }
@@ -1071,6 +1113,7 @@ class BrowserCoordinator(
         val previous = dao.session()?.activeTabId
         if (previous != null && previous != tabId) {
             dao.tab(previous)?.takeIf { it.state == TabState.OPEN }?.let { dao.updateTab(it.copy(lastFocusedAt = now - 1)) }
+            previousTabId = previous
         }
         dao.setSession(SessionEntity(activeTabId = tabId))
         if (tabId != otherAppTab) otherAppTab = null
@@ -1273,7 +1316,7 @@ class BrowserCoordinator(
      */
     private suspend fun detachCurrentPage(tab: TabEntity, recoveryUrl: String?) {
         tab.currentVisitId?.let { dao.visit(it) }?.let { retireVisit(tab, it, clock.now()) }
-        dao.updateTab(tab.copy(url = recoveryUrl, title = null, currentVisitId = null))
+        dao.updateTab(tab.copy(url = recoveryUrl, title = null, currentVisitId = null, pageForgotten = false))
     }
 
     private suspend fun maintain() {
@@ -1352,6 +1395,9 @@ class BrowserCoordinator(
 
         /** The engine request of the awaited address, so only its refusal ends the wait. */
         var awaitedRequest: Long? = null
+
+        /** The awaited address, when the app navigated to one; a reload or a new view awaits none. */
+        var awaitedUrl: String? = null
         var canGoBack = false
         var canGoForward = false
         var crashed = false
@@ -1442,6 +1488,9 @@ class BrowserCoordinator(
 
         /** Proposed default: well past a slow home server, short of a stuck bar. */
         const val NAVIGATION_TIMEOUT_MS = 30_000L
+
+        /** How often an open Recent applies the retention cutoff when nothing else changes. */
+        const val RECENT_CUTOFF_TICK_MS = 60_000L
     }
 }
 

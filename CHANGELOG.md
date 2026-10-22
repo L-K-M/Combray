@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- Long-press Recent to switch to the tab you used before this one, and
-  swipe sideways along the bottom bar to step through your open tabs in
+- Long-press Recent to switch to the tab you used before this one (a tap
+  still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
   Recent's order. Repeated swipes keep going back; after a pause they
   start from the tab you are on.
 - Long-press the address chip to copy the exact current tab URL to the
@@ -284,8 +284,10 @@ All notable changes to this project are documented here. The format follows
   replaced. The late callback no longer covers the page now on screen.
 - Forgetting a site also removes the page an open tab is showing from
   Recent. The tab keeps that address and title, and the page does not
-  come back after you navigate away or close the tab. Loading it again,
-  including when Combray restores the tab, records a new visit.
+  come back after you navigate away or close the tab, nor when it loads
+  again in that tab: after a restart, when Android reclaimed its memory,
+  after a crash or on reload. It is not sent to Hister again either.
+  The next page the tab shows is recorded as usual.
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
