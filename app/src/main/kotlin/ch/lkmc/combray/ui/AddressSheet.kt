@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,6 +45,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -60,31 +63,26 @@ import ch.lkmc.combray.core.policy.RejectReason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
-/** Pause after the last keystroke before Recent is queried for matches. */
+/** Pause after the last keystroke before the matches are ranked again. */
 private const val SUGGESTION_DELAY_MS = 150L
 
 /**
  * Address and search editor above the keyboard. The current address starts selected for
  * replacement; the button says what submitting will do, and the other reading is one tap away.
  * [target] is the tab the editor was opened for (null: a new tab); typed text survives rotation.
- * Once you change the [initialText], matching open tabs and recent pages from [suggestions] (the
- * local Recent projection) are listed between the field and the buttons.
+ * Once you change the [initialText], matching open tabs and recent pages from [recent] (the local
+ * Recent projection, read once for the sheet's life) are listed between the field and the buttons.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddressSheet(
     target: String?,
     initialText: String?,
-    suggestions: (String) -> Flow<List<RecentItem>>,
+    recent: () -> Flow<List<RecentItem>>,
     onDecision: (AddressDecision) -> Unit,
     onSelectTab: (String) -> Unit,
-    onOpenVisit: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val initial = initialText.orEmpty()
@@ -95,20 +93,22 @@ fun AddressSheet(
     val interpretation = AddressPolicy.interpret(field.text)
     val focus = remember { FocusRequester() }
 
-    // Matches come from this device only: typing contacts no server. The prefilled text lists
-    // none (it is where you are), and the pause spares the database a query per keystroke.
+    // Matches come from this device only: typing contacts no server. One subscription for the
+    // sheet's life; ranking parses every candidate's host, so it waits for a pause in typing and
+    // runs off the main thread. The prefilled text lists none: it is where you are.
+    val items by remember { recent() }.collectAsStateWithLifecycle(emptyList())
     val query = field.text.trim()
-    val edited = query.isNotEmpty() && field.text != prefilled
-    val matches by remember(query, edited) {
+    val edited = AddressSuggestions.shouldSuggest(field.text, prefilled)
+    val matches by produceState(emptyList<RecentItem>(), items, query, edited) {
         if (!edited) {
-            flowOf(emptyList())
-        } else {
-            flow {
-                delay(SUGGESTION_DELAY_MS)
-                emitAll(suggestions(query).map { AddressSuggestions.rank(it, query, target) })
-            }.flowOn(Dispatchers.Default)
+            value = emptyList()
+            return@produceState
         }
-    }.collectAsStateWithLifecycle(emptyList())
+        delay(SUGGESTION_DELAY_MS)
+        value = withContext(Dispatchers.Default) {
+            AddressSuggestions.rank(items.filter { it.matches(query) }, query, target)
+        }
+    }
     val inset = Modifier.padding(horizontal = 16.dp)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -128,12 +128,19 @@ fun AddressSheet(
             // stay next to the keyboard, where the thumb is, however many rows there are.
             if (matches.isNotEmpty()) {
                 Column(Modifier.weight(1f, fill = false).padding(top = 8.dp).verticalScroll(rememberScrollState())) {
+                    Text(
+                        stringResource(R.string.address_suggestions),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = inset.padding(vertical = 4.dp).semantics { heading() },
+                    )
                     for (item in matches) {
                         key(item.key) {
-                            SuggestionRow(item) {
+                            SuggestionRow(item, opensHere = target != null) {
                                 when (item) {
                                     is RecentItem.OpenTab -> onSelectTab(item.tabId)
-                                    is RecentItem.Visit -> onOpenVisit(item.visitId)
+                                    // Like the typed address: it opens in the tab being edited.
+                                    is RecentItem.Visit -> AddressSuggestions.navigation(item)?.let(onDecision)
                                 }
                             }
                         }
@@ -166,9 +173,12 @@ fun AddressSheet(
     LaunchedEffect(Unit) { focus.requestFocus() }
 }
 
-/** A local match: an open tab to switch to, or a recent page to open in a new tab (as in Recent). */
+/**
+ * A local match: an open tab to switch to, or a recent page to open where the typed address
+ * would ([opensHere]: in the edited tab; otherwise in a new tab).
+ */
 @Composable
-private fun SuggestionRow(item: RecentItem, onClick: () -> Unit) {
+private fun SuggestionRow(item: RecentItem, opensHere: Boolean, onClick: () -> Unit) {
     val host = item.url?.let { displayHost(it) }
     val title = item.title?.takeIf { it.isNotBlank() } ?: host.orEmpty()
     val isTab = item is RecentItem.OpenTab
@@ -187,7 +197,11 @@ private fun SuggestionRow(item: RecentItem, onClick: () -> Unit) {
             ListItemDefaults.colors(containerColor = Color.Transparent)
         },
         modifier = Modifier.clickable(
-            onClickLabel = if (isTab) switchToTab else stringResource(R.string.address_open_in_new_tab),
+            onClickLabel = when {
+                isTab -> switchToTab
+                opensHere -> stringResource(R.string.address_open_here)
+                else -> stringResource(R.string.address_open_in_new_tab)
+            },
             onClick = onClick,
         ),
     )

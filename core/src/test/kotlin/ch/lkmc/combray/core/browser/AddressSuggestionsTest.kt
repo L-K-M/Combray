@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.browser
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,6 +58,38 @@ class AddressSuggestionsTest {
         val ranked = AddressSuggestions.rank(matches, "github", editedTab = "edited")
 
         assertEquals(listOf("tab:open", "visit:repeat-new"), keys(ranked))
+    }
+
+    @Test
+    fun blankOrUntouchedTextOffersNothing() {
+        assertFalse(AddressSuggestions.shouldSuggest("", prefilled = ""))
+        assertFalse(AddressSuggestions.shouldSuggest("   ", prefilled = ""))
+        // The editor opens holding the current address; suggesting it back is noise.
+        assertFalse(AddressSuggestions.shouldSuggest("https://news.example/", prefilled = "https://news.example/"))
+        assertTrue(AddressSuggestions.shouldSuggest("https://news.example/w", prefilled = "https://news.example/"))
+    }
+
+    @Test
+    fun rowsWithoutAnAddressOrWithoutAPassableReadingAreNotOffered() {
+        // A title-only row would match the filter but leave nothing to open.
+        val titleOnly = tab("title-only", url = null, time = 2, title = "Inner news")
+        // A stored address the address policy now rejects would be a dead, tappable row.
+        val credentials = visit("credentials", "https://user:pass@inner.test/", time = 1, title = "Inner news")
+
+        assertTrue(AddressSuggestions.rank(listOf(titleOnly, credentials), "inner", null).isEmpty())
+    }
+
+    @Test
+    fun theNewestOfRepeatedVisitsSurvives() {
+        val matches = listOf(visit("old", "https://a.example/", time = 3), visit("new", "https://a.example/", time = 30))
+
+        assertEquals(listOf("visit:new"), keys(AddressSuggestions.rank(matches, "a.example", null)))
+    }
+
+    @Test
+    fun aHistoryRowOpensThroughTheAddressPolicy() {
+        assertEquals("https://a.example/", AddressSuggestions.navigation(visit("v", "https://a.example/", time = 1))?.url)
+        assertEquals(null, AddressSuggestions.navigation(visit("c", "https://user:pass@inner.test/", time = 1)))
     }
 
     @Test

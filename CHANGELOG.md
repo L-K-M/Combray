@@ -80,8 +80,9 @@ All notable changes to this project are documented here. The format follows
   restored (at most two seconds).
 - More › Close tab closes the current tab, with the same Undo as Recent.
 - The address sheet lists up to five open tabs and recent pages that match
-  what you type: a tab switches to that tab, a page opens in a new tab.
-  The matches come from this device; nothing is sent while you type.
+  what you type, under "On this device": a tab switches to that tab, and a
+  page opens where the typed address would. The matches come from this
+  device; nothing is sent while you type.
 
 ### Changed
 

@@ -59,6 +59,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
+import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.KeyboardRequest
 import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
@@ -251,7 +252,8 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             target = addressTab,
             // On a Kagi results page, refining the search starts from its words, not its address.
             initialText = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
-            suggestions = browser::recent,
+            // Suggestions search all retained history, like a Recent search.
+            recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
             onDecision = { decision ->
                 dismiss()
                 val target = addressTab
@@ -267,10 +269,6 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onSelectTab = { tabId ->
                 dismiss()
                 browser.selectTab(tabId)
-            },
-            onOpenVisit = { visitId ->
-                dismiss()
-                browser.openVisit(visitId)
             },
             onDismiss = dismiss,
         )
