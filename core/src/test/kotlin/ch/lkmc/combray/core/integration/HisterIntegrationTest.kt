@@ -3,13 +3,22 @@ package ch.lkmc.combray.core.integration
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import ch.lkmc.combray.core.browser.BrowserCoordinator
+import ch.lkmc.combray.core.browser.CaptureSink
 import ch.lkmc.combray.core.browser.CapturedPage
+import ch.lkmc.combray.core.browser.FakeEngine
+import ch.lkmc.combray.core.browser.Notice
+import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.ExclusionEntity
 import ch.lkmc.combray.core.data.JobKind
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
+import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.HistoryKind
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -47,17 +56,19 @@ class HisterIntegrationTest {
         database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java).build()
         // Background kicks never run here: only drain() sends, so queue states are deterministic.
         scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher())
-        integrations = Integrations(
-            database = database,
-            secrets = secrets,
-            transport = UrlConnectionTransport(timeoutMs = 2_000),
-            clock = { now },
-            newId = { "job${ids++}" },
-            scope = scope,
-            scheduler = {},
-        )
+        integrations = newIntegrations()
         runBlocking { assertEquals(Configured.Saved, hister.configure(server.root, FakeHister.TOKEN)) }
     }
+
+    private fun newIntegrations() = Integrations(
+        database = database,
+        secrets = secrets,
+        transport = UrlConnectionTransport(timeoutMs = 2_000),
+        clock = { now },
+        newId = { "job${ids++}" },
+        scope = scope,
+        scheduler = {},
+    )
 
     @After
     fun tearDown() {
@@ -134,6 +145,97 @@ class HisterIntegrationTest {
         // The claimed one is rechecked right before sending and not sent.
         assertEquals(DispatchResult.Cancelled("excluded"), runBlocking { hister.dispatch(claim.job) })
         assertTrue(server.added.isEmpty())
+    }
+
+    @Test
+    fun forgettingAVisitRollsBackBothHistoryAndCancellationWhenInvalidationFails() = runBlocking {
+        enable()
+        val url = "https://a.example/article"
+        capture(url, "forgotten text")
+        var fail = true
+        val sink = object : CaptureSink by hister {
+            override suspend fun forgetUrl(url: String) {
+                hister.forgetUrl(url)
+                check(!fail) { "invalidation failed" }
+            }
+        }
+        val browser = browserWithHistory(sink, listOf(url, "https://kept.example/"))
+        val visit = browser.recent().first().filterIsInstance<RecentItem.Visit>().single()
+
+        browser.forgetVisit(visit.visitId)
+        browser.awaitIdle()
+
+        assertNotNull(database.browser().visit(visit.visitId))
+        assertTrue(browser.browserState.value.notice is Notice.Problem)
+        assertEquals(JobState.PENDING, jobs().single().state)
+        assertTrue(jobs().single().payload.contains("forgotten text"))
+
+        fail = false
+        browser.forgetVisit(visit.visitId)
+        browser.awaitIdle()
+        assertNull(database.browser().visit(visit.visitId))
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+        assertEquals("", jobs().single().payload)
+
+        // New integration objects have no in-memory forget tombstones.
+        newIntegrations().dispatcher.drain()
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
+    fun forgettingASiteRollsBackBothStoresAndARetrySurvivesRestart() = runBlocking {
+        enable()
+        val site = "https://a.example/article"
+        val subdomain = "https://www.a.example/other"
+        val lookalike = "https://nota.example/"
+        listOf(site, subdomain, lookalike).forEach { capture(it, "text for $it") }
+        var fail = true
+        val sink = object : CaptureSink by hister {
+            override suspend fun forgetHost(host: String, includeSubdomains: Boolean) {
+                hister.forgetHost(host, includeSubdomains)
+                check(!fail) { "invalidation failed" }
+            }
+        }
+        val browser = browserWithHistory(sink, listOf(site, subdomain, lookalike, "https://a.example/open"))
+        val visits = browser.recent().first().filterIsInstance<RecentItem.Visit>()
+
+        browser.forgetSite("a.example", includeSubdomains = true)
+        browser.awaitIdle()
+
+        assertTrue(visits.all { database.browser().visit(it.visitId) != null })
+        assertTrue(browser.browserState.value.notice is Notice.Problem)
+        assertTrue(jobs().all { it.state == JobState.PENDING && it.payload.isNotEmpty() })
+
+        fail = false
+        browser.forgetSite("a.example", includeSubdomains = true)
+        browser.awaitIdle()
+        assertEquals(listOf(lookalike), browser.recent().first().filterIsInstance<RecentItem.Visit>().map { it.url })
+        assertEquals("https://a.example/open", browser.browserState.value.activeTab?.url)
+        assertEquals(listOf(JobState.CANCELLED, JobState.CANCELLED, JobState.PENDING), jobs().map { it.state })
+        assertTrue(jobs().take(2).all { it.payload.isEmpty() })
+
+        newIntegrations().dispatcher.drain()
+        assertEquals(1, server.added.size)
+        assertTrue(server.added.single().contains(lookalike))
+    }
+
+    private suspend fun browserWithHistory(sink: CaptureSink, urls: List<String>): BrowserCoordinator {
+        val engine = FakeEngine()
+        // Share the harness Job for cleanup; awaitIdle fences coordinator work on Default.
+        val browser = BrowserCoordinator(
+            database, engine, CoroutineScope(scope.coroutineContext + Dispatchers.Default),
+            clock = { now }, capture = sink,
+        )
+        browser.start()
+        engine.emit(EngineEvent.EngineReady(720, 1280))
+        browser.awaitIdle()
+        browser.openUrl(urls.first(), Placement.CURRENT_TAB)
+        browser.awaitIdle()
+        urls.forEachIndexed { index, url ->
+            engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, index.toLong(), url, index, index + 1))
+            browser.awaitIdle()
+        }
+        return browser
     }
 
     @Test

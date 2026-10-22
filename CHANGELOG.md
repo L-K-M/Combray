@@ -127,6 +127,8 @@ All notable changes to this project are documented here. The format follows
   reporting timeouts.
 - `scripts/check-app.sh` skipped the reader view checks: its default run
   now covers every device-check class, and `--list` prints them.
+- Forgetting a page or site commits local deletion and queued Hister
+  cancellation together, so a crash cannot leave forgotten text queued.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.

@@ -265,15 +265,14 @@ class BrowserCoordinator(
 
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
-        val forgotten = database.withTransaction {
-            val visit = dao.visit(visitId) ?: return@withTransaction null
+        database.withTransaction {
+            val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
-            if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction null
+            if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
-            visit
+            capture?.forgetUrl(visit.url)
         }
-        forgotten?.let { capture?.forgetUrl(it.url) }
     }
 
     /**
@@ -285,8 +284,8 @@ class BrowserCoordinator(
         database.withTransaction {
             dao.deleteVisitsForHost(site, if (includeSubdomains) ".$site" else null)
             dao.deleteEmptyClosedTabs()
+            capture?.forgetHost(site, includeSubdomains)
         }
-        capture?.forgetHost(site, includeSubdomains)
     }
 
     /**
