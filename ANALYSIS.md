@@ -13,7 +13,10 @@ are not phone benchmarks. Earlier contributors' PR descriptions are retained
 as provenance, not re-verified PR status; no other contributor's PR was
 inspected during this pass. This pass also folds in the Inkling review
 (`inkling.md`, kept as the review record); its five code slices were published
-as PRs #98-#102 on 22 October 2026 and remain open for the owner. Read
+as PRs #98-#102 on 22 October 2026 and remain open for the owner. The GLM
+review (`glm.md`, kept as the review record) is folded in below; its seven
+code slices were published as PRs #51 and #105-#110 on 21/22 October 2026
+and remain open for the owner. Read
 `AGENTS.md` and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) before
 editing. Keep Servo and the personal-browser scope. Private browsing, extensions
 and ad blocking are separate proposals; Stop, downloads and connection-security
@@ -139,6 +142,33 @@ change them:
   and sets `EXTRA_SUBJECT`. Same topic as the chrome section's share-title item
   (and #51).
 
+GLM fixes, also left open for the owner. Where a topic already has an open
+PR above, the pair are independent implementations: merge one, not both.
+
+- #51 `glm/share-title` — the bottom bar's Share sends the page's title with
+  the address: the chooser's `EXTRA_SUBJECT` and the shared text's first line,
+  with title whitespace collapsed so a page title cannot add lines. A
+  long-press link share keeps the bare address. Same topic as #102.
+- #105 `glm/page-info-dismiss` — Page Info keys on the address captured when
+  it was opened (cleared on every dismissal path), removing the `?: dismiss()`
+  state write during composition. Same topic as #48 and #99.
+- #106 `glm/save-guard-order` — an unconfigured Save answers "set Karakeep
+  up" even when the address looks credential-bearing, instead of claiming the
+  address was withheld for safety. Regression-tested.
+- #107 `glm/retry-after-overflow` — `Retry-After` seconds are clamped before
+  the millisecond multiplication, so `Long.MAX_VALUE` no longer wraps negative
+  into an immediate retry (correctness item 14). Tests cover the wrap, cap,
+  negative, HTTP-date and beyond-Long inputs.
+- #108 `glm/tab-badge-cap` — the Recent tab-count badge caps its visible label
+  at a `%1$d+` string derived from the limit; TalkBack keeps the exact count.
+  Covers the chrome badge item below.
+- #109 `glm/quick-tab-switch` — long-press the Recent button to focus the
+  runner-up tab (`focusPreviousTab()`), as an accessible labeled long-click
+  beside the sheet's rows. Offers the ideas-section quick-switch item.
+- #110 `glm/retention-graph` — one `Retention` instance flows from `AppGraph`
+  to maintenance and the Settings label (correctness item 4's plumbing half;
+  no new configuration).
+
 ## Completed On Main
 
 | PR / branch | Scope and verification |
@@ -196,8 +226,9 @@ not implemented behavior on main.
 
 History/capture atomicity and abandoned-claim expiry are offered in #32 and #31;
 do not implement them again. Connection labels, page-info dismissal, and
-Karakeep-panel identity are offered in #43, #48 and #40. Validate the listed
-source candidates before editing; none is a new device reproduction.
+Karakeep-panel identity are offered in #43, #48/#105 and #40. Retry-After
+clamping is offered in #107 and the Retention plumbing in #110. Validate the
+listed source candidates before editing; none is a new device reproduction.
 
 **First remaining privacy slice: capture pause and durable admission (Fusion 2).**
 The due-job query checks `captureEnabled`; `HisterIntegration.dispatch` does not.
@@ -235,7 +266,8 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
 4. **`Retention()` is built again in `SettingsSheet` for the history-days label.**
    Pass the configured instance from `AppGraph`, or the label will drift when
    retention becomes a setting. Do this when exposing retention choices, not as
-   speculative configuration plumbing.
+   speculative configuration plumbing. (The instance-sharing plumbing is
+   offered in #110; exposing a setting remains open.)
 5. **Settings save and connection check share one `message`.** A slow check can
    finish after a save and replace "Settings saved" with the old result. Give
    each request a generation, or show the two statuses apart.
@@ -306,6 +338,7 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     `Long.MAX_VALUE` wraps negative and yields zero delay, not the six-hour cap.
     Clamp before multiplication. Test huge/invalid/negative/ordinary values,
     case-insensitive headers and the documented HTTP-date limitation.
+    (Offered in #107 with those tests; keep this entry until it lands.)
 15. **External scheme handling for standard mobile protocols**:
     `AddressPolicy.EXTERNAL_SCHEMES` currently only allows `mailto:` and `tel:`.
     Adding standard mobile schemes (`sms:`, `geo:`, `market:`) allows opening them
@@ -425,6 +458,12 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     editable field, and the IME can re-show after a window refocus with no page
     field. Return whether the engine reports an active field (last ImeShown
     without ImeHidden).
+33. **`WorkManagerScheduler` schedules with `ExistingWorkPolicy.REPLACE`.** A
+    wakeup booked while the unique worker is between its final `drain()` and
+    return can request cancellation of a worker that is already finishing.
+    Benign today (the dispatcher mutex serializes drains in-process); worth a
+    one-line rationale or `APPEND` semantics before any multi-process dispatch.
+    File: `OutboxWorker.kt`.
 
 ## Performance and engine
 
@@ -589,10 +628,11 @@ Do not claim a device reproduction for these. They are from the bridge and
   old-generation pages. Test double taps, delayed old queries and unauthorized/
   offline later pages; #40's service-identity fix is related but distinct.
 - Tab badge shows the raw count. Cap the display at "99+" but announce the real
-  count. Check 0/1/99/100 without changing logical state.
+  count. Check 0/1/99/100 without changing logical state. (Offered in #108.)
 - Share sends only the URL. Send the title and the address (`title` then the
   URL). File: `share()` in the app module. Long-press Share can copy the address
-  instead of opening the chooser.
+  instead of opening the chooser. (The title half is offered in #51 and #102;
+  the long-press copy stays open.)
 - Address-copy long press is in open PR #97 `fusion/copy-address` (Fusion 20),
   with a labeled accessibility action, no copy action on home, and no duplicate
   Android 13+ confirmation. Do not implement that slice again. Still verify a
@@ -608,6 +648,14 @@ Do not claim a device reproduction for these. They are from the bridge and
 - Address-sheet focus is requested in `LaunchedEffect` and may run before the
   sheet window is laid out. Confirm the keyboard opens and the field clears it
   on a device.
+- Recent's relative times are frozen at the composition that opened the sheet
+  (`RecentSheet.kt` reads `now` once, and item keys stop rows recomposing on
+  scroll): a sheet kept open says "5 minutes ago" for an hour. Recompute per
+  row, or on a slow ticker, keeping `DateUtils.getRelativeTimeSpanString`.
+- Cold start with a restored tab paints the "Starting the engine…" overlay
+  across the whole page area until the engine reports ready
+  (`BrowserScreen.PageOverlay`). The restored page paints shortly after; show
+  nothing (or the home surface) for that sub-second window to avoid the flash.
 - Empty states (home, empty Recent) are plain text. One line of useful copy is
   enough. Do not add decoration that competes with the page.
 - The complete palette is offered in #26; reviewed main still partially overrides
@@ -642,6 +690,9 @@ Do not claim a device reproduction for these. They are from the bridge and
 - The More sheet's pause row uses `Close` (X) for "Pause history capture"
   (`MoreSheet.kt:76`): X reads as remove, not pause. Hand-build a pause glyph
   the way `StarBorder` already does, or pick accurate semantics.
+  The sheet also hides Forward conditionally while other rows stay, so its
+  height changes between tabs; consider fixed rows with disabled states for
+  muscle memory, keeping the "only offer what works" intent.
 - Home and the engine-failure overlays are fixed centered columns with no
   scroll (`BrowserScreen.kt:324-360`): at 200% font on a 320 dp screen the
   headline and two 240 dp buttons clip with no way to reach them. Wrap them in
@@ -718,6 +769,8 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   orders them.
   Combine with optional address swipes as one Return ticket experiment; keep a
   visible action and avoid fighting Back or the page's gestures.
+  (Offered in #109; the address-swipe half stays open. The alternative below,
+  long-press opening the Hister scope, then needs its own gesture.)
 - A pending mark on Save when the outbox still has work, separate from the
   per-page star.
   Per-page Pending already has a spinner/live-region label; add another mark only
@@ -796,6 +849,10 @@ landscape/tablet widths is an option to evaluate with the same measurements.
 - Reader scroll progress: a thin bar that fills as you move through the article,
   beside the quiet reading-time estimate above. Derived from the existing
   `article` blocks; no server contact.
+- A quiet dwell line in Page Info: approximate time spent on this page this
+  visit, derived from focus transitions the coordinator already records.
+  Private and local; label it as an estimate. Very Combray: browsing as
+  reading, not clicking.
 - Quiet reading: while Reader is Ready and idle, hold back snackbars and outbox
   badges for a stretch; restore on scroll, close, or a sheet. Local to Reader;
   no capture-policy change.
