@@ -61,10 +61,11 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    // Key on the service's stable identity (its fingerprint and config generation), not the
-    // mutable entity instance. updatedAt changes on list selection and outbox churn and would
-    // reset pagination; generation bumps only when the URL or credential is reconfigured.
-    LaunchedEffect(query, service?.generation, service?.baseUrl, service?.fingerprint) {
+    // Key on what the load depends on: the server (its fingerprint, derived from the main
+    // address) and the configuration generation, which bumps on every address or credential
+    // change. Not the whole row: choosing a list or editing the alternate address rewrites it
+    // without changing what a read returns, and must not reset the loaded pages.
+    LaunchedEffect(query, service?.fingerprint, service?.generation) {
         val mine = ++generation
         ui = BookmarksUi.Idle
         bookmarks = emptyList()

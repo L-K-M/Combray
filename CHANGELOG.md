@@ -130,9 +130,6 @@ All notable changes to this project are documented here. The format follows
   "not a function".
 - Reader view drops an article whose renderer has crashed or been
   replaced. The late callback no longer covers the page now on screen.
-- Page info no longer dismisses itself while Compose is drawing. If
-  the tab has no address when the dialog opens, it closes from an
-  effect instead of writing sheet state during composition.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).

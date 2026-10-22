@@ -304,7 +304,11 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             if (url != null) {
                 PageInfoDialog(url = url, onDismiss = dismiss)
             } else {
-                // Dismissing during composition writes state while Compose is building the tree.
+                // The focused tab can lose its address while the dialog is open: for example a
+                // page's window.open focuses a new blank tab, or a refused address clears a tab
+                // without a renderer. Close from an effect: writing sheet state during
+                // composition is not allowed. If an address returns first, this branch leaves
+                // composition and the pending dismissal is cancelled with it.
                 LaunchedEffect(Unit) { dismiss() }
             }
         }
