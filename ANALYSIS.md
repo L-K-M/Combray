@@ -329,15 +329,12 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     `BrowserCoordinator.kt`.
 17. **Coordinator lifecycle edges.** `start()` is not idempotent (a second call
     starts a second work-queue consumer and breaks the single-consumer ordering
-    invariant); `recent()` computes its retention `since` once per flow, so a
-    long-lived collection's window never slides (the triage asked #67 not to
-    freeze it; the landed #67 documents the fixed cutoff instead, and an open
-    Recent sheet keeps one flow per depth, so expired visits stay until it
-    reopens or the filter changes depth); `onEngineError` ignores
+    invariant); `onEngineError` ignores
     refusals without a request, leaving the coordinator believing a dead view is
     on screen; and `pendingCaptures`/`pendingArticles` are removed only when a
     result arrives, so a crashed view leaks them for the process lifetime (fold
-    the last one into item 13's pruning when measured). Each is small and
+    the last one into item 13's pruning when measured). `recent()`'s retention
+    window now slides while a sheet stays open (wave 2). Each is small and
     unit-testable like the PR #36 cases. File: `BrowserCoordinator.kt`. The narrow
     unscoped-STARTING failure path is already fixed on main by #65 (see
     [Landed on main](#landed-on-main)); it does not claim all runtime errors and

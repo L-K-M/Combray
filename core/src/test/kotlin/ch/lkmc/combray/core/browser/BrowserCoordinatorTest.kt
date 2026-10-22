@@ -18,8 +18,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -394,6 +397,43 @@ class BrowserCoordinatorTest {
 
         browser.focusPreviousTab(); idle()
         assertEquals(b, state().activeTab?.id)
+    }
+
+    /** Correctness item 17: the window slides for a sheet that stays open. */
+    @Test
+    fun anOpenRecentDropsAVisitOnceItPassesTheRetentionPeriod() {
+        ready()
+        browser.openUrl("https://old.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://old.test/")
+        commit(1, 11, "https://new.test/", index = 1, length = 2)
+        val answers = Channel<List<RecentItem>>(Channel.UNLIMITED)
+        val sheet = scope.launch { browser.recent().collect { answers.send(it) } }
+        runBlocking {
+            assertTrue(answers.receive().any { it.url == "https://old.test/" })
+
+            now += 8 * DAY
+            title(1, 11, "New")
+            withTimeout(TEST_WAIT_MS) {
+                while (answers.receive().any { it.url == "https://old.test/" }) Unit
+            }
+        }
+        sheet.cancel()
+    }
+
+    @Test
+    fun aQuickSwitchSkipsATabOpenedInTheBackground() {
+        ready()
+        val (a, _, c) = openThreeTabs()
+        now += 1_000
+        browser.selectTab(a); idle()
+        now += 1_000
+        browser.selectTab(c); idle()
+        // A link opened in the background ranks right behind the focused tab, unseen.
+        now += 1_000
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(a, state().activeTab?.id)
     }
 
     @Test
@@ -1453,6 +1493,27 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun onlyTheAwaitedAddressEndsTheWaitWithinAPage() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        // The old page rewrites its own address while b.test is on its way.
+        commit(1, 10, "https://a.test/#progress", HistoryKind.SAME_DOCUMENT)
+        assertTrue(state().activeTab!!.loading)
+        commit(1, 11, "https://b.test/", index = 1, length = 2)
+        loaded(1, 11)
+
+        // A typed part of the page shown arrives within it.
+        browser.openUrl("https://b.test/#part", Placement.CURRENT_TAB); idle()
+        assertTrue(state().activeTab!!.loading)
+        commit(1, 11, "https://b.test/#part", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
     fun aRequestThatNeverCommitsStopsShowingLoading() {
         scope.cancel()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -1756,6 +1817,7 @@ class BrowserCoordinatorTest {
         const val START = 1_760_000_000_000L
         const val DAY = 24L * 60 * 60 * 1000
         const val GATE_TIMEOUT_SECONDS = 10L
+        const val TEST_WAIT_MS = 5_000L
         const val SHORT_TIMEOUT_MS = 1_000L
         /** Longer than any test: a request does not time out unless the test means it to. */
         const val LONG_TIMEOUT_MS = 10L * 60 * 1000
