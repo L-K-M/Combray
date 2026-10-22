@@ -38,7 +38,7 @@ use url::Url;
 
 use crate::activation::{OpeningTap, TapRecognizer};
 use crate::animations;
-use crate::capture::{self, ScriptOutcome};
+use crate::capture::{self, CaptureKind, ScriptOutcome, Visibility};
 use crate::commands::{
     Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
     ScrollEdge, Throttling, TouchPhase,
@@ -314,6 +314,12 @@ struct Engine {
     taps: TapRecognizer,
     /// Given to every view, so pages match the app's light or dark theme.
     appearance: Appearance,
+    /// Fingers on the page now, and when the last touch event came: captures of the page on
+    /// screen wait while the user scrolls or taps.
+    touches: capture::Touches,
+    /// Page-text captures of the page on screen waiting for a quiet moment, with when each
+    /// first had to wait.
+    deferred_captures: Vec<(CaptureRequest, Instant)>,
 }
 
 impl Engine {
@@ -345,6 +351,8 @@ impl Engine {
             last_activation: None,
             taps,
             appearance: Appearance::Light,
+            touches: Default::default(),
+            deferred_captures: Vec::new(),
         }
     }
 
@@ -473,6 +481,7 @@ impl Engine {
             runtime.servo.spin_event_loop();
         }
         self.drain_delegate_events();
+        self.start_deferred_captures();
         self.drain_capture_results();
         self.drain_evaluations();
         self.drain_find_results();
@@ -618,6 +627,8 @@ impl Engine {
     }
 
     fn surface_destroyed(&mut self) {
+        // The gesture on this surface ends without its up events.
+        self.touches.forget_pointers();
         let Surface::Bound { .. } = self.surface else {
             return;
         };
@@ -789,6 +800,7 @@ impl Engine {
         }
         self.active = None;
         self.release_leave_page_questions_off_screen();
+        self.touches.forget_pointers();
         self.needs_paint = true;
     }
 
@@ -842,6 +854,7 @@ impl Engine {
 
         self.active = Some(tab);
         self.release_leave_page_questions_off_screen();
+        self.touches.forget_pointers();
         self.needs_paint = true;
         self.emit(EngineEvent::TabSelected { view });
     }
@@ -854,6 +867,7 @@ impl Engine {
         if self.active == Some(tab) {
             // The application picks the successor; until then the surface shows no page.
             self.active = None;
+            self.touches.forget_pointers();
             self.needs_paint = true;
         }
         if self.ime_owner.is_some_and(|(view, _)| view == closed.view) {
@@ -943,6 +957,13 @@ impl Engine {
                 false
             },
         };
+        let now = Instant::now();
+        match phase {
+            TouchPhase::Down => self.touches.press(pointer, now),
+            TouchPhase::Move => self.touches.moved(now),
+            TouchPhase::Up => self.touches.lift(pointer, now),
+            TouchPhase::Cancel => self.touches.cancel(now),
+        }
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -1075,7 +1096,43 @@ impl Engine {
 
     // --- Capture -------------------------------------------------------------------------------
 
+    /// Captures of page text for the page on screen wait while the user touches it: the
+    /// script holds the page's script thread, so the page would stop responding under the
+    /// finger. Other captures (hidden tabs, reader view) start at once.
     fn start_capture(&mut self, request: CaptureRequest) {
+        if self.waits_for_quiet(&request, Duration::ZERO) {
+            self.deferred_captures.push((request, Instant::now()));
+            return;
+        }
+        self.run_capture(request);
+    }
+
+    fn waits_for_quiet(&self, request: &CaptureRequest, waited: Duration) -> bool {
+        let now = Instant::now();
+        request.kind == CaptureKind::PageText
+            && self.active == Some(request.tab)
+            && capture::defer_while_touched(
+                self.touches.touching(now),
+                self.touches.since_last(now),
+                waited,
+            )
+    }
+
+    fn start_deferred_captures(&mut self) {
+        if self.deferred_captures.is_empty() {
+            return;
+        }
+        let deferred = std::mem::take(&mut self.deferred_captures);
+        for (request, since) in deferred {
+            if self.waits_for_quiet(&request, since.elapsed()) {
+                self.deferred_captures.push((request, since));
+            } else {
+                self.run_capture(request);
+            }
+        }
+    }
+
+    fn run_capture(&mut self, request: CaptureRequest) {
         let started = Instant::now();
         let refuse = |view: ViewKey, status: CaptureStatus, detail: &str| {
             EngineEvent::Capture(CaptureReport {
@@ -1126,11 +1183,17 @@ impl Engine {
             return;
         }
 
+        let visibility = if self.active == Some(request.tab) {
+            Visibility::Shown
+        } else {
+            Visibility::Hidden
+        };
+        let time_budget = capture::time_budget(visibility, request.timeout);
         let results = self.capture_results.clone();
         let (capture_id, expected_document) = (request.capture, request.document);
         tab.webview.evaluate_javascript_in_document(
             document,
-            capture::script(request.kind, request.max_text_bytes),
+            capture::script(request.kind, request.max_text_bytes, time_budget),
             move |result| {
                 results
                     .borrow_mut()
