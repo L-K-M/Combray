@@ -120,6 +120,8 @@ All notable changes to this project are documented here. The format follows
   or `document.getAnimations()` so other pages are unaffected. If the
   polyfill cannot install, every later call reports that cause instead of
   "not a function".
+- Reader view drops an article whose renderer has crashed or been
+  replaced. The late callback no longer covers the page now on screen.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
