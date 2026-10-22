@@ -19,7 +19,7 @@ class HttpStatusTest {
     fun anHugeRetryAfterClampsToTheCeilingInsteadOfWrapping() {
         // Long.MAX_VALUE seconds times 1000 overflows negative; the wait must stay at the cap.
         assertEquals(6L * 60 * 60 * 1000, HttpStatus.retryAfterMs(mapOf("Retry-After" to Long.MAX_VALUE.toString())))
-        assertEquals(6L * 60 * 60 * 1000, HttpStatus.retryAfterMs(mapOf("Retry-After" to "9223372036854775807")))
+        assertEquals(6L * 60 * 60 * 1000, HttpStatus.retryAfterMs(mapOf("Retry-After" to "100000")))
     }
 
     @Test
@@ -30,6 +30,8 @@ class HttpStatusTest {
     @Test
     fun nonNumericRetryAfterIsIgnored() {
         assertNull(HttpStatus.retryAfterMs(mapOf("Retry-After" to "Wed, 21 Oct 2026 07:28:00 GMT")))
+        // Beyond Long's range: not a number this parser knows, so the backoff applies.
+        assertNull(HttpStatus.retryAfterMs(mapOf("Retry-After" to "99999999999999999999")))
         assertNull(HttpStatus.retryAfterMs(mapOf()))
     }
 }
