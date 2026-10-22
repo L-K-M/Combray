@@ -52,6 +52,16 @@ interface EnginePort {
      * blocks of at most [maxBytes] (native/src/reader.js), or empty when it has none.
      */
     fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
+
+    /**
+     * Find in page: searches the tab's current document for [query], selects match [index]
+     * (wrapping around; negative counts from the end) and scrolls it into view. Reported as
+     * [EngineEvent.FindResult] for [request], naming the document it ran in.
+     */
+    fun find(tab: Long, request: Long, query: String, index: Int)
+
+    /** Removes the selection [find] made in the tab's current document. */
+    fun clearFind(tab: Long)
 }
 
 enum class EngineStart {

@@ -24,6 +24,17 @@
     <string name="text_size_percent">%1$d%%</string>
     <string name="text_size_reset">Reset</string>
     <string name="text_size_explanation">Pages are zoomed, so their pictures and layout grow with the text. Reader view uses the same size.</string>
+    <string name="action_find_in_page">Find in page</string>
+    <string name="action_find_previous">Previous match</string>
+    <string name="action_find_next">Next match</string>
+    <string name="action_close_find">Close find in page</string>
+    <!-- Position of the selected match: "3 of 12". The count can be find_count_at_least. -->
+    <string name="find_position">%1$d of %2$s</string>
+    <!-- A count that is only a lower bound: the page has at least this many matches. -->
+    <string name="find_count_at_least">%1$d+</string>
+    <string name="find_none">No matches</string>
+    <string name="find_none_in_part">No matches in the part searched</string>
+    <string name="find_failed">This page cannot be searched</string>
     <string name="action_settings">Settings</string>
     <string name="action_save">Save</string>
     <string name="action_recent">Recent</string>

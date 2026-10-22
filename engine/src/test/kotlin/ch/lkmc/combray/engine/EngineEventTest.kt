@@ -62,6 +62,26 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesFindResultsWithAndWithoutAMatch() {
+        val found = EngineEvent.parse(
+            """{"type":"find_result","document":4294967331,"request":17,"status":"found","count":12,"index":2,""" +
+                """"capped":false,"tab":2,"generation":5,"schema":1}""",
+        )
+        val failed = EngineEvent.parse(
+            """{"type":"find_result","document":null,"request":18,"status":"failed","count":0,"index":null,""" +
+                """"capped":false,"tab":2,"generation":5,"schema":1}""",
+        )
+        val unknown = EngineEvent.parse(
+            """{"type":"find_result","document":7,"request":19,"status":"later","count":1,"index":0,""" +
+                """"capped":false,"tab":2,"generation":5,"schema":1}""",
+        ) as EngineEvent.FindResult
+
+        assertEquals(EngineEvent.FindResult(ViewRef(2, 5), 4294967331L, 17, FindStatus.FOUND, 12, 2, false), found)
+        assertEquals(EngineEvent.FindResult(ViewRef(2, 5), null, 18, FindStatus.FAILED, 0, null, false), failed)
+        assertEquals(FindStatus.FAILED, unknown.status)
+    }
+
+    @Test
     fun keepsUnknownTypesAsOther() {
         assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"type":"default_handled","request":"x"}"""))
     }

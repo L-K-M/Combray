@@ -10,16 +10,18 @@
 //!                         ├─ capture: bounded in-page text snapshot
 //!                         ├─ animations: Element.animate() for every page
 //!                         ├─ page_zoom: the layout zoom of every view
+//!                         ├─ find: find in page (bounded in-page search)
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
 //! `animations`, `events`, `media`, `page_zoom`, `panic_policy` and the pure parts of `capture`
-//! build on any host so their tests run without Servo.
+//! and `find` build on any host so their tests run without Servo.
 
 mod animations;
 pub mod capture;
 pub mod controls;
 pub mod events;
+pub mod find;
 mod media;
 mod page_zoom;
 mod panic_policy;

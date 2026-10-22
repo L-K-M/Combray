@@ -198,6 +198,25 @@ ZOOM_PAGE = page(
     "addEventListener('load', report); addEventListener('resize', report);</script>",
 )
 
+# Find in page: the word appears three times, a screen and a half apart and in three cases, and
+# also where find must not count it (hidden, a script, a form field). The title reports the
+# scroll offset and the selected text: "FIND:<scrollY>:<selection>".
+FIND_GAP = "<div style='height:150vh'></div>"
+FIND_PAGE = page(
+    "FIND",
+    "<p>Find fixture: the word is further down.</p>"
+    f"{FIND_GAP}<p>First combraneedle here.</p>"
+    f"{FIND_GAP}<p>Second CombraNeedle here.</p>"
+    f"{FIND_GAP}<p>Third COMBRANEEDLE here.</p>{FIND_GAP}"
+    "<div hidden>combraneedle hidden</div><div style='display:none'>combraneedle not shown</div>"
+    "<textarea>combraneedle in a field</textarea><script>var unused = 'combraneedle in a script';</script>"
+    "<script>function report() { var t = 'FIND:' + Math.round(window.scrollY) + ':' + String(window.getSelection());"
+    " if (document.title !== t) document.title = t; }"
+    " addEventListener('scroll', report); document.addEventListener('selectionchange', report);"
+    " setInterval(report, 250); report();</script>",
+    "<style>body{margin:0 16px;font-size:20px}</style>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -334,6 +353,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_slow_media()
         if path == "/zoom.html":
             return self.send(200, ZOOM_PAGE)
+        if path == "/find.html":
+            return self.send(200, FIND_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

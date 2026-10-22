@@ -8,6 +8,7 @@
 use serde_json::{Value, json};
 
 use crate::controls::ControlDescription;
+use crate::find::FindCounts;
 
 /// One native incarnation of a logical tab.
 ///
@@ -126,6 +127,30 @@ impl CaptureStatus {
     }
 }
 
+/// How a find request ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FindStatus {
+    /// The script searched the document, which is still the tab's current one.
+    Found(FindCounts),
+    /// Another document became current before the result arrived; the result is dropped.
+    StaleDocument,
+    /// The tab, or its native view generation, closed before the result arrived.
+    TabClosed,
+    /// No such tab, no document yet, or the script failed or returned something else.
+    Failed,
+}
+
+impl FindStatus {
+    fn name(self) -> &'static str {
+        match self {
+            FindStatus::Found(_) => "found",
+            FindStatus::StaleDocument => "stale_document",
+            FindStatus::TabClosed => "tab_closed",
+            FindStatus::Failed => "failed",
+        }
+    }
+}
+
 /// Content returned by a successful capture script, after native bounds were enforced.
 #[derive(Clone, Debug)]
 pub struct CapturedContent {
@@ -227,6 +252,13 @@ pub enum EngineEvent {
         request: i64,
         current_document_at_completion: Option<u64>,
         result: Result<Value, String>,
+    },
+    /// The answer to a find request, for the document it ran in (none if it never ran).
+    FindResult {
+        view: ViewKey,
+        document: Option<u64>,
+        request: i64,
+        status: FindStatus,
     },
     Painted {
         view: ViewKey,
@@ -388,6 +420,33 @@ impl EngineEvent {
                     }),
                 )
             },
+            EngineEvent::FindResult {
+                view,
+                document,
+                request,
+                status,
+            } => {
+                let counts = match status {
+                    FindStatus::Found(counts) => *counts,
+                    _ => FindCounts {
+                        count: 0,
+                        index: None,
+                        capped: false,
+                    },
+                };
+                with_view(
+                    view,
+                    json!({
+                        "type": "find_result",
+                        "document": document,
+                        "request": request,
+                        "status": status.name(),
+                        "count": counts.count,
+                        "index": counts.index,
+                        "capped": counts.capped,
+                    }),
+                )
+            },
             EngineEvent::Painted { view, frames } => {
                 with_view(view, json!({ "type": "painted", "frames": frames }))
             },
@@ -483,6 +542,61 @@ fn capture_json(report: &CaptureReport) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_result_carries_view_document_and_bounded_counts() {
+        let view = ViewKey {
+            tab: 2,
+            generation: 5,
+        };
+        let found = EngineEvent::FindResult {
+            view,
+            document: Some(4294967331),
+            request: 17,
+            status: FindStatus::Found(FindCounts {
+                count: 12,
+                index: Some(2),
+                capped: false,
+            }),
+        };
+        let failed = EngineEvent::FindResult {
+            view,
+            document: None,
+            request: 18,
+            status: FindStatus::Failed,
+        };
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&found.to_json()).unwrap(),
+            json!({
+                "schema": 1,
+                "type": "find_result",
+                "document": 4294967331u64,
+                "request": 17,
+                "status": "found",
+                "count": 12,
+                "index": 2,
+                "capped": false,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&failed.to_json()).unwrap(),
+            json!({
+                "schema": 1,
+                "type": "find_result",
+                "document": null,
+                "request": 18,
+                "status": "failed",
+                "count": 0,
+                "index": null,
+                "capped": false,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
+    }
 
     #[test]
     fn control_shown_carries_view_id_and_description() {

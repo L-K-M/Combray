@@ -15,6 +15,7 @@ import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
+import ch.lkmc.combray.engine.FindStatus
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.PageControlContent
@@ -102,6 +103,9 @@ class BrowserCoordinator(
 
     /** The article request reader view waits for; an older one's late result is ignored. */
     private var readerRequest: Long? = null
+
+    /** Find in page while its bar is open: over one tab, in one view of it. */
+    private var findSession: FindSession? = null
 
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
@@ -472,6 +476,8 @@ class BrowserCoordinator(
      */
     fun openReader() = submit {
         val tab = activeTab() ?: return@submit
+        // Reader view covers the page find searches.
+        closeFindSession()
         val view = liveByTab[tab.id]
         val document = view?.currentDocument
         val generation = view?.generation
@@ -492,6 +498,56 @@ class BrowserCoordinator(
     /** Leaves reader view; an article still being read is dropped when it arrives. */
     fun closeReader() = submit {
         reader = null
+        publish()
+    }
+
+    /** Opens find in page over the focused tab's page; not while reader view covers it. */
+    fun openFind() = submit {
+        if (reader != null) return@submit
+        val tab = activeTab() ?: return@submit
+        val view = liveByTab[tab.id]?.takeIf { !it.crashed && it.currentDocument != null } ?: return@submit
+        val open = findSession
+        if (open != null && open.tabId == tab.id && open.nativeTab == view.nativeTab) return@submit
+        closeFindSession()
+        findSession = FindSession(tab.id, view.nativeTab)
+        publish()
+    }
+
+    /**
+     * Searches the page find was opened on for [query]. A new query starts at its first match (or,
+     * with [FindStep.PREVIOUS], its last); [FindStep.NEXT] and [FindStep.PREVIOUS] step through the
+     * current one, wrapping around. Only the newest request's answer counts, and only while the
+     * document it searched is still shown.
+     */
+    fun find(query: String, step: FindStep) = submit {
+        val session = findSession ?: return@submit
+        val view = liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return@submit
+        val generation = view.generation ?: return@submit
+        val document = view.currentDocument ?: return@submit
+        val text = boundedFindQuery(query)
+        if (text.isBlank()) {
+            // Nothing to look for: the page's find selection goes.
+            if (session.searched) engine.clearFind(view.nativeTab)
+            session.reset(text)
+            publish()
+            return@submit
+        }
+
+        val current = (session.outcome as? FindOutcome.Found)?.takeIf { text == session.query }
+        val index = findIndex(step, current)
+        val request = nextRequest++
+        session.pending = PendingFind(request, ViewRef(view.nativeTab, generation), document)
+        // A new query shows nothing until the page answers; stepping keeps the last answer meanwhile.
+        if (text != session.query) session.outcome = null
+        session.query = text
+        session.searched = true
+        engine.find(view.nativeTab, request, text, index)
+        publish()
+    }
+
+    /** Closes find in page and removes its selection from the page. */
+    fun closeFind() = submit {
+        closeFindSession()
         publish()
     }
 
@@ -536,6 +592,7 @@ class BrowserCoordinator(
                 }
             }
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
+            is EngineEvent.FindResult -> onFindResult(event)
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
             is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 state.update { it.copy(keyboard = KeyboardRequest.Show(event.kind)) }
@@ -629,6 +686,8 @@ class BrowserCoordinator(
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.awaitingCommit = false
                     view.currentDocument = event.document
+                    // Find searched the replaced document, and its selection went with it.
+                    if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
@@ -852,6 +911,35 @@ class BrowserCoordinator(
         }
         val article = content?.let { ArticleJson.parse(it.text, it.truncated) }
         reader = article?.let { ReaderState.Ready(pending.tabId, pending.url, it) } ?: ReaderState.Unavailable(pending.tabId)
+    }
+
+    /** Shows the page's answer if it is for the newest request and its document is still shown. */
+    private fun onFindResult(event: EngineEvent.FindResult) {
+        val session = findSession ?: return
+        val pending = session.pending?.takeIf { it.request == event.request } ?: return
+        if (event.view != pending.view || event.document != pending.document) return
+        if (view(event.view)?.currentDocument != pending.document) return
+        session.pending = null
+        val index = event.index
+        session.outcome = when (event.status) {
+            FindStatus.FOUND -> when {
+                event.count == 0 -> FindOutcome.NotFound(event.capped)
+                index != null && index in 0 until event.count -> FindOutcome.Found(event.count, index, event.capped)
+                else -> FindOutcome.Failed
+            }
+            FindStatus.FAILED -> FindOutcome.Failed
+            // The document or view changed meanwhile; whatever changed it ends find.
+            FindStatus.STALE_DOCUMENT, FindStatus.TAB_CLOSED -> return
+        }
+    }
+
+    /** Ends find in page; its selection is removed where the view still shows that page. */
+    private fun closeFindSession() {
+        val session = findSession ?: return
+        findSession = null
+        if (!session.searched) return
+        val view = liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return
+        engine.clearFind(view.nativeTab)
     }
 
     private fun view(ref: ViewRef): LiveView? =
@@ -1141,6 +1229,11 @@ class BrowserCoordinator(
         val tab = activeTab()
         // Reader view belongs to the tab it was opened for: moving to another tab leaves it.
         if (reader != null && reader?.tabId != tab?.id) reader = null
+        // Find belongs to the page it was opened on: another tab, or a released or crashed view, ends it.
+        findSession?.let { session ->
+            val live = liveByTab[session.tabId]
+            if (session.tabId != tab?.id || live == null || live.nativeTab != session.nativeTab || live.crashed) closeFindSession()
+        }
         val view = tab?.let { liveByTab[it.id] }
         val openCount = dao.openTabCount()
         val returnsToOpener = tab?.let { openers[it.id] }?.let { dao.tab(it)?.state == TabState.OPEN } ?: false
@@ -1177,6 +1270,7 @@ class BrowserCoordinator(
                 reader = reader,
                 // Every publish reads the stored session, so the first one ends restoring.
                 session = SessionState.RESTORED,
+                find = findSession?.state(),
             )
         }
     }
@@ -1221,6 +1315,30 @@ class BrowserCoordinator(
 
     /** A reused visit's title and failure before a same-URL reload's title reports changed it. */
     private data class ReloadBaseline(val title: String?, val failed: Boolean)
+
+    /** Find in page over [tabId], in its view [nativeTab]; another view of the tab ends it. */
+    private class FindSession(val tabId: String, val nativeTab: Long) {
+        var query = ""
+        var outcome: FindOutcome? = null
+
+        /** The newest request; an older one's answer is ignored. */
+        var pending: PendingFind? = null
+
+        /** The page may hold find's selection, so closing clears it. */
+        var searched = false
+
+        fun reset(query: String) {
+            this.query = query
+            outcome = null
+            pending = null
+            searched = false
+        }
+
+        fun state() = FindState(query, outcome)
+    }
+
+    /** A find request and what its answer must still match. */
+    private data class PendingFind(val request: Long, val view: ViewRef, val document: Long)
 
     /** A reader-view request and what its result must still match. */
     private data class PendingArticle(val tabId: String, val view: ViewRef, val document: Long, val url: String)

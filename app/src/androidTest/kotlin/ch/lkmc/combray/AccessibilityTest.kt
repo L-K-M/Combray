@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.FindOutcome
+import ch.lkmc.combray.core.browser.FindState
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.browser.TextSize
 import ch.lkmc.combray.core.integration.SaveStatus
@@ -39,6 +41,7 @@ import ch.lkmc.combray.engine.SelectEntry
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
+import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
@@ -178,7 +181,7 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {}, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {}, {}, {})
             }
         }
 
@@ -212,6 +215,19 @@ class AccessibilityTest {
         assertTargetsAreAccessible()
         compose.onNodeWithContentDescription("Scroll to top").assertIsDisplayed()
         compose.onNodeWithContentDescription("Scroll to bottom").assertIsDisplayed()
+    }
+
+    @Test
+    fun theFindBarIsAccessible() {
+        show(LARGE_FONT) {
+            FindBar(FindState("rate limit", FindOutcome.Found(999, 2, capped = true)), { _, _ -> }, {}, Modifier.width(NARROW_WIDTH))
+        }
+
+        assertTargetsAreAccessible()
+        for (label in listOf("Previous match", "Next match", "Close find in page")) {
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        }
+        compose.onNodeWithText("3 of 999+").assertIsDisplayed()
     }
 
     @Test

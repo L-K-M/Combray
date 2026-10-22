@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,10 +48,11 @@ fun MoreSheet(
     readerOpen: Boolean,
     onReader: () -> Unit,
     onTextSize: () -> Unit,
+    onFind: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader, onTextSize)
+        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader, onTextSize, onFind)
     }
 }
 
@@ -70,10 +72,11 @@ internal fun MoreActions(
     readerOpen: Boolean,
     onReader: () -> Unit,
     onTextSize: () -> Unit,
+    onFind: () -> Unit,
 ) {
     // Scrolls when the rows are taller than the window, as in landscape, so Settings stays reachable.
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-        for (action in moreActions(tab, captureEnabled)) {
+        for (action in moreActions(tab, captureEnabled, readerOpen)) {
             when (action) {
                 MoreAction.FORWARD -> MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
                 MoreAction.RELOAD -> MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
@@ -82,6 +85,7 @@ internal fun MoreActions(
                 MoreAction.PAGE_INFO -> MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
                 MoreAction.READER ->
                     MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
+                MoreAction.FIND -> MoreRow(Icons.Filled.Search, R.string.action_find_in_page, onFind)
                 MoreAction.TEXT_SIZE -> MoreRow(TextSizeIcon, R.string.action_text_size, onTextSize)
                 MoreAction.PAUSE_CAPTURE -> MoreRow(PauseIcon, R.string.action_pause_capture, onPauseCapture)
                 MoreAction.RESUME_CAPTURE -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
@@ -92,10 +96,10 @@ internal fun MoreActions(
 }
 
 /** A row of the More sheet. */
-internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, TEXT_SIZE, PAUSE_CAPTURE, RESUME_CAPTURE, SETTINGS }
+internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, FIND, TEXT_SIZE, PAUSE_CAPTURE, RESUME_CAPTURE, SETTINGS }
 
 /** The rows More offers for [tab], in order. */
-internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAction> = buildList {
+internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?, readerOpen: Boolean): List<MoreAction> = buildList {
     val onPage = tab?.url != null
     if (tab?.canGoForward == true) add(MoreAction.FORWARD)
     if (onPage) add(MoreAction.RELOAD)
@@ -106,6 +110,8 @@ internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAc
     if (onPage) {
         add(MoreAction.PAGE_INFO)
         add(MoreAction.READER)
+        // Find searches the page itself, which reader view covers.
+        if (!readerOpen) add(MoreAction.FIND)
     }
     // Every page, not just this one: offered on the home screen too.
     add(MoreAction.TEXT_SIZE)

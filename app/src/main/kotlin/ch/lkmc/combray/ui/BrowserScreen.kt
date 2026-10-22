@@ -210,6 +210,8 @@ fun BrowserScreen(
     }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && backInPage != null) { backInPage?.invoke() }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
+    // Registered last, so it runs before going back in the page.
+    BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
 
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
     // The bar is one row or two (BottomBar), so snackbars clear its measured height.
@@ -263,7 +265,16 @@ fun BrowserScreen(
                     )
                 }
             }
-            BottomBar(
+            // Find in page takes the bottom bar's place, above the keyboard like it.
+            state.find?.let { find ->
+                FindBar(
+                    state = find,
+                    onFind = browser::find,
+                    onClose = browser::closeFind,
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
+                )
+            }
+            if (state.find == null) BottomBar(
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
@@ -370,6 +381,10 @@ fun BrowserScreen(
                 if (state.reader != null) browser.closeReader() else browser.openReader()
             },
             onTextSize = { sheet = Sheet.TEXT_SIZE },
+            onFind = {
+                dismiss()
+                browser.openFind()
+            },
             onDismiss = dismiss,
         )
         Sheet.SETTINGS -> SettingsSheet(

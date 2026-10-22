@@ -63,6 +63,9 @@ object Fixtures {
     /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
     const val ZOOM = "$BASE/zoom.html"
 
+    /** "combraneedle" three times far apart; titled `FIND:<scrollY>:<selected text>`. */
+    const val FIND = "$BASE/find.html"
+
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
 

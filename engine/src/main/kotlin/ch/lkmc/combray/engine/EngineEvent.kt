@@ -48,6 +48,21 @@ enum class CaptureStatus {
     UNRECOGNIZED,
 }
 
+/** How a find request ended (native/src/events.rs). */
+enum class FindStatus {
+    /** The document was searched and is still the tab's current one. */
+    FOUND,
+
+    /** Another document became current before the answer arrived. */
+    STALE_DOCUMENT,
+
+    /** The view closed before the answer arrived. */
+    TAB_CLOSED,
+
+    /** No such tab, no document yet, or the page's script failed or answered something else. */
+    FAILED,
+}
+
 data class CapturedContent(
     val url: String,
     val title: String,
@@ -122,6 +137,21 @@ sealed interface EngineEvent {
         val ok: Boolean,
         val value: JsonElement?,
         val error: String?,
+    ) : EngineEvent
+
+    /**
+     * The answer to [EnginePort.find] [request], from [document] (null if it never ran). With
+     * [FindStatus.FOUND]: [count] matches (at most 999; a lower bound when [capped]) and the
+     * selected match [index], null when nothing matched.
+     */
+    data class FindResult(
+        val view: ViewRef,
+        val document: Long?,
+        val request: Long,
+        val status: FindStatus,
+        val count: Int,
+        val index: Int?,
+        val capped: Boolean,
     ) : EngineEvent
 
     data class Painted(val view: ViewRef, val frames: Long) : EngineEvent
@@ -200,6 +230,15 @@ sealed interface EngineEvent {
                     event["value"]?.takeUnless { it is JsonNull },
                     event.optionalString("error"),
                 )
+                "find_result" -> FindResult(
+                    event.view(),
+                    event.optionalLong("document"),
+                    event.long("request"),
+                    findStatus(event.string("status")),
+                    event.int("count"),
+                    (event["index"] as? JsonPrimitive)?.intOrNull,
+                    event.boolean("capped"),
+                )
                 "painted" -> Painted(event.view(), event.long("frames"))
                 "ime_shown" -> ImeShown(event.view(), event.boolean("multiline"), event.optionalString("kind") ?: "text")
                 "ime_hidden" -> ImeHidden(event.view())
@@ -230,6 +269,10 @@ sealed interface EngineEvent {
 
         private fun captureStatus(name: String) =
             CaptureStatus.entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: CaptureStatus.UNRECOGNIZED
+
+        /** An unknown status is a failure: its result must not be shown as matches. */
+        private fun findStatus(name: String) =
+            FindStatus.entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: FindStatus.FAILED
 
         private fun JsonObject.history(kind: HistoryKind) = HistoryChanged(
             view(),
