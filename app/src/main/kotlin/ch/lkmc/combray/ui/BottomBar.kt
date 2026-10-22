@@ -77,7 +77,7 @@ fun BottomBar(
                 }
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                 IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
-                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
+                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(tabCountLabel(openTabs)) } }) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
                 }
@@ -95,6 +95,11 @@ fun BottomBar(
         }
     }
 }
+
+/** The badge's visible text: the exact count, or a capped label once it no longer fits. */
+@Composable
+private fun tabCountLabel(openTabs: Int): String =
+    if (openTabs > BADGE_LIMIT) stringResource(R.string.recent_badge_many, BADGE_LIMIT) else openTabs.toString()
 
 /** One tap saves; the icon says saved, saving or needs attention, the label says it in words. */
 @Composable
@@ -161,6 +166,9 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, modifier: Modifier
         }
     }
 }
+
+/** Beyond this many open tabs the badge shows a capped label instead of the count. */
+private const val BADGE_LIMIT = 99
 
 /**
  * Material's "star_border" (Apache License 2.0, like the icon library). The core icon set has no

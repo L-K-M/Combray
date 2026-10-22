@@ -97,6 +97,8 @@ All notable changes to this project are documented here. The format follows
   still sensitive and is never sent to Karakeep or captured for Hister.
   Double-encoded names and ordinary parameters are unchanged, and escapes the
   decoder rejects remain conservative (sensitive).
+- The Recent tab-count badge caps its visible label at "99+" so large
+  counts fit the badge; TalkBack still hears the exact number.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
