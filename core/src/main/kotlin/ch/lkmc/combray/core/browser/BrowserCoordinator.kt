@@ -486,6 +486,8 @@ class BrowserCoordinator(
         view.controls.remove(answered)
         // Only where the dialog offered it: a stray request must not silence the page's dialogs.
         if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
+        // Stay cancels the navigation or reload the page asked about: nothing will commit (#92).
+        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) view.awaitingCommit = false
         engine.respondToControl(control, response)
         publish()
     }
@@ -535,7 +537,13 @@ class BrowserCoordinator(
             }
             is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
-            is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
+            is EngineEvent.ControlHidden -> view(event.view)?.let { live ->
+                val hidden = live.controls.filter { it.id == event.control }
+                live.controls.removeAll(hidden)
+                // The engine answers an unanswered leave-page question Stay (its deadline, or the
+                // tab left the screen), or drops it as the page commits; either way stop waiting.
+                if (hidden.any { it.content is PageControlContent.LeavePage }) live.awaitingCommit = false
+            }
             is EngineEvent.EngineError -> onEngineError(event)
             // Heartbeats, echoes, navigation confirmations and diagnostics cannot change what
             // publish() reads, so they skip its three Room reads on this serialized queue

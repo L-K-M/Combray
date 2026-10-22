@@ -1700,6 +1700,41 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun stayingOnAPageEndsTheReloadsLoadingLine() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.reload(); idle()
+        assertTrue(state().activeTab!!.loading)
+        showControl(1, 1, PageControlContent.LeavePage)
+        browser.answerPageControl(1, LeavePageChoice.STAY.response); idle()
+        // Nothing will commit: the line must not wait for #92's timeout.
+        assertFalse(state().activeTab!!.loading)
+
+        browser.reload(); idle()
+        showControl(1, 2, PageControlContent.LeavePage)
+        browser.answerPageControl(2, LeavePageChoice.LEAVE.response); idle()
+        assertTrue(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aLeavePageQuestionTheEngineAnswersEndsTheLoadingLine() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.reload(); idle()
+        showControl(1, 1, PageControlContent.LeavePage)
+        // Unanswered past its deadline: the engine answers Stay and withdraws the question.
+        engine.emit(EngineEvent.ControlHidden(engine.view(1), 1)); idle()
+        assertNull(state().pageControl)
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
     fun aHiddenTabWaitingForAnAnswerKeepsItsRenderer() {
         engine = FakeEngine()
         browser = BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, maxLiveViews = 1).also { it.start() }
