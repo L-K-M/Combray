@@ -4,13 +4,13 @@
 // a pref. Pages that call it unconditionally break; docs.mistral.ai shows "Application error"
 // when its marquee starts. This script runs in every document before the page's own scripts and
 // adds only a stub. The first call installs the web-animations-js polyfill and hands over to it.
-// The polyfill wraps requestAnimationFrame and the style of animated elements, so pages that
-// never animate keep the engine's own behaviour.
+// The polyfill wraps requestAnimationFrame, getComputedStyle and the style of animated elements,
+// so pages that never animate keep the engine's own behaviour.
 //
-//   el.animate(...) ──▶ stub: remove itself, run the polyfill ──▶ the polyfill's animate()
+//   el.animate(...) ──▶ stub: removes itself, runs the polyfill ──▶ the polyfill's animate()
 //
-// The polyfill skips itself when the engine's animate() is complete, so a future Servo
-// implementation takes over without changes here.
+// The stub steps aside when the engine has animate() at all, and the polyfill when the engine's
+// is complete. BrowsingTest#pagesCanAnimateElements fails if a future Servo's is not.
 (function (installPolyfill) {
   "use strict";
 
@@ -36,7 +36,9 @@
 
   // The polyfill's effects lack getComputedTiming(), which pages use to resume an animation
   // where it was (docs.mistral.ai's marquee does when its text changes width). Computed from
-  // the effect's timing and its animation's current time, as the spec defines it.
+  // the effect's timing and its animation's current time, as the spec defines it. Reads the
+  // 2.3.2 build's private fields (_timing, _animation, _easingFunction) and activeDuration:
+  // recheck them when the polyfill changes.
   function addComputedTiming() {
     var effect = window.KeyframeEffect && window.KeyframeEffect.prototype;
     if (!effect || effect.getComputedTiming) {
