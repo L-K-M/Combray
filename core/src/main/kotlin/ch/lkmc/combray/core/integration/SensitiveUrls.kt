@@ -31,7 +31,8 @@ object SensitiveUrls {
     /**
      * Names are percent-decoded once so `%74oken` cannot hide a credential. Decoding again is
      * not done: `%2574oken` becomes the literal name "%74oken", not a credential. An escape
-     * the decoder rejects is treated conservatively, like a malformed URI.
+     * the decoder rejects is treated conservatively, like a malformed URI. [URI] already
+     * refuses such escapes before this runs, so the catch is defense in depth.
      */
     private fun isCredentialName(name: String): Boolean {
         val decoded = try {

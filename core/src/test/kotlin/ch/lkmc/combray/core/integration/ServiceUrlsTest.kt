@@ -69,6 +69,7 @@ class ServiceUrlsTest {
     @Test
     fun ordinaryAndDoubleEncodedParametersAreNotSensitive() {
         assertEquals(false, SensitiveUrls.looksSensitive("https://a.example/article?id=3&%71=feed"))
+        assertEquals(false, SensitiveUrls.looksSensitive("https://a.example/article?id=%33"))
         // An encoded credential string inside a VALUE is content, not a credential name.
         assertEquals(false, SensitiveUrls.looksSensitive("https://a.example/?next=%2Flogin%3Ftoken%3Dx"))
         // One decode only: %2574oken decodes to the literal name "%74oken", not "token".
