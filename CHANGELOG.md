@@ -69,9 +69,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- Settings' history-retention label now reads the same configured
-  retention instance maintenance runs with, instead of building its own
-  copy of the default.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.

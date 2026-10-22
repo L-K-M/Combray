@@ -145,7 +145,19 @@ class ReaderTest {
         browser.reload(); idle()
 
         article(1, 10, capture, ARTICLE)
-        assertTrue(state().reader !is ReaderState.Ready)
+        assertTrue(state().reader is ReaderState.Unavailable)
+    }
+
+    @Test
+    fun anArticleFromACrashedRendererIsNotShown() {
+        openPage()
+        browser.openReader(); idle()
+        val capture = engine.articleCaptures.single().second
+        engine.emit(EngineEvent.Crashed(engine.view(1), "oom"))
+        idle()
+
+        article(1, 10, capture, ARTICLE)
+        assertTrue(state().reader is ReaderState.Unavailable)
     }
 
     @Test

@@ -537,6 +537,33 @@ Suggested performance measurements are targets to establish after M0, not assert
 | M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |
 | Server auth/version and target sites | Pending owner/configuration | Fixture work can proceed without secrets |
 
+
+### Owner decisions from the PR triage, 22 October 2026
+
+Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are the owner's words or a recommendation the owner accepted; "Proposed" rows are the triager's call on a question the owner left open. The PR column names where the work lands; an open PR is not behavior on main.
+
+| Decision | Status | PR |
+| --- | --- | --- |
+| Back on a page-opened tab with no history closes it and returns to the tab that opened it; on a tab another app opened, Back returns to that app | Confirmed | #57 with #47 |
+| Leaving Reader view: the bottom bar's Back leaves Reader, and "Show the page" sits at the top of the article; no floating close button | Confirmed | #77; #27 and #101 closed |
+| Theme: an in-app Follow the system / Light / Dark choice; the pine and ivory palette stays the default; no Material You colors by default and no pitch-black variant | Confirmed | #62, #52; #98 closed |
+| Text size: one control. Page zoom (More > Text size) also scales Reader view, instead of a separate reader size | Proposed | #87, #52 |
+| Other apps can share links and text into Combray; "Save to Karakeep" from the share sheet asks for one tap before it saves | Confirmed | #61 |
+| Address suggestions: a history row opens in the tab being edited (a new tab when the editor is for a new tab); an open-tab row switches to that tab | Confirmed | #63 with #79 |
+| A typed private or loopback IP literal or `localhost` opens over plain HTTP in the page, with HTTPS one tap away | Confirmed | #69 |
+| Sensitive address parameters: also treat exact `key`, `ticket`, `pass`, names containing `token`, and path session parameters as credentials; anchors and hash routes without `name=value` stay ordinary | Proposed | #91 |
+| Links to other apps (`mailto:`, `tel:`, `intent:`, `market:` and the like) ask before Combray hands them to Android | Confirmed | #80, #84 |
+| Find in page runs in the page, so the page can observe the query and the selection | Confirmed | #86 |
+| Pages reached through an HTTP sign-in can be captured to Hister and saved to Karakeep; the sign-in itself never appears in an address | Confirmed | #89 |
+| Scroll buttons: scrolling up shows "Scroll to top", scrolling down shows "Scroll to bottom"; the button hides again shortly after scrolling stops | Confirmed (direction); Proposed (hiding) | #103 |
+| Below about 400dp the address gets its own row above the actions | Confirmed | #50 |
+| Swiping a tab row in Recent closes it; the close button stays | Confirmed | #53 |
+| Haptics: a tick when a save lands, a distinct one when it is refused, and one on a page long-press | Confirmed | #76 |
+| Long-pressing Recent switches to the previously used tab | Confirmed | #109 |
+| Swiping sideways on the bottom bar switches tabs | Confirmed (owner request) | New, with #109 |
+| The More sheet keeps "Resume history capture" while capture is paused | Proposed | #58 |
+| Saves that never reached the server do not use up the ten attempts; they need attention after seven days. Hister's deliberate refusals cancel the capture | Confirmed | #74 |
+
 ### Principal risks and response
 
 **Android wrapper work:** multi-tab identity and extraction required upstream changes; M0 carries them as `native/servo/patches/0002` (document identity, crash fix). Keep the patch set small and offer it upstream; rebase it when moving to a later 0.6.x LTS release.
