@@ -268,6 +268,21 @@ class BrowsingTest {
         assertEquals(ANIMATE_OK, state.activeTab?.title)
     }
 
+    @Test
+    fun pagesSeeAScreenAtLeastAsWideAsTheirWindow() {
+        device.browser.openUrl(Fixtures.SCREEN, Placement.CURRENT_TAB)
+        val state = device.awaitState { it.activeTab?.title?.startsWith(SCREEN_PREFIX) == true }
+        val title = state.activeTab?.title.orEmpty()
+        val widths = title.removePrefix(SCREEN_PREFIX).split(":").map { it.toIntOrNull() ?: 0 }
+        assertEquals("four widths in $title", SCREEN_WIDTHS, widths.size)
+
+        val (screenWidth, availWidth, outerWidth, innerWidth) = widths
+        assertTrue("every width is positive: $title", widths.all { it > 0 })
+        assertTrue("screen.width >= innerWidth: $title", screenWidth >= innerWidth)
+        assertTrue("screen.availWidth >= innerWidth: $title", availWidth >= innerWidth)
+        assertTrue("outerWidth >= innerWidth: $title", outerWidth >= innerWidth)
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -299,5 +314,7 @@ class BrowsingTest {
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val SCREEN_PREFIX = "SCREEN:"
+        const val SCREEN_WIDTHS = 4
     }
 }

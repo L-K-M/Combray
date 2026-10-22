@@ -48,6 +48,9 @@ object Fixtures {
 
     const val ONCE_TITLE = "ONCE"
 
+    /** Titled `SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth>` as the page reads them. */
+    const val SCREEN = "$BASE/screen.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

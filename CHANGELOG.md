@@ -252,6 +252,10 @@ All notable changes to this project are documented here. The format follows
 - On a screen narrower than 400dp the address sits on its own row above
   the actions, so the site name stays readable. Wider screens keep the
   single row, and snackbars stay clear of the bar either way.
+- Pages read a real screen and window size: `screen.width`,
+  `screen.availWidth` and `outerWidth` (and their heights) were 0, which
+  broke sites that size images or layouts from them. The screen is the
+  page area.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
