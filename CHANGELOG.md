@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- Long-press Recent to switch to the tab you used before this one, and
-  swipe sideways along the bottom bar to step through your open tabs in
+- Long-press Recent to switch to the tab you used before this one (a tap
+  still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
   Recent's order. Repeated swipes keep going back; after a pause they
   start from the tab you are on.
 - Long-press the address chip to copy the exact current tab URL to the
@@ -29,8 +29,6 @@ All notable changes to this project are documented here. The format follows
   Karakeep" share target saves a link after one confirming tap, without
   opening the browser.
 - Launcher shortcuts for New tab and Search history (Recent on Hister).
-- Long-press the Recent button to switch straight to the tab used before
-  the focused one; tapping Recent still opens the list.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.
