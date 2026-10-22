@@ -106,6 +106,19 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aForegroundSignalBeforeReadinessUnthrottlesTheCreatedView() {
+        browser.setAppForeground(true)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertTrue(engine.created.isEmpty())
+        assertTrue(engine.throttling.isEmpty())
+        ready()
+        assertEquals(listOf(1L to false), engine.throttling)
+        assertEquals(1L, engine.selected.last())
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
     fun foregroundTogglesOnlyTheShownRenderer() {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()

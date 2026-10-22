@@ -310,6 +310,7 @@ class BrowserCoordinator(
     /**
      * Process visibility from the lifecycle owner: while backgrounded the shown renderer is
      * throttled too (hidden ones already are). Purely a hint; no logical state changes.
+     * Servo's hint slows timers/animations, not explicit document evaluation.
      */
     fun setAppForeground(foreground: Boolean) = submit {
         if (foreground == appForeground) return@submit
