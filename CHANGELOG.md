@@ -85,6 +85,9 @@ All notable changes to this project are documented here. The format follows
   which keeps every view throttled until the app returns. Views created or
   restored while backgrounded stay throttled, and repeated visibility signals
   emit no extra commands.
+- An engine that fails before it is ready (for example a graphics driver
+  error) now shows the engine-failed message instead of claiming the
+  engine is still starting forever.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
