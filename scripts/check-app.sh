@@ -47,7 +47,7 @@ trap cleanup EXIT
 # the port would accept whatever answers there, including another run's server, and a dead one is
 # a zombie until the shell reaps it, which kill -0 calls alive.
 echo "==> fixture server on 127.0.0.1:$FIXTURE_PORT"
-python3 -I "$ROOT/testing/fixtures/server.py" --port "$FIXTURE_PORT" > "$RESULTS/fixtures.log" 2>&1 &
+python3 -I -u "$ROOT/testing/fixtures/server.py" --port "$FIXTURE_PORT" > "$RESULTS/fixtures.log" 2>&1 &
 FIXTURE_PID=$!
 PIDS+=("$FIXTURE_PID")
 "${ADB[@]}" reverse "tcp:$FIXTURE_PORT" "tcp:$FIXTURE_PORT" > /dev/null
