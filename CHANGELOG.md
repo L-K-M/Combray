@@ -80,6 +80,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Page info no longer changes screen state during composition when the
+  focused tab loses its address while the dialog is open; the dialog keeps
+  describing the address it was opened for, and Back closes it as before.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.

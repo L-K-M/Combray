@@ -128,9 +128,15 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         sheet = Sheet.ADDRESS
     }
 
+    // The page information dialog describes the address it was opened for: it stays complete
+    // even if the tab's address changes or clears while it is open, and closing it is the
+    // dialog's own callback — never a state write during composition.
+    var pageInfoUrl by rememberSaveable { mutableStateOf<String?>(null) }
+
     // Back: close the open sheet or reader view first, then go back in the page, then leave
     // the app. A tab another app opened closes on the way out: its page stays in history only.
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
+
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack == true) { browser.goBack() }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
         tab?.let { browser.returnToOtherApp(it.id) }
@@ -260,7 +266,10 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onForward = { dismiss(); browser.goForward() },
             onReload = { dismiss(); browser.reload() },
             onNewTab = editNewTab,
-            onPageInfo = { sheet = Sheet.PAGE_INFO },
+            onPageInfo = {
+                pageInfoUrl = tab?.url
+                sheet = Sheet.PAGE_INFO
+            },
             onSettings = { sheet = Sheet.SETTINGS },
             captureEnabled = histerService?.captureEnabled,
             onPauseCapture = {
@@ -281,7 +290,9 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             notices = graph.notices,
             onDismiss = dismiss,
         )
-        Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
+        // A null address cannot happen through More (the row needs a page); composing nothing
+        // is still safe if it ever does: Back simply closes the selected sheet.
+        Sheet.PAGE_INFO -> pageInfoUrl?.let { PageInfoDialog(url = it, onDismiss = dismiss) }
     }
 
     // Shown over any sheet: the page is blocked until it gets an answer.
