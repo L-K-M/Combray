@@ -62,9 +62,10 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     val scope = rememberCoroutineScope()
 
     // Key on what the load depends on: the server (its fingerprint, derived from the main
-    // address) and the configuration generation, which bumps on every address or credential
-    // change. Not the whole row: choosing a list or editing the alternate address rewrites it
-    // without changing what a read returns, and must not reset the loaded pages.
+    // address) and the configuration generation, which bumps whenever settings are saved with a
+    // key (a new main address, a new alternate or a new key). Not the whole row: choosing a list
+    // or dropping the alternate rewrites it without changing what a read returns, and must not
+    // reset the loaded pages.
     LaunchedEffect(query, service?.fingerprint, service?.generation) {
         val mine = ++generation
         ui = BookmarksUi.Idle

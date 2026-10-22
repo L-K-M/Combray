@@ -1111,6 +1111,11 @@ class BrowserCoordinator(
         val view = tab?.let { liveByTab[it.id] }
         val openCount = dao.openTabCount()
         val returnsToOpener = tab?.let { openers[it.id] }?.let { dao.tab(it)?.state == TabState.OPEN } ?: false
+        // Without a committed document (restored, released or not yet loaded) the stored visit
+        // still says whether the tab's page was an engine error page, whose title is not the page's.
+        val loadFailed = view?.currentDocument?.let { it in view.errorDocuments }
+            ?: tab?.currentVisitId?.let { dao.visit(it)?.failed }
+            ?: false
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -1123,7 +1128,7 @@ class BrowserCoordinator(
                         canGoForward = view?.takeIf { !it.crashed }?.canGoForward ?: false,
                         crashed = view?.crashed ?: false,
                         hasView = view != null,
-                        loadFailed = view?.currentDocument?.let { it in view.errorDocuments } ?: false,
+                        loadFailed = loadFailed,
                         openedByOtherApp = active.id == otherAppTab,
                         returnsToOpener = returnsToOpener,
                     )

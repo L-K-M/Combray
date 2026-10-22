@@ -468,7 +468,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Page controls: `<select>`, `alert`/`confirm`/`prompt`, file upload | Passed on the emulator against real Servo (`PageControlsTest`, run `controls2`): a choice from the app's picker changed the page's `<select>`; confirm, prompt and alert answers reached the page in order under a "localhost says" title; the page read a staged upload with `FileReader`. Android's document picker itself (another app) and pinch zoom were not exercised |
 | Link menu on long-press | Menu and Open in new tab passed on the emulator (`PageControlsTest.aLongPressOnALinkOffersToOpenItInANewTab`, runs `controls4` and `controls5`): a long-press on a link opened Combray's menu without following the link, and "Open in new tab" opened the link's page in a second tab. Full suite `full10` (same feature, before rebasing onto #9's final fixes): 21 of 22 passed; the select check failed once on a Compose idling timeout under host load and passed in both later runs. A tap misread as a long-press under emulator stalls failed the upload check in `controls6`; with the hold timed from when the app handled the press, all four checks passed (`controls7`) and `BrowsingTest` passed 9 of 9 (`browsing11`). Copy, share and image entries were not exercised on the device. Open in background and Save link to Karakeep came later and have not run on the device either |
 | HTTP sign-in (Basic/Digest) | Passed on the emulator (`PageControlsTest.aSignInFromTheDialogReachesTheServer`, runs `signin1`, `signin2` and `signin3`, with the other four page-control checks): the dialog named `http://localhost:8766`, Cancel showed the server's 401 page, and the fixture's username and password loaded the protected page. The password appeared in neither logcat nor the test output. Proxy sign-in and Digest were not exercised |
-| Reader view | Incomplete: Sol's run ([ENGINE_SPIKE section 14](ENGINE_SPIKE.md#14-sol-review-validation-21-october-2026)) passed 2 of 3 `ReaderTest` checks; the Back check was blocked by a System UI ANR on that emulator. `check-app.sh`'s default run now covers every device-check class, including `ReaderTest`; no default run is recorded yet |
+| Reader view | Incomplete: Sol's run ([ENGINE_SPIKE section 14](ENGINE_SPIKE.md#14-sol-review-validation-21-october-2026)) passed 2 of 3 `ReaderTest` checks; the article check passed its extraction and display assertions, but its final system Back was blocked by a System UI ANR on that emulator. `check-app.sh`'s default run now covers every device-check class, including `ReaderTest`; no default run is recorded yet |
 
 Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). Latest whole-suite device evidence: `full11` and `about4` (M1 status above).
 
@@ -526,7 +526,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Tune on the owner's device (M4) |
 | Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
 | Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |
-| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode. A host is read only right after a leading `scheme://`; pages without one (`data:`, `about:blank`, local files) show only their scheme, never text from their address |
+| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode. A host is read only right after a leading `http://` or `https://` (or inside a `blob:` address); other pages (`data:`, `about:blank`, local files, other schemes) show only their scheme, never text from their address |
 | Seven-day closed-history retention | Proposed | Bounded short-term memory, counted from last use; open tabs exempt unless the owner turns on closing unused tabs |
 | Back from a page-opened tab | Confirmed (owner, 22 October 2026) | Back on the first page of a tab a page or the link menu opened closes it and focuses its opener, as in Chrome, instead of leaving the app (section 2) |
 | Closing unused tabs | Confirmed (owner choice, 20 October 2026) | A Settings switch, off by default; uses the history retention period; the focused tab stays |
@@ -541,7 +541,6 @@ Suggested performance measurements are targets to establish after M0, not assert
 | M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |
 | Server auth/version and target sites | Pending owner/configuration | Fixture work can proceed without secrets |
 
-
 ### Owner decisions from the PR triage, 22 October 2026
 
 Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are the owner's words or a recommendation the owner accepted; "Proposed" rows are the triager's call on a question the owner left open. The PR column names where the work lands; an open PR is not behavior on main.
@@ -549,9 +548,9 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 | Decision | Status | PR |
 | --- | --- | --- |
 | Back on a page-opened tab with no history closes it and returns to the tab that opened it; on a tab another app opened, Back returns to that app | Confirmed | #57 with #47 |
-| Leaving Reader view: the bottom bar's Back leaves Reader, and "Show the page" sits at the top of the article; no floating close button | Confirmed | #77; #27 and #101 closed |
+| Leaving Reader view: the bottom bar's Back leaves Reader, and "Show the page" sits at the top of the article; no floating close button | Confirmed | #57 (bar Back), #77 (Show the page); #27 and #101 closed |
 | Theme: an in-app Follow the system / Light / Dark choice; the pine and ivory palette stays the default; no Material You colors by default and no pitch-black variant | Confirmed | #62, #52; #98 closed |
-| Text size: one control. Page zoom (More > Text size) also scales Reader view, instead of a separate reader size | Proposed | #87, #52 |
+| Text size: one control. Page zoom (More › Text size) also scales Reader view, instead of a separate reader size | Proposed | #87, #52 |
 | Other apps can share links and text into Combray; "Save to Karakeep" from the share sheet asks for one tap before it saves | Confirmed | #61 |
 | Address suggestions: a history row opens in the tab being edited (a new tab when the editor is for a new tab); an open-tab row switches to that tab | Confirmed | #63 with #79 |
 | A typed private or loopback IP literal or `localhost` opens over plain HTTP in the page, with HTTPS one tap away | Confirmed | #69 |
@@ -593,6 +592,8 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, which needs the owner's signing key and a decision on building Servo in CI (hours of build time and tens of gigabytes per run). Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
 

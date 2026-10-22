@@ -767,6 +767,21 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aRestoredTabStillKnowsItsLastLoadFailed() {
+        ready()
+        browser.openUrl("https://down.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://down.test/")
+        title(1, 10, "Error loading page")
+        assertTrue(state().activeTab!!.loadFailed)
+
+        // Process death: no renderer yet, so the stored visit says the page was an error page.
+        browser = newCoordinator()
+        idle()
+        assertEquals("https://down.test/", state().activeTab?.url)
+        assertTrue(state().activeTab!!.loadFailed)
+    }
+
+    @Test
     fun closedHistoryExpiresButOpenTabsDoNot() {
         ready()
         browser.openUrl("https://old-open.test/", Placement.NEW_TAB); idle()

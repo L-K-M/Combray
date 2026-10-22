@@ -152,9 +152,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- A huge `Retry-After` header now waits the six-hour ceiling. Converting
-  it to milliseconds overflowed, so the server's delay was replaced by the
-  ordinary backoff or an arbitrary one.
+- A `Retry-After` header too large to convert to milliseconds now waits
+  the six-hour ceiling. The conversion overflowed, so the server's delay
+  was replaced by the ordinary backoff or an arbitrary one. A value beyond
+  64-bit range is still ignored.
 - Tapping Save with Karakeep not set up now says so even when the address
   looks like it carries a login token, instead of claiming the address was
   withheld for safety.
@@ -255,10 +256,10 @@ All notable changes to this project are documented here. The format follows
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
   Each patch is now checked to have landed.
-- Settings stopped saying Hister capture was paused for the 20 MB budget
-  only when another page was captured. The notice now follows the queue:
-  it clears as soon as sent, expired or discarded captures bring the
-  waiting text back under the limit.
+- Settings' "Capture is paused" notice for the 20 MB budget cleared only
+  when another page was captured. It now follows the queue: it shows
+  while the waiting text leaves no room for a full-size capture, and
+  clears once sent, expired or discarded captures make room.
 - Abandoned Hister captures expire after seven days, including when a
   running queue crosses the age limit. Expiry clears page bodies and
   rejects late results without invalidating a live request's lease.
