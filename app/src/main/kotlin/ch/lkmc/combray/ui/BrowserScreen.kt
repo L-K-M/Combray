@@ -121,6 +121,7 @@ fun BrowserScreen(
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
     val mediaUnsupported = stringResource(R.string.notice_media_unsupported)
+    val popupBlocked = stringResource(R.string.notice_popup_blocked)
     val undo = stringResource(R.string.action_undo)
     val openedInBackground = stringResource(R.string.notice_opened_in_background)
     val show = stringResource(R.string.action_show)
@@ -145,6 +146,7 @@ fun BrowserScreen(
                     if (result == SnackbarResult.ActionPerformed) browser.selectTab(notice.tabId)
                 }
                 Notice.MediaUnsupported -> snackbar.showSnackbar(mediaUnsupported)
+                Notice.PopupBlocked -> snackbar.showSnackbar(popupBlocked)
             }
         }
     }

@@ -68,6 +68,9 @@ sealed interface Notice {
 
     /** The shown page has audio or video, which Combray cannot play; its media was not downloaded. */
     data object MediaUnsupported : Notice
+
+    /** The shown page asked for a window without the user's tap, and it was not opened. */
+    data object PopupBlocked : Notice
 }
 
 /** Whether Undo of a tab close moves focus to the reopened tab. */

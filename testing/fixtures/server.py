@@ -27,6 +27,8 @@ Pages
                              page-filling #8a5a2b link (or, with auto, a script on load) to another
                              app's link or a file, with blank in a new window (target=_blank); the
                              title turns EXTERNAL:still-here 3 s later if the page is still shown
+  /popup.html                calls window.open on load, without a tap; the title turns
+                             POPUP:still-here 3 s later
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
@@ -245,6 +247,13 @@ def external_page(to, automatic, blank):
     return page("EXTERNAL", body, "<style>html,body{margin:0;background:#8a5a2b}</style>")
 
 
+# Asks for a window as soon as it loads, which no user tapped for.
+POPUP_PAGE = page(
+    "POPUP",
+    "<p>popup</p><script>addEventListener('load',function(){window.open('/solid/3b4f8a.html');"
+    "setTimeout(function(){document.title='POPUP:still-here';},3000);});</script>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -389,6 +398,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(400, page("bad link", ""))
             auto, blank = (query.get(name, [""])[0] == "1" for name in ("auto", "blank"))
             return self.send(200, external_page(to, auto, blank))
+        if path == "/popup.html":
+            return self.send(200, POPUP_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

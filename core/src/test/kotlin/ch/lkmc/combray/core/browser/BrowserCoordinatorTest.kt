@@ -181,6 +181,28 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aBlockedWindowIsReportedOncePerDocumentOfTheShownPage() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1)))
+        idle()
+        assertEquals(Notice.PopupBlocked, state().notice)
+        browser.noticeShown(Notice.PopupBlocked)
+
+        // The same page trying again says nothing more; its next document may say it once.
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1)))
+        idle()
+        assertNull(state().notice)
+        commit(1, 11, "https://a.test/next")
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1)))
+        idle()
+        assertEquals(Notice.PopupBlocked, state().notice)
+    }
+
+    @Test
     fun aHiddenTabCannotHandALinkToAnotherApp() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)

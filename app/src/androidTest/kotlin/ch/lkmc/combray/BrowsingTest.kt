@@ -374,6 +374,18 @@ class BrowsingTest {
         assertTrue(compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isEmpty())
     }
 
+    @Test
+    fun aPageCannotOpenWindowsWithoutATap() {
+        val popup = "${Fixtures.BASE}/popup.html"
+        device.browser.openUrl(popup, Placement.CURRENT_TAB)
+        // The notice comes at load, before the title's 3 s: look for it first, while it shows.
+        val blocked = compose.activity.getString(R.string.notice_popup_blocked)
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithText(blocked).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.url == popup && it.activeTab?.title == "POPUP:still-here" }
+
+        assertEquals(1, state.openTabCount)
+    }
+
     /**
      * Taps the page-filling fixture link until [done]. Under software emulation a tap right after
      * the first paint can arrive before the page can hit-test it, and is then lost.

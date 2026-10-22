@@ -96,6 +96,9 @@ sealed interface EngineEvent {
     /** The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed. */
     data class ExternalLink(val view: ViewRef, val url: String) : EngineEvent
 
+    /** The page asked for a window without the user's tap; the engine did not open it. */
+    data class PopupBlocked(val view: ViewRef) : EngineEvent
+
     /** [index] and [length] describe the view's session history after the change. */
     data class HistoryChanged(
         val view: ViewRef,
@@ -210,6 +213,7 @@ sealed interface EngineEvent {
                 "navigation_requested" -> NavigationRequested(event.view(), event.long("request"), event.string("url"))
                 "page_navigation_requested" -> PageNavigationRequested(event.view(), event.string("url"))
                 "external_link" -> ExternalLink(event.view(), event.string("url"))
+                "popup_blocked" -> PopupBlocked(event.view())
                 "document_committed" -> event.history(HistoryKind.DOCUMENT_COMMITTED)
                 "same_document_navigation" -> event.history(HistoryKind.SAME_DOCUMENT)
                 "history_updated" -> event.history(HistoryKind.LIST_UPDATED)

@@ -231,6 +231,9 @@ All notable changes to this project are documented here. The format follows
   backend), and by Servo's source never finished loading. Combray now
   cancels these loads before they start, so the page's error handling and
   fallback run, and says once per page that its audio or video can't play.
+- Pages could open new tabs by themselves, on load or from a timer, and
+  each new tab could open the next. A page now opens a window only right
+  after your tap, one per tap; Combray says when it blocked one.
 - Tapping a `mailto:`, `tel:`, map or app link on a page replaced the page
   with an error. Combray now asks whether to open such a link in another
   app; Open hands it to the app that handles it, or says that none can,

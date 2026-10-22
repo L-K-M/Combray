@@ -598,6 +598,13 @@ class BrowserCoordinator(
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.FindResult -> onFindResult(event)
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
+            // Said once per document: a page that keeps trying must not keep a notice up.
+            is EngineEvent.PopupBlocked -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                if (it.popupNoticeDocument != it.currentDocument) {
+                    it.popupNoticeDocument = it.currentDocument
+                    state.update { s -> s.copy(notice = Notice.PopupBlocked) }
+                }
+            }
             // The engine sends these only right after the user's tap; still, only the shown page's.
             is EngineEvent.ExternalLink -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 val link = ExternalLink(nextRequest++, event.url)
@@ -1321,6 +1328,9 @@ class BrowserCoordinator(
         var dialogDocument: Long? = null
         var dialogCount = 0
         var dialogsBlocked = false
+
+        /** The document a blocked window was last reported for. */
+        var popupNoticeDocument: Long? = null
     }
 
     private class ShownControl(val id: Long, val content: PageControlContent, val offerBlocking: Boolean)

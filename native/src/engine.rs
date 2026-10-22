@@ -36,7 +36,7 @@ use servo::{
 };
 use url::Url;
 
-use crate::activation::TapRecognizer;
+use crate::activation::{OpeningTap, TapRecognizer};
 use crate::animations;
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
@@ -196,6 +196,8 @@ struct Tab {
     /// Whether a document other than the initial `about:blank` committed: a window opened just
     /// for an app link has none and closes (`navigation::refusal`).
     shown: Shown,
+    /// The tap that let the opener open this window, for the window's first navigation.
+    opening_tap: OpeningTap,
 }
 
 impl Tab {
@@ -306,8 +308,8 @@ struct Engine {
     next_control: u64,
     /// Page zoom of every view (`SetPageZoom`); kept here so views created later start at it.
     page_zoom: f32,
-    /// The user's last tap or key press: in which tab and when.
-    last_activation: Option<(i64, Instant)>,
+    /// The user's last tap or key press: in which tab, on which of its documents, and when.
+    last_activation: Option<(i64, Option<PipelineId>, Instant)>,
     taps: TapRecognizer,
 }
 
@@ -683,7 +685,7 @@ impl Engine {
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
 
-        let webview_id = self.insert_tab(view, webview, None);
+        let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
@@ -693,7 +695,13 @@ impl Engine {
     /// Registers a new view, hidden until selected so two shown views never overlap, at the
     /// page zoom every view uses. Servo builds a view at 100%, so its first document may lay out
     /// once more when the zoom arrives (as a resize).
-    fn insert_tab(&mut self, view: ViewKey, webview: WebView, opener: Option<ViewKey>) -> String {
+    fn insert_tab(
+        &mut self,
+        view: ViewKey,
+        webview: WebView,
+        opener: Option<ViewKey>,
+        opening_tap: OpeningTap,
+    ) -> String {
         webview.hide();
         webview.set_page_zoom(self.page_zoom);
         let webview_id = format!("{:?}", webview.id());
@@ -713,6 +721,7 @@ impl Engine {
                 interacted_document: None,
                 opener,
                 shown: Shown::InitialBlank,
+                opening_tap,
             },
         );
         webview_id
@@ -722,10 +731,18 @@ impl Engine {
     /// the application adopts it (`tab_opened`). Dropping the request refuses the window.
     fn open_page_tab(&mut self, opener: ViewKey, request: CreateNewWebViewRequest) {
         // Only the tab the user sees may open windows: hidden or throttled tabs cannot take
-        // over the screen (Servo 0.6.0 reports no user activation to check instead).
+        // over the screen.
         if self.live_tab(opener).is_none() || self.active != Some(opener.tab) {
             return;
         }
+        // And only right after the user's own tap or key press there, on the page it shows now:
+        // Servo 0.6.0 opens every window.open() and target=_blank window, with or without one,
+        // and each new tab could open the next. One tap opens at most one window.
+        let Some(tapped_at) = self.take_document_activation(opener.tab) else {
+            info!("window without the user's tap in the visible tab: refused");
+            self.emit(EngineEvent::PopupBlocked { view: opener });
+            return;
+        };
         let Some(runtime) = &self.runtime else {
             return;
         };
@@ -743,7 +760,8 @@ impl Engine {
             .user_content_manager(runtime.user_content.clone())
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
-        self.insert_tab(view, webview, Some(opener));
+        // The window's first navigation is still the tap's: a target=_blank app link opens its app.
+        self.insert_tab(view, webview, Some(opener), OpeningTap::at(tapped_at));
         self.emit(EngineEvent::TabOpened { view, opener });
     }
 
@@ -923,20 +941,42 @@ impl Engine {
     }
 
     fn note_activation(&mut self) {
-        self.last_activation = self.active.map(|tab| (tab, Instant::now()));
+        let activation = self.active.map(|tab| {
+            let document = self.tabs.get(&tab).and_then(|found| found.current_document);
+            (tab, document, Instant::now())
+        });
+        self.last_activation = activation;
     }
 
-    /// Whether the user tapped or pressed a key moments ago in one of `tabs`, and one of them is
-    /// still the visible tab. Using it up means one tap hands at most one link to another app.
-    fn take_activation(&mut self, tabs: &[i64]) -> bool {
-        let recent = self.active.is_some_and(|shown| tabs.contains(&shown))
-            && self.last_activation.is_some_and(|(activated, at)| {
-                tabs.contains(&activated) && at.elapsed() <= USER_ACTIVATION_WINDOW
-            });
-        if recent {
-            self.last_activation = None;
+    /// When the user tapped or pressed a key, if that was moments ago in one of `tabs` and one of
+    /// them is still the visible tab. Using it up means one tap hands at most one link to another
+    /// app.
+    fn take_activation(&mut self, tabs: &[i64]) -> Option<Instant> {
+        let (activated, _, at) = self.last_activation?;
+        let recent = self.shows_one_of(tabs)
+            && tabs.contains(&activated)
+            && at.elapsed() <= USER_ACTIVATION_WINDOW;
+        if !recent {
+            return None;
         }
-        recent
+        self.last_activation = None;
+        Some(at)
+    }
+
+    /// Like `take_activation`, for a page opening a window: the tap must also have been on the
+    /// document `tab` shows now, as browsers tie activation to the document. Otherwise a tapped
+    /// link's destination could open a pop-up as it loads.
+    fn take_document_activation(&mut self, tab: i64) -> Option<Instant> {
+        let (_, document, _) = self.last_activation?;
+        let current = self.tabs.get(&tab).and_then(|found| found.current_document);
+        if document.is_none() || document != current {
+            return None;
+        }
+        self.take_activation(&[tab])
+    }
+
+    fn shows_one_of(&self, tabs: &[i64]) -> bool {
+        self.active.is_some_and(|shown| tabs.contains(&shown))
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
@@ -1439,6 +1479,10 @@ impl Engine {
     /// refused. A window a page opened just for such a link closes instead of staying blank.
     fn page_navigation(&mut self, view: ViewKey, request: NavigationRequest) {
         let url = request.url.clone();
+        // Used up by the window's first navigation, whatever it is.
+        let opened_by_tap = self
+            .live_tab(view)
+            .is_some_and(|tab| tab.opening_tap.take(Instant::now(), USER_ACTIVATION_WINDOW));
         match navigation::classify(url.scheme()) {
             PageNavigation::Allow => {
                 request.allow();
@@ -1470,8 +1514,12 @@ impl Engine {
                 // Only a link that can be handed over may use up the user's tap.
                 let deliverable = bounded && self.live_tab(refusal.owner).is_some();
                 // Before closing the window, which may be the visible tab: the user tapped in
-                // the opener, or in the window itself.
-                let tapped = deliverable && self.take_activation(&[refusal.owner.tab, view.tab]);
+                // the opener, or in the window itself. The tap that opened the window is spent
+                // in the opener, so the window's first navigation brings it along.
+                let owners = [refusal.owner.tab, view.tab];
+                let tapped = deliverable
+                    && ((opened_by_tap && self.shows_one_of(&owners))
+                        || self.take_activation(&owners).is_some());
                 if refusal.close {
                     // Reported like a page closing its own window, and before the link: the
                     // application drops the tab and shows the opener again, which then takes it.
