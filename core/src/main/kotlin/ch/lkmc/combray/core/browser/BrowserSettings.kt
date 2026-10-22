@@ -51,7 +51,8 @@ class BrowserSettings(private val preferences: SharedPreferences) {
  * Text size of web pages, applied as the page zoom of every view: the page lays out again, so
  * text, pictures and layout grow together and lines rewrap to the screen. A choice of its own,
  * not Android's font scale: at the largest system font (200%) the same zoom would halve a
- * phone's CSS width and break most sites. Reader view follows the system font size instead.
+ * phone's CSS width and break most sites. Reader view scales its type by the same step, on top of
+ * the system font size.
  */
 enum class TextSize(val percent: Int) {
     PERCENT_80(80),

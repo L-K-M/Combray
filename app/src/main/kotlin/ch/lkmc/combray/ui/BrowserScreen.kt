@@ -93,6 +93,7 @@ fun BrowserScreen(
 ) {
     val browser = graph.browser
     val state by browser.browserState.collectAsStateWithLifecycle()
+    val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -235,6 +236,7 @@ fun BrowserScreen(
                 state.reader?.let { reader ->
                     ReaderView(
                         state = reader,
+                        textSize = textSize,
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
                             browser.closeReader()
@@ -375,7 +377,6 @@ fun BrowserScreen(
             }
         }
         Sheet.TEXT_SIZE -> {
-            val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
             TextSizeDialog(
                 size = textSize,
                 onChange = { size ->

@@ -21,7 +21,7 @@
     <string name="text_size_larger">Larger text</string>
     <string name="text_size_percent">%1$d%%</string>
     <string name="text_size_reset">Reset</string>
-    <string name="text_size_explanation">Pages are zoomed, so their pictures and layout grow with the text. Reader view uses your device’s font size.</string>
+    <string name="text_size_explanation">Pages are zoomed, so their pictures and layout grow with the text. Reader view uses the same size.</string>
     <string name="action_settings">Settings</string>
     <string name="action_save">Save</string>
     <string name="action_recent">Recent</string>

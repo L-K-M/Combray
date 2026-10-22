@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,6 +67,7 @@ import ch.lkmc.combray.core.browser.Article
 import ch.lkmc.combray.core.browser.ArticleBlock
 import ch.lkmc.combray.core.browser.BlockKind
 import ch.lkmc.combray.core.browser.ReaderState
+import ch.lkmc.combray.core.browser.TextSize
 
 /** Readable line length for body text. */
 private val MAX_TEXT_WIDTH = 680.dp
@@ -107,7 +109,7 @@ internal object ReaderType {
  * Page content is never rendered as markup here; links go through [onOpenLink].
  */
 @Composable
-fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
+fun ReaderView(state: ReaderState, textSize: TextSize, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
             is ReaderState.Loading -> ReaderMessage(stringResource(R.string.reader_loading)) { CircularProgressIndicator() }
@@ -116,7 +118,13 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
             }
             is ReaderState.Ready -> {
                 val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
-                CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                // More › Text size scales the article's type too, on top of the system font size:
+                // one text control (proposed default, 22 October 2026).
+                val density = LocalDensity.current
+                CompositionLocalProvider(
+                    LocalLayoutDirection provides direction,
+                    LocalDensity provides Density(density.density, density.fontScale * textSize.zoom),
+                ) {
                     ArticleText(state.article, onOpenLink, onClose)
                 }
             }
