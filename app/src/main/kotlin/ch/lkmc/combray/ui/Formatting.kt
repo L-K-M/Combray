@@ -12,8 +12,13 @@ fun displayHost(url: String): String {
 fun relativeTime(time: Long, now: Long): String =
     DateUtils.getRelativeTimeSpanString(time, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
 
-/** The share's subject: the page's trimmed title, or null when it has nothing usable. */
-fun shareTitle(title: String?): String? = title?.trim()?.takeIf { it.isNotEmpty() }
+/**
+ * The share's subject: the page's title with its whitespace collapsed (a title's line break
+ * must not become a second line of the share), or null when it has nothing usable.
+ */
+fun shareTitle(title: String?): String? = title?.trim()?.replace(WHITESPACE, " ")?.takeIf { it.isNotEmpty() }
+
+private val WHITESPACE = Regex("\\s+")
 
 /** What a share carries: the title as the first line (when there is one), then the address. */
 fun shareText(url: String, title: String?): String =

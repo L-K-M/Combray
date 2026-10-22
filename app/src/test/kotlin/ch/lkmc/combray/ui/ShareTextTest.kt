@@ -14,4 +14,12 @@ class ShareTextTest {
         assertEquals("https://example.org/untitled", shareText("https://example.org/untitled", null))
         assertEquals("https://example.org/blank-title", shareText("https://example.org/blank-title", "  "))
     }
+
+    @Test
+    fun aPaddedTitleIsTrimmedAndItsBreaksCollapseIntoOneLine() {
+        assertEquals(
+            "How to Sail\nhttps://example.org/sailing",
+            shareText("https://example.org/sailing", "  How to\nSail  "),
+        )
+    }
 }
