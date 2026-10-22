@@ -31,6 +31,7 @@ REGISTRY = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registr
 # Inputs whose change requires regenerating; the test recomputes these.
 HASHED_INPUTS = [
     "native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml", "native/src/vendor/Readability.LICENSE.md",
+    "native/src/vendor/web-animations.LICENSE.md",
     "scripts/generate-notices.py",
 ]
 

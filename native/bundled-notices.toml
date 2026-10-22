@@ -145,6 +145,14 @@ version = "0.6.0"
 license = "Apache-2.0"
 repo-files = ["native/src/vendor/Readability.LICENSE.md"]
 
+# Run inside every page that animates an element (native/src/animations.js), embedded in the
+# engine library.
+[[library]]
+name = "web-animations-js"
+version = "2.3.2"
+license = "Apache-2.0"
+repo-files = ["native/src/vendor/web-animations.LICENSE.md"]
+
 [[library]]
 name = "LZ4 (OpenType Sanitizer)"
 crate = "fontsan"

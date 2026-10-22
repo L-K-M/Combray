@@ -40,6 +40,9 @@ object Fixtures {
     /** Titled `IO:visible` once IntersectionObserver reports its text on screen, `IO:missing` without it. */
     const val INTERSECTION = "$BASE/intersection.html"
 
+    /** Titled `WA:ok` once Element.animate() behaves, `WA:missing` without it, `WA:fail:<why>` otherwise. */
+    const val ANIMATE = "$BASE/animate.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 
