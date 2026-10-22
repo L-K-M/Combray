@@ -32,4 +32,10 @@ class BrowserSettingsTest {
         BrowserSettings(preferences).setThemeMode(ThemeMode.DARK_OLED)
         assertEquals(ThemeMode.DARK_OLED, BrowserSettings(preferences).themeMode.value)
     }
+
+    @Test
+    fun `unknown stored value falls back to following the system`() {
+        preferences.edit().putString("theme_mode", "SOMETHING_ELSE").commit()
+        assertEquals(ThemeMode.SYSTEM, BrowserSettings(preferences).themeMode.value)
+    }
 }
