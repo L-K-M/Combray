@@ -303,7 +303,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "query": text,
                 "total": len(docs),
                 "documents": [{"url": d["url"], "title": d["title"], "text": d["text"][:200]} for d in docs],
-                "history": [],
+                # Like the pinned server: null when no history is promoted.
+                "history": None,
                 # Like the pinned server: always present, empty when there is no next page.
                 "page_key": "",
             })

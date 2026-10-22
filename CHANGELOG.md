@@ -190,6 +190,10 @@ All notable changes to this project are documented here. The format follows
   of being reclaimed forever; re-saving a failed page sends its current
   title; a resumed job restarts its attempt budget; a claim that keeps
   failing waits a minute between tries instead of retrying at once.
+- A Hister search answer that is JSON but not a search result (neither a
+  `documents` nor a `history` field, or either of the wrong type) is
+  reported as malformed instead of an empty search. A null list, which
+  Hister sends for an empty one, still counts as empty.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
