@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
@@ -187,17 +186,14 @@ private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Uni
     }
 }
 
-/** Shows where the page is from and whether the connection is encrypted; opens the editor. */
+/** Shows the site name. A lock is not drawn: the engine does not report a verified connection. */
 @Composable
 private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit, modifier: Modifier) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
-    val secure = url?.startsWith("https:", ignoreCase = true) == true
-    val connection = when {
-        url == null -> null
-        secure -> stringResource(R.string.address_secure)
-        else -> stringResource(R.string.address_insecure)
-    }
+    // Cleartext is a property of the scheme. HTTPS is not treated as verified.
+    val cleartext = url?.startsWith("http:", ignoreCase = true) == true
+    val connection = if (cleartext) stringResource(R.string.address_insecure) else null
     val failed = if (tab?.loadFailed == true) stringResource(R.string.address_load_failed) else null
     val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed).joinToString(", ")
 
@@ -222,13 +218,9 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (url != null) {
+            if (url != null && (tab.loadFailed || cleartext)) {
                 Icon(
-                    when {
-                        tab.loadFailed -> Icons.Filled.Warning
-                        secure -> Icons.Filled.Lock
-                        else -> Icons.Outlined.Info
-                    },
+                    if (tab.loadFailed) Icons.Filled.Warning else Icons.Outlined.Info,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )

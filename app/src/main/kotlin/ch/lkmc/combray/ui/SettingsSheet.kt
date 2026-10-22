@@ -594,7 +594,12 @@ fun SectionTitle(label: Int) {
 /** The page's address and what the engine can say about its connection. */
 @Composable
 fun PageInfoDialog(url: String, onDismiss: () -> Unit) {
-    val secure = url.startsWith("https:", ignoreCase = true)
+    // data:, about: and file: pages came over no connection, so there is nothing to describe.
+    val connection = when {
+        url.startsWith("https:", ignoreCase = true) -> R.string.page_info_https
+        url.startsWith("http:", ignoreCase = true) -> R.string.page_info_http
+        else -> null
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
@@ -603,12 +608,14 @@ fun PageInfoDialog(url: String, onDismiss: () -> Unit) {
             Column {
                 Text(stringResource(R.string.page_info_address), style = MaterialTheme.typography.labelLarge)
                 SelectionContainer { Text(url) }
-                Text(
-                    stringResource(R.string.page_info_connection),
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                Text(stringResource(if (secure) R.string.page_info_https else R.string.page_info_http))
+                connection?.let {
+                    Text(
+                        stringResource(R.string.page_info_connection),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(stringResource(it))
+                }
             }
         },
     )

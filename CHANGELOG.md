@@ -190,6 +190,10 @@ All notable changes to this project are documented here. The format follows
   of being reclaimed forever; re-saving a failed page sends its current
   title; a resumed job restarts its attempt budget; a claim that keeps
   failing waits a minute between tries instead of retrying at once.
+- The address chip no longer draws a lock or says the connection is
+  encrypted just because the URL starts with `https`. Cleartext HTTP is
+  still called not encrypted. Page info no longer claims a verified
+  connection the engine has not reported.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
