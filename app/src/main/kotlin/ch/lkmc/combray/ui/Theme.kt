@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import android.app.Activity
 import android.content.Context
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -12,8 +13,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.ThemeMode
 
@@ -61,6 +65,18 @@ fun CombrayTheme(settings: BrowserSettings, content: @Composable () -> Unit) {
         ThemeMode.DARK, ThemeMode.DARK_OLED -> true
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    // Keep the status/navigation bar icons legible on the forced surface. enableEdgeToEdge set
+    // them from the system's day/night at activity creation; a forced Dark/OLED theme must
+    // override that so icons are light on a dark surface even when the system is light.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
     }
     // Material You only in system-following mode; the pine palette otherwise. Remembered so a
     // recomposition of the wrapper does not rebuild a fresh ColorScheme and force a subtree pass.

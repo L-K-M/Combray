@@ -37,6 +37,6 @@ class BrowserSettings(private val preferences: SharedPreferences) {
     companion object {
         const val FILE_NAME = "browser_settings"
         private const val KEY_UNUSED_TABS = "unused_tabs"
-        private const val KEY_THEME_MODE = "theme_mode"
+        internal const val KEY_THEME_MODE = "theme_mode"
     }
 }

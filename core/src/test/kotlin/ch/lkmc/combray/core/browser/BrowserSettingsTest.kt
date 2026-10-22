@@ -35,7 +35,7 @@ class BrowserSettingsTest {
 
     @Test
     fun `unknown stored value falls back to following the system`() {
-        preferences.edit().putString("theme_mode", "SOMETHING_ELSE").commit()
+        preferences.edit().putString(BrowserSettings.KEY_THEME_MODE, "SOMETHING_ELSE").commit()
         assertEquals(ThemeMode.SYSTEM, BrowserSettings(preferences).themeMode.value)
     }
 }
