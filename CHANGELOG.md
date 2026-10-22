@@ -172,6 +172,12 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- The durable queue: one broken job cycle (a storage error, a recorder
+  bug) no longer strands the jobs behind it or skips their wakeup; a job
+  whose worker died before finishing stops at the attempt limit instead
+  of being reclaimed forever; re-saving a failed page sends its current
+  title; a resumed job restarts its attempt budget; a claim that keeps
+  failing waits a minute between tries instead of retrying at once.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
