@@ -215,7 +215,9 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                         }
                     }
                 },
-                onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser)) } },
+                onShare = {
+                    tab?.let { page -> page.url?.let { url -> share(context, url, page.title, resources.getString(R.string.share_chooser)) } }
+                },
                 onRecent = { sheet = Sheet.RECENT },
                 onMore = { sheet = Sheet.MORE },
                 onCopyAddress = {
@@ -312,7 +314,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
             canOpenInNewTab = { url -> navigation(url) != null },
             onOpenInNewTab = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.NEW_TAB) } },
-            onShare = { url -> share(context, url, resources.getString(R.string.share_chooser)) },
+            onShare = { url -> share(context, url, null, resources.getString(R.string.share_chooser)) },
         )
     }
 }
@@ -383,9 +385,13 @@ private fun openExternally(context: Context, url: String, noApp: String, notify:
     }
 }
 
-private fun share(context: Context, url: String, title: String) {
-    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
-    context.startActivity(Intent.createChooser(send, title))
+/** Shares the address, and the page's title as the subject and first line when it has one. */
+private fun share(context: Context, url: String, title: String?, chooserTitle: String) {
+    val send = Intent(Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(Intent.EXTRA_TEXT, shareText(url, title))
+    shareTitle(title)?.let { send.putExtra(Intent.EXTRA_SUBJECT, it) }
+    context.startActivity(Intent.createChooser(send, chooserTitle))
 }
 
 /**
