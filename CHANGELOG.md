@@ -19,6 +19,12 @@ All notable changes to this project are documented here. The format follows
   has no undo.
 - Settings › Display › Appearance: follow the system, light or dark. The
   choice applies at once and keeps the system bar icons readable.
+- Other apps can send to Combray: a shared link opens in a new tab, other
+  shared text and web searches wait in the address editor, "Search with
+  Kagi" in the text selection menu searches at once, and a "Save to
+  Karakeep" share target saves a link after one confirming tap, without
+  opening the browser.
+- Launcher shortcuts for New tab and Search history (Recent on Hister).
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

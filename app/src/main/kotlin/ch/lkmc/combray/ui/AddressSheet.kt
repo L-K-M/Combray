@@ -69,9 +69,10 @@ import kotlinx.coroutines.withContext
 private const val SUGGESTION_DELAY_MS = 150L
 
 /**
- * Address and search editor above the keyboard. The current address starts selected for
- * replacement; the button says what submitting will do, and the other reading is one tap away.
- * [target] is the tab the editor was opened for (null: a new tab); typed text survives rotation.
+ * Address and search editor above the keyboard. [initialText] (the current address, or text
+ * another app sent) starts selected for replacement; the button says what submitting will do,
+ * and the other reading is one tap away. [target] is the tab the editor was opened for (null: a
+ * new tab); typed text survives rotation. A new [restartKey] starts over with [initialText].
  * Once you change the [initialText], matching open tabs and recent pages from [recent] (the local
  * Recent projection, read once for the sheet's life) are listed between the field and the buttons.
  */
@@ -80,16 +81,18 @@ private const val SUGGESTION_DELAY_MS = 150L
 fun AddressSheet(
     target: String?,
     initialText: String?,
+    restartKey: Int,
     recent: () -> Flow<List<RecentItem>>,
     onDecision: (AddressDecision) -> Unit,
     onSelectTab: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val initial = initialText.orEmpty()
-    var field by rememberSaveable(target, stateSaver = TextFieldValue.Saver) {
+    var field by rememberSaveable(target, restartKey, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
     }
-    val prefilled = rememberSaveable(target) { initial }
+    // Text another app sent is the prefill too: suggestions wait until it is edited.
+    val prefilled = rememberSaveable(target, restartKey) { initial }
     val interpretation = AddressPolicy.interpret(field.text)
     val focus = remember { FocusRequester() }
 

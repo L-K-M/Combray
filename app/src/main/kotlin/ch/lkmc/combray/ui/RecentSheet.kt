@@ -1,6 +1,7 @@
 package ch.lkmc.combray.ui
 
 import android.text.format.DateFormat as AndroidDateFormat
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -88,7 +89,7 @@ import java.util.Date
 import kotlinx.coroutines.delay
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
-private enum class RecentScope(val label: Int) {
+enum class RecentScope(@StringRes val label: Int) {
     OPEN(R.string.recent_filter_open),
     ALL(R.string.recent_filter_all),
     HISTER(R.string.recent_scope_hister),
@@ -116,28 +117,31 @@ internal fun recentEmpty(query: String, matching: List<RecentItem>, shown: List<
 }
 
 /**
- * Open tabs and recently visited pages in one most-recently-used list (R5), opening on the
- * tabs. Filtering them stays on the device; Hister and Karakeep are separate, labeled scopes.
+ * Open tabs and recently visited pages in one most-recently-used list (R5), opening on
+ * [initialScope] (normally the tabs); a new [restartKey] returns to it. Filtering them stays on
+ * the device; Hister and Karakeep are separate, labeled scopes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentSheet(
     browser: BrowserCoordinator,
     integrations: Integrations,
+    initialScope: RecentScope,
+    restartKey: Int,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     snackbar: SnackbarHostState,
     onDismiss: () -> Unit,
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
+    var query by rememberSaveable(restartKey) { mutableStateOf("") }
+    var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
     // One subscription per depth: browsing reads the newest rows, a search all retained ones.
     // The filter runs in memory, so typing does not restart three Room observers per keystroke.
     val depth = HistoryDepth.forQuery(query)
     // Null until the first answer: an empty list before it would flash an empty-state message.
     val items by remember(browser, depth) { browser.recent(depth) }.collectAsStateWithLifecycle(null)
     val rows = remember(items, query) { items?.let { LocalRows(query, it.matching(query)) } }
-    var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
+    var forgetting by rememberSaveable(restartKey) { mutableStateOf<String?>(null) }
     val shown = remember(rows, scope) {
         val items = rows?.items.orEmpty()
         if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items

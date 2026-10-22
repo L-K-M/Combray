@@ -6,9 +6,9 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Resources
 import android.os.Build
 import android.os.PersistableBundle
-import android.content.res.Resources
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -55,6 +56,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.AppGraph
+import ch.lkmc.combray.LaunchRequest
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.BrowserState
@@ -69,6 +71,7 @@ import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.EngineSurfaceView
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -77,9 +80,16 @@ private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
  * surface stays in place under every overlay, so sheets never release a renderer.
+ * [launchRequest] carries a sheet another app or a launcher shortcut asked for; the screen
+ * opens it once and hands it back through [onLaunchRequestHandled].
  */
 @Composable
-fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
+fun BrowserScreen(
+    graph: AppGraph,
+    launchRequest: StateFlow<LaunchRequest?>,
+    onLaunchRequestHandled: (LaunchRequest) -> Unit,
+    onLeave: () -> Unit,
+) {
     val browser = graph.browser
     val state by browser.browserState.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
@@ -138,14 +148,38 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
     var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
+    // Text another app sent, which the editor starts with instead of an address.
+    var addressText by rememberSaveable { mutableStateOf<String?>(null) }
     val editAddress = {
         addressTab = tab?.id
+        addressText = null
         sheet = Sheet.ADDRESS
     }
-    // An unused blank tab is the new tab already; typing there makes no second one.
-    val editNewTab = {
+    // An unused blank tab is the new tab already; typing there makes no second one. Text from
+    // another app waits there, selected, until the user submits it.
+    val editNewTabWith = { text: String? ->
         addressTab = tab?.takeIf { it.isHome }?.id
+        addressText = text
         sheet = Sheet.ADDRESS
+    }
+    val editNewTab = { editNewTabWith(null) }
+    var recentScope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
+    val openRecent = { initial: RecentScope ->
+        recentScope = initial
+        sheet = Sheet.RECENT
+    }
+
+    // A requested sheet replaces the open one and starts fresh: the counter restarts its state.
+    var launches by rememberSaveable { mutableIntStateOf(0) }
+    val pendingLaunch by launchRequest.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingLaunch) {
+        val request = pendingLaunch ?: return@LaunchedEffect
+        launches++
+        when (request) {
+            is LaunchRequest.EditNewTab -> editNewTabWith(request.text)
+            LaunchRequest.SearchHistory -> openRecent(RecentScope.HISTER)
+        }
+        onLaunchRequestHandled(request)
     }
 
     // Back: close the open sheet or reader view first, then go back in the page, then return to
@@ -189,7 +223,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 PageOverlay(
                     state = state,
                     onOpenAddress = editAddress,
-                    onOpenRecent = { sheet = Sheet.RECENT },
+                    onOpenRecent = { openRecent(RecentScope.OPEN) },
                     onReload = browser::reload,
                 )
                 state.reader?.let { reader ->
@@ -224,7 +258,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 onShare = {
                     tab?.let { page -> page.url?.let { url -> share(context, url, resources.getString(R.string.share_chooser), page.title.takeUnless { page.loadFailed }) } }
                 },
-                onRecent = { sheet = Sheet.RECENT },
+                onRecent = { openRecent(RecentScope.OPEN) },
                 onMore = { sheet = Sheet.MORE },
                 onCopyAddress = {
                     // The rendered address as shown (a recovery URL before a commit), copied whole.
@@ -250,8 +284,9 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         Sheet.NONE -> Unit
         Sheet.ADDRESS -> AddressSheet(
             target = addressTab,
-            // On a Kagi results page, refining the search starts from its words, not its address.
-            initialText = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
+            restartKey = launches,
+            // Text another app sent, or the tab's address; on a Kagi results page, its search words.
+            initialText = addressText ?: addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
             // Suggestions search all retained history, like a Recent search.
             recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
             onDecision = { decision ->
@@ -275,6 +310,8 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         Sheet.RECENT -> RecentSheet(
             browser = browser,
             integrations = graph.integrations,
+            initialScope = recentScope,
+            restartKey = launches,
             onOpenUrl = { url ->
                 dismiss()
                 // Hister and Karakeep results open as new navigations, through the same address policy.
