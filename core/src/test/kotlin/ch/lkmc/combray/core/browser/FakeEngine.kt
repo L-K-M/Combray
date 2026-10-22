@@ -21,6 +21,9 @@ class FakeEngine : EnginePort {
     val closed = mutableListOf<Long>()
     val navigated = mutableListOf<Triple<Long, Long, String>>()
 
+    /** (tab, throttled) throttle commands, in order. */
+    val throttling = mutableListOf<Pair<Long, Boolean>>()
+
     /** (document, capture ID) per capture request. */
     val captures = mutableListOf<Pair<Long, Long>>()
 
@@ -79,7 +82,9 @@ class FakeEngine : EnginePort {
 
     override fun reload(tab: Long) = Unit
 
-    override fun setThrottled(tab: Long, throttled: Boolean) = Unit
+    override fun setThrottled(tab: Long, throttled: Boolean) {
+        throttling += tab to throttled
+    }
 
     val responses = mutableListOf<Pair<Long, ControlResponse>>()
 

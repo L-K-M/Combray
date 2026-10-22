@@ -133,6 +133,153 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aViewCreatedBeforeForegroundArrivesStaysThrottled() {
+        // The coordinator starts conservatively backgrounded until Android reports visibility.
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        assertEquals(listOf(1L to "https://a.test/"), engine.created)
+        assertEquals(1L, engine.selected.last())
+        assertEquals(1L to true, engine.throttling.last())
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun aForegroundSignalBeforeReadinessUnthrottlesTheCreatedView() {
+        browser.setAppForeground(true)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertTrue(engine.created.isEmpty())
+        assertTrue(engine.throttling.isEmpty())
+        ready()
+        assertEquals(listOf(1L to false), engine.throttling)
+        assertEquals(1L, engine.selected.last())
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun foregroundTogglesOnlyTheShownRenderer() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        val tabId = state().activeTab!!.id
+        val native = engine.created.single().first
+        assertEquals(native to true, engine.throttling.last())
+
+        browser.setAppForeground(true)
+        idle()
+        assertEquals(native to false, engine.throttling.last())
+        browser.setAppForeground(false)
+        idle()
+        assertEquals(native to true, engine.throttling.last())
+
+        // Duplicate signals emit no extra commands.
+        val size = engine.throttling.size
+        browser.setAppForeground(false)
+        browser.setAppForeground(false)
+        idle()
+        assertEquals(size, engine.throttling.size)
+        browser.setAppForeground(true)
+        browser.setAppForeground(true)
+        idle()
+        assertEquals(size + 1, engine.throttling.size)
+
+        assertTrue(engine.closed.isEmpty())
+        assertEquals(tabId, state().activeTab!!.id)
+        assertEquals("https://a.test/", state().activeTab!!.url)
+        assertEquals(tabId, runBlocking { database.browser().openTabs() }.single().id)
+    }
+
+    @Test
+    fun backgroundedSwitchingNeverUnthrottlesUntilResume() {
+        browser.setAppForeground(true)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        val aTab = state().activeTab!!.id
+        val aNative = engine.created.single().first
+        browser.openUrl("https://b.test/", Placement.NEW_TAB)
+        idle()
+        val bNative = engine.created.last().first
+
+        browser.setAppForeground(false)
+        idle()
+        engine.throttling.clear()
+
+        // Switch to the first tab and open a third while backgrounded.
+        browser.selectTab(aTab)
+        idle()
+        browser.openUrl("https://c.test/", Placement.NEW_TAB)
+        idle()
+        val cNative = engine.created.last().first
+
+        // Everything emitted while backgrounded is a throttle; nothing is released.
+        assertTrue(engine.throttling.isNotEmpty())
+        assertTrue(engine.throttling.all { it.second })
+        assertTrue(engine.closed.isEmpty())
+
+        browser.setAppForeground(true)
+        idle()
+        // Resuming unthrottles only the shown renderer; hidden views stay throttled.
+        assertEquals(listOf(cNative to false), engine.throttling.filter { !it.second })
+        assertTrue(engine.throttling.none { (it.first == aNative || it.first == bNative) && !it.second })
+        assertEquals("https://c.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun visibilityChangesOnTheInternalHomeEmitNoEngineCommands() {
+        browser.setAppForeground(true)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        browser.closeTab(state().activeTab!!.id)
+        idle()
+        assertNull(state().activeTab?.url)
+
+        // The retired view must not receive throttle commands for visibility changes.
+        engine.throttling.clear()
+        val created = engine.created.toList()
+        val closed = engine.closed.toList()
+        val selected = engine.selected.toList()
+
+        browser.setAppForeground(false)
+        idle()
+        browser.setAppForeground(true)
+        idle()
+        browser.setAppForeground(false)
+        idle()
+
+        assertTrue(engine.throttling.isEmpty())
+        assertEquals(created, engine.created)
+        assertEquals(closed, engine.closed)
+        assertEquals(selected, engine.selected)
+    }
+
+    @Test
+    fun aViewRestoredWhileBackgroundedStaysThrottledUntilForeground() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        val tabId = state().activeTab!!.id
+        // Nothing reaches the engine before readiness, whatever the visibility.
+        assertTrue(engine.created.isEmpty())
+        assertTrue(engine.throttling.isEmpty())
+        assertTrue(engine.selected.isEmpty())
+
+        ready()
+        assertEquals(listOf(1L to "https://a.test/"), engine.created)
+        assertEquals(1L, engine.selected.last())
+        assertEquals(1L to true, engine.throttling.last())
+        assertEquals(tabId, state().activeTab!!.id)
+        assertEquals("https://a.test/", state().activeTab!!.url)
+
+        browser.setAppForeground(true)
+        idle()
+        assertEquals(listOf(1L to true, 1L to false), engine.throttling)
+        assertEquals(tabId, state().activeTab!!.id)
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
     fun navigatingKeepsTheOldPageAsHistoryAndTheTabAsOneRow() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)

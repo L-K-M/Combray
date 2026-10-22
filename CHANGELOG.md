@@ -135,6 +135,11 @@ All notable changes to this project are documented here. The format follows
   decoder rejects remain conservative (sensitive).
 - The Recent tab-count badge caps its visible label at "99+" so large
   counts fit the badge; TalkBack still hears the exact number.
+- Backgrounding the app now throttles the shown renderer too, not just hidden
+  ones: the process lifecycle reports visibility to the browser coordinator,
+  which keeps every view throttled until the app returns. Views created or
+  restored while backgrounded stay throttled, and repeated visibility signals
+  emit no extra commands.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
