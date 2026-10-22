@@ -62,14 +62,15 @@ jobs:
           cargo "+$toolchain" fmt --check
 
       # The engine embeds these with include_str!, so a syntax error would only
-      # show on a device (reader view finds no article, Hister capture stops).
+      # show on a device (reader view finds no article, Hister capture stops,
+      # pages lose Element.animate). The globs cover scripts added later.
       # vm.Script compiles each as the classic script Servo evaluates; `node
       # --check` would accept a top-level return. The placeholders the engine
       # fills in (__MAX_NODES__ and so on) are identifiers, so the templates
       # compile unfilled.
       - name: Engine page-script syntax
         run: |
-          for f in native/src/capture.js native/src/reader.js native/src/vendor/Readability.js; do
+          for f in native/src/*.js native/src/vendor/*.js; do
             node -e 'const file = process.argv[1]; new (require("vm").Script)(require("fs").readFileSync(file, "utf8"), { filename: file })' "$f"
           done
 

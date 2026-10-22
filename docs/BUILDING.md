@@ -149,7 +149,7 @@ Host unit tests for the engine's pure modules (no Servo build needed):
 cd native && cargo test --lib
 ```
 
-They still need the fetched tree, because Cargo reads the Android-only path dependencies into it, so CI does not run them. CI checks what needs no tree: `cargo fmt --check` in `native/`, and that `capture.js`, `reader.js` and the vendored `Readability.js` compile as scripts.
+They still need the fetched tree, because Cargo reads the Android-only path dependencies into it, so CI does not run them. CI checks what needs no tree: `cargo fmt --check` in `native/`, and that every page script in `native/src/` and `native/src/vendor/` compiles as a classic script.
 
 ## Emulator and checks
 
