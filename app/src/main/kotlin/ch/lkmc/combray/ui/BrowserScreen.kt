@@ -210,7 +210,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                         }
                     }
                 },
-                onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser)) } },
+                onShare = { tab?.url?.let { share(context, it, resources.getString(R.string.share_chooser), tab.title) } },
                 onRecent = { sheet = Sheet.RECENT },
                 onMore = { sheet = Sheet.MORE },
                 // Clear of the navigation bar and, in landscape, of a display cutout.
@@ -367,7 +367,9 @@ private fun openExternally(context: Context, url: String, noApp: String, notify:
     }
 }
 
-private fun share(context: Context, url: String, title: String) {
-    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
-    context.startActivity(Intent.createChooser(send, title))
+/** Shares the page address, with its title first when there is one. */
+private fun share(context: Context, url: String, chooserTitle: String, pageTitle: String? = null) {
+    val body = if (!pageTitle.isNullOrBlank()) "$pageTitle\n$url" else url
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, body)
+    context.startActivity(Intent.createChooser(send, chooserTitle))
 }
