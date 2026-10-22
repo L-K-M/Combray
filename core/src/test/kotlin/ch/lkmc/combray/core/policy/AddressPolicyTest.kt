@@ -105,6 +105,37 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun onlyAnAuthorityRightAfterSchemeSlashesNamesAHost() {
+        // A data: page chooses its own address: "://" inside it names no site.
+        assertNull(HostNames.of("data:text/html,<!--://accounts.example.com/-->"))
+        assertNull(HostNames.of("data:text/html,x://accounts.example.com/"))
+        assertNull(HostNames.of("data://accounts.example.com/x"))
+        assertNull(HostNames.of("javascript://accounts.example.com/%0Aalert(1)"))
+        assertNull(HostNames.of("file://accounts.example.com/x"))
+        assertNull(HostNames.of("file:///sdcard/a.html"))
+        assertNull(HostNames.of("about:blank"))
+        assertNull(HostNames.of("mailto:a@accounts.example.com"))
+
+        // Nor does any scheme but http(s), a page's own included.
+        assertNull(HostNames.of("intent://accounts.example.com/x#Intent;end"))
+        assertNull(HostNames.of("content://accounts.example.com/x"))
+        assertNull(HostNames.of("view-source://accounts.example.com/"))
+        assertNull(HostNames.of("a.b://accounts.example.com/"))
+        assertNull(HostNames.of("ws://accounts.example.com/"))
+
+        // A blob: address belongs to the web page that made it.
+        assertEquals("a.test", HostNames.of("blob:https://a.test/0f1e"))
+        assertNull(HostNames.of("blob:null/0f1e"))
+        assertNull(HostNames.of("blob:data:text/html,x://accounts.example.com/"))
+
+        assertEquals("example.org", HostNames.of("https://example.org/a?next=https://other.test/"))
+        assertEquals("example.org", HostNames.of("  https://example.org/a"))
+        assertEquals("a.test", HostNames.of("BLOB:HTTPS://a.test/0f1e"))
+        assertEquals("www.example.org", HostNames.of("http://user@WWW.example.org:8080/"))
+        assertEquals("xn--bcher-kva.de", HostNames.of("https://bücher.de/a?next=https://other.test/"))
+    }
+
+    @Test
     fun hostsShowInUnicodeOnlyWhenTheyCannotImitateAnotherSite() {
         assertEquals("bücher.de", HostNames.forDisplay("xn--bcher-kva.de"))
         assertEquals("日本語.jp", HostNames.forDisplay("xn--wgv71a119e.jp"))

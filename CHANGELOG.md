@@ -150,3 +150,7 @@ All notable changes to this project are documented here. The format follows
 - A Karakeep save with a chosen list stays pending if its acknowledgment
   has no usable bookmark ID. Duplicate-safe retries recover the ID and
   finish list membership, or stop with a visible failure.
+- A `data:` page could make the address chip, Recent and its dialog titles
+  name another site by putting `://` and that site's name in its own
+  address. Pages without a host now show only their scheme ("data:",
+  "about:blank", "file:"), and their dialogs say "This page says".

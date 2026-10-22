@@ -523,7 +523,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Tune on the owner's device (M4) |
 | Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
 | Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |
-| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode |
+| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode. A host is read only right after a leading `scheme://`; pages without one (`data:`, `about:blank`, local files) show only their scheme, never text from their address |
 | Seven-day closed-history retention | Proposed | Bounded short-term memory, counted from last use; open tabs exempt unless the owner turns on closing unused tabs |
 | Closing unused tabs | Confirmed (owner choice, 20 October 2026) | A Settings switch, off by default; uses the history retention period; the focused tab stays |
 | Browser preferences in SharedPreferences | Decided | One switch so far, with nothing bound to it transactionally; DataStore can replace it when preferences grow |
