@@ -136,6 +136,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
                     }
                 },
                 modifier = Modifier.clickable { onOpen(hit.url) },
+                colors = sheetListItemColors(),
             )
         }
         nextPage?.let { page ->

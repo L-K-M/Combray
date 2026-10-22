@@ -4,12 +4,17 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,6 +28,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -64,10 +70,22 @@ fun BottomBar(
     onCopyAddress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(tonalElevation = 3.dp, modifier = modifier) {
+    // The bar's color runs under the navigation bar and, in landscape, a cutout; only its
+    // actions keep clear of them. A hairline along its top edge separates it from the page.
+    // Explicit content colours: contentColorFor matches by value, and a role sharing a tier's
+    // value would give its own on-colour.
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier,
+    ) {
         Box {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
+                Modifier
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
@@ -80,7 +98,16 @@ fun BottomBar(
                 }
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                 IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
-                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(tabCountLabel(openTabs)) } }) {
+                    // A count, not an alert: pine rather than Material's error red.
+                    BadgedBox(
+                        badge = {
+                            if (openTabs > 0) {
+                                Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+                                    Text(tabCountLabel(openTabs))
+                                }
+                            }
+                        },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
                 }
@@ -88,6 +115,7 @@ fun BottomBar(
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                 }
             }
+            HorizontalDivider(Modifier.align(Alignment.TopCenter), color = MaterialTheme.colorScheme.outlineVariant)
             // Overlaid on the bar's top edge: loading never moves or covers an action.
             if (tab?.loading == true) {
                 val loading = stringResource(R.string.loading)
@@ -140,7 +168,8 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
 
     Surface(
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
     ) {
         Row(

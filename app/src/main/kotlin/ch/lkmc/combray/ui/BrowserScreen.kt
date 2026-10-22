@@ -230,8 +230,6 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                         }
                     }
                 },
-                // Clear of the navigation bar and, in landscape, of a display cutout.
-                modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
             )
         }
         // Above the keyboard too: a page field can hold it while a Save error shows. Recent is a

@@ -116,6 +116,7 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
                 headlineContent = { Text(bookmark.title ?: displayHost(bookmark.url), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 supportingContent = { Text(displayHost(bookmark.url), maxLines = 1) },
                 modifier = Modifier.clickable { onOpen(bookmark.url) },
+                colors = sheetListItemColors(),
             )
         }
         nextCursor?.let { cursor ->

@@ -514,6 +514,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Bottom UI and unified Recent | Confirmed | Core product requirements |
 | Karakeep / Hister / Kagi roles | Confirmed | Existing personal services |
 | Kotlin/Compose + Rust bridge | Verified (M0 bridge, M1 app) | Own `cdylib`, one engine thread, JSON events; Compose BOM 2026.09.00 with Material 3 |
+| Brand palette, no dynamic color | Proposed (M4) | Complete light and dark Material 3 schemes from the icon's pine and ivory, with a sage secondary and an ochre tertiary kept for memory and Hister accents. `ThemeContrastTest` checks text (4.5:1) and outline (3:1) contrast on the JVM; not yet reviewed on a device |
 | Recent sheet initial layout | Proposed; implemented as the sheet (M1) | Both concepts accepted in general; no exclusive final selection. Recent home remains possible: Recent is one composable over `BrowserCoordinator.recent()` |
 | Service settings in Room, not DataStore | Decided (M2) | A service row's fingerprint and generation bind outbox jobs; keeping it in the outbox's database makes configuration changes and job invalidation one transaction |
 | HTTP client: `HttpURLConnection` | Decided (M2) | No extra dependency; redirects are not followed (they could carry a credential or page text to another origin); bounded timeouts and response sizes |
