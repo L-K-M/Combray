@@ -80,6 +80,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The Recent tab-count badge caps its visible label at "99+" so large
+  counts fit the badge; TalkBack still hears the exact number.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
