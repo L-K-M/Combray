@@ -109,7 +109,7 @@
       configurable: true,
       writable: true,
       value: function getAnimations() {
-        var timeline = document.timeline;
+        var timeline = this.timeline;
         return timeline && typeof timeline.getAnimations === "function" ? timeline.getAnimations() : [];
       }
     });
