@@ -595,4 +595,3 @@ Not checked: owner's phone/keyboard, real accounts or browsing history, live
 Karakeep/Hister/Kagi writes, real-world frame timing/battery use, a fresh native
 build, or a signed arm64 release. No FPS, startup-time, or battery-saving number
 is claimed. Existing fixture evidence is useful but does not close those gaps.
-
