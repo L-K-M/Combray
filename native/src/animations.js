@@ -3,7 +3,9 @@
 // Servo 0.6.0 has no Element.animate(): its Web Animations interfaces are incomplete stubs behind
 // a pref. Pages that call it unconditionally break; docs.mistral.ai shows "Application error"
 // when its marquee starts. This script runs in every document before the page's own scripts and
-// adds only a stub. The first call installs the web-animations-js polyfill and hands over to it.
+// adds stubs for the three members pages probe first: animate(), getAnimations() and the
+// document's getAnimations(). The first use of any of them installs the web-animations-js polyfill
+// and hands over to it. The constructors and document.timeline still appear only then.
 // The polyfill wraps requestAnimationFrame, getComputedStyle and the style of animated elements,
 // so pages that never animate keep the engine's own behaviour.
 //
@@ -20,19 +22,98 @@
 
   var installed = false;
 
+  // A page rarely probes animate() alone: `"animate" in Element.prototype` is usually followed by
+  // `el.getAnimations()` or `document.getAnimations()`. Each of the three steps aside on first use,
+  // so any of them brings the whole surface into existence instead of leaving the others missing.
   Object.defineProperty(Element.prototype, "animate", {
     configurable: true,
     writable: true,
     value: function animate(keyframes, options) {
-      if (!installed) {
-        installed = true;
-        delete Element.prototype.animate;
-        installPolyfill();
-        addComputedTiming();
-      }
+      ensureInstalled();
       return this.animate(keyframes, options);
     }
   });
+
+  Object.defineProperty(Element.prototype, "getAnimations", {
+    configurable: true,
+    writable: true,
+    value: function getAnimations() {
+      ensureInstalled();
+      return this.getAnimations();
+    }
+  });
+
+  Object.defineProperty(Document.prototype, "getAnimations", {
+    configurable: true,
+    writable: true,
+    value: function getAnimations() {
+      ensureInstalled();
+      return this.getAnimations();
+    }
+  });
+
+  // The polyfill wraps whatever animate() it finds, so the stubs have to be gone before it runs:
+  // left in place it would wrap this one and call it again for ever. Nothing after that point
+  // restores them, so a failed install must not leave a stub that delegates into thin air.
+  function ensureInstalled() {
+    if (installed) {
+      return;
+    }
+    installed = true;
+
+    delete Element.prototype.animate;
+    delete Element.prototype.getAnimations;
+    delete Document.prototype.getAnimations;
+    try {
+      installPolyfill();
+      addComputedTiming();
+      addDocumentAnimations();
+      // Both are what the stubs above promised; a polyfill that provides one and not the other
+      // would leave the second as a TypeError with nothing to say why.
+      ["animate", "getAnimations"].forEach(function (name) {
+        if (typeof Element.prototype[name] !== "function") {
+          throw new Error("Combray: web-animations-js did not define Element.prototype." + name);
+        }
+      });
+    } catch (error) {
+      // Without this, every later call says "this.animate is not a function" and blames the page.
+      failWith(error);
+      throw error;
+    }
+  }
+
+  /** Keeps the real cause reachable: animations are unavailable, and the page is told why. */
+  function failWith(error) {
+    ["animate", "getAnimations"].forEach(function (name) {
+      Object.defineProperty(Element.prototype, name, {
+        configurable: true,
+        writable: true,
+        value: function () { throw error; }
+      });
+    });
+    Object.defineProperty(Document.prototype, "getAnimations", {
+      configurable: true,
+      writable: true,
+      value: function () { throw error; }
+    });
+  }
+
+  // 2.3.2 defines Element.getAnimations() but not Document's, which pages use to stop every
+  // animation on the page. The polyfill keeps all of them on one timeline, so its list is the
+  // document's: there is no second timeline to exclude.
+  function addDocumentAnimations() {
+    if (typeof Document.prototype.getAnimations === "function") {
+      return;
+    }
+    Object.defineProperty(Document.prototype, "getAnimations", {
+      configurable: true,
+      writable: true,
+      value: function getAnimations() {
+        var timeline = this.timeline;
+        return timeline && typeof timeline.getAnimations === "function" ? timeline.getAnimations() : [];
+      }
+    });
+  }
 
   // The polyfill's effects lack getComputedTiming(), which pages use to resume an animation
   // where it was (docs.mistral.ai's marquee does when its text changes width). Computed from

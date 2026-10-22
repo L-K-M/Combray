@@ -42,10 +42,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Every check against a port another run already holds serves no page at all, and the run then
+# reports timeouts with no cause. Readiness is our own server saying so in its own log: probing
+# the port would accept whatever answers there, including another run's server, and a dead one is
+# a zombie until the shell reaps it, which kill -0 calls alive.
 echo "==> fixture server on 127.0.0.1:$FIXTURE_PORT"
-python3 -I "$ROOT/testing/fixtures/server.py" --port "$FIXTURE_PORT" > "$RESULTS/fixtures.log" 2>&1 &
-PIDS+=("$!")
+python3 -I -u "$ROOT/testing/fixtures/server.py" --port "$FIXTURE_PORT" > "$RESULTS/fixtures.log" 2>&1 &
+FIXTURE_PID=$!
+PIDS+=("$FIXTURE_PID")
 "${ADB[@]}" reverse "tcp:$FIXTURE_PORT" "tcp:$FIXTURE_PORT" > /dev/null
+
+FIXTURE_READY="serving Combray fixtures on"
+fixture_alive() {
+    kill -0 "$FIXTURE_PID" 2>/dev/null && [ "$(ps -p "$FIXTURE_PID" -o state= 2>/dev/null | tr -d ' ')" != "Z" ]
+}
+for _ in $(seq 1 20); do
+    if grep -q "$FIXTURE_READY" "$RESULTS/fixtures.log" 2>/dev/null; then
+        break
+    fi
+    if ! fixture_alive; then
+        echo "!! the fixture server could not start on port $FIXTURE_PORT" >&2
+        sed 's/^/    /' "$RESULTS/fixtures.log" >&2
+        exit 1
+    fi
+    sleep 1
+done
+if ! grep -q "$FIXTURE_READY" "$RESULTS/fixtures.log" 2>/dev/null; then
+    echo "!! the fixture server never answered on port $FIXTURE_PORT" >&2
+    sed 's/^/    /' "$RESULTS/fixtures.log" >&2
+    exit 1
+fi
 
 # Under software emulation and host load, Android's system_server restarts (often "Lost network
 # stack") and installs then fail. Wait until it has run for a while and the package manager works.
