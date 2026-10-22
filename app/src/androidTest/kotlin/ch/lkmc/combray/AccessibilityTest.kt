@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -25,6 +26,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -43,6 +45,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -73,6 +76,32 @@ class AccessibilityTest {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aNarrowBarGivesTheAddressARowAboveTheActions() {
+        show(DEFAULT_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
+        }
+
+        val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
+        val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
+        val more = compose.onNodeWithContentDescription("More").getUnclippedBoundsInRoot()
+        assertTrue(address.bottom <= back.top)
+        // The chip spans the actions under it.
+        assertTrue(address.left <= back.left && address.right >= more.right)
+    }
+
+    @Test
+    fun aWideBarKeepsOneRow() {
+        show(DEFAULT_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, width = WIDE_WIDTH)
+        }
+
+        val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
+        val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
+        assertTrue(address.top < back.bottom && address.bottom > back.top)
+        assertTrue(address.left >= back.right)
     }
 
     @Test
@@ -298,6 +327,7 @@ class AccessibilityTest {
         saveStatus: SaveStatus,
         onAddress: () -> Unit = {},
         onCopyAddress: () -> Unit = {},
+        width: Dp = NARROW_WIDTH,
     ) = BottomBar(
         tab = tab,
         openTabs = openTabs,
@@ -312,7 +342,7 @@ class AccessibilityTest {
         onMore = {},
         onCopyAddress = onCopyAddress,
         onSwipeTab = {},
-        modifier = Modifier.width(NARROW_WIDTH),
+        modifier = Modifier.width(width),
     )
 
     private companion object {
@@ -325,6 +355,9 @@ class AccessibilityTest {
 
         /** Small phones are 320dp wide. */
         val NARROW_WIDTH = 320.dp
+
+        /** Wide enough for the single-row bar. */
+        val WIDE_WIDTH = 412.dp
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp

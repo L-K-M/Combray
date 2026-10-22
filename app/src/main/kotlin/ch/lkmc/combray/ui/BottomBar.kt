@@ -9,7 +9,10 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -119,56 +122,70 @@ fun BottomBar(
         modifier = modifier,
     ) {
         Box {
-            Row(
+            BoxWithConstraints(
                 Modifier
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                     .then(swipe)
-                    .fillMaxWidth()
-                    .heightIn(min = 64.dp)
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .fillMaxWidth(),
             ) {
-                IconButton(onClick = onBack, enabled = backEnabled) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                }
-                AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))
-                SaveButton(saveStatus, enabled = tab?.url != null, onSave)
-                IconButton(onClick = onShare, enabled = tab?.url != null) {
-                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
-                }
-                val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
-                val switchPrevious = stringResource(R.string.recent_switch_previous)
-                // Combined click/long-click: IconButton has no long-press overload. Same 48dp
-                // target, role and ripple; the long-press is a shortcut beside the Recent sheet's rows.
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .combinedClickable(
-                            interactionSource = null,
-                            indication = ripple(bounded = false, radius = 20.dp),
-                            role = Role.Button,
-                            onLongClickLabel = switchPrevious,
-                            onClick = onRecent,
-                            onLongClick = onRecentLongPress,
-                        )
-                        .semantics { contentDescription = recentLabel },
-                ) {
-                    // A count, not an alert: pine rather than Material's error red.
-                    BadgedBox(
-                        badge = {
-                            if (openTabs > 0) {
-                                Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
-                                    Text(tabCountLabel(openTabs))
-                                }
-                            }
-                        },
-                    ) {
-                        Icon(TabStackIcon, contentDescription = null)
+                // Five 48dp actions leave a narrow phone's chip too little room for a site name, so
+                // the address takes a row of its own above them (owner decision, 22 October 2026).
+                val stacked = maxWidth < STACKED_BAR_BELOW
+                Column {
+                    if (stacked) {
+                        AddressChip(tab, onAddress, onCopyAddress, Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp))
                     }
-                }
-                IconButton(onClick = onMore) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = if (stacked) STACKED_ACTION_ROW_HEIGHT else BAR_HEIGHT)
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = if (stacked) Arrangement.SpaceEvenly else Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onBack, enabled = backEnabled) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                        if (!stacked) AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))
+                        SaveButton(saveStatus, enabled = tab?.url != null, onSave)
+                        IconButton(onClick = onShare, enabled = tab?.url != null) {
+                            Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                        }
+                        val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
+                        val switchPrevious = stringResource(R.string.recent_switch_previous)
+                        // Combined click/long-click: IconButton has no long-press overload. Same 48dp
+                        // target, role and ripple; the long-press is a shortcut beside the Recent sheet's rows.
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .combinedClickable(
+                                    interactionSource = null,
+                                    indication = ripple(bounded = false, radius = 20.dp),
+                                    role = Role.Button,
+                                    onLongClickLabel = switchPrevious,
+                                    onClick = onRecent,
+                                    onLongClick = onRecentLongPress,
+                                )
+                                .semantics { contentDescription = recentLabel },
+                        ) {
+                            // A count, not an alert: pine rather than Material's error red.
+                            BadgedBox(
+                                badge = {
+                                    if (openTabs > 0) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+                                            Text(tabCountLabel(openTabs))
+                                        }
+                                    }
+                                },
+                            ) {
+                                Icon(TabStackIcon, contentDescription = null)
+                            }
+                        }
+                        IconButton(onClick = onMore) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                        }
+                    }
                 }
             }
             HorizontalDivider(Modifier.align(Alignment.TopCenter), color = MaterialTheme.colorScheme.outlineVariant)
@@ -287,6 +304,15 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
         }
     }
 }
+
+/** The single-row bar's height. */
+private val BAR_HEIGHT = 64.dp
+
+/** Below this width the address gets its own row; at 400dp the single row leaves the host about 115dp. */
+private val STACKED_BAR_BELOW = 400.dp
+
+/** The action row's height under the address row: 48dp targets with a little room. */
+private val STACKED_ACTION_ROW_HEIGHT = 56.dp
 
 /** How far a drag along the bar must go to switch tabs: well past a tap's slop, short of the bar. */
 private val TAB_SWIPE_DISTANCE = 56.dp
