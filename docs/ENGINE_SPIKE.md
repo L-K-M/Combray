@@ -273,3 +273,34 @@ Limitations found while building the app:
 - **Screen density is read once.** The HiDPI factor passed to Servo at startup is not updated when the density changes in the same process (display size setting, moving between screens); pages then render at the old scale until the app restarts.
 - **Profile writes block the engine thread** for the duration of three small file writes; the five-minute interval keeps that rare.
 - **Emulator compositor.** After about 2.5 hours of headless running, the reference emulator's screenshots turned all black, the launcher included, while the app kept working. This was an emulator problem, not an engine one; `check-app.sh` now detects it before running checks.
+
+## 14. Sol review validation, 21 October 2026
+
+Source baseline: `e5cf8ed`, Servo v0.6.0 at the revision in section 2, patches 0001–0004. The Sol fixes change logical browser/outbox behavior, not the native pin or patch set. Host: Linux x86_64, JDK 21.0.12.1, Rust 1.97.1, NDK 29.0.14206865, SDK platform 37. The existing Zig 0.17 host wrappers described in [BUILDING.md](BUILDING.md) were used.
+
+Native build, executed from the review worktree:
+
+```sh
+ANDROID_HOME=/home/paseo/android-sdk ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_HOST_CC=/home/paseo/.paseo/worktrees/14fivrxx/subtle-mayfly/servo-checkout/hostbin/host-cc \
+COMBRAY_HOST_CXX=/home/paseo/.paseo/worktrees/14fivrxx/subtle-mayfly/servo-checkout/hostbin/host-c++ \
+CARGO_BUILD_JOBS=4 scripts/build-native.sh
+```
+
+Passed in 16m11s; staged x86_64 `libcombray_engine.so` (130,888,544 bytes) and `libc++_shared.so` (9,015,544 bytes). Native host tests: 20 passed; `cargo fmt --check` passed. The first host-test attempt lacked the Servo path dependency; it passed after the build script prepared the verified source. JVM tests, lint and debug/release assembly passed separately on each Sol fix branch. These are build/check times on a shared host, not phone responsiveness measurements.
+
+Device: dedicated `combray-sol-audit` AVD, `emulator-5562`, Android 11/API 30 x86_64, 720×1440 at 320dpi, SwiftShader, no KVM. The emulator was created through `scripts/m0/emulator.sh` with `COMBRAY_AVD=combray-sol-audit` and `COMBRAY_EMULATOR_PORT=5562`; its installed emulator reported 37.2.12. The fixture server used host port 8768 because 8766 was occupied; the dedicated device mapped `tcp:8766` to `tcp:8768`. The default `check-app.sh` has a fixed fixture port and omits Reader, so Reader was selected explicitly through instrumentation instead:
+
+```sh
+python3 -I testing/fixtures/server.py --port 8768
+./gradlew assembleDebug assembleDebugAndroidTest
+# After pushing and installing both APKs on this dedicated emulator:
+adb -s emulator-5562 reverse tcp:8766 tcp:8768
+adb -s emulator-5562 shell am instrument -w -r \
+  -e class ch.lkmc.combray.ReaderTest \
+  ch.lkmc.combray.debug.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+The installed app contained Reader fix `2ae2b8b`; the second run used the test helper change later committed in `6b6d489`. Both complete runs passed 2/3 checks: unavailable-article handling and article-link navigation passed. Article extraction, markers and displayed text assertions passed, but the following system Back injection failed with `SecurityException: Injecting to another application requires INJECT_EVENTS permission`. The existing `Device.dismissSystemDialogs()` was added immediately before Back; it did not clear the interference reliably on this emulator.
+
+A read-only REA/adb screenshot showed “System UI isn't responding” covering the screen: 720×1440 PNG, SHA-256 `19884e2324b5e7ea5188ab40e2b012c152a5bc90d4a21b66797aa9f6d067e9c8`, Evidence `ev_9ec17de27963221eb3ed27bb7bada937afc55e82c0f5ac113a6ea96225207ac0`. Restarting System UI on this disposable emulator was attempted; the next run timed out and was stopped. **The device gate did not pass.** No physical phone, live service, personal history, Kagi login, dark/landscape sweep, or performance benchmark was exercised in this pass.
