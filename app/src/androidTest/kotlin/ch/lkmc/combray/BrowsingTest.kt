@@ -219,6 +219,15 @@ class BrowsingTest {
         assertEquals(INTERSECTION_VISIBLE, state.activeTab?.title)
     }
 
+    @Test
+    fun pagesCanAnimateElements() {
+        device.browser.openUrl(Fixtures.ANIMATE, Placement.CURRENT_TAB)
+        val state = device.awaitState {
+            it.activeTab?.title?.let { title -> title.startsWith(ANIMATE_PREFIX) && title != ANIMATE_WAITING } == true
+        }
+        assertEquals(ANIMATE_OK, state.activeTab?.title)
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -234,5 +243,8 @@ class BrowsingTest {
         const val STOP_TIMEOUT_MS = 10_000L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"
+        const val ANIMATE_PREFIX = "WA:"
+        const val ANIMATE_WAITING = "WA:waiting"
+        const val ANIMATE_OK = "WA:ok"
     }
 }

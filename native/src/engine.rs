@@ -30,10 +30,12 @@ use servo::{
     Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts,
     PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
     SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType,
-    TouchId, TouchPointerType, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    TouchId, TouchPointerType, UserContentManager, UserScript, WebView, WebViewBuilder,
+    WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
+use crate::animations;
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
     CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
@@ -132,6 +134,8 @@ impl EventLoopWaker for ChannelWaker {
 struct Runtime {
     servo: Servo,
     rendering_context: Rc<WindowRenderingContext>,
+    /// Scripts every view's documents run before their own (see `animations.js`).
+    user_content: Rc<UserContentManager>,
 }
 
 enum Surface {
@@ -479,11 +483,15 @@ impl Engine {
             .event_loop_waker(Box::new(ChannelWaker(self.wake.clone())))
             .build();
 
+        let user_content = Rc::new(UserContentManager::new(&servo));
+        user_content.add_script(Rc::new(UserScript::from(animations::page_script())));
+
         info!("Servo started at {}x{}", size.width, size.height);
         self.size = size;
         self.runtime = Some(Runtime {
             servo,
             rendering_context,
+            user_content,
         });
         self.emit(EngineEvent::EngineReady {
             width: size.width,
@@ -571,6 +579,7 @@ impl Engine {
         let webview = WebViewBuilder::new(&runtime.servo, rendering_context)
             .url(url)
             .hidpi_scale_factor(Scale::new(self.config.density))
+            .user_content_manager(runtime.user_content.clone())
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
 
@@ -624,6 +633,7 @@ impl Engine {
         let webview = request
             .builder(rendering_context)
             .hidpi_scale_factor(Scale::new(self.config.density))
+            .user_content_manager(runtime.user_content.clone())
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
         self.insert_tab(view, webview);
@@ -1410,7 +1420,10 @@ impl Engine {
             let Runtime {
                 servo,
                 rendering_context,
+                user_content,
             } = runtime;
+            // The user content manager holds a Servo handle of its own.
+            drop(user_content);
             // Dropping the last handle asks the constellation to exit and spins until it has;
             // this is when Servo writes cookies and HSTS state to the profile directory.
             drop(servo);

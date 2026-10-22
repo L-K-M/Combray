@@ -8,12 +8,14 @@
 //!                         ├─ delegate: per-view WebViewDelegate → queue
 //!                         ├─ controls: select pickers, script dialogs, file pickers
 //!                         ├─ capture: bounded in-page text snapshot
+//!                         ├─ animations: Element.animate() for every page
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `events`, `panic_policy` and the pure parts of `capture` build on any host so their tests run
-//! without Servo.
+//! `animations`, `events`, `panic_policy` and the pure parts of `capture` build on any host so
+//! their tests run without Servo.
 
+mod animations;
 pub mod capture;
 pub mod controls;
 pub mod events;

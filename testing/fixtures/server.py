@@ -100,6 +100,44 @@ INTERSECTION_PAGE = page(
     " }).observe(document.getElementById('target')); }</script>",
 )
 
+# Reports in its title whether element animations work: docs.mistral.ai runs an endless marquee
+# through Element.animate() and shows an error page without it.
+ANIMATE_PAGE = page(
+    "WA:waiting",
+    "<div id='box'>animated</div><script>"
+    "var failed = false;"
+    "function fail(why) { failed = true; document.title = 'WA:fail:' + why; }"
+    "try {"
+    " var box = document.getElementById('box');"
+    " if (!box.animate) { document.title = 'WA:missing'; } else {"
+    "  var loop = box.animate([{transform: 'translateX(0)'}, {transform: 'translateX(-50%)'}],"
+    "   {duration: 1000, iterations: Infinity});"
+    "  var fade;"
+    "  loop.playbackRate = 2;"
+    "  loop.ready.then(function () {"
+    "   var at = loop.currentTime, timing = loop.effect.getComputedTiming();"
+    "   if (Math.abs(timing.localTime - at) > 1) fail('localTime ' + timing.localTime + ' at ' + at);"
+    "   if (timing.currentIteration !== Math.floor(timing.localTime / 1000)) fail('iteration ' + timing.currentIteration);"
+    "   if (Math.abs(timing.progress - (timing.localTime % 1000) / 1000) > 1e-3) fail('progress ' + timing.progress);"
+    "   loop.finished.then(function () { fail('endless finished'); },"
+    "    function (e) { if (e.name !== 'AbortError') fail('cancel ' + e.name); });"
+    "   loop.cancel();"
+    "   if (loop.playState !== 'idle') fail('playState ' + loop.playState);"
+    "   fade = box.animate([{opacity: 1}, {opacity: 0.5}], {duration: 100, fill: 'forwards'});"
+    "   return fade.finished;"
+    "  }).then(function (done) {"
+    "   if (done !== fade) return fail('finished value');"
+    "   var held = getComputedStyle(box).opacity;"
+    "   fade.cancel();"
+    "   var reverted = getComputedStyle(box).opacity;"
+    "   if (held !== '0.5') return fail('fill ' + held);"
+    "   if (reverted !== '1') return fail('revert ' + reverted);"
+    "   if (!failed) document.title = 'WA:ok';"
+    "  }).catch(function (e) { fail(e.message); });"
+    " }"
+    "} catch (e) { fail(e.message); }</script>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -200,6 +238,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
+        if path == "/animate.html":
+            return self.send(200, ANIMATE_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
