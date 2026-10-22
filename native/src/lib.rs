@@ -14,8 +14,9 @@
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `activation`, `animations`, `events`, `media`, `navigation`, `page_zoom`, `panic_policy` and
-//! the pure parts of `capture` and `find` build on any host so their tests run without Servo.
+//! `activation`, `animations`, `events`, `media`, `navigation`, `page_zoom`, `panic_policy`,
+//! `profile`, `userinfo` and the pure parts of `capture` and `find` build on any host so their
+//! tests run without Servo.
 
 pub mod activation;
 mod animations;
@@ -27,6 +28,8 @@ mod media;
 pub mod navigation;
 mod page_zoom;
 mod panic_policy;
+mod profile;
+mod userinfo;
 
 #[cfg(target_os = "android")]
 mod commands;

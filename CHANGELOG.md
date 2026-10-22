@@ -57,6 +57,8 @@ All notable changes to this project are documented here. The format follows
   pressing Back on the question stays. Servo 0.6.0 asks only when the page
   itself navigates (links, forms), on reload and on `window.close()`, not
   for a typed address, Back/Forward or closing the tab.
+  password and warns on unencrypted connections. Combray stores no
+  credentials; what Servo keeps is in `docs/ENGINE_SPIKE.md`.
 - Device check that the bottom bar, More menu and page dialogs keep 48dp,
   labeled touch targets at the narrowest width and largest font size.
 - Local release signing through environment variables, with explicit validation
@@ -246,6 +248,16 @@ All notable changes to this project are documented here. The format follows
   another app at device data (`file:`, `content:`). The page stays on screen, but
   Servo still stops what it was loading: a link tapped before the page
   finished loading leaves it unfinished.
+- After an HTTP sign-in, the page's address carried the username and
+  password (Servo 0.6.0 puts them in the URL), so the address bar,
+  Recent, Share and restore after a restart showed or kept them. The
+  engine and the app now leave them out of every address; opening the
+  page again from Recent or after a restart asks you to sign in again.
+  Like other signed-in pages, such pages can now be saved to Karakeep
+  and captured for Hister.
+- Proxy sign-ins Servo saved in its profile are deleted when the engine
+  starts instead of being sent again after a restart. They still reach
+  the disk while the app runs until a Servo patch change.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
