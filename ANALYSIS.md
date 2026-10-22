@@ -754,7 +754,7 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   monogram and host quick links on that surface; it waits on the owner.)
 - Reader text size: Proposed in the
   [owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)
-  as one control, where page zoom (#87, More > Text size) also scales Reader
+  as one control, where page zoom (#87, More › Text size) also scales Reader
   instead of #52's separate reader size. Body text is fixed at 18 sp today.
   Reading seam: preserve Reader scroll across a brief departure only for the
   same tab/document; invalidate it when content is replaced. A quiet local reading-
