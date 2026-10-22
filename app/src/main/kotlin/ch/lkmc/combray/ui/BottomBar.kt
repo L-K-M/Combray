@@ -99,7 +99,7 @@ fun BottomBar(
 /** The badge's visible text: the exact count, or a capped label once it no longer fits. */
 @Composable
 private fun tabCountLabel(openTabs: Int): String =
-    if (openTabs > BADGE_LIMIT) stringResource(R.string.recent_badge_many) else openTabs.toString()
+    if (openTabs > BADGE_LIMIT) stringResource(R.string.recent_badge_many, BADGE_LIMIT) else openTabs.toString()
 
 /** One tap saves; the icon says saved, saving or needs attention, the label says it in words. */
 @Composable
