@@ -20,13 +20,16 @@ Pages
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /leave.html[?auto]         link to /solid/2e6b4f.html above a <textarea>; its beforeunload handler
+                             always asks to stay (title LEAVE:<times asked>); ?auto follows the link
+                             by script a second after load, without any user input
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
                              error events
   /media/slow.bin            512 KiB served over about eight seconds; /_admin/state "media" counts the
                              requests that arrived and the responses sent in full
-  (the three control pages have a #1f6f78 margin on the left for paint checks)
+  (the four control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
   POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks (newest first), GET .../bookmarks/search?q=,
@@ -205,6 +208,16 @@ CONTROL_PAGES = {
         "<script>addEventListener('load',function(){var f=document.getElementById('f');"
         "f.onchange=function(){var file=f.files[0];var r=new FileReader();"
         "r.onload=function(){document.title='FILE:'+file.name+':'+r.result};r.readAsText(file)}})</script>",
+    ),
+    # The link fills most of the page, so a tap in the middle follows it.
+    "/leave.html": (
+        "LEAVE",
+        "<a class='c' id='away' href='/solid/2e6b4f.html' style='height:60vh'>leave</a>"
+        "<textarea style='margin:2vh 0 0 12vw;width:80vw;height:20vh;font-size:24px'>draft</textarea>",
+        "<script>var asked=0;addEventListener('beforeunload',function(e){asked++;"
+        "document.title='LEAVE:'+asked;e.preventDefault();e.returnValue='unsaved'});"
+        "if(location.search=='?auto')addEventListener('load',function(){"
+        "setTimeout(function(){document.getElementById('away').click()},1000)})</script>",
     ),
 }
 

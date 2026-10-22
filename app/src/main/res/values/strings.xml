@@ -40,6 +40,12 @@
     <string name="sign_in_username">Username</string>
     <string name="sign_in_password">Password</string>
     <string name="sign_in_action">Sign in</string>
+    <!-- A page's beforeunload question; the page cannot choose this text. -->
+    <string name="leave_page_title">Leave this page?</string>
+    <string name="leave_page_message">Changes you made may not be saved.</string>
+    <string name="leave_page_site">Asked by %1$s</string>
+    <string name="leave_page_leave">Leave</string>
+    <string name="leave_page_stay">Stay</string>
     <string name="link_open_new_tab">Open in new tab</string>
     <string name="link_open_background">Open in background</string>
     <string name="link_save">Save link to Karakeep</string>

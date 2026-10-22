@@ -279,6 +279,7 @@ sealed interface EngineEvent {
             )
             "link_menu" -> PageControlContent.LinkMenu(optionalString("link"), optionalString("image"))
             "sign_in" -> PageControlContent.SignIn(string("origin"), boolean("proxy"))
+            "leave_page" -> PageControlContent.LeavePage
             else -> throw IllegalArgumentException("unknown control kind $kind")
         }
 

@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
+use servo::AllowOrDenyRequest;
 use servo::{
     AuthenticationRequest, CreateNewWebViewRequest, DeviceIntRect, EmbedderControl,
     EmbedderControlId, InputMethodType, LoadStatus, NavigationRequest, PermissionRequest,
@@ -66,6 +67,12 @@ pub enum DelegateEvent {
     SignIn {
         view: ViewKey,
         request: AuthenticationRequest,
+    },
+    /// The page asks to confirm leaving it (`beforeunload`); its script thread waits for the
+    /// answer. Dropping the request lets the page go.
+    LeavePage {
+        view: ViewKey,
+        request: AllowOrDenyRequest,
     },
     /// The page closed its own window (`window.close()`); Servo has discarded the view.
     ClosedByPage {
@@ -202,6 +209,13 @@ impl WebViewDelegate for TabDelegate {
         self.push(DelegateEvent::SignIn {
             view: self.view,
             request,
+        });
+    }
+
+    fn request_unload(&self, _webview: WebView, unload_request: AllowOrDenyRequest) {
+        self.push(DelegateEvent::LeavePage {
+            view: self.view,
+            request: unload_request,
         });
     }
 

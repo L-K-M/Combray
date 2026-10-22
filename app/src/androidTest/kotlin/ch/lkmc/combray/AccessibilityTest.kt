@@ -195,6 +195,9 @@ class AccessibilityTest {
     fun aSignInIsAccessible() = assertControlIsAccessible(PageControlContent.SignIn("http://intranet.test", proxy = false))
 
     @Test
+    fun aLeavePageQuestionIsAccessible() = assertControlIsAccessible(PageControlContent.LeavePage)
+
+    @Test
     fun aSelectIsAccessible() = assertControlIsAccessible(
         PageControlContent.Select(
             listOf(

@@ -29,13 +29,25 @@ sealed interface PageControlContent {
      * which may not be the page that linked there. The load waits for the answer.
      */
     data class SignIn(val origin: String, val proxy: Boolean) : PageControlContent
+
+    /**
+     * The page asks to confirm leaving it (`beforeunload`), usually over unsaved form text; its
+     * scripts wait for the answer. Answer with a [LeavePageChoice]'s response.
+     */
+    data object LeavePage : PageControlContent
+}
+
+/** The answers to [PageControlContent.LeavePage]: Leave like OK, Stay like Cancel or Back. */
+enum class LeavePageChoice(val response: ControlResponse) {
+    LEAVE(ControlResponse.Accept),
+    STAY(ControlResponse.Dismiss),
 }
 
 /** The answer to a page control. */
 sealed interface ControlResponse {
     data class Select(val ids: List<Int>) : ControlResponse
 
-    /** OK on `alert` or `confirm`. */
+    /** OK on `alert` or `confirm`; Leave on a leave-page question. */
     data object Accept : ControlResponse
 
     /** OK on `prompt`. */
@@ -49,7 +61,7 @@ sealed interface ControlResponse {
         override fun toString() = "Credentials(username=$username, password=<redacted>)"
     }
 
-    /** Cancel or Back: Servo's default response. */
+    /** Cancel or Back: Servo's default response. Stay on a leave-page question, where Servo's default would leave. */
     data object Dismiss : ControlResponse
 
     fun toJson(): String = buildJsonObject {

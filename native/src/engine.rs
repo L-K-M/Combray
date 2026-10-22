@@ -23,6 +23,7 @@ use dpi::PhysicalSize;
 use euclid::Scale;
 use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
+use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
 use servo::{
     AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
@@ -42,6 +43,7 @@ use crate::commands::{
     TouchPhase,
 };
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
+use crate::controls::{LeavePageAnswer, LeavePageDecision, PageActivation, TabVisibility};
 use crate::delegate::{DelegateEvent, DelegateQueue, TabDelegate};
 use crate::events::{
     Attribution, CaptureReport, CaptureStatus, EngineEvent, HistoryChange, LoadPhase, ViewKey,
@@ -177,6 +179,9 @@ struct Tab {
     media_blocked: HashSet<PipelineId>,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
+    /// The document the user last touched or typed into. A page may ask to confirm leaving only
+    /// while this is still its current document (browsers' sticky activation).
+    interacted_document: Option<PipelineId>,
 }
 
 impl Tab {
@@ -204,20 +209,35 @@ struct PendingControl {
     control: ControlHandle,
 }
 
-/// Servo's handle for a control: an embedder control, or a sign-in request, which Servo models
-/// separately. Dropping a sign-in request loads the server's 401 (or the proxy's 407) response.
+/// Servo's handle for a control: an embedder control, or a sign-in or leave-page request, which
+/// Servo models separately. Dropping a sign-in request loads the server's 401 (or the proxy's
+/// 407) response; dropping a leave-page request lets the page go.
 enum ControlHandle {
     Embedder(EmbedderControl),
     SignIn(AuthenticationRequest),
+    /// `beforeunload`: the page's script thread waits for the answer, so it is let go at
+    /// `deadline` if the user has not answered.
+    LeavePage {
+        request: AllowOrDenyRequest,
+        deadline: Instant,
+    },
 }
 
 impl ControlHandle {
-    /// None for sign-ins: Servo never hides them, so they end only when answered or when their
-    /// view closes.
+    /// None for sign-ins and leave-page questions: Servo never hides them, so they end when
+    /// answered, when their view closes, or (leave-page) at their deadline.
     fn embedder_id(&self) -> Option<EmbedderControlId> {
         match self {
             ControlHandle::Embedder(control) => Some(control.id()),
-            ControlHandle::SignIn(_) => None,
+            ControlHandle::SignIn(_) | ControlHandle::LeavePage { .. } => None,
+        }
+    }
+
+    /// When an unanswered control is let go; only leave-page questions have one.
+    fn deadline(&self) -> Option<Instant> {
+        match self {
+            ControlHandle::LeavePage { deadline, .. } => Some(*deadline),
+            ControlHandle::Embedder(_) | ControlHandle::SignIn(_) => None,
         }
     }
 }
@@ -309,9 +329,15 @@ impl Engine {
 
     fn next_timeout(&self) -> Duration {
         let now = Instant::now();
+        let controls = self
+            .page_controls
+            .values()
+            .filter_map(|pending| pending.control.deadline());
         self.pending_captures
             .values()
-            .map(|pending| pending.deadline.saturating_duration_since(now))
+            .map(|pending| pending.deadline)
+            .chain(controls)
+            .map(|deadline| deadline.saturating_duration_since(now))
             .min()
             .map_or(IDLE_TICK, |until_deadline| until_deadline.min(IDLE_TICK))
     }
@@ -395,6 +421,7 @@ impl Engine {
         self.drain_capture_results();
         self.drain_evaluations();
         self.expire_captures();
+        self.expire_leave_page_questions();
         self.paint();
     }
 
@@ -609,6 +636,7 @@ impl Engine {
                 media_blocked: HashSet::new(),
                 frames_painted: 0,
                 last_paint_report: None,
+                interacted_document: None,
             },
         );
         webview_id
@@ -649,6 +677,7 @@ impl Engine {
             tab.webview.hide();
         }
         self.active = None;
+        self.release_leave_page_questions_off_screen();
         self.needs_paint = true;
     }
 
@@ -679,6 +708,7 @@ impl Engine {
         selected.webview.focus();
 
         self.active = Some(tab);
+        self.release_leave_page_questions_off_screen();
         self.needs_paint = true;
         self.emit(EngineEvent::TabSelected { view });
     }
@@ -759,6 +789,11 @@ impl Engine {
     // --- Input (always to the active view) ---------------------------------------------------
 
     fn touch(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) {
+        // A scroll ends with Up too, so it counts, where browsers cancel the pointer once
+        // scrolling starts: asking a little more often is the safe side for unsaved text.
+        if phase == TouchPhase::Up {
+            self.note_interaction();
+        }
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -777,6 +812,9 @@ impl Engine {
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
+        if action == KeyAction::Press {
+            self.note_interaction();
+        }
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -808,10 +846,20 @@ impl Engine {
         }
     }
 
+    /// The user touched or typed into the selected page: its current document may now ask to
+    /// confirm leaving.
+    fn note_interaction(&mut self) {
+        if let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) {
+            tab.interacted_document = tab.current_document;
+        }
+    }
+
     fn ime_commit(&mut self, text: String) {
         if text.is_empty() {
             return;
         }
+        // Typing: the page sees a key press (`Process`) with the text.
+        self.note_interaction();
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -1126,6 +1174,7 @@ impl Engine {
             DelegateEvent::SignIn { view, request } => {
                 self.show_page_control(view, ControlHandle::SignIn(request))
             },
+            DelegateEvent::LeavePage { view, request } => self.ask_to_leave_page(view, request),
             DelegateEvent::ControlHidden { view, control } => {
                 if self.ime_owner == Some((view, control)) {
                     self.ime_owner = None;
@@ -1180,6 +1229,7 @@ impl Engine {
                 origin: request.url().origin().ascii_serialization(),
                 proxy: request.for_proxy(),
             }),
+            ControlHandle::LeavePage { .. } => Some(ControlDescription::LeavePage),
         };
         let Some(description) = description else {
             warn!("answering an unsupported page control with Servo's default");
@@ -1194,6 +1244,72 @@ impl Engine {
             control: id,
             description,
         });
+    }
+
+    /// A page's `beforeunload` asks to confirm leaving it, and its script thread waits for the
+    /// answer. Servo 0.6.0 asks for page-initiated navigations, reloads and `window.close()`
+    /// only; the request names the view, not which of its documents (an iframe's) asks.
+    fn ask_to_leave_page(&mut self, view: ViewKey, request: AllowOrDenyRequest) {
+        let Some(tab) = self.live_tab(view) else {
+            // Dropping the request lets the page go.
+            return;
+        };
+        let activation = PageActivation::of(tab.interacted_document, tab.current_document);
+        let visibility = if self.active == Some(view.tab) {
+            TabVisibility::Selected
+        } else {
+            TabVisibility::Hidden
+        };
+        if controls::leave_page_decision(visibility, activation) == LeavePageDecision::Leave {
+            request.allow();
+            return;
+        }
+
+        let deadline = Instant::now() + controls::LEAVE_PAGE_TIMEOUT;
+        self.show_page_control(view, ControlHandle::LeavePage { request, deadline });
+    }
+
+    /// An unanswered leave-page question keeps its page: its script thread cannot wait longer,
+    /// and staying lets it go on as well as leaving does.
+    fn expire_leave_page_questions(&mut self) {
+        let now = Instant::now();
+        self.keep_pages_of_questions(|pending| {
+            pending
+                .control
+                .deadline()
+                .is_some_and(|deadline| deadline <= now)
+        });
+    }
+
+    /// Only the tab on screen can ask the user: a question from a tab that left it keeps its page.
+    fn release_leave_page_questions_off_screen(&mut self) {
+        let active = self.active;
+        self.keep_pages_of_questions(|pending| Some(pending.view.tab) != active);
+    }
+
+    /// Answers the matching leave-page questions with Stay and tells the app they are gone. A
+    /// navigation the user did not confirm can be repeated; unsaved text cannot be brought back.
+    fn keep_pages_of_questions(&mut self, matches: impl Fn(&PendingControl) -> bool) {
+        let settled: Vec<u64> = self
+            .page_controls
+            .iter()
+            .filter(|(_, pending)| {
+                matches!(pending.control, ControlHandle::LeavePage { .. }) && matches(pending)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in settled {
+            let Some(pending) = self.page_controls.remove(&id) else {
+                continue;
+            };
+            if let ControlHandle::LeavePage { request, .. } = pending.control {
+                request.deny();
+            }
+            self.emit(EngineEvent::ControlHidden {
+                view: pending.view,
+                control: id,
+            });
+        }
     }
 
     /// Drops the matching controls (Servo answers them with its defaults) and tells the app.
@@ -1222,6 +1338,12 @@ impl Engine {
         let response = match controls::parse_response(response) {
             Ok(response) => response,
             Err(error) => {
+                if let ControlHandle::LeavePage { request, .. } = pending.control {
+                    // Stay: a navigation can be repeated, unsaved text cannot be brought back.
+                    request.deny();
+                    self.error(format!("{error}; leave-page question {id} kept its page"));
+                    return;
+                }
                 self.error(format!(
                     "{error}; control {id} answered with Servo's default"
                 ));
@@ -1240,6 +1362,19 @@ impl Engine {
                     response => self.error(format!(
                         "response {response:?} does not fit sign-in {id}; the sign-in was cancelled"
                     )),
+                }
+                return;
+            },
+            ControlHandle::LeavePage { request, .. } => {
+                match controls::leave_page_answer(&response) {
+                    Some(LeavePageAnswer::Leave) => request.allow(),
+                    Some(LeavePageAnswer::Stay) => request.deny(),
+                    None => {
+                        request.deny();
+                        self.error(format!(
+                            "response {response:?} does not fit leave-page question {id}; the page was kept"
+                        ));
+                    },
                 }
                 return;
             },
@@ -1340,6 +1475,14 @@ impl Engine {
                     tab.held.push_back(report);
                 }
             }
+        }
+
+        if change == HistoryChange::NewDocument {
+            // Another document replaced the one asking (a load the application started): its
+            // question is moot.
+            self.hide_controls(|pending| {
+                pending.view == view && matches!(pending.control, ControlHandle::LeavePage { .. })
+            });
         }
 
         self.emit(EngineEvent::History {
