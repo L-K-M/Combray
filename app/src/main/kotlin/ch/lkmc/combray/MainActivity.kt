@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
         val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromRecents) openLink(intent)
         setContent {
-            CombrayTheme {
+            CombrayTheme(graph.settings) {
                 // Back from a page another app opened returns to that app.
                 BrowserScreen(graph, onLeave = { moveTaskToBack(true) })
             }

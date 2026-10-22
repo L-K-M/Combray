@@ -60,6 +60,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.ThirdPartyNotices
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.Retention
+import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.browser.UnusedTabs
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
@@ -156,6 +157,8 @@ fun SettingsSheet(
                 check = integrations.hister::check,
                 remove = integrations.hister::remove,
             ) { service -> HisterCaptureSettings(integrations, service) }
+            SectionTitle(R.string.settings_theme_title)
+            ThemeModeSetting(settings)
             SectionTitle(R.string.settings_history_title)
             val days = Retention().closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
@@ -169,6 +172,34 @@ fun SettingsSheet(
             }
         }
     }
+}
+
+/** Theme: follow the system, or force light, dark, or a pitch-black OLED dark surface. */
+@Composable
+private fun ThemeModeSetting(settings: BrowserSettings) {
+    val current by settings.themeMode.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        ThemeMode.entries.forEach { mode ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                    selected = current == mode,
+                    role = Role.RadioButton,
+                    onClick = { settings.setThemeMode(mode) },
+                ),
+            ) {
+                RadioButton(selected = current == mode, onClick = null)
+                Text(stringResource(themeLabel(mode)), modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
+
+private fun themeLabel(mode: ThemeMode): Int = when (mode) {
+    ThemeMode.SYSTEM -> R.string.settings_theme_system
+    ThemeMode.LIGHT -> R.string.settings_theme_light
+    ThemeMode.DARK -> R.string.settings_theme_dark
+    ThemeMode.DARK_OLED -> R.string.settings_theme_dark_oled
 }
 
 /** Opt-in: open tabs unused for the retention period close like history expires. */

@@ -227,6 +227,11 @@
     </plurals>
     <string name="settings_close_unused_tabs_body">Their pages leave Recent with them. The tab you are on stays open.</string>
     <string name="settings_about_title">About</string>
+    <string name="settings_theme_title">Theme</string>
+    <string name="settings_theme_system">Follow the system</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_dark_oled">Dark (pitch black)</string>
     <string name="settings_version">Combray %1$s</string>
     <string name="settings_engine">Browser engine: Servo %1$s</string>
     <string name="settings_source">Source code: %1$s</string>

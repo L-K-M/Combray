@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.engine.PageControlContent
@@ -149,10 +150,12 @@ class AccessibilityTest {
     }
 
     private fun show(fontScale: Float, content: @Composable () -> Unit) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val settings = BrowserSettings(context.getSharedPreferences(BrowserSettings.FILE_NAME, android.content.Context.MODE_PRIVATE))
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                CombrayTheme(content)
+                CombrayTheme(settings, content)
             }
         }
     }
