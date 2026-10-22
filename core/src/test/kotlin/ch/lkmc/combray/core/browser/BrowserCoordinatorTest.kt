@@ -1674,7 +1674,7 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://a.test/")
 
-        engine.emit(EngineEvent.ImeShown(engine.view(1), multiline = false, kind = "password")); idle()
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         assertEquals(KeyboardRequest.Show("password"), state().keyboard)
         browser.keyboardHandled(state().keyboard!!)
         assertNull(state().keyboard)
@@ -1691,9 +1691,87 @@ class BrowserCoordinatorTest {
         // Focus moves between fields: hide, then show for the next one, before the UI is done.
         engine.emit(EngineEvent.ImeHidden(engine.view(1))); idle()
         val handling = state().keyboard!!
-        engine.emit(EngineEvent.ImeShown(engine.view(1), multiline = false, kind = "password")); idle()
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         browser.keyboardHandled(handling)
         assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+    }
+
+    /** Opens a page in tab 1 and gives one of its fields the keyboard; the UI has shown it. */
+    private fun keyboardOnFirstPage() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = true)); idle()
+        browser.keyboardHandled(state().keyboard!!)
+    }
+
+    @Test
+    fun aFieldFocusedBeforeThePageIsUsedGetsTheKeyboardSetUpButNotOpened() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false)); idle()
+        assertEquals(KeyboardRequest.Prepare("search"), state().keyboard)
+    }
+
+    @Test
+    fun aHiddenTabsFieldDoesNotTakeTheKeyboard() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = true)); idle()
+        assertNull(state().keyboard)
+    }
+
+    @Test
+    fun aFieldOfTheNextDocumentKeepsTheKeyboardItAskedForBeforeItsCommit() {
+        keyboardOnFirstPage()
+        // Servo can report the new document's focused field before the document's commit.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "text", showKeyboard = true)); idle()
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Show("text"), state().keyboard)
+    }
+
+    @Test
+    fun aFieldTheNextDocumentFocusesOnLoadDoesNotKeepTheOldKeyboard() {
+        keyboardOnFirstPage()
+        // A results page refocuses its search field on load, before its commit and without a tap.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "search", showKeyboard = false)); idle()
+        commit(1, 11, "https://a.test/results", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWhenANavigationReplacesTheFieldsDocument() {
+        keyboardOnFirstPage()
+        // A form sent with Enter: Servo reports no hidden field, only the next document.
+        commit(1, 11, "https://a.test/results", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWhenAnotherTabIsShown() {
+        keyboardOnFirstPage()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWhenTheInternalHomeIsShown() {
+        keyboardOnFirstPage()
+        browser.newTab(); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWithItsTab() {
+        keyboardOnFirstPage()
+        browser.closeTab(state().activeTab!!.id); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
     }
 
     @Test

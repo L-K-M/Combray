@@ -121,6 +121,9 @@ class BrowserCoordinator(
     /** What pages see as `prefers-color-scheme`; the engine gets it as soon as it runs. */
     private var appearance = Appearance.LIGHT
 
+    /** The page field the keyboard was last requested for, while its page is the one shown. */
+    private var keyboardOwner: KeyboardOwner? = null
+
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
 
@@ -623,10 +626,15 @@ class BrowserCoordinator(
                 val link = ExternalLink(nextRequest++, event.url)
                 state.update { it.copy(externalLink = link) }
             }
-            is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
-                state.update { it.copy(keyboard = KeyboardRequest.Show(event.kind)) }
+            is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let { view ->
+                // Only a field that opens the keyboard owns it: one the next document focuses on
+                // load must not keep the previous document's keyboard through the navigation.
+                if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
+                val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
+                state.update { it.copy(keyboard = request) }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                keyboardOwner = null
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
             is EngineEvent.Crashed -> view(event.view)?.let {
@@ -704,6 +712,12 @@ class BrowserCoordinator(
         val event = reported.copy(url = HostNames.withoutCredentials(reported.url))
         view.canGoBack = event.canGoBack
         view.canGoForward = event.canGoForward
+        // Servo hides nothing when a navigation replaces the field's document (a form sent with
+        // Enter). A field of the new document may have asked for the keyboard before its commit.
+        val owner = keyboardOwner
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED && owner?.nativeTab == view.nativeTab && owner.document != event.document) {
+            releaseKeyboard(view.nativeTab)
+        }
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
         val now = clock.now()
 
@@ -1127,7 +1141,18 @@ class BrowserCoordinator(
         view.captureTimer?.cancel()
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
+        releaseKeyboard(view.nativeTab)
         if (selectedNative == view.nativeTab) selectedNative = null
+    }
+
+    /**
+     * Hides the keyboard if a field of [nativeTab]'s page has it: that page is no longer shown
+     * or no longer exists. Servo itself hides it only when the field loses focus.
+     */
+    private fun releaseKeyboard(nativeTab: Long) {
+        if (keyboardOwner?.nativeTab != nativeTab) return
+        keyboardOwner = null
+        state.update { it.copy(keyboard = KeyboardRequest.Hide) }
     }
 
     /** The page closed its own window: the tab closes as if the user had closed it. */
@@ -1195,6 +1220,7 @@ class BrowserCoordinator(
         if (view == null) {
             // Internal home: no page may stay painted under it.
             selectedNative?.let {
+                releaseKeyboard(it)
                 engine.setThrottled(it, true)
                 engine.showNone()
             }
@@ -1202,7 +1228,10 @@ class BrowserCoordinator(
             return
         }
         if (selectedNative != view.nativeTab) {
-            selectedNative?.let { engine.setThrottled(it, true) }
+            selectedNative?.let {
+                releaseKeyboard(it)
+                engine.setThrottled(it, true)
+            }
             engine.setThrottled(view.nativeTab, visibility == AppVisibility.BACKGROUND)
             engine.selectView(view.nativeTab)
             selectedNative = view.nativeTab
@@ -1376,6 +1405,9 @@ class BrowserCoordinator(
 
     /** A find request and what its answer must still match. */
     private data class PendingFind(val request: Long, val view: ViewRef, val document: Long)
+
+    /** A page field with the keyboard: its view and its document (its frame's, in a frame). */
+    private class KeyboardOwner(val nativeTab: Long, val document: Long)
 
     /** A reader-view request and what its result must still match. */
     private data class PendingArticle(val tabId: String, val view: ViewRef, val document: Long, val url: String)

@@ -279,9 +279,15 @@ pub enum EngineEvent {
     },
     ImeShown {
         view: ViewKey,
+        /// The field's document: Servo's pipeline ID of its frame (the top-level document's ID
+        /// unless the field is in a frame).
+        document: u64,
         multiline: bool,
         /// Field type: "text", "password", "email", "url", "number", "tel" or "search".
         kind: &'static str,
+        /// Whether to open the keyboard. Before the user has used the page, Servo asks for the
+        /// field without it (`InputMethodControl::allow_virtual_keyboard`).
+        show_keyboard: bool,
     },
     ImeHidden {
         view: ViewKey,
@@ -475,11 +481,19 @@ impl EngineEvent {
             },
             EngineEvent::ImeShown {
                 view,
+                document,
                 multiline,
                 kind,
+                show_keyboard,
             } => with_view(
                 view,
-                json!({ "type": "ime_shown", "multiline": multiline, "kind": kind }),
+                json!({
+                    "type": "ime_shown",
+                    "document": document,
+                    "multiline": multiline,
+                    "kind": kind,
+                    "show_keyboard": show_keyboard,
+                }),
             ),
             EngineEvent::ImeHidden { view } => with_view(view, json!({ "type": "ime_hidden" })),
             EngineEvent::DefaultHandled { view, request } => with_view(
@@ -669,6 +683,35 @@ mod tests {
                 "document": 4294967331u64,
                 "tab": 2,
                 "generation": 5,
+            })
+        );
+    }
+
+    #[test]
+    fn ime_shown_says_whether_to_open_the_keyboard() {
+        let event = EngineEvent::ImeShown {
+            view: ViewKey {
+                tab: 3,
+                generation: 9,
+            },
+            document: 42,
+            multiline: false,
+            kind: "search",
+            show_keyboard: false,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "ime_shown",
+                "document": 42,
+                "multiline": false,
+                "kind": "search",
+                "show_keyboard": false,
+                "tab": 3,
+                "generation": 9,
             })
         );
     }

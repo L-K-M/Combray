@@ -51,6 +51,7 @@ use crate::events::{
     ViewKey,
 };
 use crate::find::{self, FindAction};
+use crate::keyboard::{self, TapTracker};
 use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
@@ -199,6 +200,9 @@ struct Tab {
     shown: Shown,
     /// The tap that let the opener open this window, for the window's first navigation.
     opening_tap: OpeningTap,
+    /// The field that has Servo's input method. Servo keeps focus per document, so a hidden
+    /// tab keeps its field; only the selected tab's field gets the keyboard.
+    ime_field: Option<ImeField>,
 }
 
 impl Tab {
@@ -217,6 +221,34 @@ impl Tab {
             self.held.pop_front();
         }
         self.held.push_back(report);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Keyboard {
+    Open,
+    /// Not open: the page was not used yet, the user hid the keyboard, or the tab was hidden.
+    /// A tap on the field opens it (see `keyboard`).
+    Withheld,
+}
+
+#[derive(Clone, Copy)]
+struct ImeField {
+    control: EmbedderControlId,
+    multiline: bool,
+    kind: &'static str,
+    keyboard: Keyboard,
+}
+
+impl ImeField {
+    fn shown_event(&self, view: ViewKey) -> EngineEvent {
+        EngineEvent::ImeShown {
+            view,
+            document: u64::from(self.control.pipeline_id),
+            multiline: self.multiline,
+            kind: self.kind,
+            show_keyboard: self.keyboard == Keyboard::Open,
+        }
     }
 }
 
@@ -286,6 +318,14 @@ type FinishedFind = (
 );
 type FindResults = Rc<RefCell<Vec<FinishedFind>>>;
 
+/// A tap checked against a view's focused field: the view, the field and the page's answer.
+type TapCheck = (
+    ViewKey,
+    EmbedderControlId,
+    Result<JSValue, JavaScriptEvaluationError>,
+);
+type TapChecks = Rc<RefCell<Vec<TapCheck>>>;
+
 struct Engine {
     config: EngineConfig,
     wake: Sender<Command>,
@@ -299,7 +339,8 @@ struct Engine {
     next_page_tab: i64,
     next_sequence: u64,
     needs_paint: bool,
-    ime_owner: Option<(ViewKey, EmbedderControlId)>,
+    field_taps: TapTracker,
+    tap_checks: TapChecks,
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
     evaluation_results: EvaluationResults,
@@ -326,6 +367,7 @@ impl Engine {
     fn new(config: EngineConfig, wake: Sender<Command>, sink: Box<dyn EventSink + Send>) -> Self {
         // Touches arrive in the view's device pixels.
         let taps = TapRecognizer::new(config.density);
+        let density = config.density;
         Self {
             config,
             wake,
@@ -339,7 +381,8 @@ impl Engine {
             next_page_tab: PAGE_TAB_BASE,
             next_sequence: 1,
             needs_paint: false,
-            ime_owner: None,
+            field_taps: TapTracker::new(density),
+            tap_checks: Default::default(),
             delegate_queue: Default::default(),
             capture_results: Default::default(),
             evaluation_results: Default::default(),
@@ -462,6 +505,7 @@ impl Engine {
             } => self.touch(phase, pointer, x, y),
             Command::Key { action, key } => self.key(action, key),
             Command::ImeCommit { text } => self.ime_commit(text),
+            Command::ImeDismissed => self.ime_dismissed(),
             Command::ContextClick { x, y } => self.context_click(x, y),
             Command::RespondToControl { control, response } => {
                 self.respond_to_control(control, &response)
@@ -499,6 +543,7 @@ impl Engine {
         self.drain_capture_results();
         self.drain_evaluations();
         self.drain_find_results();
+        self.drain_tap_checks();
         self.expire_captures();
         self.expire_leave_page_questions();
         self.paint();
@@ -764,6 +809,7 @@ impl Engine {
                 opener,
                 shown: Shown::InitialBlank,
                 opening_tap,
+                ime_field: None,
             },
         );
         webview_id
@@ -812,6 +858,7 @@ impl Engine {
         for tab in self.tabs.values() {
             tab.webview.hide();
         }
+        self.withhold_keyboard();
         self.active = None;
         self.release_leave_page_questions_off_screen();
         self.touches.forget_pointers();
@@ -866,6 +913,9 @@ impl Engine {
         selected.webview.show();
         selected.webview.focus();
 
+        if self.active != Some(tab) {
+            self.withhold_keyboard();
+        }
         self.active = Some(tab);
         self.release_leave_page_questions_off_screen();
         self.touches.forget_pointers();
@@ -873,19 +923,29 @@ impl Engine {
         self.emit(EngineEvent::TabSelected { view });
     }
 
+    /// The selected tab leaves the screen and the application hides its keyboard. Its field
+    /// keeps focus in the page, so a tap on it must open the keyboard again.
+    fn withhold_keyboard(&mut self) {
+        let active = self.active.and_then(|tab| self.tabs.get_mut(&tab));
+        if let Some(field) = active.and_then(|tab| tab.ime_field.as_mut()) {
+            field.keyboard = Keyboard::Withheld;
+        }
+    }
+
     fn close_tab(&mut self, tab: i64) {
         let Some(closed) = self.tabs.remove(&tab) else {
             self.error(format!("no tab {tab} to close"));
             return;
         };
+        // Only the selected tab's field can have the keyboard.
+        let had_keyboard = self.active == Some(tab) && closed.ime_field.is_some();
         if self.active == Some(tab) {
             // The application picks the successor; until then the surface shows no page.
             self.active = None;
             self.touches.forget_pointers();
             self.needs_paint = true;
         }
-        if self.ime_owner.is_some_and(|(view, _)| view == closed.view) {
-            self.ime_owner = None;
+        if had_keyboard {
             self.emit(EngineEvent::ImeHidden { view: closed.view });
         }
         // Their answers could never reach the page; dropping sends Servo's defaults.
@@ -978,6 +1038,24 @@ impl Engine {
             TouchPhase::Up => self.touches.lift(pointer, now),
             TouchPhase::Cancel => self.touches.cancel(now),
         }
+        // Every touch counts for the gesture, with or without a page shown: a lift the tracker
+        // missed would leave its finger down, and no later touch would be a tap.
+        let field_tap = match phase {
+            TouchPhase::Down => {
+                self.field_taps.down(pointer, x, y);
+                None
+            },
+            TouchPhase::Move => {
+                self.field_taps.moved(pointer, x, y);
+                None
+            },
+            TouchPhase::Up => self.field_taps.up(pointer, x, y),
+            TouchPhase::Cancel => {
+                self.field_taps.cancel();
+                None
+            },
+        };
+
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -996,6 +1074,10 @@ impl Engine {
         // Only a tap: the end of a scroll, fling or pinch must not let the page open an app.
         if tapped {
             self.note_activation();
+        }
+
+        if let Some((x, y)) = field_tap {
+            self.check_tap_on_field(x, y);
         }
     }
 
@@ -1036,6 +1118,61 @@ impl Engine {
 
     fn shows_one_of(&self, tabs: &[i64]) -> bool {
         self.active.is_some_and(|shown| tabs.contains(&shown))
+    }
+
+    /// A tap while the selected tab's field has focus but no keyboard: if the tap landed on the
+    /// field, open the keyboard (see `keyboard`). Servo handles the tap at the same time; the
+    /// answer is checked against the field when it arrives, and a tap elsewhere moves focus.
+    fn check_tap_on_field(&mut self, x: f32, y: f32) {
+        let Some(tab) = self.active.and_then(|tab| self.tabs.get(&tab)) else {
+            return;
+        };
+        let Some(field) = tab
+            .ime_field
+            .filter(|field| field.keyboard == Keyboard::Withheld)
+        else {
+            return;
+        };
+        let Some(document) = tab.current_document else {
+            return;
+        };
+        // Device to CSS pixels: density, page zoom, the page's viewport scale and pinch zoom.
+        // Servo exposes no pinch-zoom offset, so a tap on a zoomed page can miss the field.
+        let scale = tab.webview.device_pixels_per_css_pixel().get();
+        let Some(script) = keyboard::tap_hits_focus_script(x / scale, y / scale) else {
+            return;
+        };
+        let view = tab.view;
+        let control = field.control;
+        let checks = self.tap_checks.clone();
+        tab.webview
+            .evaluate_javascript_in_document(document, script, move |result| {
+                checks.borrow_mut().push((view, control, result))
+            });
+    }
+
+    fn drain_tap_checks(&mut self) {
+        let checks: Vec<_> = self.tap_checks.borrow_mut().drain(..).collect();
+        for (view, control, result) in checks {
+            // Anything but a plain yes (a script error, a replaced document) opens nothing.
+            if !matches!(result, Ok(JSValue::Boolean(true))) || self.active != Some(view.tab) {
+                continue;
+            }
+            let Some(tab) = self.live_tab(view) else {
+                continue;
+            };
+            // Still the field the tap was checked against: focus may have moved meanwhile.
+            let Some(field) = tab
+                .ime_field
+                .as_mut()
+                .filter(|field| field.control == control && field.keyboard == Keyboard::Withheld)
+            else {
+                continue;
+            };
+            field.keyboard = Keyboard::Open;
+            let event = field.shown_event(view);
+            self.emit(event);
+        }
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
@@ -1106,6 +1243,28 @@ impl Engine {
             KeyState::Up,
             Key::Named(NamedKey::Process),
         )));
+    }
+
+    /// The user hid the keyboard (Back, or the keyboard's own key). Servo asks for it again
+    /// only when a field gains focus, so the field gives up focus, as in Servo's own shell
+    /// (`ImeEvent::Dismissed`): a tap on it focuses it again and asks for the keyboard.
+    fn ime_dismissed(&mut self) {
+        let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) else {
+            return;
+        };
+        // No page field has the keyboard: leave the page's focus alone. A withheld field (focused
+        // by the page, never opened) had no keyboard to dismiss, so the page keeps its focus.
+        let Some(field) = tab
+            .ime_field
+            .as_mut()
+            .filter(|field| field.keyboard == Keyboard::Open)
+        else {
+            return;
+        };
+        // Should the page keep the focus anyway, a tap on the field still opens the keyboard.
+        field.keyboard = Keyboard::Withheld;
+        tab.webview
+            .notify_input_event(InputEvent::Ime(ImeEvent::Dismissed));
     }
 
     // --- Capture -------------------------------------------------------------------------------
@@ -1506,14 +1665,27 @@ impl Engine {
                 control,
                 multiline,
                 kind,
+                allow_keyboard,
             } => {
-                if self.live_tab(view).is_some() {
-                    self.ime_owner = Some((view, control));
-                    self.emit(EngineEvent::ImeShown {
-                        view,
-                        multiline,
-                        kind,
-                    });
+                // A hidden tab's field must not take the keyboard from the selected tab; it is
+                // kept for a tap once its tab is selected.
+                let shown = self.active == Some(view.tab);
+                let keyboard = if shown && allow_keyboard {
+                    Keyboard::Open
+                } else {
+                    Keyboard::Withheld
+                };
+                let field = ImeField {
+                    control,
+                    multiline,
+                    kind,
+                    keyboard,
+                };
+                if let Some(tab) = self.live_tab(view) {
+                    tab.ime_field = Some(field);
+                    if shown {
+                        self.emit(field.shown_event(view));
+                    }
                 }
             },
             DelegateEvent::ClosedByPage { view } => {
@@ -1531,9 +1703,14 @@ impl Engine {
             },
             DelegateEvent::LeavePage { view, request } => self.ask_to_leave_page(view, request),
             DelegateEvent::ControlHidden { view, control } => {
-                if self.ime_owner == Some((view, control)) {
-                    self.ime_owner = None;
-                    self.emit(EngineEvent::ImeHidden { view });
+                let shown = self.active == Some(view.tab);
+                if let Some(tab) = self.live_tab(view)
+                    && tab.ime_field.is_some_and(|field| field.control == control)
+                {
+                    tab.ime_field = None;
+                    if shown {
+                        self.emit(EngineEvent::ImeHidden { view });
+                    }
                 }
                 self.hide_controls(|pending| {
                     pending.view == view && pending.control.embedder_id() == Some(control)
@@ -1874,6 +2051,7 @@ impl Engine {
         };
         let sequence = self.next_sequence;
         self.next_sequence += 1;
+        let shown = self.active == Some(view.tab);
         let Some(tab) = self.live_tab(view) else {
             return;
         };
@@ -1895,6 +2073,16 @@ impl Engine {
             HistoryChange::ListOnly
         };
         tab.current_url = url.clone();
+
+        // Servo hides no input method when a navigation replaces the field's document (a form
+        // sent with Enter). A field of the new document can be reported before its commit.
+        let field_replaced = change == HistoryChange::NewDocument
+            && tab
+                .ime_field
+                .is_some_and(|field| field.control.pipeline_id != document);
+        if field_replaced {
+            tab.ime_field = None;
+        }
 
         // Release reports that overtook this commit; discard those of replaced documents.
         let mut released = Vec::new();
@@ -1920,6 +2108,9 @@ impl Engine {
             });
         }
 
+        if field_replaced && shown {
+            self.emit(EngineEvent::ImeHidden { view });
+        }
         self.emit(EngineEvent::History {
             view,
             change,

@@ -162,8 +162,19 @@ sealed interface EngineEvent {
 
     data class Painted(val view: ViewRef, val frames: Long) : EngineEvent
 
-    /** A page field wants the keyboard; [kind] is "text", "password", "email", "url", "number", "tel" or "search". */
-    data class ImeShown(val view: ViewRef, val multiline: Boolean, val kind: String) : EngineEvent
+    /**
+     * A page field has focus; [kind] is "text", "password", "email", "url", "number", "tel" or
+     * "search". [document] is the field's document (its frame's, for a field in a frame). Before
+     * the user has used the page, Servo asks for no keyboard ([showKeyboard] false): a field the
+     * page focused on load must not cover it; a tap on the field opens the keyboard.
+     */
+    data class ImeShown(
+        val view: ViewRef,
+        val document: Long,
+        val multiline: Boolean,
+        val kind: String,
+        val showKeyboard: Boolean,
+    ) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
 
@@ -248,7 +259,13 @@ sealed interface EngineEvent {
                     event.boolean("capped"),
                 )
                 "painted" -> Painted(event.view(), event.long("frames"))
-                "ime_shown" -> ImeShown(event.view(), event.boolean("multiline"), event.optionalString("kind") ?: "text")
+                "ime_shown" -> ImeShown(
+                    event.view(),
+                    event.long("document"),
+                    event.boolean("multiline"),
+                    event.optionalString("kind") ?: "text",
+                    event.boolean("show_keyboard"),
+                )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
                 "media_blocked" -> MediaBlocked(event.view(), event.long("document"))

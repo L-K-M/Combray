@@ -38,7 +38,7 @@ Pages
                              requests that arrived and the responses sent in full
   /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
                              (page zoom checks)
-  (the four control pages have a #1f6f78 margin on the left for paint checks)
+  (the five control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
   POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks (newest first), GET .../bookmarks/search?q=,
@@ -293,6 +293,14 @@ CONTROL_PAGES = {
         "document.title='LEAVE:'+asked;e.preventDefault();e.returnValue='unsaved'});"
         "if(location.search=='?auto')addEventListener('load',function(){"
         "setTimeout(function(){document.getElementById('away').click()},1000)})</script>",
+    ),
+    # A search field the page focuses on load, as search pages do; Enter sends it to /echo.
+    "/autofocus.html": (
+        "AUTOFOCUS",
+        "<form action='/echo'><input class='c' type='search' name='q' id='q'></form>",
+        "<script>addEventListener('load',function(){var q=document.getElementById('q');"
+        "q.onfocus=function(){document.title='AUTOFOCUS:focused'};"
+        "q.onblur=function(){document.title='AUTOFOCUS:blurred'};q.focus()})</script>",
     ),
 }
 

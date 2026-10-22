@@ -474,6 +474,15 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommit<'local>(
     .resolve::<ThrowRuntimeExAndDefault>()
 }
 
+/// The user hid the keyboard; the selected tab's field gives up focus so a tap reopens it.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeDismissed<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) {
+    send(Command::ImeDismissed);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_contextClick<'local>(
     _env: EnvUnowned<'local>,

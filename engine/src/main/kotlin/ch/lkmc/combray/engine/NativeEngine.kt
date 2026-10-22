@@ -89,6 +89,9 @@ object NativeEngine {
 
     @JvmStatic external fun imeCommit(text: String)
 
+    /** The user hid the keyboard a page field had: the field gives up focus, so a tap on it reopens it. */
+    @JvmStatic external fun imeDismissed()
+
     /** Long-press at a surface point of the selected tab: Servo's context menu. */
     @JvmStatic external fun contextClick(x: Float, y: Float)
 

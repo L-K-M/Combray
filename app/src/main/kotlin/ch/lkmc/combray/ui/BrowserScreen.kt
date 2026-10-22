@@ -158,6 +158,7 @@ fun BrowserScreen(
         val view = surfaceView ?: return@LaunchedEffect
         when (request) {
             is KeyboardRequest.Show -> view.showKeyboard(request.kind)
+            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind)
             // While find is open the keyboard may be the find field's: find's selection can blur a
             // page field, and that must not close the keyboard the user is typing the query with.
             KeyboardRequest.Hide -> if (state.find == null) view.hideKeyboard()
