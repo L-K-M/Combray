@@ -89,6 +89,11 @@ All notable changes to this project are documented here. The format follows
 - Tapping Save with Karakeep not set up now says so even when the address
   looks like it carries a login token, instead of claiming the address was
   withheld for safety.
+- Credential-bearing parameter names are matched after a single percent-decode,
+  so an encoded `token`/`access_token`/`auth` name in a query or fragment is
+  still sensitive and is never sent to Karakeep or captured for Hister.
+  Double-encoded names and ordinary parameters are unchanged, and escapes the
+  decoder rejects remain conservative (sensitive).
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.

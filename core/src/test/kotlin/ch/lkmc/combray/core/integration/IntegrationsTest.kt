@@ -202,10 +202,16 @@ class IntegrationsTest {
     @Test
     fun internalAndCredentialBearingAddressesAreNotSent() {
         configure()
+        sent.clear()
         assertEquals(SaveRequest.NotSaveable, save("about:blank"))
         assertEquals(SaveRequest.NotSaveable, save("data:text/html,x"))
         assertEquals(SaveRequest.Sensitive, save("https://kagi.com/search?q=x&token=secret"))
+        assertEquals(SaveRequest.Sensitive, save("https://a.example/?%74oken=abc"))
+        assertEquals(SaveRequest.Sensitive, save("https://a.example/?access%5Ftoken=abc"))
+        assertEquals(SaveRequest.Sensitive, save("https://a.example/#%73essionid=abc"))
         assertNull(runBlocking { database.integrations().job("job0") })
+        drain()
+        assertTrue(sent.isEmpty())
     }
 
     @Test

@@ -265,6 +265,26 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun encodedCredentialNamesAreNeverCaptured() {
+        enable()
+        // A generation from an ordinary URL exercises URL policy, not staleness.
+        val generation = wants("https://a.example/")
+        assertNotNull(generation)
+        for (url in listOf(
+            "https://a.example/?%74oken=abc",
+            "https://a.example/?access%5Ftoken=abc",
+            "https://a.example/#%73essionid=abc",
+            "https://a.example/#access%5Ftoken=abc",
+        )) {
+            assertNull(wants(url))
+            capture(url, "page text", generation)
+        }
+        drain()
+        assertTrue(jobs().isEmpty())
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
     fun theAlternateAddressesHostIsNeverCapturedEither() {
         runBlocking { assertEquals(Configured.Saved, hister.configure(server.root, FakeHister.TOKEN, "https://hister.tailnet.ts.net")) }
         enable()
