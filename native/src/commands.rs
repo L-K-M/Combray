@@ -9,6 +9,7 @@ use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
 use crate::capture::CaptureKind;
+use crate::events::ViewKey;
 use crate::native_window::NativeWindow;
 
 /// Acknowledgement channel for requests the caller must wait for.
@@ -32,6 +33,26 @@ pub enum KeyAction {
 pub enum Throttling {
     Normal,
     Throttled,
+}
+
+#[derive(Clone, Copy)]
+pub enum ScrollEdge {
+    Top,
+    Bottom,
+}
+
+impl ScrollEdge {
+    pub fn script(self) -> &'static str {
+        // The root scroller, not an iframe or nested panel under the last touch point.
+        match self {
+            Self::Top => {
+                "(()=>{const s=document.scrollingElement;if(s)s.scrollTo({top:0,left:s.scrollLeft,behavior:'instant'});})()"
+            },
+            Self::Bottom => {
+                "(()=>{const s=document.scrollingElement;if(s)s.scrollTo({top:s.scrollHeight,left:s.scrollLeft,behavior:'instant'});})()"
+            },
+        }
+    }
 }
 
 /// Whether the engine may refuse a capture locally when it already knows the expected
@@ -102,6 +123,11 @@ pub enum Command {
     },
     Reload {
         tab: i64,
+    },
+    ScrollToEdge {
+        view: ViewKey,
+        document: u64,
+        edge: ScrollEdge,
     },
     /// Show no view: the application covers the page area with its own home screen.
     SelectNone,

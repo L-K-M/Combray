@@ -59,6 +59,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun reload(tab: Long) = NativeEngine.reload(tab)
 
+    override fun scrollToEdge(page: PageRef, edge: ScrollEdge) =
+        NativeEngine.scrollToEdge(page.view.tab, page.view.generation, page.document, edge.nativeCode)
+
     override fun setThrottled(tab: Long, throttled: Boolean) = NativeEngine.setThrottled(tab, throttled)
 
     override fun setPageZoom(zoom: Float) = NativeEngine.setPageZoom(zoom)

@@ -38,6 +38,9 @@ class EngineSurfaceView(
     private var pressPointer = 0
     private var pressX = 0f
     private var pressY = 0f
+    private val scrollGesture = ScrollGestureTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    private var scrollPage: PageRef? = null
+    private var onScroll: (ScrollEdge) -> Unit = {}
     private val longPressCheck = Runnable {
         // The engine may have stopped since the press.
         if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
@@ -79,7 +82,16 @@ class EngineSurfaceView(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressCheck)
+        scrollGesture.release()
+        onScroll = {}
         super.onDetachedFromWindow()
+    }
+
+    /** Rebinding a document cancels an old gesture, so it cannot reveal the new page's button. */
+    fun observeScroll(page: PageRef?, onScroll: (ScrollEdge) -> Unit) {
+        if (page != scrollPage) scrollGesture.release()
+        scrollPage = page
+        this.onScroll = onScroll
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -87,6 +99,7 @@ class EngineSurfaceView(
         requestFocus()
         trackLongPress(event)
         if (longPressed) return true
+        trackScroll(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
                 sendPointer(event, event.actionIndex, NativeEngine.TOUCH_DOWN)
@@ -99,6 +112,15 @@ class EngineSurfaceView(
                 for (index in 0 until event.pointerCount) sendPointer(event, index, NativeEngine.TOUCH_MOVE)
         }
         return true
+    }
+
+    private fun trackScroll(event: MotionEvent) {
+        if (scrollPage == null) return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> scrollGesture.press(event.x, event.y)
+            MotionEvent.ACTION_MOVE -> if (event.pointerCount == 1) scrollGesture.move(event.x, event.y)?.let(onScroll)
+            else -> scrollGesture.release()
+        }
     }
 
     private fun trackLongPress(event: MotionEvent) {

@@ -43,6 +43,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +75,7 @@ import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.launch
 
 private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE }
@@ -101,6 +103,8 @@ fun BrowserScreen(
     val context = LocalContext.current
     val resources = LocalResources.current
     val tab = state.activeTab
+    val page = tab?.page
+    var scrollEdge by remember(tab?.id, page, state.reader) { mutableStateOf<ScrollEdge?>(null) }
     // Tagged with its address: until the new page's status arrives, the bar keeps the last one.
     val saveStatus by remember(tab?.url) {
         val url = tab?.url
@@ -226,6 +230,7 @@ fun BrowserScreen(
                         EngineSurfaceView(viewContext) { graph.engineRunning() }.also { surfaceView = it }
                     },
                     modifier = Modifier.fillMaxSize(),
+                    update = { view -> view.observeScroll(page) { scrollEdge = it } },
                 )
                 PageOverlay(
                     state = state,
@@ -233,6 +238,18 @@ fun BrowserScreen(
                     onOpenRecent = { openRecent(RecentScope.OPEN) },
                     onReload = browser::reload,
                 )
+                if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed) {
+                    scrollEdge?.let { edge ->
+                        ScrollEdgeButton(
+                            edge = edge,
+                            onClick = {
+                                scrollEdge = null
+                                browser.scrollToEdge(page, edge)
+                            },
+                            modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(16.dp),
+                        )
+                    }
+                }
                 state.reader?.let { reader ->
                     ReaderView(
                         state = reader,

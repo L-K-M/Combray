@@ -18,6 +18,8 @@ import ch.lkmc.combray.engine.EngineStart
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -380,6 +382,13 @@ class BrowserCoordinator(
     fun goBack() = withActiveView { engine.goBack(it.nativeTab) }
 
     fun goForward() = withActiveView { engine.goForward(it.nativeTab) }
+
+    /** A late tap must not scroll a different tab, a reloaded document or the page under reader view. */
+    fun scrollToEdge(page: PageRef, edge: ScrollEdge) = submit {
+        val view = view(page.view) ?: return@submit
+        if (view.nativeTab != selectedNative || view.currentDocument != page.document || view.crashed || reader != null) return@submit
+        engine.scrollToEdge(page, edge)
+    }
 
     /** Reloads the page; a crashed renderer is replaced by a new one at the tab's address. */
     fun reload() = submit {
@@ -1155,6 +1164,10 @@ class BrowserCoordinator(
                         loadFailed = loadFailed,
                         openedByOtherApp = active.id == otherAppTab,
                         returnsToOpener = returnsToOpener,
+                        page = view?.takeIf { !it.crashed }?.let { live ->
+                            val generation = live.generation ?: return@let null
+                            live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
+                        },
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->

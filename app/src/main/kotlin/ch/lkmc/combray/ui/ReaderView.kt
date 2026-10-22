@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -30,6 +31,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -68,6 +77,8 @@ import ch.lkmc.combray.core.browser.ArticleBlock
 import ch.lkmc.combray.core.browser.BlockKind
 import ch.lkmc.combray.core.browser.ReaderState
 import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.engine.ScrollEdge
+import kotlinx.coroutines.launch
 
 /** Readable line length for body text. */
 private val MAX_TEXT_WIDTH = 680.dp
@@ -134,20 +145,50 @@ fun ReaderView(state: ReaderState, textSize: TextSize, onOpenLink: (String) -> U
 
 @Composable
 private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
-    // Selectable, so a passage can be copied; links stay tappable inside the selection.
-    SelectionContainer {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item { ShowPageBar(onClose) }
-            item { ArticleHeader(article) }
-            items(article.blocks) { block -> Block(block, onOpenLink) }
-            if (article.truncated) {
-                item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var edge by remember(article) { mutableStateOf<ScrollEdge?>(null) }
+    LaunchedEffect(list, article) {
+        var previous = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
+        snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { position ->
+            if (list.isScrollInProgress && position != previous) {
+                edge = if (position.first > previous.first || position.first == previous.first && position.second > previous.second) {
+                    ScrollEdge.BOTTOM
+                } else {
+                    ScrollEdge.TOP
+                }
             }
-            item { Box(Modifier.padding(bottom = 24.dp)) }
+            previous = position
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        // Selectable, so a passage can be copied; links stay tappable inside the selection.
+        SelectionContainer {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                state = list,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item { ShowPageBar(onClose) }
+                item { ArticleHeader(article) }
+                items(article.blocks) { block -> Block(block, onOpenLink) }
+                if (article.truncated) {
+                    item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
+                }
+                item { Box(Modifier.padding(bottom = 24.dp)) }
+            }
+        }
+        edge?.takeIf { if (it == ScrollEdge.TOP) list.canScrollBackward else list.canScrollForward }?.let { target ->
+            ScrollEdgeButton(
+                edge = target,
+                onClick = {
+                    edge = null
+                    scope.launch { list.scrollToItem(if (target == ScrollEdge.TOP) 0 else list.layoutInfo.totalItemsCount - 1) }
+                },
+                modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(16.dp),
+            )
         }
     }
 }

@@ -34,6 +34,8 @@ All notable changes to this project are documented here. The format follows
 - Text size: More › Text size zooms every page from 80% to 150% with
   Servo's page zoom, so text rewraps to the screen. The choice is kept and
   applies to new tabs and to reader view.
+- A bottom-left button jumps to the top when scrolling up or the bottom
+  when scrolling down, on pages and in reader view.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

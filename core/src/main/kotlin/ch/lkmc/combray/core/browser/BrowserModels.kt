@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.browser
 
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.PageRef
 
 /** Wall-clock time in UTC milliseconds; injectable for retention tests. */
 fun interface Clock {
@@ -41,6 +42,9 @@ data class ActiveTab(
     val openedByOtherApp: Boolean = false,
     /** A page in another tab opened this one, and Back on its first page returns there ([BrowserCoordinator.returnToOpener]). */
     val returnsToOpener: Boolean = false,
+
+    /** Ephemeral identity for actions on the document shown now; never persisted. */
+    val page: PageRef? = null,
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView

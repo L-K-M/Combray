@@ -4,6 +4,8 @@ import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
+import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 
 /** Behaves like the native bridge: one generation per created view, events via the listener. */
@@ -81,6 +83,12 @@ class FakeEngine : EnginePort {
     override fun goForward(tab: Long) = Unit
 
     override fun reload(tab: Long) = Unit
+
+    val scrolled = mutableListOf<Pair<PageRef, ScrollEdge>>()
+
+    override fun scrollToEdge(page: PageRef, edge: ScrollEdge) {
+        scrolled += page to edge
+    }
 
     override fun setThrottled(tab: Long, throttled: Boolean) {
         throttling += tab to throttled

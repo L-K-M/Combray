@@ -71,6 +71,9 @@ object NativeEngine {
 
     @JvmStatic external fun reload(tab: Long)
 
+    /** Root-page jump, guarded by view generation and document identity. */
+    @JvmStatic external fun scrollToEdge(tab: Long, generation: Long, document: Long, edge: Int)
+
     @JvmStatic external fun setThrottled(tab: Long, throttled: Boolean)
 
     /** Page zoom of every view, now and for views created later (1.0 is 100%). */
