@@ -247,3 +247,11 @@ All notable changes to this project are documented here. The format follows
   name another site by putting `://` and that site's name in its own
   address. Pages without a host now show only their scheme ("data:",
   "about:blank", "file:"), and their dialogs say "This page says".
+- A typed home-server address opens over plain HTTP when that is likely:
+  `192.168.1.10`, `10.0.0.2:8080`, `localhost` and other private or
+  loopback addresses now go to `http://`, with HTTPS one tap away. Names
+  such as `keep.lan:3000` or `nas:5000` still try HTTPS first, but offer
+  `http://` instead of a Kagi search that would leak the name.
+- A typed `user:password@host` without `https://` was sent to Kagi as a
+  search, password included. It is now refused like other addresses with
+  credentials.
