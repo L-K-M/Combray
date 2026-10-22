@@ -176,6 +176,8 @@ class BrowserCoordinatorTest {
         assertEquals(opener, state().activeTab?.id)
         assertEquals(1L, engine.selected.last())
         assertEquals("mailto:ada@example.org", state().externalLink?.url)
+        // The window never showed a page: nothing to announce or undo.
+        assertNull(state().notice)
     }
 
     @Test

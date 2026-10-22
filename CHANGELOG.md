@@ -232,9 +232,12 @@ All notable changes to this project are documented here. The format follows
   cancels these loads before they start, so the page's error handling and
   fallback run, and says once per page that its audio or video can't play.
 - Tapping a `mailto:`, `tel:`, map or app link on a page replaced the page
-  with an error. Such links now open in the app that handles them, or say
-  that none can; an `intent:` link's fallback page opens instead. A link
-  that opens a new window for another app no longer leaves a blank tab.
+  with an error. Combray now asks whether to open such a link in another
+  app; Open hands it to the app that handles it, or says that none can,
+  and an `intent:` link's fallback page opens instead. A link that opens a
+  new window for another app no longer leaves a blank tab or a "Tab
+  closed" notice, and a malformed `intent:` link is refused instead of
+  closing Combray.
   Pages can no longer open apps without a tap (the end of a scroll does
   not count), nor `file:` addresses at all, and `intent:` links may not aim
   another app at device data (`file:`, `content:`). The page stays on screen, but

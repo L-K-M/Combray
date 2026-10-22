@@ -1110,10 +1110,13 @@ class BrowserCoordinator(
 
     /** The page closed its own window: the tab closes as if the user had closed it. */
     private suspend fun onClosedByPage(view: LiveView) {
+        // A window that never showed a page (one a page opened for an app link, say) closes
+        // without a "Tab closed" notice: there is nothing the user saw to bring back.
+        val shownAPage = view.currentDocument != null
         forgetView(view)
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
         val wasActive = closeLogically(tab)
-        state.update { it.copy(notice = Notice.TabClosed(tab.id, tab.title, wasActive)) }
+        if (shownAPage) state.update { it.copy(notice = Notice.TabClosed(tab.id, tab.title, wasActive)) }
         reconcile()
     }
 

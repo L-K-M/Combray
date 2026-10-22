@@ -67,9 +67,14 @@ object ExternalLinks {
             return Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
         }
 
+        // parseUri throws more than its declared URISyntaxException: a malformed number in an
+        // "i." extra or in launchFlags is a NumberFormatException. A page wrote it, so neither
+        // may crash Combray.
         val parsed = try {
             Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
         } catch (malformed: URISyntaxException) {
+            return null
+        } catch (malformed: IllegalArgumentException) {
             return null
         }
         if (parsed.`package` == ownPackage) return null

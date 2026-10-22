@@ -6,11 +6,13 @@ import android.net.Uri
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -377,11 +379,16 @@ class BrowsingTest {
      * the first paint can arrive before the page can hit-test it, and is then lost.
      */
     private fun tapLinkUntil(done: () -> Boolean) {
+        val question = compose.activity.getString(R.string.app_link_question)
+        val asked = { compose.onAllNodesWithText(question).fetchSemanticsNodes().isNotEmpty() }
         val deadline = SystemClock.uptimeMillis() + Device.LOAD_TIMEOUT_MS
         while (SystemClock.uptimeMillis() < deadline) {
             tapPageCenter()
             // Not waitForIdle: it fast-forwards the clock past a snackbar's display time.
             try {
+                compose.waitUntil(TAP_OUTCOME_MS) { done() || asked() }
+                // A link for another app asks first (owner decision); these checks open it.
+                if (!done()) compose.onNodeWithText(compose.activity.getString(R.string.action_open_app_link)).performClick()
                 compose.waitUntil(TAP_OUTCOME_MS) { done() }
                 return
             } catch (noEffect: ComposeTimeoutException) {

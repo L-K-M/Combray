@@ -99,6 +99,8 @@
     <string name="address_suggestions">On this device</string>
     <string name="address_load_failed">Page did not load</string>
     <string name="no_app_for_link">No app on this device can open this link.</string>
+    <string name="app_link_question">Open this link in another app?</string>
+    <string name="action_open_app_link">Open</string>
     <string name="save_not_set_up">Saving needs Karakeep. Set it up in Settings.</string>
     <string name="save_not_saveable">This page cannot be saved.</string>
     <string name="save_sensitive">Not saved: this address looks like it contains a login or session token.</string>

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
@@ -65,6 +68,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
+import ch.lkmc.combray.core.browser.ExternalLink
 import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.KeyboardRequest
 import ch.lkmc.combray.core.browser.Notice
@@ -158,23 +162,34 @@ fun BrowserScreen(
         browser.keyboardHandled(request)
     }
 
-    // A page link for another app: Android opens it, or the link's own fallback page loads in
-    // the tab. Handled before clearing, which restarts this effect.
+    // A page link for another app asks first (owner decision, 22 October 2026). Open hands it to
+    // Android, or the link's own fallback page loads in the tab. Taken from the state before the
+    // question, so the engine's next link is a new request.
+    var appLink by remember { mutableStateOf<ExternalLink?>(null) }
     LaunchedEffect(state.externalLink) {
         val link = state.externalLink ?: return@LaunchedEffect
-        val outcome = ExternalLinks.open(context, link.url)
+        appLink = link
         browser.externalLinkHandled(link)
-        val noApp = { scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) } }
-        when (outcome) {
-            ExternalOutcome.Opened -> Unit
-            is ExternalOutcome.Fallback -> {
-                val page = AddressPolicy.interpret(outcome.url).primary as? AddressDecision.Navigate
-                val shown = tab?.id
-                // A fallback that is no web page, or no tab to show it in: say so, as without one.
-                if (page != null && shown != null) browser.openUrlInTab(shown, page.url) else noApp()
-            }
-            ExternalOutcome.NoApp -> noApp()
-        }
+    }
+    appLink?.let { link ->
+        AppLinkDialog(
+            url = link.url,
+            onOpen = {
+                appLink = null
+                val noApp = { scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) } }
+                when (val outcome = ExternalLinks.open(context, link.url)) {
+                    ExternalOutcome.Opened -> Unit
+                    is ExternalOutcome.Fallback -> {
+                        val page = AddressPolicy.interpret(outcome.url).primary as? AddressDecision.Navigate
+                        val shown = tab?.id
+                        // A fallback that is no web page, or no tab to show it in: say so, as without one.
+                        if (page != null && shown != null) browser.openUrlInTab(shown, page.url) else noApp()
+                    }
+                    ExternalOutcome.NoApp -> noApp()
+                }
+            },
+            onDismiss = { appLink = null },
+        )
     }
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
@@ -613,3 +628,22 @@ internal fun copyAddressToClipboard(context: Context, label: String, url: String
 
 /** Space between a snackbar and the bottom bar under it. */
 private val SNACKBAR_GAP = 8.dp
+
+/**
+ * "Open this link in another app?" over the page. The page wrote the link, so it is shown as is,
+ * scheme first and cut short, and nothing leaves Combray without the user's Open.
+ */
+@Composable
+private fun AppLinkDialog(url: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.app_link_question)) },
+        text = { Text(url.take(APP_LINK_SHOWN_CHARS), maxLines = APP_LINK_SHOWN_LINES, overflow = TextOverflow.Ellipsis) },
+        confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.action_open_app_link)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+/** Enough of a link to tell a phone number, an address or an app apart; the rest is the page's. */
+private const val APP_LINK_SHOWN_CHARS = 200
+private const val APP_LINK_SHOWN_LINES = 3
