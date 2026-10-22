@@ -573,7 +573,7 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 | Links to other apps (`mailto:`, `tel:`, `intent:`, `market:` and the like) ask before Combray hands them to Android | Confirmed | #80, #84 |
 | Find in page runs in the page, so the page can observe the query and the selection | Confirmed | #86 |
 | Pages reached through an HTTP sign-in can be captured to Hister and saved to Karakeep; the sign-in itself never appears in an address | Confirmed | #89 |
-| Scroll buttons: scrolling up shows "Scroll to top", scrolling down shows "Scroll to bottom"; the button hides again shortly after scrolling stops | Confirmed (direction); Proposed (hiding) | #103 |
+| Scroll buttons: scrolling up shows "Scroll to top", scrolling down shows "Scroll to bottom"; the button hides again shortly after scrolling stops | Confirmed (direction); Proposed (hiding, not built yet: #103's device checks rely on the button staying) | #103 |
 | Below about 400dp the address gets its own row above the actions | Confirmed | #50 |
 | Swiping a tab row in Recent closes it; the close button stays | Confirmed | #53 |
 | Haptics: a tick when a save lands, a distinct one when it is refused, and one on a page long-press | Confirmed | #76 |
