@@ -69,7 +69,13 @@ fun BottomBar(
 ) {
     // The bar's color runs under the navigation bar and, in landscape, a cutout; only its
     // actions keep clear of them. A hairline along its top edge separates it from the page.
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier) {
+    // Explicit content colours: contentColorFor matches by value, and a role sharing a tier's
+    // value would give its own on-colour.
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier,
+    ) {
         Box {
             Row(
                 Modifier
@@ -156,6 +162,7 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, modifier: Modifier
         onClick = onClick,
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp).semantics(mergeDescendants = true) {
             contentDescription = label
         },
