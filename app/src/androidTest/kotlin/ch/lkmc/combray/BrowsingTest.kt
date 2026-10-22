@@ -12,6 +12,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.ReopenFocus
 import ch.lkmc.combray.core.policy.AddressPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -98,7 +99,7 @@ class BrowsingTest {
         // The closed page must not stay painted under the home screen.
         assertFalse(device.matches(device.screenColor(), Device.OCHRE))
 
-        device.browser.reopenTab(tab)
+        device.browser.reopenTab(tab, ReopenFocus.FOCUS)
         device.awaitPage(Fixtures.solid(Device.OCHRE))
         assertEquals(tab, device.browser.browserState.value.activeTab?.id)
         assertScreen(Device.OCHRE)
@@ -111,6 +112,20 @@ class BrowsingTest {
         device.browser.openUrl(unreachable, Placement.CURRENT_TAB)
         device.awaitState { it.activeTab?.url == unreachable && it.activeTab?.title == "Error loading page" }
         assertTrue(device.recent().none { it is RecentItem.Visit && it.url == unreachable })
+    }
+
+    @Test
+    fun aFailedReloadKeepsThePageInRecentWithItsTitle() {
+        // A key of its own: the fixture answers it once, so the reload fails.
+        val url = Fixtures.once(System.currentTimeMillis().toString())
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.url == url && it.activeTab?.title == Fixtures.ONCE_TITLE && it.activeTab?.loading == false }
+
+        device.browser.reload()
+        device.awaitState { it.activeTab?.loadFailed == true && it.activeTab?.title == "Error loading page" }
+        device.browser.closeTab(device.browser.browserState.value.activeTab!!.id)
+        device.awaitState { it.activeTab == null }
+        assertTrue(device.recent().any { it is RecentItem.Visit && it.url == url && it.title == Fixtures.ONCE_TITLE })
     }
 
     @Test

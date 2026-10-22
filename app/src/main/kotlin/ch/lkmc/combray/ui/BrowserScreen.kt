@@ -103,7 +103,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                     // A newer close replaces the last Undo instead of queuing behind it.
                     snackbar.currentSnackbarData?.dismiss()
                     val result = snackbar.showSnackbar(closedMessage, actionLabel = undo, duration = SnackbarDuration.Short)
-                    if (result == SnackbarResult.ActionPerformed) browser.reopenTab(notice.tabId)
+                    if (result == SnackbarResult.ActionPerformed) browser.reopenTab(notice.tabId, notice.undoFocus)
                 }
                 is Notice.Problem -> snackbar.showSnackbar(notice.message)
                 Notice.AddressNotOpened -> snackbar.showSnackbar(notOpened)

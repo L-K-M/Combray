@@ -79,7 +79,7 @@ The UI may group repeated visits to the same page for readability, but grouping 
 
 ### Closing, forgetting, retention, and feedback
 
-Closing releases the native view and marks the logical tab closed while preserving eligible visits. Choose the most recently focused remaining open tab; if none remains, show the internal home/Recent screen. Never leave the closed page painted underneath the chrome. Opening an old history item creates a new logical tab identity. A short Undo close affordance may restore a recently closed logical tab, but it must not promise native back-stack restoration after resources were released.
+Closing releases the native view and marks the logical tab closed while preserving eligible visits. Choose the most recently focused remaining open tab; if none remains, show the internal home/Recent screen. Never leave the closed page painted underneath the chrome. Opening an old history item creates a new logical tab identity. A short Undo close affordance may restore a recently closed logical tab, but it must not promise native back-stack restoration after resources were released. Proposed default: Undo focuses the tab again only if it was the focused tab; a tab closed in the background returns to its place without taking focus.
 
 A link from another app opens a new tab. Until the user moves to another tab, Back on that tab's first page closes it without an Undo notice and returns to the other app; its page stays in Recent as history only (owner request, 20 October 2026).
 

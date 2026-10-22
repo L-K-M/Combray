@@ -46,12 +46,24 @@ data class ActiveTab(
 
 /** A short notice the UI shows once, optionally with an action. */
 sealed interface Notice {
-    data class TabClosed(val tabId: String, val title: String?) : Notice
+    /** [wasActive]: it was the focused tab when it closed. */
+    data class TabClosed(val tabId: String, val title: String?, val wasActive: Boolean) : Notice {
+        /** Undo focuses the tab again only if it was focused. */
+        val undoFocus get() = if (wasActive) ReopenFocus.FOCUS else ReopenFocus.KEEP_CURRENT
+    }
 
     data class Problem(val message: String) : Notice
 
     /** The engine could not open an address (it does not parse as a URL Servo can load). */
     data object AddressNotOpened : Notice
+}
+
+/** Whether Undo of a tab close moves focus to the reopened tab. */
+enum class ReopenFocus {
+    FOCUS,
+
+    /** The tab was closed in the background: focus stays on the current tab. */
+    KEEP_CURRENT,
 }
 
 sealed interface KeyboardRequest {

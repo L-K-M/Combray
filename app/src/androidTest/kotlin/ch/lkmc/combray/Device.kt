@@ -43,6 +43,11 @@ object Fixtures {
     /** Titled `WA:ok` once Element.animate() behaves, `WA:missing` without it, `WA:fail:<why>` otherwise. */
     const val ANIMATE = "$BASE/animate.html"
 
+    /** Answered once per [key] (title [ONCE_TITLE]); later requests fail like a lost connection. */
+    fun once(key: String) = "$BASE/once.html?k=$key"
+
+    const val ONCE_TITLE = "ONCE"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 
