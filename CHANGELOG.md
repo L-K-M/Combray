@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows
 - Swiping a tab row in Recent closes the tab, with the same Undo as its
   close button. History rows keep their explicit menu: removing a visit
   has no undo.
+- Settings › Display › Appearance: follow the system, light or dark. The
+  choice applies at once and keeps the system bar icons readable.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

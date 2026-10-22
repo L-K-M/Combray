@@ -5,25 +5,37 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/** How the app picks its colors: follow the system, or one theme whatever the system says. */
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
 /**
  * The browser's own preferences. Service configuration stays in the database, where it binds
  * queued work; these are plain user choices with nothing depending on them transactionally.
  */
 class BrowserSettings(private val preferences: SharedPreferences) {
-    private val unused = MutableStateFlow(readUnusedTabs())
+    private val unused = MutableStateFlow(read(KEY_UNUSED_TABS, UnusedTabs.entries, UnusedTabs.KEEP))
+    private val theme = MutableStateFlow(read(KEY_THEME_MODE, ThemeMode.entries, ThemeMode.SYSTEM))
 
     val unusedTabs: StateFlow<UnusedTabs> = unused.asStateFlow()
 
-    fun setUnusedTabs(choice: UnusedTabs) {
-        preferences.edit().putString(KEY_UNUSED_TABS, choice.name).apply()
-        unused.value = choice
-    }
+    val themeMode: StateFlow<ThemeMode> = theme.asStateFlow()
 
-    private fun readUnusedTabs(): UnusedTabs =
-        UnusedTabs.entries.firstOrNull { it.name == preferences.getString(KEY_UNUSED_TABS, null) } ?: UnusedTabs.KEEP
+    fun setUnusedTabs(choice: UnusedTabs) = write(KEY_UNUSED_TABS, unused, choice)
+
+    fun setThemeMode(choice: ThemeMode) = write(KEY_THEME_MODE, theme, choice)
+
+    /** An unknown stored name falls back to its default: preferences never block startup. */
+    private fun <T : Enum<T>> read(key: String, values: List<T>, default: T): T =
+        values.firstOrNull { it.name == preferences.getString(key, null) } ?: default
+
+    private fun <T : Enum<T>> write(key: String, state: MutableStateFlow<T>, choice: T) {
+        preferences.edit().putString(key, choice.name).apply()
+        state.value = choice
+    }
 
     companion object {
         const val FILE_NAME = "browser_settings"
         private const val KEY_UNUSED_TABS = "unused_tabs"
+        private const val KEY_THEME_MODE = "theme_mode"
     }
 }

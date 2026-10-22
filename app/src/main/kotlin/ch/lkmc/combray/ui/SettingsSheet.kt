@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -61,6 +62,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.ThirdPartyNotices
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.Retention
+import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.browser.UnusedTabs
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
@@ -163,6 +165,8 @@ fun SettingsSheet(
             val days = retention.closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
             UnusedTabsSetting(settings, days, onUnusedTabsChanged)
+            SectionTitle(R.string.settings_display_title)
+            ThemeSetting(settings)
             SectionTitle(R.string.settings_about_title)
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
             Text(stringResource(R.string.settings_engine, BuildConfig.SERVO_VERSION))
@@ -193,6 +197,30 @@ private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: (
     }
     Text(stringResource(R.string.settings_close_unused_tabs_body), style = MaterialTheme.typography.bodySmall)
 }
+
+/**
+ * The app's colors: follow the system, or one theme whatever the system says. One choice
+ * among three, so radio rows in a group, like the Karakeep list choice.
+ */
+@Composable
+private fun ThemeSetting(settings: BrowserSettings) {
+    val choice by settings.themeMode.collectAsStateWithLifecycle()
+    Text(stringResource(R.string.settings_appearance), modifier = Modifier.semantics { heading() }.padding(top = 8.dp))
+    Column(Modifier.selectableGroup()) {
+        ThemeMode.entries.forEach { mode ->
+            ListOption(themeModeLabel(mode), selected = mode == choice) { settings.setThemeMode(mode) }
+        }
+    }
+}
+
+@Composable
+private fun themeModeLabel(mode: ThemeMode): String = stringResource(
+    when (mode) {
+        ThemeMode.SYSTEM -> R.string.appearance_system
+        ThemeMode.LIGHT -> R.string.appearance_light
+        ThemeMode.DARK -> R.string.appearance_dark
+    },
+)
 
 /** Each service's own wording: an API key for Karakeep, an access token for Hister. */
 private data class ServiceLabels(

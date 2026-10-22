@@ -205,7 +205,7 @@ class AccessibilityTest {
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                CombrayTheme(content)
+                CombrayTheme(content = content)
             }
         }
     }
