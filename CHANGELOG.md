@@ -165,6 +165,14 @@ All notable changes to this project are documented here. The format follows
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Addresses with common credential parameters (`auth_token`, `accessToken`,
+  `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
+  `code` with its `state`, session IDs) could be saved to Karakeep or captured
+  to Hister. Parameter names are now compared without case or separators,
+  path matrix parameters (`;jsessionid=`) count too, and pagination cursors
+  such as `pageToken` and `NextToken` are still allowed. In a fragment only
+  `name=value` pairs count, so an anchor such as `#token-usage` is not
+  mistaken for a credential.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
