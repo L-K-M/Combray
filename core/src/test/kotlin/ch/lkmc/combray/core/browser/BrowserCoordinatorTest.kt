@@ -475,6 +475,25 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aForgottenSitesCurrentPageDoesNotReturnAfterNavigation() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.NEW_TAB)
+        idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false)
+        idle()
+        assertEquals("https://example.com/4", state().activeTab?.url)
+
+        browser.openUrl("https://other.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 11, "https://other.test/")
+
+        val items = recent()
+        assertEquals("https://other.test/", items.filterIsInstance<RecentItem.OpenTab>().single().url)
+        assertFalse(items.map { it.url }.contains("https://example.com/4"))
+    }
+
+    @Test
     fun aRestartRestoresOpenTabsAndRecreatesOnlyTheFocusedView() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
