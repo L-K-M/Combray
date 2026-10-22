@@ -142,23 +142,26 @@ class BrowserCoordinator(
         done.await()
     }
 
-    /** Recent: open tabs and local history, newest first, filtered by [query] if given. */
-    fun recent(query: String? = null): Flow<List<RecentItem>> {
+    /**
+     * Recent: open tabs and local history, newest first, unfiltered. [depth] picks how much
+     * history: the newest [RECENT_HISTORY_LIMIT] visits to browse, or every retained visit
+     * to search, so a match older than the newest rows is still found. The filter runs in the
+     * caller with [matching] against one subscription per depth, so typing does not restart
+     * three Room observers on every keystroke. The retention cutoff is fixed when the flow is
+     * created: a long-open sheet keeps showing visits until it is opened afresh.
+     */
+    fun recent(depth: HistoryDepth = HistoryDepth.NEWEST): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
-        // A search reads all retained history (retention bounds it); the cap applies to matches.
-        val historyLimit = if (query.isNullOrBlank()) RECENT_LIMIT else Int.MAX_VALUE
+        val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else Int.MAX_VALUE
         return combine(
             dao.observeOpenTabs(),
             dao.observeHistory(since, historyLimit),
             dao.observeSession(),
         ) { tabs, visits, session ->
-            val openTabs = tabs.map {
+            val items = tabs.map {
                 RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId)
-            }.filter { it.matches(query) }
-            val history = visits.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
-                .filter { it.matches(query) }
-                .take(RECENT_LIMIT)
-            (openTabs + history).sortedByDescending { it.time }
+            } + visits.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
+            items.sortedByDescending { it.time }
         }
     }
 
@@ -959,12 +962,6 @@ class BrowserCoordinator(
 
     private fun documentKey(view: LiveView, document: Long) = "$processKey:${view.generation}:$document"
 
-    private fun RecentItem.matches(query: String?): Boolean {
-        if (query.isNullOrBlank()) return true
-        val needle = query.trim()
-        return (title?.contains(needle, ignoreCase = true) ?: false) || (url?.contains(needle, ignoreCase = true) ?: false)
-    }
-
     /** One native view incarnation for a logical tab. */
     private class LiveView(val tabId: String, val nativeTab: Long) {
         var generation: Long? = null
@@ -1014,7 +1011,6 @@ class BrowserCoordinator(
         const val LOG_TAG = "CombrayBrowser"
         const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
-        const val RECENT_LIMIT = 500
         const val PROCESS_KEY_LENGTH = 8
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */
         val SERVO_ERROR_TITLES = setOf("Error loading page", "Certificate error")

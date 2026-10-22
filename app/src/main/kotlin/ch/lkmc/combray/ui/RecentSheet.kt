@@ -86,7 +86,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Date
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.map
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
 private enum class RecentScope(val label: Int) {
@@ -132,9 +131,12 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
+    // One subscription per depth: browsing reads the newest rows, a search all retained ones.
+    // The filter runs in memory, so typing does not restart three Room observers per keystroke.
+    val depth = HistoryDepth.forQuery(query)
     // Null until the first answer: an empty list before it would flash an empty-state message.
-    val rows by remember(query) { browser.recent(query).map { LocalRows(query, it) } }
-        .collectAsStateWithLifecycle(null)
+    val items by remember(browser, depth) { browser.recent(depth) }.collectAsStateWithLifecycle(null)
+    val rows = remember(items, query) { items?.let { LocalRows(query, it.matching(query)) } }
     var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
     val shown = remember(rows, scope) {
         val items = rows?.items.orEmpty()

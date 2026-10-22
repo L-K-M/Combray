@@ -86,6 +86,9 @@ All notable changes to this project are documented here. The format follows
   dialogs, menus, snackbars and the tab count no longer show Material's
   default purple or red, and the bottom bar's color reaches the screen
   edge under the navigation bar.
+- Recent no longer restarts three database observers on every keystroke
+  of its filter: it reads the newest rows while you browse and all
+  retained history once you type, and filters in memory.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.

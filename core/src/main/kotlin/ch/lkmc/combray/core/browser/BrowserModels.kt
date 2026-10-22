@@ -132,6 +132,34 @@ data class BrowserState(
 )
 
 /** One row of the unified Recent list. */
+/**
+ * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
+ * must reach every retained visit, or a match older than the newest rows would be missed.
+ */
+enum class HistoryDepth {
+    NEWEST,
+    ALL_RETAINED,
+    ;
+
+    companion object {
+        /** The depth a Recent filter needs: everything retained once there is text to match. */
+        fun forQuery(query: String?) = if (query.isNullOrBlank()) NEWEST else ALL_RETAINED
+    }
+}
+
+/** History rows Recent shows at most, newest first; open tabs are never cut. */
+const val RECENT_HISTORY_LIMIT = 500
+
+/**
+ * The rows a Recent filter shows: matches of [query] in this newest-first list, keeping at most
+ * [historyLimit] history rows. The cap applies after filtering, so a search over all retained
+ * history still finds an old match.
+ */
+fun List<RecentItem>.matching(query: String?, historyLimit: Int = RECENT_HISTORY_LIMIT): List<RecentItem> {
+    var history = 0
+    return filter { it.matches(query) && (it !is RecentItem.Visit || history++ < historyLimit) }
+}
+
 sealed interface RecentItem {
     val key: String
     val url: String?
@@ -139,6 +167,14 @@ sealed interface RecentItem {
 
     /** Time used for ordering: last use for tabs (focus, or navigation in focus), last interaction for history. */
     val time: Long
+
+    /** Whether the local Recent filter keeps this row; a blank query keeps everything. */
+    fun matches(query: String?): Boolean {
+        if (query.isNullOrBlank()) return true
+        val needle = query.trim()
+        return (title?.contains(needle, ignoreCase = true) ?: false) ||
+            (url?.contains(needle, ignoreCase = true) ?: false)
+    }
 
     data class OpenTab(
         val tabId: String,

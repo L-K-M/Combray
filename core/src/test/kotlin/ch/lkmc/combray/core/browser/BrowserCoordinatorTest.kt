@@ -74,7 +74,10 @@ class BrowserCoordinatorTest {
 
     private fun state() = browser.browserState.value
 
-    private fun recent(query: String? = null) = runBlocking { browser.recent(query).first() }
+    /** What RecentSheet shows for [query]: the depth it subscribes to, filtered and capped. */
+    private fun recent(query: String? = null) = runBlocking {
+        browser.recent(HistoryDepth.forQuery(query)).first().matching(query)
+    }
 
     /** Simulates Servo committing [url] as [document] in the view the coordinator created for it. */
     private fun commit(native: Long, document: Long, url: String, kind: HistoryKind = HistoryKind.DOCUMENT_COMMITTED, index: Int = 0, length: Int = 1) {
