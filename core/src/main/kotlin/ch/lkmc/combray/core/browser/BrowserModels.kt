@@ -95,8 +95,18 @@ sealed interface ReaderState {
     data class Unavailable(override val tabId: String) : ReaderState
 }
 
+/** Whether the stored session has been read since the process started. */
+enum class SessionState {
+    /** Not yet: no focused tab does not mean the internal home, so neither may be shown. */
+    RESTORING,
+
+    /** The stored tabs are published, or reading them failed and the state shows what there is. */
+    RESTORED,
+}
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
+    val session: SessionState = SessionState.RESTORING,
     /** Null: no tab is focused, the internal home is shown. */
     val activeTab: ActiveTab? = null,
     val openTabCount: Int = 0,

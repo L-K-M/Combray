@@ -2,9 +2,12 @@ package ch.lkmc.combray
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import ch.lkmc.combray.core.browser.SessionState
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.ui.BrowserScreen
@@ -14,6 +17,15 @@ class MainActivity : ComponentActivity() {
     private val graph get() = (application as CombrayApplication).graph
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // First, before the window's views exist (enableEdgeToEdge, super.onCreate): the launch window
+        // (Theme.Combray.Starting) stays until the stored session is known, so "New tab" never
+        // flashes in place of restored tabs. Bounded: a slow restore never holds the app behind it.
+        val splash = installSplashScreen()
+        val splashShownAt = SystemClock.uptimeMillis()
+        splash.setKeepOnScreenCondition {
+            graph.browser.browserState.value.session == SessionState.RESTORING &&
+                SystemClock.uptimeMillis() - splashShownAt < MAX_SPLASH_MILLIS
+        }
         enableEdgeToEdge()
         // The bottom bar's own color runs under the navigation bar and gives its buttons their
         // contrast, so three-button navigation needs no system scrim over it.
@@ -42,5 +54,10 @@ class MainActivity : ComponentActivity() {
         val url = intent.dataString ?: return
         val decision = AddressPolicy.interpret(url).primary
         if (decision is AddressDecision.Navigate) graph.browser.openFromOtherApp(decision.url)
+    }
+
+    private companion object {
+        /** The longest the launch window waits for the session; reading it normally takes far less. */
+        const val MAX_SPLASH_MILLIS = 2_000L
     }
 }

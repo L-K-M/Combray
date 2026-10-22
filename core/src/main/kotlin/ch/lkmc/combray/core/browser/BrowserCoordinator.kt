@@ -19,6 +19,7 @@ import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ViewRef
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -105,13 +106,32 @@ class BrowserCoordinator(
                 } catch (failure: Exception) {
                     // A failed step must not stop the queue; it is a bug worth surfacing.
                     Log.e(LOG_TAG, "browser state update failed", failure)
-                    state.update { it.copy(notice = Notice.Problem("Something went wrong; the last action may not have completed.")) }
+                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
+                    state.update {
+                        // Before the session is restored the user has done nothing: it was the restore.
+                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+                    }
                 }
             }
         }
         submit {
-            maintain()
+            // The stored tabs are shown even if maintenance fails, and the problem is named as
+            // the restore: publishing first ends RESTORING, so the queue's handler would call it
+            // "the last action".
+            val failure = try {
+                maintain()
+                null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failed: Exception) {
+                failed
+            }
             publish()
+            if (failure != null) {
+                Log.e(LOG_TAG, "restoring the session failed", failure)
+                state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
+            }
         }
     }
 
@@ -891,6 +911,8 @@ class BrowserCoordinator(
                 },
                 openTabCount = openCount,
                 reader = reader,
+                // Every publish reads the stored session, so the first one ends restoring.
+                session = SessionState.RESTORED,
             )
         }
     }
@@ -947,6 +969,8 @@ class BrowserCoordinator(
 
     private companion object {
         const val LOG_TAG = "CombrayBrowser"
+        const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
+        const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val RECENT_LIMIT = 500
         const val PROCESS_KEY_LENGTH = 8
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */

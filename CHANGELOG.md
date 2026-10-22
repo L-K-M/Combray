@@ -71,6 +71,8 @@ All notable changes to this project are documented here. The format follows
   manual Karakeep list you choose.
 - Recent, Hister and Karakeep results mark the words you typed, ignoring
   case and accents.
+- A launch screen with the Combray icon, shown until your open tabs are
+  restored (at most two seconds).
 
 ### Changed
 
@@ -144,6 +146,8 @@ All notable changes to this project are documented here. The format follows
   stayed open; they now update every 30 seconds.
 - After scrolling Recent, a new filter or scope could leave its first
   matches out of view; the list now starts at the top.
+- Starting the app with open tabs no longer shows "New tab" for a moment
+  before the restored page, as if the tabs were lost.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
