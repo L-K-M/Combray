@@ -98,6 +98,9 @@ All notable changes to this project are documented here. The format follows
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
   Each patch is now checked to have landed.
 - A page's prompt dialog labels its text field, so TalkBack names it.
+- A device check whose fixture server could not start (another run holds
+  the port) now stops and says so instead of testing against no page and
+  reporting timeouts.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.

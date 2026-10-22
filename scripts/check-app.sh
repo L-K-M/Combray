@@ -44,8 +44,31 @@ trap cleanup EXIT
 
 echo "==> fixture server on 127.0.0.1:$FIXTURE_PORT"
 python3 -I "$ROOT/testing/fixtures/server.py" --port "$FIXTURE_PORT" > "$RESULTS/fixtures.log" 2>&1 &
-PIDS+=("$!")
+FIXTURE_PID=$!
+PIDS+=("$FIXTURE_PID")
 "${ADB[@]}" reverse "tcp:$FIXTURE_PORT" "tcp:$FIXTURE_PORT" > /dev/null
+
+# Every check against a port another run already holds serves no page at all, and the run then
+# reports timeouts with no cause. Say so here instead: a check whose fixture never answered is
+# worthless, and this costs seconds rather than the length of the suite.
+fixture_ready() {
+    python3 -I -c "import socket; socket.create_connection(('127.0.0.1', $FIXTURE_PORT), 1).close()" 2>/dev/null
+}
+for _ in $(seq 1 10); do
+    if fixture_ready; then
+        break
+    fi
+    if ! kill -0 "$FIXTURE_PID" 2>/dev/null; then
+        echo "!! the fixture server could not start on port $FIXTURE_PORT; another run may hold it" >&2
+        sed 's/^/    /' "$RESULTS/fixtures.log" >&2
+        exit 1
+    fi
+    sleep 1
+done
+if ! fixture_ready; then
+    echo "!! the fixture server never answered on port $FIXTURE_PORT" >&2
+    exit 1
+fi
 
 # Under software emulation and host load, Android's system_server restarts (often "Lost network
 # stack") and installs then fail. Wait until it has run for a while and the package manager works.
