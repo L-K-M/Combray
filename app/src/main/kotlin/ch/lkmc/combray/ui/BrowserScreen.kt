@@ -369,10 +369,11 @@ private fun openExternally(context: Context, url: String, noApp: String, notify:
 
 /** Shares the page address, with its title first when there is one. */
 private fun share(context: Context, url: String, chooserTitle: String, pageTitle: String? = null) {
-    val body = if (!pageTitle.isNullOrBlank()) "$pageTitle\n$url" else url
+    val title = pageTitle?.takeIf { it.isNotBlank() }
+    val body = if (title != null) "$title\n$url" else url
     val send = Intent(Intent.ACTION_SEND)
         .setType("text/plain")
         .putExtra(Intent.EXTRA_TEXT, body)
-        .apply { if (!pageTitle.isNullOrBlank()) putExtra(Intent.EXTRA_SUBJECT, pageTitle) }
+        .apply { title?.let { putExtra(Intent.EXTRA_SUBJECT, it) } }
     context.startActivity(Intent.createChooser(send, chooserTitle))
 }
