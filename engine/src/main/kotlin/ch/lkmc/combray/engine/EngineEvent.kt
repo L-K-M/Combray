@@ -139,6 +139,12 @@ sealed interface EngineEvent {
     /** The page withdrew [control] or its view closed; an answer would be ignored. */
     data class ControlHidden(val view: ViewRef, val control: Long) : EngineEvent
 
+    /**
+     * A refusal or an engine-level failure. Contract with the coordinator's handler: [tab]
+     * is null only for engine-level failures (the native `error()` path: EGL, profile
+     * directory, control plumbing) and then fails a pending startup; request refusals always
+     * carry the refused view's tab.
+     */
     data class EngineError(val message: String, val tab: Long?, val request: Long?) : EngineEvent
 
     data object ShutdownComplete : EngineEvent
