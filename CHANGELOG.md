@@ -75,6 +75,7 @@ All notable changes to this project are documented here. The format follows
   case and accents.
 - A launch screen with the Combray icon, shown until your open tabs are
   restored (at most two seconds).
+- More › Close tab closes the current tab, with the same Undo as Recent.
 
 ### Changed
 
@@ -114,6 +115,8 @@ All notable changes to this project are documented here. The format follows
 - CI also compiles the device checks, fails when Room's exported schemas
   are not committed or a committed version's schema changed, and checks
   the engine bridge's Rust formatting and page-script syntax.
+- More's "Pause history capture" row has a pause icon instead of an X,
+  which read as closing the tab.
 
 ### Fixed
 
@@ -228,6 +231,8 @@ All notable changes to this project are documented here. The format follows
   500 visits.
 - Undo after closing a tab other than the current one reopens it in the
   background instead of switching to it.
+- More and Settings open fully expanded instead of at half height, which
+  hid their last rows; More scrolls when it is taller than the window.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.

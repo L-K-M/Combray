@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -144,12 +145,15 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
             }
         }
 
         assertTargetsAreAccessible()
-        compose.onNodeWithText("Settings").assertIsDisplayed()
+        // The rows scroll when they outgrow the window: bring each into view before checking it.
+        for (label in listOf("Close tab", "Pause history capture", "Settings")) {
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+        }
     }
 
     @Test
