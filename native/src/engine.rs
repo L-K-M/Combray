@@ -421,12 +421,13 @@ impl Engine {
             },
             Command::Capture(request) => self.start_capture(request),
             Command::Find {
-                tab,
+                view,
+                document,
                 request,
                 query,
                 index,
-            } => self.find(tab, request, &query, index),
-            Command::FindClear { tab } => self.clear_find(tab),
+            } => self.find(view, document, request, &query, index),
+            Command::FindClear { view, document } => self.clear_find(view, document),
             Command::Evaluate {
                 tab,
                 request,
@@ -1164,25 +1165,30 @@ impl Engine {
 
     // --- Find in page -------------------------------------------------------------------------
 
-    /// Runs the find script in the tab's current document only (Servo refuses it if that document
-    /// is replaced first); the result names that document.
-    fn find(&mut self, tab: i64, request: i64, query: &str, index: i32) {
-        let Some(found) = self.tabs.get(&tab) else {
-            self.emit(EngineEvent::FindResult {
-                view: ViewKey { tab, generation: 0 },
-                document: None,
-                request,
-                status: FindStatus::Failed,
-            });
-            return;
-        };
-        let view = found.view;
-        let Some(document) = found.current_document else {
+    /// Runs the find script in `document_id`, the document the app saw, and only while the view
+    /// still shows it: a document that committed before the app heard of it is neither selected
+    /// nor scrolled. Servo checks again when the script runs; the result names that document.
+    fn find(&mut self, view: ViewKey, document_id: u64, request: i64, query: &str, index: i32) {
+        let Some(found) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
             self.emit(EngineEvent::FindResult {
                 view,
                 document: None,
                 request,
-                status: FindStatus::Failed,
+                status: FindStatus::TabClosed,
+            });
+            return;
+        };
+        let Some(document) = found
+            .documents
+            .get(&document_id)
+            .copied()
+            .filter(|&document| found.current_document == Some(document))
+        else {
+            self.emit(EngineEvent::FindResult {
+                view,
+                document: Some(document_id),
+                request,
+                status: FindStatus::StaleDocument,
             });
             return;
         };
@@ -1196,12 +1202,18 @@ impl Engine {
         );
     }
 
-    /// Removes find's selection from the tab's current document; nothing to report.
-    fn clear_find(&mut self, tab: i64) {
-        let Some(found) = self.tabs.get(&tab) else {
+    /// Removes find's selection from `document_id` if the view still shows it; nothing to report.
+    /// A replaced document took its selection with it.
+    fn clear_find(&mut self, view: ViewKey, document_id: u64) {
+        let Some(found) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
             return;
         };
-        let Some(document) = found.current_document else {
+        let Some(document) = found
+            .documents
+            .get(&document_id)
+            .copied()
+            .filter(|&document| found.current_document == Some(document))
+        else {
             return;
         };
         found.webview.evaluate_javascript_in_document(

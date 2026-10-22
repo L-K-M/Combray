@@ -75,9 +75,10 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
     override fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int) =
         NativeEngine.captureArticle(tab, document, capture, maxBytes, timeoutMs)
 
-    override fun find(tab: Long, request: Long, query: String, index: Int) = NativeEngine.find(tab, request, query, index)
+    override fun find(page: PageRef, request: Long, query: String, index: Int) =
+        NativeEngine.find(page.view.tab, page.view.generation, page.document, request, query, index)
 
-    override fun clearFind(tab: Long) = NativeEngine.clearFind(tab)
+    override fun clearFind(page: PageRef) = NativeEngine.clearFind(page.view.tab, page.view.generation, page.document)
 
     private companion object {
         const val LOG_TAG = "CombrayEngine"

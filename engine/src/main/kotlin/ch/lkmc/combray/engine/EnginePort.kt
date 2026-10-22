@@ -54,14 +54,14 @@ interface EnginePort {
     fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
 
     /**
-     * Find in page: searches the tab's current document for [query], selects match [index]
-     * (wrapping around; negative counts from the end) and scrolls it into view. Reported as
-     * [EngineEvent.FindResult] for [request], naming the document it ran in.
+     * Find in page: searches [page]'s document for [query], selects match [index] (wrapping
+     * around; negative counts from the end) and scrolls it into view, only while that document
+     * is still shown. Reported as [EngineEvent.FindResult] for [request], naming the document.
      */
-    fun find(tab: Long, request: Long, query: String, index: Int)
+    fun find(page: PageRef, request: Long, query: String, index: Int)
 
-    /** Removes the selection [find] made in the tab's current document. */
-    fun clearFind(tab: Long)
+    /** Removes the selection [find] made in [page]'s document, if it is still shown. */
+    fun clearFind(page: PageRef)
 }
 
 enum class EngineStart {

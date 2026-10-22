@@ -7,6 +7,7 @@ import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.FindStatus
 import ch.lkmc.combray.engine.HistoryKind
+import ch.lkmc.combray.engine.PageRef
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +90,8 @@ class FindTest {
         assertEquals(FindState("", null), state().find)
 
         val request = find("needle")
-        assertEquals(FakeEngine.Find(1, request.request, "needle", 0), request)
+        // Bound to the document on screen: the engine refuses it once another one is shown.
+        assertEquals(FakeEngine.Find(PageRef(engine.view(1), DOCUMENT), request.request, "needle", 0), request)
         assertEquals(FindState("needle", null), state().find)
 
         answer(request, count = 12, index = 0)
@@ -190,7 +192,7 @@ class FindTest {
 
         browser.find("  ", FindStep.FIRST); idle()
         assertEquals(asked, engine.finds.size)
-        assertEquals(listOf(1L), engine.findClears)
+        assertEquals(listOf(PageRef(engine.view(1), DOCUMENT)), engine.findClears)
         assertEquals(FindState("  ", null), state().find)
     }
 
@@ -214,7 +216,7 @@ class FindTest {
         val request = find("needle")
         browser.closeFind(); idle()
         assertNull(state().find)
-        assertEquals(listOf(1L), engine.findClears)
+        assertEquals(listOf(PageRef(engine.view(1), DOCUMENT)), engine.findClears)
         // An answer after closing is dropped.
         answer(request, count = 3, index = 0)
         assertNull(state().find)
@@ -252,7 +254,7 @@ class FindTest {
 
         browser.newTab(); idle()
         assertNull(state().find)
-        assertEquals(listOf(1L), engine.findClears)
+        assertEquals(listOf(PageRef(engine.view(1), DOCUMENT)), engine.findClears)
         browser.selectTab(first); idle()
         assertNull(state().find)
     }
@@ -264,7 +266,7 @@ class FindTest {
         find("needle")
         browser.openReader(); idle()
         assertNull(state().find)
-        assertEquals(listOf(1L), engine.findClears)
+        assertEquals(listOf(PageRef(engine.view(1), DOCUMENT)), engine.findClears)
 
         browser.openFind(); idle()
         assertNull(state().find)

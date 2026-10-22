@@ -538,20 +538,28 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_captureArticle<'local
     }));
 }
 
-/// Find in page in the tab's current document; the engine reports `find_result` for `request`.
+/// Find in page in `document` of the view (`tab`, `generation`), only while it is still shown;
+/// the engine reports `find_result` for `request`.
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_find<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     tab: jlong,
+    generation: jlong,
+    document: jlong,
     request: jlong,
     query: JString<'local>,
     index: jint,
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         let query = java_string(env, query)?;
+        let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+        else {
+            return Ok(());
+        };
         send(Command::Find {
-            tab,
+            view: crate::events::ViewKey { tab, generation },
+            document,
             request,
             query,
             index,
@@ -566,8 +574,17 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_clearFind<'local>(
     _env: EnvUnowned<'local>,
     _class: JClass<'local>,
     tab: jlong,
+    generation: jlong,
+    document: jlong,
 ) {
-    send(Command::FindClear { tab });
+    let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+    else {
+        return;
+    };
+    send(Command::FindClear {
+        view: crate::events::ViewKey { tab, generation },
+        document,
+    });
 }
 
 #[unsafe(no_mangle)]

@@ -118,19 +118,21 @@ class FakeEngine : EnginePort {
         articleCaptures += document to capture
     }
 
-    /** One find request: the view it searches, request ID, query and match index. */
-    data class Find(val tab: Long, val request: Long, val query: String, val index: Int)
+    /** One find request: the document it searches, request ID, query and match index. */
+    data class Find(val page: PageRef, val request: Long, val query: String, val index: Int) {
+        val tab: Long get() = page.view.tab
+    }
 
     val finds = mutableListOf<Find>()
 
-    /** Views whose find selection was cleared. */
-    val findClears = mutableListOf<Long>()
+    /** Documents whose find selection was cleared. */
+    val findClears = mutableListOf<PageRef>()
 
-    override fun find(tab: Long, request: Long, query: String, index: Int) {
-        finds += Find(tab, request, query, index)
+    override fun find(page: PageRef, request: Long, query: String, index: Int) {
+        finds += Find(page, request, query, index)
     }
 
-    override fun clearFind(tab: Long) {
-        findClears += tab
+    override fun clearFind(page: PageRef) {
+        findClears += page
     }
 }

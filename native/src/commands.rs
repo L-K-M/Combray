@@ -165,17 +165,20 @@ pub enum Command {
         response: String,
     },
     Capture(CaptureRequest),
-    /// Find in page: search the tab's current document for `query` and select match `index`
-    /// (wrapping around; negative counts from the end). Outcome: `find_result`.
+    /// Find in page: search `document`, which must still be the view's current one, for `query`
+    /// and select match `index` (wrapping around; negative counts from the end). Outcome:
+    /// `find_result`.
     Find {
-        tab: i64,
+        view: ViewKey,
+        document: u64,
         request: i64,
         query: String,
         index: i32,
     },
-    /// Remove the selection find made in the tab's current document. No outcome event.
+    /// Remove the selection find made in `document`, if the view still shows it. No outcome event.
     FindClear {
-        tab: i64,
+        view: ViewKey,
+        document: u64,
     },
     /// Test support: run `script` in the tab's current document without a document guard.
     Evaluate {

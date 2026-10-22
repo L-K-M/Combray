@@ -527,7 +527,7 @@ class BrowserCoordinator(
         val text = boundedFindQuery(query)
         if (text.isBlank()) {
             // Nothing to look for: the page's find selection goes.
-            if (session.searched) engine.clearFind(view.nativeTab)
+            session.searched?.let(engine::clearFind)
             session.reset(text)
             publish()
             return@submit
@@ -536,12 +536,13 @@ class BrowserCoordinator(
         val current = (session.outcome as? FindOutcome.Found)?.takeIf { text == session.query }
         val index = findIndex(step, current)
         val request = nextRequest++
-        session.pending = PendingFind(request, ViewRef(view.nativeTab, generation), document)
+        val page = PageRef(ViewRef(view.nativeTab, generation), document)
+        session.pending = PendingFind(request, page.view, document)
         // A new query shows nothing until the page answers; stepping keeps the last answer meanwhile.
         if (text != session.query) session.outcome = null
         session.query = text
-        session.searched = true
-        engine.find(view.nativeTab, request, text, index)
+        session.searched = page
+        engine.find(page, request, text, index)
         publish()
     }
 
@@ -937,9 +938,9 @@ class BrowserCoordinator(
     private fun closeFindSession() {
         val session = findSession ?: return
         findSession = null
-        if (!session.searched) return
-        val view = liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return
-        engine.clearFind(view.nativeTab)
+        val searched = session.searched ?: return
+        liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return
+        engine.clearFind(searched)
     }
 
     private fun view(ref: ViewRef): LiveView? =
@@ -1324,14 +1325,14 @@ class BrowserCoordinator(
         /** The newest request; an older one's answer is ignored. */
         var pending: PendingFind? = null
 
-        /** The page may hold find's selection, so closing clears it. */
-        var searched = false
+        /** The document find last searched: it may hold find's selection, so closing clears it. */
+        var searched: PageRef? = null
 
         fun reset(query: String) {
             this.query = query
             outcome = null
             pending = null
-            searched = false
+            searched = null
         }
 
         fun state() = FindState(query, outcome)

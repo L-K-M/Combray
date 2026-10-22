@@ -109,13 +109,14 @@ object NativeEngine {
     @JvmStatic external fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
 
     /**
-     * Find in page in the tab's current document: select match [index] of [query] (wrapping;
-     * negative counts from the end). Reported as `find_result` for [request] (native/src/find.js).
+     * Find in page in [document] of the view ([tab], [generation]) while it is still shown: select
+     * match [index] of [query] (wrapping; negative counts from the end). Reported as
+     * `find_result` for [request] (native/src/find.js).
      */
-    @JvmStatic external fun find(tab: Long, request: Long, query: String, index: Int)
+    @JvmStatic external fun find(tab: Long, generation: Long, document: Long, request: Long, query: String, index: Int)
 
-    /** Removes the selection [find] made in the tab's current document. */
-    @JvmStatic external fun clearFind(tab: Long)
+    /** Removes the selection [find] made in [document], if the view still shows it. */
+    @JvmStatic external fun clearFind(tab: Long, generation: Long, document: Long)
 
     /** Test support: evaluate [script] in the tab's current document, without a document guard. */
     @JvmStatic external fun evaluate(tab: Long, request: Long, script: String)
