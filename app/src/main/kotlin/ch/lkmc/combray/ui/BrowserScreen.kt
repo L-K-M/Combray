@@ -391,6 +391,7 @@ private fun share(context: Context, url: String, title: String) {
  * Copied addresses can carry one-time tokens (a recovery URL before a commit), so they are
  * marked sensitive: Android 13+ redacts the system preview and well-behaved keyboards keep
  * them out of suggestions/history. A rendering hint, not access control.
+ * `ClipDescription.extras` exists since API 24; the app requires API 30.
  */
 internal fun copyAddressToClipboard(context: Context, label: String, url: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
