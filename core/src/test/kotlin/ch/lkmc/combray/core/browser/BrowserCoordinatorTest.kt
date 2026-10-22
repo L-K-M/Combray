@@ -616,6 +616,15 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aFieldTheNextDocumentFocusesOnLoadDoesNotKeepTheOldKeyboard() {
+        keyboardOnFirstPage()
+        // A results page refocuses its search field on load, before its commit and without a tap.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "search", showKeyboard = false)); idle()
+        commit(1, 11, "https://a.test/results", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
     fun theKeyboardClosesWhenANavigationReplacesTheFieldsDocument() {
         keyboardOnFirstPage()
         // A form sent with Enter: Servo reports no hidden field, only the next document.

@@ -375,7 +375,9 @@ class BrowserCoordinator(
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
             is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let { view ->
-                keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
+                // Only a field that opens the keyboard owns it: one the next document focuses on
+                // load must not keep the previous document's keyboard through the navigation.
+                if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
                 val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
                 state.update { it.copy(keyboard = request) }
             }
