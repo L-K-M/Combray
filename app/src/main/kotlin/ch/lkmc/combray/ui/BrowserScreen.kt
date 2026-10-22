@@ -281,7 +281,15 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             notices = graph.notices,
             onDismiss = dismiss,
         )
-        Sheet.PAGE_INFO -> tab?.url?.let { PageInfoDialog(url = it, onDismiss = dismiss) } ?: dismiss()
+        Sheet.PAGE_INFO -> {
+            val infoUrl = tab?.url
+            if (infoUrl != null) {
+                PageInfoDialog(url = infoUrl, onDismiss = dismiss)
+            } else {
+                // No URL to show: close the sheet after composition (not during it).
+                LaunchedEffect(Unit) { dismiss() }
+            }
+        }
     }
 
     // Shown over any sheet: the page is blocked until it gets an answer.
