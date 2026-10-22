@@ -36,6 +36,7 @@ import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
+import ch.lkmc.combray.ui.PageSaveStatus
 import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -266,7 +267,7 @@ class AccessibilityTest {
     ) = BottomBar(
         tab = tab,
         openTabs = openTabs,
-        saveStatus = saveStatus,
+        saveStatus = PageSaveStatus(tab?.url, saveStatus),
         onBack = {},
         onAddress = onAddress,
         onSave = {},
