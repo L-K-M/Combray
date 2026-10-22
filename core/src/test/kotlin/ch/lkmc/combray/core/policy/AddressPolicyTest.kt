@@ -42,6 +42,8 @@ class AddressPolicyTest {
         val public = listOf(
             "example.org:8443", "8.8.8.8", "11.0.0.1", "172.15.0.1", "172.32.0.1", "192.169.0.1", "169.255.0.1",
             "[2001:db8::1]:8443/x", "[fe00::1]", "[fec0::1]", "keep.lan.example.org", "local.example.org",
+            // Zero-padded octets are octal to Servo: this is 8.0.0.5, not 10.0.0.5.
+            "010.0.0.5",
         )
         for (input in public) {
             val interpretation = AddressPolicy.interpret(input)
@@ -178,7 +180,13 @@ class AddressPolicyTest {
     @Test
     fun schemelessCredentialsAreRejectedNotSearched() {
         // A search would put the password in Kagi's URL and search history.
-        for (input in listOf("admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas", "admin:pw@nas!", "u:p@1.2.3.4.5")) {
+        val withCredentials = listOf(
+            "admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas", "admin:pw@nas!",
+            "u:p@1.2.3.4.5", "admin:1234@nas",
+            // A password may hold what would end an address's host.
+            "admin:Ab#3x@192.168.1.1", "admin:p/ss@nas", "admin:a?b@10.0.0.2",
+        )
+        for (input in withCredentials) {
             val interpretation = AddressPolicy.interpret(input)
             assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
             assertNull(input, interpretation.alternative)
@@ -186,6 +194,9 @@ class AddressPolicyTest {
 
         // Without a colon before "@" it is no password; "define:x@example.com" is the accepted cost.
         searches("alice@example.com")
+        // A path holding a colon and an "@", and a port before a path with an "@", are addresses.
+        assertEquals(AddressDecision.Navigate("https://example.com/a:b@c"), primary("example.com/a:b@c"))
+        assertEquals(AddressDecision.Navigate("http://localhost:3000/@me"), primary("localhost:3000/@me"))
         assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("define:x@example.com"))
     }
 

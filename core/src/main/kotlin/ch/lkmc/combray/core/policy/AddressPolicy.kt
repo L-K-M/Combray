@@ -67,6 +67,9 @@ object AddressPolicy {
     private val LABEL = Regex("^(?!-)[\\p{L}\\p{N}-]{1,63}(?<!-)$")
     private val TOP_LEVEL = Regex("^(\\p{L}{2,63}|xn--[a-z0-9-]{1,59})$", RegexOption.IGNORE_CASE)
     private val IPV6_GROUP = Regex("^[0-9A-Fa-f]{1,4}$")
+
+    /** Where a user name or a port would end in an address: its path, query or fragment. */
+    private const val URL_DELIMITERS = "/?#"
     private const val IPV6_GROUPS = 8
     private const val BITS_PER_BYTE = 8
     private const val IPV4_BYTES = 4
@@ -210,14 +213,19 @@ object AddressPolicy {
     }
 
     /**
-     * "user:password@host/path": a colon before the authority's last "@". What follows the "@"
-     * need not be a valid host: "admin:pw@nas!" would still send the password as a search.
+     * "user:password@host/path": a user name, a colon and a password before the text's last "@".
+     * The password may hold "/", "?" or "#" ("admin:p/ss@nas"); the user name may not, so
+     * "example.com/a:b@c" stays an address, and neither may a port ("localhost:3000/@me"). What
+     * follows the "@" need not be a valid host: "admin:pw@nas!" would still send the password as
+     * a search.
      */
     private fun hasSchemelessCredentials(text: String): Boolean {
-        val authority = text.takeWhile { it != '/' && it != '?' && it != '#' }
-        if ('@' !in authority) return false
+        val userInfo = text.substringBeforeLast('@', missingDelimiterValue = "")
+        if (':' !in userInfo || userInfo.substringBefore(':').any { it in URL_DELIMITERS }) return false
 
-        return ':' in authority.substringBeforeLast('@')
+        val afterColon = userInfo.substringAfter(':')
+        val port = afterColon.takeWhile { it.isDigit() }
+        return port.isEmpty() || afterColon.getOrNull(port.length)?.let { it in URL_DELIMITERS } != true
     }
 
     /** "host:1234" is a host with a port, not a URL with scheme "host". */
@@ -237,7 +245,11 @@ object AddressPolicy {
         if (port != null && !PORT.matches(port)) return null
         val shape = when {
             host.startsWith("[") && host.endsWith("]") -> addressShape(ipv6Bytes(host.removeSurrounding("[", "]")))
-            IPV4.matches(host) -> addressShape(ipv4Bytes(host) ?: return null)
+            // Servo reads a zero-padded octet as octal (WHATWG URL): "010.0.0.5" is 8.0.0.5, so such
+            // an address is never taken for a home address.
+            IPV4.matches(host) -> (ipv4Bytes(host) ?: return null).let { bytes ->
+                if (host.split('.').any { it.length > 1 && it.startsWith('0') }) HostShape.ADDRESS else addressShape(bytes)
+            }
             host.equals("localhost", ignoreCase = true) -> HostShape.LOCAL_ADDRESS
             '.' in host -> if (isDomain(host)) domainShape(host) else return null
             LABEL.matches(host) -> HostShape.SINGLE_LABEL

@@ -33,6 +33,9 @@ object SensitiveUrls {
     /** Separators of parameters: `&`, and `;` in older query strings and in path matrix parameters. */
     private val PARAMETER_SEPARATORS = Regex("[&;]")
 
+    /** In a fragment also `?`, which starts a hash-routed app's parameters after its route. */
+    private val FRAGMENT_SEPARATORS = Regex("[&;?]")
+
     /** An OAuth authorization code (`code`) is a credential when its callback also carries `state`. */
     private const val AUTHORIZATION_CODE = "code"
     private const val AUTHORIZATION_STATE = "state"
@@ -49,8 +52,9 @@ object SensitiveUrls {
         // session IDs into the path (/cart;jsessionid=...).
         val matrix = uri.rawPath.orEmpty().split('/').flatMap { it.split(';').drop(1) }.joinToString(";")
         // In a fragment only name=value pairs are parameters: "#token-usage" or a route such as
-        // "#/settings/api-keys" is an anchor, not a credential.
-        val fragment = uri.rawFragment?.substringAfterLast('?')?.split(PARAMETER_SEPARATORS)?.filter { '=' in it }
+        // "#/settings/api-keys?tab=1" is an anchor, not a credential. A "?" may separate them
+        // more than once ("#access_token=a&next=/inbox?tab=2"), so it splits like "&".
+        val fragment = uri.rawFragment?.split(FRAGMENT_SEPARATORS)?.filter { '=' in it }
         val parts = listOfNotNull(
             uri.rawQuery?.split(PARAMETER_SEPARATORS),
             fragment,

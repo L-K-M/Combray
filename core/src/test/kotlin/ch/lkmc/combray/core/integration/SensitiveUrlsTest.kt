@@ -30,6 +30,9 @@ class SensitiveUrlsTest {
             "https://app.example/cb?auth_code=a",
             // A hash-routed app's callback: the parameters follow the route.
             "https://app.example/#/callback?access_token=a",
+            // A later "?" in a value does not hide the credential before it.
+            "https://app.example/#access_token=abc&state=/inbox?tab=2",
+            "https://app.example/#/verify?token=abc&next=/inbox?folder=2",
         ).forEach { assertTrue(it, SensitiveUrls.looksSensitive(it)) }
     }
 
