@@ -47,8 +47,9 @@ internal object HttpStatus {
 
     /**
      * `Retry-After` in seconds, bounded; HTTP-date values are ignored (the backoff applies).
-     * The seconds are clamped before multiplying: a huge value would overflow `Long` and
-     * wrap negative, turning "retry much later" into "retry now".
+     * The seconds are clamped before multiplying: a huge value would overflow `Long`, and
+     * the wrapped result would replace the server's "wait" with the ordinary backoff or an
+     * arbitrary delay.
      */
     fun retryAfterMs(headers: Map<String, String>): Long? {
         val value = headers.entries.firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }?.value ?: return null
