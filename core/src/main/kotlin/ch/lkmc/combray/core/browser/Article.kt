@@ -21,8 +21,11 @@ data class Article(
 
 enum class BlockKind { HEADING, PARAGRAPH, LIST_ITEM, QUOTE, PREFORMATTED, CAPTION }
 
-/** [level]: 1..6 for headings, nesting depth (from 1) for list items, otherwise 0. */
-data class ArticleBlock(val kind: BlockKind, val level: Int, val spans: List<ArticleSpan>)
+/**
+ * [level]: 1..6 for headings, nesting depth (from 1) for list items, otherwise 0. [ordinal]: the
+ * number a numbered list shows for the item, on the item's first block only; null otherwise.
+ */
+data class ArticleBlock(val kind: BlockKind, val level: Int, val spans: List<ArticleSpan>, val ordinal: Int? = null)
 
 /** A run of text; [href] is the absolute http(s) address of a link around it. */
 data class ArticleSpan(val text: String, val href: String? = null)
@@ -43,6 +46,8 @@ object ArticleJson {
     )
     private const val MAX_HEADING_LEVEL = 6
     private const val MAX_LIST_DEPTH = 8
+    /** reader.js clamps ordinals to this; anything past it did not come from the script. */
+    private const val MAX_ORDINAL = 99_999
 
     /** Null when [text] is not an article with at least one block. */
     fun parse(text: String, truncated: Boolean): Article? {
@@ -74,7 +79,14 @@ object ArticleJson {
             BlockKind.LIST_ITEM -> level.coerceIn(1, MAX_LIST_DEPTH)
             else -> 0
         }
-        return ArticleBlock(kind, bounded, spans)
+        val ordinal = if (kind == BlockKind.LIST_ITEM) ordinal(item) else null
+        return ArticleBlock(kind, bounded, spans, ordinal)
+    }
+
+    /** A JSON integer (not a string or a fraction) in the script's range, or null: the item then shows a bullet. */
+    private fun ordinal(item: JsonObject): Int? {
+        val number = (item["o"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: return null
+        return number.takeIf { it in -MAX_ORDINAL..MAX_ORDINAL }
     }
 
     private fun span(element: JsonElement): ArticleSpan? {
