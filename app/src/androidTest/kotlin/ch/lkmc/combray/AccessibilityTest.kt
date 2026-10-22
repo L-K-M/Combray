@@ -268,6 +268,7 @@ class AccessibilityTest {
         tab = tab,
         openTabs = openTabs,
         saveStatus = PageSaveStatus(tab?.url, saveStatus),
+        backEnabled = tab?.canGoBack == true,
         onBack = {},
         onAddress = onAddress,
         onSave = {},

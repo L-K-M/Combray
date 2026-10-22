@@ -66,6 +66,8 @@ fun BottomBar(
     tab: ActiveTab?,
     openTabs: Int,
     saveStatus: PageSaveStatus,
+    /** Whether Back has somewhere to go: BrowserScreen decides, for this button and system Back alike. */
+    backEnabled: Boolean,
     onBack: () -> Unit,
     onAddress: () -> Unit,
     onSave: () -> Unit,
@@ -93,7 +95,7 @@ fun BottomBar(
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack, enabled = tab?.canGoBack == true || tab?.returnsToOpener == true) {
+                IconButton(onClick = onBack, enabled = backEnabled) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                 }
                 AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))

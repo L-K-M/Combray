@@ -139,25 +139,24 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     }
 
     // Back: close the open sheet or reader view first, then go back in the page, then return to
-    // the tab whose page opened this one, then leave the app. A tab another app opened closes on
-    // the way out: its page stays in history only.
+    // the tab whose page opened this one, then to the app that opened the tab, then leave the
+    // app. A tab another app opened closes on the way out: its page stays in history only.
     BackHandler(enabled = sheet != Sheet.NONE) { sheet = Sheet.NONE }
-    // One action for system Back and the bar's Back button, so the two cannot drift apart.
-    val backInPage = {
-        tab?.let {
-            when {
-                it.canGoBack -> browser.goBack()
-                it.returnsToOpener -> browser.returnToOpener(it.id)
-            }
+    // One action for system Back and the bar's Back button, so the two cannot drift apart; null
+    // when Back has nowhere to go in this tab. A page-opened tab and one another app opened
+    // are exclusive by construction.
+    val backInPage: (() -> Unit)? = tab?.let {
+        when {
+            it.canGoBack -> { { browser.goBack() } }
+            it.returnsToOpener -> { { browser.returnToOpener(it.id) } }
+            it.openedByOtherApp -> { {
+                browser.returnToOtherApp(it.id)
+                onLeave()
+            } }
+            else -> null
         }
     }
-    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && (tab?.canGoBack == true || tab?.returnsToOpener == true)) {
-        backInPage()
-    }
-    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && tab?.canGoBack != true && tab?.openedByOtherApp == true) {
-        tab?.let { browser.returnToOtherApp(it.id) }
-        onLeave()
-    }
+    BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && backInPage != null) { backInPage?.invoke() }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
 
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
@@ -198,7 +197,9 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
-                onBack = { backInPage() },
+                backEnabled = state.reader != null || backInPage != null,
+                // Like system Back: Reader view closes first, then Back moves through the page.
+                onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
                 onAddress = editAddress,
                 onSave = {
                     // Snapshot now: switching tabs right after the tap must not change what is saved.
