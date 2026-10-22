@@ -94,6 +94,32 @@ class CaptureTest {
     }
 
     @Test
+    fun aForgottenPageLoadedAgainIsNotCapturedAgain() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/")
+        settle()
+        assertEquals(1, engine.captures.size)
+
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+        // A reload of the page that is still open.
+        load(1, 11, "https://a.test/")
+        settle()
+        assertEquals(1, engine.captures.size)
+    }
+
+    @Test
+    fun aCaptureOnItsWayWhenThePageIsForgottenIsDropped() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/")
+        settle()
+        val capture = engine.captures.single().second
+
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+        result(1, 10, capture, "A text")
+        assertTrue(sink.pages.isEmpty())
+    }
+
+    @Test
     fun aResultFromAReplacedDocumentIsDropped() {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         load(1, 10, "https://a.test/")

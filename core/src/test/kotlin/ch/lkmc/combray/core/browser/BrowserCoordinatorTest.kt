@@ -1057,6 +1057,61 @@ class BrowserCoordinatorTest {
 
         commit(1, 10, "https://example.com/4#notes", HistoryKind.SAME_DOCUMENT)
         assertEquals("Four", state().activeTab?.title)
+
+        // Moving within the forgotten page recorded nothing that leaving it could bring back.
+        browser.openUrl("https://other.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 11, "https://other.test/")
+        assertTrue(recent().none { it is RecentItem.Visit && it.url.orEmpty().startsWith("https://example.com/") })
+    }
+
+    /** The triage's condition for #41: a new renderer loading the forgotten page records nothing. */
+    @Test
+    fun aForgottenPageStaysForgottenWhenItsRendererIsRecreated() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        val forgottenTab = state().activeTab!!.id
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // Android trims memory: the hidden tab loses its renderer, and returning recreates it.
+        browser.releaseHiddenViews(); idle()
+        assertTrue(1L in engine.closed)
+        browser.selectTab(forgottenTab); idle()
+        val recreated = engine.created.last().first
+        commit(recreated, 30, "https://example.com/4")
+        // Reloading it is loading it again too.
+        commit(recreated, 31, "https://example.com/4")
+
+        // Leaving it finds no visit to put back in Recent.
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(recreated, 32, "https://c.test/")
+        assertTrue(recent().none { it.url == "https://example.com/4" })
+        assertTrue(recent().any { it is RecentItem.OpenTab && it.url == "https://c.test/" })
+    }
+
+    @Test
+    fun aRestartDoesNotBringAForgottenPageBack() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        title(1, 10, "Four")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // Process death: the restored tab loads its page in a new renderer.
+        browser = newCoordinator()
+        ready()
+        commit(engine.created.single().first, 10, "https://example.com/4")
+        assertEquals("Four", state().activeTab?.title)
+
+        // A link to another page of the site is a new page: that one is recorded.
+        commit(engine.created.single().first, 11, "https://example.com/5")
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(engine.created.single().first, 12, "https://c.test/")
+        val urls = recent().map { it.url }
+        assertFalse("https://example.com/4" in urls)
+        assertTrue("https://example.com/5" in urls)
     }
 
     @Test

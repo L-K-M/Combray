@@ -95,7 +95,7 @@ every bullet), and #96's throttle is a hint the engine may drop.
 | #53 | `mimo/swipe-close-tabs` | Swiping a tab row in Recent closes it; the background shows only while swiping |
 | #78 | `opus/restored-splash` | A launch screen holds until the session is restored; a failed maintenance still publishes the stored tab |
 | #52 | `mimo/appearance-and-reader-size` | Settings › Display › Appearance (`ThemeMode`); the reader text size was dropped for #87's single text control |
-| #41 | `grok/forget-resurrected-history` | A forgotten page stays out of Recent, the page an open tab shows included; the tab keeps its title |
+| #41 | `grok/forget-resurrected-history` | A forgotten page stays out of Recent, the page an open tab shows included; the tab keeps its title. The integration added `TabEntity.pageForgotten` (schema 4), so loading that page again in the tab (restore, eviction, crash, reload) records and captures nothing |
 | #36 | `mimo/recent-visit-identity` | A navigating tab's old page stays in Recent while the tab has no renderer; a detached page is retired (#71) |
 | #72 | `opus/history-fixes` | Reload keeps titles; Recent search reaches all retained history; Undo focus (Proposed) |
 | #67 | `muse/recent-single-flow` | Recent subscribes once per depth (newest rows, all retained history), filters in memory and caps history after the filter; `remember(browser)` from #25 |
@@ -179,9 +179,11 @@ Notes for the open work:
   (Fusion 15).
 - **Forgetting (#32, #41, #36, all landed).** #32 deletes local history and
   cancels queued captures in one transaction. #41 keeps a forgotten page out of
-  Recent once you leave it; #36 keeps a renderer-less tab's page in Recent at
-  both detach sites. None of them cancels a pending capture timer
-  (correctness item 34).
+  Recent once you leave it, and the tab's `pageForgotten` mark keeps it out
+  when the page loads again in that tab; #36 keeps a renderer-less tab's page
+  in Recent at both detach sites. Pending capture timers are not cancelled
+  (correctness item 34), but they can no longer send an open tab's
+  forgotten page.
 - **Device runs of older branches.** A build without #73's
   `DESTINATION_CHANGED` crashes reading an outbox that holds one; rebase a
   branch onto main before running it on a device with main's data.
@@ -442,8 +444,11 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     A timer that fires after a forget can still enqueue the page's text:
     `HisterIntegration.wasForgotten` only matches jobs created before the
     forget. The plan requires that a delayed capture cannot enqueue erased
-    content (durable queue and failure policy). Pre-existing; #32 and #41 make
-    it more visible, and no open PR fixes it. Cancel or fence matching timers
+    content (durable queue and failure policy). Pre-existing. Since wave 2 a
+    tab whose page was forgotten (`pageForgotten`) neither requests nor
+    accepts a capture, which covers a timer or capture in flight for that
+    page; a page of the site that a tab shows without a visit, or a timer racing
+    the forget transaction itself, is not fenced. Cancel or fence matching timers
     in the forget path and test a forget racing a due timer. File:
     `BrowserCoordinator.kt`.
 

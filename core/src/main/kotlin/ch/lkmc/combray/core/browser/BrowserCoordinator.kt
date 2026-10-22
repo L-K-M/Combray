@@ -275,6 +275,8 @@ class BrowserCoordinator(
     private suspend fun navigateTab(tab: TabEntity, url: String) {
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
+            // Going somewhere else is the user leaving a forgotten page: what loads next is recorded.
+            if (tab.pageForgotten) dao.updateTab(tab.copy(pageForgotten = false))
             val request = nextRequest++
             engine.navigate(view.nativeTab, request, url)
             awaitCommit(view)
@@ -586,8 +588,18 @@ class BrowserCoordinator(
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
         val now = clock.now()
 
+        // Before this event: a view that has shown nothing yet is loading its tab's page again.
+        val firstCommit = view.currentDocument == null
+
         database.withTransaction {
             val current = tab.currentVisitId?.let { dao.visit(it) }
+            // A page of a forgotten site stays open without a visit. Loading it again in a new
+            // renderer (restore, eviction, a crash), reloading it or moving within it records
+            // nothing (and requestCapture sends nothing); another page committing in the tab ends that.
+            val forgotten = tab.pageForgotten && when (event.kind) {
+                HistoryKind.DOCUMENT_COMMITTED -> firstCommit || event.url == tab.url
+                HistoryKind.SAME_DOCUMENT, HistoryKind.LIST_UPDATED -> true
+            }
             // A single-page app can replace the article without replacing its document.
             if (reader?.tabId == view.tabId && (event.kind == HistoryKind.DOCUMENT_COMMITTED || event.url != tab.url)) {
                 reader = null
@@ -599,12 +611,12 @@ class BrowserCoordinator(
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
-                    committedVisit(view, tab, current, event, now)
+                    if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
                     view.awaitingCommit = false
                     scheduleCapture(view, event.document, captureTiming.debounceMs)
-                    sameDocumentVisit(view, tab, current, event, now)
+                    if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
                     if (it.url == event.url) it else it.copy(url = event.url, host = HostNames.of(event.url)).also { updated -> dao.updateVisit(updated) }
@@ -617,9 +629,11 @@ class BrowserCoordinator(
             // left. A hidden tab loading pages is not in use: closing unused tabs still closes it.
             val focused = dao.session()?.activeTabId == tab.id
             val lastFocusedAt = if (focused) now else tab.lastFocusedAt
-            // A forgotten page stays open without a visit: a history-list update leaves its label.
-            val title = if (visit == null && event.kind == HistoryKind.LIST_UPDATED) tab.title else visit?.title
-            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt))
+            // A forgotten page stays open without a visit, under its last title.
+            val title = if (visit == null && (forgotten || event.kind == HistoryKind.LIST_UPDATED)) tab.title else visit?.title
+            dao.updateTab(
+                tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
+            )
         }
     }
 
@@ -769,7 +783,8 @@ class BrowserCoordinator(
         // Servo's error pages carry the failed address but are not that page's content.
         if (document in view.errorDocuments) return
         val generation = view.generation ?: return
-        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
+        // A forgotten page is not sent again while its tab shows it ([TabEntity.pageForgotten]).
+        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && !it.pageForgotten } ?: return
         val url = tab.url ?: return
         val policy = sink.wantsCapture(url) ?: return
         val id = nextRequest++
@@ -788,7 +803,8 @@ class BrowserCoordinator(
         val content = event.content ?: return
         if (content.title in SERVO_ERROR_TITLES) return
         val view = view(event.view)?.takeIf { it.currentDocument == pending.document && pending.document !in it.errorDocuments } ?: return
-        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url } ?: return
+        // A capture that was on its way when the site was forgotten is dropped with it.
+        val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url && !it.pageForgotten } ?: return
         capture?.captured(
             CapturedPage(
                 tabId = tab.id,
@@ -1089,7 +1105,7 @@ class BrowserCoordinator(
      */
     private suspend fun detachCurrentPage(tab: TabEntity, recoveryUrl: String?) {
         tab.currentVisitId?.let { dao.visit(it) }?.let { retireVisit(tab, it, clock.now()) }
-        dao.updateTab(tab.copy(url = recoveryUrl, title = null, currentVisitId = null))
+        dao.updateTab(tab.copy(url = recoveryUrl, title = null, currentVisitId = null, pageForgotten = false))
     }
 
     private suspend fun maintain() {

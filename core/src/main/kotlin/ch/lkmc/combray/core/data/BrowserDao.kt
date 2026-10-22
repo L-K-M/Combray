@@ -79,11 +79,12 @@ interface BrowserDao {
 
     /**
      * An open tab may still be showing a page of a forgotten site. Keep that address on the
-     * tab, but stop pointing at the visit so the page cannot return to Recent later.
+     * tab, but stop pointing at the visit and mark the page forgotten, so neither leaving it nor
+     * loading it again brings it back to Recent ([TabEntity.pageForgotten]).
      */
     @Query(
         """
-        UPDATE tabs SET currentVisitId = NULL
+        UPDATE tabs SET currentVisitId = NULL, pageForgotten = 1
         WHERE currentVisitId IN (
             SELECT id FROM visits
             WHERE host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
