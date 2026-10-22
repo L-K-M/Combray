@@ -11,6 +11,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.EngineStatus
+import ch.lkmc.combray.core.browser.Retention
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.KeystoreSecretStore
@@ -106,7 +107,16 @@ class AppGraph(application: Application) {
         scheduler = WorkManagerScheduler(application),
     )
     val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
-    val browser = BrowserCoordinator(database, engine, scope, capture = integrations.hister, unusedTabs = { settings.unusedTabs.value })
+    /** One retention policy for maintenance and the Settings label, so the two cannot diverge. */
+    val retention = Retention()
+    val browser = BrowserCoordinator(
+        database,
+        engine,
+        scope,
+        retention = retention,
+        capture = integrations.hister,
+        unusedTabs = { settings.unusedTabs.value },
+    )
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
     val notices = ThirdPartyNotices(application.assets)
 

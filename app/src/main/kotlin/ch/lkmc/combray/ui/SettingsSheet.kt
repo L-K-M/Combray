@@ -90,6 +90,8 @@ private val ACTIONABLE_STATES = setOf(JobState.FAILED, JobState.RETRY_WAIT, JobS
 fun SettingsSheet(
     integrations: Integrations,
     settings: BrowserSettings,
+    /** The retention policy maintenance runs with; the label states what it actually does. */
+    retention: Retention,
     /** Applies a changed tab choice now rather than at the next maintenance. */
     onUnusedTabsChanged: () -> Unit,
     notices: ThirdPartyNotices,
@@ -157,7 +159,7 @@ fun SettingsSheet(
                 remove = integrations.hister::remove,
             ) { service -> HisterCaptureSettings(integrations, service) }
             SectionTitle(R.string.settings_history_title)
-            val days = Retention().closedHistoryDays
+            val days = retention.closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
             UnusedTabsSetting(settings, days, onUnusedTabsChanged)
             SectionTitle(R.string.settings_about_title)

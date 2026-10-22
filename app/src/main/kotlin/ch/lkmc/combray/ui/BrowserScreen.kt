@@ -277,6 +277,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         Sheet.SETTINGS -> SettingsSheet(
             integrations = graph.integrations,
             settings = graph.settings,
+            retention = graph.retention,
             onUnusedTabsChanged = browser::runMaintenance,
             notices = graph.notices,
             onDismiss = dismiss,
