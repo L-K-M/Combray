@@ -205,9 +205,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "<section style='height:500vh;background:#8a5a2b'>MIDDLE</section>"
                 "<section style='height:100vh;background:#3b4f8a'>BOTTOM</section>",
                 "<style>html,body{margin:0;scroll-behavior:smooth}</style>"
-                "<script>addEventListener('scroll',()=>{const s=document.scrollingElement;"
-                "document.title=s.scrollTop<=1?'SCROLL-TOP':"
-                "s.scrollTop+innerHeight>=s.scrollHeight-1?'SCROLL-BOTTOM':'SCROLL-MIDDLE'});</script>"))
+                "<script>const update=()=>{const s=document.scrollingElement;"
+                "const edge=s.scrollTop<=1?'SCROLL-TOP':"
+                "s.scrollTop+innerHeight>=s.scrollHeight-1?'SCROLL-BOTTOM':'SCROLL-MIDDLE';"
+                "const title=edge+':'+s.scrollTop+','+innerHeight+','+s.scrollHeight;"
+                "if(document.title!==title)document.title=title;};"
+                "addEventListener('scroll',update);</script>"))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
         if path == "/empty.html":

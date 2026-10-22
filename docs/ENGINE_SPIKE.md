@@ -281,12 +281,15 @@ The coordinator and engine reject stale view generations, replaced documents and
 
 Servo 0.6.0 has no scroll-position delegate callback. The page button follows single-finger vertical movement beyond Android's touch slop; reader view follows its native list position. Page scroll limits are not observed, so a gesture at an edge or on an unscrollable element can still offer a button. Scripted page scrolling does not change its direction. A bottom jump reaches the currently loaded content, not future infinite-scroll entries. Page overrides of DOM scrolling APIs can prevent the jump; embedder scripts retain the interruption limitation in section 11.
 
+On the API-30 emulator, a programmatic root jump painted the bottom while `scrollTop` still reported its old value: 408, with `innerHeight` 535 and `scrollHeight` 3749 (`scroll-final`). Polling did not refresh it. The first title-based endpoint checks therefore timed out; endpoint verification now uses the viewport-high colored sections on screen. Touch scrolling still updates the fixture's position title. This is an observed Servo DOM-metrics limitation, not proof that all scroll-dependent site scripts work.
+
 Verification on Linux x86_64, JDK 21, Rust 1.97.1 and NDK r29:
 
 - Passed: `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` with `ANDROID_HOME=/home/paseo/android-sdk`. Gesture checks cover reversal, jitter, horizontal movement, taps and cancellation; coordinator checks cover same-address reloads, generation mismatch, hidden/closed/crashed tabs and reader view.
 - Passed: `cargo fmt --check` and `cargo test --lib` in `native/` (20 host checks).
 - Passed: `scripts/build-native.sh` for `x86_64-linux-android` (release), using `ANDROID_SDK_ROOT=/home/paseo/android-sdk`, the host compiler wrappers described in [BUILDING.md](BUILDING.md#host-prerequisites), and `CARGO_BUILD_JOBS=4`. The local worktree reused the prepared Servo tree through a symlink; its source paths caused a fresh Servo rebuild. The updated native library was then packaged by Gradle.
-- Device checks: pending.
+- Passed on `emulator-5560` (Android 11/API 30, x86_64, software emulation/SwiftShader): `ReaderScrollTest`, `AccessibilityTest#scrollButtonsHaveLabeledUncrowdedTouchTargets`, and the existing `BrowsingTest#pagesCanObserveWhatIsOnScreen` baseline (`build/device-checks/scroll-baseline/`).
+- Painted page endpoint and reload checks: pending. `scroll-painted` was interrupted by another APK install at 04:46 UTC (`installPackageLI` killed the instrumented app): one check crashed, one did not run. This is not an engine-crash result.
 
 Reproduce the focused device checks after `scripts/build-native.sh` and `./gradlew assembleDebug assembleDebugAndroidTest`:
 
@@ -294,4 +297,4 @@ Reproduce the focused device checks after `scripts/build-native.sh` and `./gradl
 scripts/check-app.sh emulator-5560 ch.lkmc.combray.ScrollTest ch.lkmc.combray.ReaderScrollTest 'ch.lkmc.combray.AccessibilityTest#scrollButtonsHaveLabeledUncrowdedTouchTargets'
 ```
 
-`ScrollTest` uses only `testing/fixtures/server.py`'s long page: real touch input selects each action, then title and screen-color checks establish that Servo reached the corresponding root-page edge. It also checks same-address reload reset. `ReaderScrollTest` checks both ends and left placement in an RTL article. The accessibility check verifies labels and uncrowded 48dp targets at large font scale. Physical-device and live-site checks are not run.
+`ScrollTest` uses only `testing/fixtures/server.py`'s long page: real touch input selects each action, then screen-color checks establish that Servo painted the corresponding viewport-high endpoint section. Position titles corroborate touch scrolling, not programmatic jumps. It also checks same-address reload reset. `ReaderScrollTest` checks both ends and left placement in an RTL article. The accessibility check verifies labels and uncrowded 48dp targets at large font scale. Physical-device and live-site checks are not run.

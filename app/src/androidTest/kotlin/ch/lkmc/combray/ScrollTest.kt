@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
+import kotlinx.coroutines.TimeoutCancellationException
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -26,7 +27,7 @@ class ScrollTest {
         device.awaitEngine()
         device.closeAllTabs()
         device.browser.openUrl(URL, Placement.CURRENT_TAB)
-        device.awaitState { it.activeTab?.title == "SCROLL-TOP" && it.activeTab?.loading == false }
+        awaitTitle("SCROLL-TOP")
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
     }
 
@@ -34,19 +35,20 @@ class ScrollTest {
     fun verticalSwipesOfferTheMatchingEdgeAndTheButtonJumpsThere() {
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
         swipe(0.65f, 0.35f)
-        device.awaitState { it.activeTab?.title == "SCROLL-MIDDLE" }
+        awaitTitle("SCROLL-MIDDLE")
         val down = compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
         val bounds = down.fetchSemanticsNode().boundsInRoot
         assertTrue("button is not at the bottom left", bounds.center.x < compose.activity.resources.displayMetrics.widthPixels / 2)
         down.performClick()
-        device.awaitState { it.activeTab?.title == "SCROLL-BOTTOM" }
+        // Servo paints programmatic root jumps without refreshing window.scrollY.
+        // Viewport-high endpoint sections verify what is actually on screen instead.
         assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
 
+        val previousTitle = device.browser.browserState.value.activeTab!!.title
         swipe(0.35f, 0.65f)
-        device.awaitState { it.activeTab?.title == "SCROLL-MIDDLE" }
+        device.awaitState { it.activeTab?.title != previousTitle && it.activeTab?.title?.substringBefore(':') == "SCROLL-MIDDLE" }
         compose.onNodeWithContentDescription(TOP).assertIsDisplayed().performClick()
-        device.awaitState { it.activeTab?.title == "SCROLL-TOP" }
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
         compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
     }
@@ -54,11 +56,11 @@ class ScrollTest {
     @Test
     fun reloadingTheSameAddressClearsTheOldButton() {
         swipe(0.65f, 0.35f)
-        device.awaitState { it.activeTab?.title == "SCROLL-MIDDLE" }
+        awaitTitle("SCROLL-MIDDLE")
         compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
         val oldPage = device.browser.browserState.value.activeTab!!.page
         device.browser.reload()
-        device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.title == "SCROLL-TOP" }
+        device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.title?.substringBefore(':') == "SCROLL-TOP" }
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
     }
 
@@ -78,6 +80,15 @@ class ScrollTest {
             send(MotionEvent.ACTION_MOVE, start + (end - start) * step / SWIPE_STEPS)
         }
         send(MotionEvent.ACTION_UP, end)
+    }
+
+    private fun awaitTitle(expected: String) {
+        try {
+            device.awaitState { it.activeTab?.title?.substringBefore(':') == expected && it.activeTab?.loading == false }
+        } catch (timeout: TimeoutCancellationException) {
+            val state = device.browser.browserState.value
+            throw AssertionError("Expected $expected; engine=${state.engine}, title=${state.activeTab?.title}, loading=${state.activeTab?.loading}", timeout)
+        }
     }
 
     private companion object {
