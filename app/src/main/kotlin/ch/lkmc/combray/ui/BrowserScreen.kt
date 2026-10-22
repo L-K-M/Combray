@@ -292,7 +292,16 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
         )
         // A null address cannot happen through More (the row needs a page); composing nothing
         // is still safe if it ever does: Back simply closes the selected sheet.
-        Sheet.PAGE_INFO -> pageInfoUrl?.let { PageInfoDialog(url = it, onDismiss = dismiss) }
+        Sheet.PAGE_INFO -> pageInfoUrl?.let { url ->
+            PageInfoDialog(
+                url = url,
+                onDismiss = {
+                    // Cleared, so the next opening always captures the address it is asked about.
+                    pageInfoUrl = null
+                    dismiss()
+                },
+            )
+        }
     }
 
     // Shown over any sheet: the page is blocked until it gets an answer.
