@@ -1231,10 +1231,11 @@ impl Engine {
         self.show_page_control(view, ControlHandle::LeavePage { request, deadline });
     }
 
-    /// Unanswered leave-page questions let their page go: its script thread cannot wait longer.
+    /// An unanswered leave-page question keeps its page: its script thread cannot wait longer,
+    /// and staying lets it go on as well as leaving does.
     fn expire_leave_page_questions(&mut self) {
         let now = Instant::now();
-        self.hide_controls(|pending| {
+        self.keep_pages_of_questions(|pending| {
             pending
                 .control
                 .deadline()
@@ -1242,14 +1243,35 @@ impl Engine {
         });
     }
 
-    /// Only the tab on screen can ask the user: a question from a tab that left it lets its page
-    /// go.
+    /// Only the tab on screen can ask the user: a question from a tab that left it keeps its page.
     fn release_leave_page_questions_off_screen(&mut self) {
         let active = self.active;
-        self.hide_controls(|pending| {
-            matches!(pending.control, ControlHandle::LeavePage { .. })
-                && Some(pending.view.tab) != active
-        });
+        self.keep_pages_of_questions(|pending| Some(pending.view.tab) != active);
+    }
+
+    /// Answers the matching leave-page questions with Stay and tells the app they are gone. A
+    /// navigation the user did not confirm can be repeated; unsaved text cannot be brought back.
+    fn keep_pages_of_questions(&mut self, matches: impl Fn(&PendingControl) -> bool) {
+        let settled: Vec<u64> = self
+            .page_controls
+            .iter()
+            .filter(|(_, pending)| {
+                matches!(pending.control, ControlHandle::LeavePage { .. }) && matches(pending)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in settled {
+            let Some(pending) = self.page_controls.remove(&id) else {
+                continue;
+            };
+            if let ControlHandle::LeavePage { request, .. } = pending.control {
+                request.deny();
+            }
+            self.emit(EngineEvent::ControlHidden {
+                view: pending.view,
+                control: id,
+            });
+        }
     }
 
     /// Drops the matching controls (Servo answers them with its defaults) and tells the app.
@@ -1278,6 +1300,12 @@ impl Engine {
         let response = match controls::parse_response(response) {
             Ok(response) => response,
             Err(error) => {
+                if let ControlHandle::LeavePage { request, .. } = pending.control {
+                    // Stay: a navigation can be repeated, unsaved text cannot be brought back.
+                    request.deny();
+                    self.error(format!("{error}; leave-page question {id} kept its page"));
+                    return;
+                }
                 self.error(format!(
                     "{error}; control {id} answered with Servo's default"
                 ));
@@ -1303,10 +1331,12 @@ impl Engine {
                 match controls::leave_page_answer(&response) {
                     Some(LeavePageAnswer::Leave) => request.allow(),
                     Some(LeavePageAnswer::Stay) => request.deny(),
-                    // Dropped: the page is left.
-                    None => self.error(format!(
-                        "response {response:?} does not fit leave-page question {id}; the page was left"
-                    )),
+                    None => {
+                        request.deny();
+                        self.error(format!(
+                            "response {response:?} does not fit leave-page question {id}; the page was kept"
+                        ));
+                    },
                 }
                 return;
             },

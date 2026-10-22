@@ -34,7 +34,7 @@ pub const MAX_FILE_EXTENSIONS: usize = 50;
 pub const MAX_URL_CHARS: usize = 32_768;
 /// How long a leave-page question waits for an answer (proposed default). The asking page's
 /// script thread, and every same-site tab sharing it, is blocked until then, so an unanswered
-/// question lets the page go, as Servo does when nobody is asked.
+/// question is answered Stay: the page is kept and its script goes on.
 pub const LEAVE_PAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]

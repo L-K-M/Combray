@@ -196,18 +196,20 @@ class PageControlsTest {
         assertFalse("the page asked although nobody touched it", asked)
     }
 
-    /** The page's scripts wait for the answer, so an unanswered question lets the page go. */
+    /** The page's scripts wait for the answer; unanswered, it is answered Stay and the page kept. */
     @Test
-    fun anUnansweredQuestionLetsThePageGo() {
+    fun anUnansweredQuestionKeepsThePage() {
         openControls("leave", "LEAVE")
+        // From before the tap, so a slow dialog does not shorten the wait measured.
+        val asked = System.currentTimeMillis()
         tapPage()
         assertEquals(PageControlContent.LeavePage, awaitControl().content)
-        val shown = System.currentTimeMillis()
 
-        device.awaitPage(Fixtures.solid(Device.GREEN))
-        assertNull(device.browser.browserState.value.pageControl)
-        val waited = System.currentTimeMillis() - shown
-        assertTrue("left after $waited ms", waited >= UNANSWERED_MIN_MS)
+        device.awaitState { it.pageControl == null }
+        val waited = System.currentTimeMillis() - asked
+        assertTrue("hidden after $waited ms", waited >= UNANSWERED_MIN_MS)
+        Thread.sleep(SETTLE_MS)
+        assertEquals(LEAVE_PAGE, device.browser.browserState.value.activeTab?.url)
     }
 
     private fun awaitText(text: String) =
