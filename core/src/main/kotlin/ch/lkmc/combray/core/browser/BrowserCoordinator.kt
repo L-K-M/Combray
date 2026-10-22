@@ -99,7 +99,7 @@ class BrowserCoordinator(
 
     /** The open tabs in Recent order when the current run of bar swipes began, and its last swipe. */
     private var swipeRun: List<String> = emptyList()
-    private var swipeRunAt = Long.MIN_VALUE
+    private var swipeRunAt: Long? = null
 
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
@@ -316,7 +316,7 @@ class BrowserCoordinator(
     fun stepTab(step: TabStep) = submit {
         val now = clock.now()
         val open = dao.openTabs()
-        if (now - swipeRunAt > SWIPE_RUN_MS) swipeRun = open.map { it.id }
+        if (swipeRunAt.let { it == null || now - it > SWIPE_RUN_MS }) swipeRun = open.map { it.id }
         swipeRunAt = now
         // Tabs closed during the run drop out; tabs opened during it wait for the next run.
         val order = swipeRun.filter { id -> open.any { it.id == id } }
