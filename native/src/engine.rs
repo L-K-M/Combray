@@ -35,7 +35,7 @@ use servo::{
 };
 use url::Url;
 
-use crate::activation::TapRecognizer;
+use crate::activation::{OpeningTap, TapRecognizer};
 use crate::capture::{self, ScriptOutcome};
 use crate::commands::{
     CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
@@ -183,6 +183,8 @@ struct Tab {
     /// Whether a document other than the initial `about:blank` committed: a window opened just
     /// for an app link has none and closes (`navigation::refusal`).
     shown: Shown,
+    /// The tap that let the opener open this window, for the window's first navigation.
+    opening_tap: OpeningTap,
 }
 
 impl Tab {
@@ -593,7 +595,7 @@ impl Engine {
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
 
-        let webview_id = self.insert_tab(view, webview, None);
+        let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
@@ -601,7 +603,13 @@ impl Engine {
     }
 
     /// Registers a new view, hidden until selected so two shown views never overlap.
-    fn insert_tab(&mut self, view: ViewKey, webview: WebView, opener: Option<ViewKey>) -> String {
+    fn insert_tab(
+        &mut self,
+        view: ViewKey,
+        webview: WebView,
+        opener: Option<ViewKey>,
+        opening_tap: OpeningTap,
+    ) -> String {
         webview.hide();
         let webview_id = format!("{:?}", webview.id());
         self.tabs.insert(
@@ -618,6 +626,7 @@ impl Engine {
                 last_paint_report: None,
                 opener,
                 shown: Shown::InitialBlank,
+                opening_tap,
             },
         );
         webview_id
@@ -634,11 +643,11 @@ impl Engine {
         // And only right after the user's own tap or key press there: Servo 0.6.0 opens every
         // window.open() and target=_blank window, with or without one, and each new tab could
         // open the next. One tap opens at most one window.
-        if !self.take_activation(&[opener.tab]) {
+        let Some(tapped_at) = self.take_activation(&[opener.tab]) else {
             info!("window without the user's tap in the visible tab: refused");
             self.emit(EngineEvent::PopupBlocked { view: opener });
             return;
-        }
+        };
         let Some(runtime) = &self.runtime else {
             return;
         };
@@ -655,7 +664,8 @@ impl Engine {
             .hidpi_scale_factor(Scale::new(self.config.density))
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
-        self.insert_tab(view, webview, Some(opener));
+        // The window's first navigation is still the tap's: a target=_blank app link opens its app.
+        self.insert_tab(view, webview, Some(opener), OpeningTap::at(tapped_at));
         self.emit(EngineEvent::TabOpened { view, opener });
     }
 
@@ -816,17 +826,23 @@ impl Engine {
         self.last_activation = self.active.map(|tab| (tab, Instant::now()));
     }
 
-    /// Whether the user tapped or pressed a key moments ago in one of `tabs`, and one of them is
-    /// still the visible tab. Using it up means one tap hands at most one link to another app.
-    fn take_activation(&mut self, tabs: &[i64]) -> bool {
-        let recent = self.active.is_some_and(|shown| tabs.contains(&shown))
-            && self.last_activation.is_some_and(|(activated, at)| {
-                tabs.contains(&activated) && at.elapsed() <= USER_ACTIVATION_WINDOW
-            });
-        if recent {
-            self.last_activation = None;
+    /// When the user tapped or pressed a key, if that was moments ago in one of `tabs` and one of
+    /// them is still the visible tab. Using it up means one tap hands at most one link to another
+    /// app.
+    fn take_activation(&mut self, tabs: &[i64]) -> Option<Instant> {
+        let (activated, at) = self.last_activation?;
+        let recent = self.shows_one_of(tabs)
+            && tabs.contains(&activated)
+            && at.elapsed() <= USER_ACTIVATION_WINDOW;
+        if !recent {
+            return None;
         }
-        recent
+        self.last_activation = None;
+        Some(at)
+    }
+
+    fn shows_one_of(&self, tabs: &[i64]) -> bool {
+        self.active.is_some_and(|shown| tabs.contains(&shown))
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
@@ -1200,6 +1216,10 @@ impl Engine {
     /// refused. A window a page opened just for such a link closes instead of staying blank.
     fn page_navigation(&mut self, view: ViewKey, request: NavigationRequest) {
         let url = request.url.clone();
+        // Used up by the window's first navigation, whatever it is.
+        let opened_by_tap = self
+            .live_tab(view)
+            .is_some_and(|tab| tab.opening_tap.take(Instant::now(), USER_ACTIVATION_WINDOW));
         match navigation::classify(url.scheme()) {
             PageNavigation::Allow => {
                 request.allow();
@@ -1229,8 +1249,12 @@ impl Engine {
                 };
                 let refusal = navigation::refusal(view, tab.opener, tab.shown);
                 // Before closing the window, which may be the visible tab: the user tapped in
-                // the opener, or in the window itself.
-                let tapped = bounded && self.take_activation(&[refusal.owner.tab, view.tab]);
+                // the opener, or in the window itself. The tap that opened the window is spent
+                // in the opener, so the window's first navigation brings it along.
+                let owners = [refusal.owner.tab, view.tab];
+                let tapped = bounded
+                    && ((opened_by_tap && self.shows_one_of(&owners))
+                        || self.take_activation(&owners).is_some());
                 if refusal.close {
                     // Reported like a page closing its own window, and before the link: the
                     // application drops the tab and shows the opener again, which then takes it.

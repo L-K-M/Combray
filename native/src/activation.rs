@@ -1,5 +1,6 @@
 //! Which touches are taps: only a tap (or a key press) is the user's activation that lets a page
-//! hand a link to another app. The end of a scroll, a fling or a pinch is not.
+//! hand a link to another app. The end of a scroll, a fling or a pinch is not. A window a tap
+//! opened keeps that tap for its first navigation ([`OpeningTap`]).
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -85,12 +86,60 @@ impl TapRecognizer {
     }
 }
 
+/// The tap that let a page open a window (`target=_blank`, `window.open`). Opening the window
+/// used it up in the opener, yet the window's first navigation is still that tap's: a
+/// `target=_blank` app link would otherwise be refused. Later navigations are the window's own.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OpeningTap(Option<Instant>);
+
+impl OpeningTap {
+    /// For a window the tap at `at` opened. [`OpeningTap::default`] is for any other tab.
+    pub fn at(at: Instant) -> Self {
+        Self(Some(at))
+    }
+
+    /// For the window's navigation at `now`: true for its first only, within `window` of the tap.
+    pub fn take(&mut self, now: Instant, window: Duration) -> bool {
+        self.0
+            .take()
+            .is_some_and(|at| now.saturating_duration_since(at) <= window)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Two device pixels per density-independent pixel: the slop is 20 px.
     const SCALE: f32 = 2.0;
+
+    /// How long a tap counts, as the engine's `USER_ACTIVATION_WINDOW`.
+    const WINDOW: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn a_window_s_first_navigation_may_use_the_tap_that_opened_it() {
+        let tapped = Instant::now();
+        let mut tap = OpeningTap::at(tapped);
+        assert!(tap.take(tapped + Duration::from_secs(1), WINDOW));
+        // Once: the page in the window cannot use it again.
+        assert!(!tap.take(tapped + Duration::from_secs(2), WINDOW));
+    }
+
+    #[test]
+    fn the_tap_that_opened_a_window_expires_like_any_tap() {
+        let tapped = Instant::now();
+        let mut tap = OpeningTap::at(tapped);
+        assert!(tap.take(tapped + WINDOW, WINDOW));
+
+        let mut late = OpeningTap::at(tapped);
+        assert!(!late.take(tapped + WINDOW + Duration::from_millis(1), WINDOW));
+    }
+
+    #[test]
+    fn a_tab_no_tap_opened_has_no_tap_to_use() {
+        let mut tap = OpeningTap::default();
+        assert!(!tap.take(Instant::now(), WINDOW));
+    }
 
     #[test]
     fn a_touch_that_stays_put_is_a_tap() {
