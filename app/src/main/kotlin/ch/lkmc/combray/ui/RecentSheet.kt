@@ -78,7 +78,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.BrowserCoordinator
+import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.matching
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.policy.HostNames
 import java.text.DateFormat
@@ -320,6 +322,7 @@ private fun EmptyRecent(empty: RecentEmpty, onShowAll: () -> Unit) {
  * the same row key comes back and must not restore as already dismissed. The row is drawn on
  * the sheet's colour so the close background shows only beside it while it moves.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeToCloseTab(onClose: () -> Unit, row: @Composable () -> Unit) {
     val threshold = SwipeToDismissBoxDefaults.positionalThreshold

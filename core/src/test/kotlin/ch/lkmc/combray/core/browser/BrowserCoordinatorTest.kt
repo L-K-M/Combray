@@ -106,6 +106,7 @@ class BrowserCoordinatorTest {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
+        idle() // the view's creation events are queued from inside the work queue
         reads.set(0)
 
         engine.emit(EngineEvent.Painted(engine.view(1), frames = 3))
