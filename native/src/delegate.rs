@@ -11,11 +11,12 @@ use std::rc::Rc;
 use servo::{
     AuthenticationRequest, CreateNewWebViewRequest, DeviceIntRect, EmbedderControl,
     EmbedderControlId, InputMethodType, LoadStatus, NavigationRequest, PermissionRequest,
-    PipelineId, ScreenGeometry, WebView, WebViewDelegate,
+    PipelineId, ScreenGeometry, WebResourceLoad, WebResourceResponse, WebView, WebViewDelegate,
 };
 use url::Url;
 
 use crate::events::{LoadPhase, ViewKey};
+use crate::media;
 
 pub enum DelegateEvent {
     /// Kept whole: the engine builds the new view after the spin, outside this callback.
@@ -78,6 +79,10 @@ pub enum DelegateEvent {
     DefaultHandled {
         view: ViewKey,
         request: &'static str,
+    },
+    /// The delegate cancelled an audio, video or text-track load (see `media`).
+    MediaBlocked {
+        view: ViewKey,
     },
     Crashed {
         view: ViewKey,
@@ -258,5 +263,17 @@ impl WebViewDelegate for TabDelegate {
             view: self.view,
             control: control_id,
         });
+    }
+
+    fn load_web_resource(&self, _webview: WebView, load: WebResourceLoad) {
+        // Servo's fetch waits for this answer, so it is given here; answering only sends on the
+        // fetch's channel and does not re-enter the WebView. Dropping `load` lets it continue.
+        if !media::is_unplayable_media(load.request().destination.as_str()) {
+            return;
+        }
+        // A cancelled load is a network error: the element fires `error` without any download.
+        let url = load.request().url.clone();
+        load.intercept(WebResourceResponse::new(url)).cancel();
+        self.push(DelegateEvent::MediaBlocked { view: self.view });
     }
 }

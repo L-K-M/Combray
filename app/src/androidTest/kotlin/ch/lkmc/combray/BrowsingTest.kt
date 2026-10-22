@@ -6,6 +6,8 @@ import android.net.Uri
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,7 +28,8 @@ import org.junit.runner.RunWith
 /**
  * M1 gate on the real engine (docs/IMPLEMENTATION_PLAN.md section 9): navigation, same-URL tabs,
  * close and reopen, failed loads, ten-tab switching, rotation, page-opened windows, external
- * links and query encoding. Screens are checked with real screenshots of solid-color pages.
+ * links, query encoding and cancelled media. Screens are checked with real screenshots of
+ * solid-color pages.
  */
 @RunWith(AndroidJUnit4::class)
 class BrowsingTest {
@@ -283,6 +286,21 @@ class BrowsingTest {
         assertTrue("outerWidth >= innerWidth: $title", outerWidth >= innerWidth)
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun mediaIsCancelledBeforeDownloadingAndThePageIsTold() {
+        Fixtures.reset()
+        device.browser.openUrl(Fixtures.MEDIA, Placement.CURRENT_TAB)
+        compose.waitUntilAtLeastOneExists(hasText(MEDIA_NOTICE), Device.LOAD_TIMEOUT_MS)
+
+        // Both elements fired `error`, and they no longer hold back the page's load event.
+        device.awaitState { it.activeTab?.title == MEDIA_FAILED }
+        device.awaitPage(Fixtures.MEDIA)
+        val media = Fixtures.state().getJSONObject("media")
+        assertEquals("media requests that reached the server", 0, media.getInt("requests"))
+        assertEquals("media responses sent in full", 0, media.getInt("completed"))
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -316,5 +334,7 @@ class BrowsingTest {
         const val ANIMATE_OK = "WA:ok"
         const val SCREEN_PREFIX = "SCREEN:"
         const val SCREEN_WIDTHS = 4
+        const val MEDIA_FAILED = "MEDIA:errors:2"
+        const val MEDIA_NOTICE = "This page’s audio or video can’t play in Combray."
     }
 }

@@ -249,6 +249,12 @@ pub enum EngineEvent {
         view: ViewKey,
         reason: String,
     },
+    /// The engine cancelled the document's audio, video or text-track loads: Combray cannot play
+    /// media. Reported once per document, for the tab's committed document.
+    MediaBlocked {
+        view: ViewKey,
+        document: u64,
+    },
     /// A page control waits for an answer; `control` names it in `respondToControl`.
     ControlShown {
         view: ViewKey,
@@ -401,6 +407,10 @@ impl EngineEvent {
             EngineEvent::Crashed { view, reason } => {
                 with_view(view, json!({ "type": "crashed", "reason": reason }))
             },
+            EngineEvent::MediaBlocked { view, document } => with_view(
+                view,
+                json!({ "type": "media_blocked", "document": document }),
+            ),
             EngineEvent::ControlShown {
                 view,
                 control,
@@ -498,6 +508,29 @@ mod tests {
                 "message": "Leave?",
                 "tab": 3,
                 "generation": 9,
+            })
+        );
+    }
+
+    #[test]
+    fn media_blocked_names_its_document() {
+        let event = EngineEvent::MediaBlocked {
+            view: ViewKey {
+                tab: 2,
+                generation: 5,
+            },
+            document: 4294967331,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "media_blocked",
+                "document": 4294967331u64,
+                "tab": 2,
+                "generation": 5,
             })
         );
     }

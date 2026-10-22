@@ -57,6 +57,9 @@ object Fixtures {
     /** A page the server answers only after several seconds. */
     const val SLOW = "$BASE/slow.html"
 
+    /** A `<video>` and an `<audio>` element; titled `MEDIA:errors:2` once both failed. */
+    const val MEDIA = "$BASE/media.html"
+
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
 

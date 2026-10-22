@@ -22,6 +22,10 @@ Pages
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
+  /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
+                             error events
+  /media/slow.bin            512 KiB served over about eight seconds; /_admin/state "media" counts the
+                             requests that arrived and the responses sent in full
   (the three control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -31,7 +35,7 @@ service's own host is never captured for Hister)
 Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
   POST /hister/api/add (needs Origin: hister://), GET /hister/search?q=&format=json; token "fixture-token"
 Admin (for the checks)
-  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log
+  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log, media
   POST /_admin/reset                    forget everything
   POST /_admin/fault?service=karakeep|hister&kind=<fault>&count=<n>
        faults: none, store_then_hang, too_many_requests, server_error, unauthorized
@@ -57,6 +61,10 @@ COOKIE_NAME = "combray"
 COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60
 MAX_BODY_BYTES = 2 * 1024 * 1024
 FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unauthorized"}
+# Slow enough that a media download in progress is still running when a check looks.
+MEDIA_CHUNK_BYTES = 16 * 1024
+MEDIA_CHUNKS = 32
+MEDIA_CHUNK_DELAY_SECONDS = 0.25
 
 lock = threading.Lock()
 def fresh_lists():
@@ -64,7 +72,12 @@ def fresh_lists():
     return {"reading": []}
 
 
-state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": []}
+def fresh_media():
+    """Requests for /media/slow.bin that arrived, and responses sent to the end."""
+    return {"requests": 0, "completed": 0}
+
+
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 
@@ -162,6 +175,14 @@ SCREEN_PAGE = page(
     "SCREEN",
     "<script>document.title = ['SCREEN', screen.width, screen.availWidth, outerWidth, innerWidth]"
     ".join(':');</script>",
+)
+
+# Combray cannot play media: both elements must fail, without downloading, so their handlers run.
+MEDIA_PAGE = page(
+    "MEDIA",
+    "<video src='/media/slow.bin?element=video' autoplay muted onerror='failed()'></video>"
+    "<audio src='/media/slow.bin?element=audio' autoplay onerror='failed()'></audio>",
+    "<script>var errors = 0; function failed() { errors++; document.title = 'MEDIA:errors:' + errors; }</script>",
 )
 
 CONTROL_PAGES = {
@@ -271,6 +292,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("SLOW", "<p>SLOW</p>"))
         if path == "/screen.html":
             return self.send(200, SCREEN_PAGE)
+        if path == "/media.html":
+            return self.send(200, MEDIA_PAGE)
+        if path == "/media/slow.bin":
+            return self.send_slow_media()
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
@@ -347,6 +372,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state["hister"].clear()
                 state["log"].clear()
                 once_served.clear()
+                state["media"] = fresh_media()
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})
@@ -411,6 +437,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if fault == "store_then_hang":
             time.sleep(HANG_SECONDS)
         return self.send_json(status, existing)
+
+    def send_slow_media(self):
+        with lock:
+            state["media"]["requests"] += 1
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(MEDIA_CHUNK_BYTES * MEDIA_CHUNKS))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            for _ in range(MEDIA_CHUNKS):
+                self.wfile.write(bytes(MEDIA_CHUNK_BYTES))
+                self.wfile.flush()
+                time.sleep(MEDIA_CHUNK_DELAY_SECONDS)
+        except ConnectionError:
+            # The client stopped the download.
+            self.close_connection = True
+            return
+        with lock:
+            state["media"]["completed"] += 1
 
     def hister_authorized(self):
         token = self.headers.get("X-Access-Token") or self.headers.get("Authorization", "").removeprefix("Bearer ")

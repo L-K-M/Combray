@@ -61,6 +61,9 @@ sealed interface Notice {
 
     /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
     data class OpenedInBackground(val tabId: String) : Notice
+
+    /** The shown page has audio or video, which Combray cannot play; its media was not downloaded. */
+    data object MediaUnsupported : Notice
 }
 
 /** Whether Undo of a tab close moves focus to the reopened tab. */

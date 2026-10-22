@@ -213,6 +213,11 @@ All notable changes to this project are documented here. The format follows
 - A typed address, a reload, or a new or restored tab showed no loading line
   until the server answered, so a slow server looked like a tap that did
   nothing. The line now shows from the request.
+- Pages with `<video>` or `<audio>` downloaded every media file in full,
+  although Combray cannot play audio or video (its Servo build has no media
+  backend), and by Servo's source never finished loading. Combray now
+  cancels these loads before they start, so the page's error handling and
+  fallback run, and says once per page that its audio or video can't play.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.

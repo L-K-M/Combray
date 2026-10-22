@@ -1355,6 +1355,34 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun mediaBlockedOnTheShownPageGivesANotice() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.MediaBlocked(engine.view(1), 10)); idle()
+        assertEquals(Notice.MediaUnsupported, state().notice)
+    }
+
+    @Test
+    fun mediaBlockedInAHiddenTabOrAReplacedPageGivesNoNotice() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        // The first tab is hidden behind the second.
+        engine.emit(EngineEvent.MediaBlocked(engine.view(1), 10)); idle()
+        assertNull(state().notice)
+
+        // The report arrives after the shown tab moved on to another page.
+        commit(2, 21, "https://c.test/", index = 1, length = 2)
+        engine.emit(EngineEvent.MediaBlocked(engine.view(2), 20)); idle()
+        assertNull(state().notice)
+    }
+
+    @Test
     fun aPageClosingItsOwnTabClosesItLikeAUserClose() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()

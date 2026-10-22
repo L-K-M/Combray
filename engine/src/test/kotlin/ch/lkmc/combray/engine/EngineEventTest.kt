@@ -55,6 +55,13 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesMediaBlockedWithItsDocument() {
+        val event = EngineEvent.parse("""{"type":"media_blocked","document":4294967331,"tab":2,"generation":5,"schema":1}""")
+
+        assertEquals(EngineEvent.MediaBlocked(ViewRef(2, 5), 4294967331L), event)
+    }
+
+    @Test
     fun keepsUnknownTypesAsOther() {
         assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"type":"default_handled","request":"x"}"""))
     }
