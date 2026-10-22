@@ -146,7 +146,7 @@ class BrowserCoordinatorTest {
 
     @Test
     fun aForegroundSignalBeforeReadinessUnthrottlesTheCreatedView() {
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
         assertTrue(engine.created.isEmpty())
@@ -166,21 +166,21 @@ class BrowserCoordinatorTest {
         val native = engine.created.single().first
         assertEquals(native to true, engine.throttling.last())
 
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         idle()
         assertEquals(native to false, engine.throttling.last())
-        browser.setAppForeground(false)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
         idle()
         assertEquals(native to true, engine.throttling.last())
 
         // Duplicate signals emit no extra commands.
         val size = engine.throttling.size
-        browser.setAppForeground(false)
-        browser.setAppForeground(false)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
         idle()
         assertEquals(size, engine.throttling.size)
-        browser.setAppForeground(true)
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         idle()
         assertEquals(size + 1, engine.throttling.size)
 
@@ -192,7 +192,7 @@ class BrowserCoordinatorTest {
 
     @Test
     fun backgroundedSwitchingNeverUnthrottlesUntilResume() {
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
         ready()
@@ -202,7 +202,7 @@ class BrowserCoordinatorTest {
         idle()
         val bNative = engine.created.last().first
 
-        browser.setAppForeground(false)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
         idle()
         engine.throttling.clear()
 
@@ -218,7 +218,7 @@ class BrowserCoordinatorTest {
         assertTrue(engine.throttling.all { it.second })
         assertTrue(engine.closed.isEmpty())
 
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         idle()
         // Resuming unthrottles only the shown renderer; hidden views stay throttled.
         assertEquals(listOf(cNative to false), engine.throttling.filter { !it.second })
@@ -228,7 +228,7 @@ class BrowserCoordinatorTest {
 
     @Test
     fun visibilityChangesOnTheInternalHomeEmitNoEngineCommands() {
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
         ready()
@@ -242,11 +242,11 @@ class BrowserCoordinatorTest {
         val closed = engine.closed.toList()
         val selected = engine.selected.toList()
 
-        browser.setAppForeground(false)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
         idle()
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         idle()
-        browser.setAppForeground(false)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
         idle()
 
         assertTrue(engine.throttling.isEmpty())
@@ -272,11 +272,28 @@ class BrowserCoordinatorTest {
         assertEquals(tabId, state().activeTab!!.id)
         assertEquals("https://a.test/", state().activeTab!!.url)
 
-        browser.setAppForeground(true)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
         idle()
         assertEquals(listOf(1L to true, 1L to false), engine.throttling)
         assertEquals(tabId, state().activeTab!!.id)
         assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun aPageClosingItselfInTheBackgroundLeavesItsSuccessorThrottled() {
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        browser.setAppVisibility(AppVisibility.BACKGROUND); idle()
+
+        // The page closes its own window: its successor is shown, but nobody sees it yet (#88).
+        engine.emit(EngineEvent.TabClosed(engine.view(2))); idle()
+        assertEquals(1L, engine.selected.last())
+        assertEquals(1L to true, engine.throttling.last { it.first == 1L })
+
+        browser.setAppVisibility(AppVisibility.FOREGROUND); idle()
+        assertEquals(1L to false, engine.throttling.last())
     }
 
     @Test

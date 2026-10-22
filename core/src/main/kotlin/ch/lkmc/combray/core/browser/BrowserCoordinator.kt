@@ -78,7 +78,7 @@ class BrowserCoordinator(
     private var engineReady = false
 
     /** Process visibility; conservatively backgrounded until Android reports onStart. */
-    private var appForeground = false
+    private var visibility = AppVisibility.BACKGROUND
     private val pendingCaptures = HashMap<Long, PendingCapture>()
     private val pendingArticles = HashMap<Long, PendingArticle>()
 
@@ -345,13 +345,14 @@ class BrowserCoordinator(
 
     /**
      * Process visibility from the lifecycle owner: while backgrounded the shown renderer is
-     * throttled too (hidden ones already are). Purely a hint; no logical state changes.
-     * Servo's hint slows timers/animations, not explicit document evaluation.
+     * throttled too (hidden ones already are). Purely a hint; no logical state changes. Servo
+     * 0.6.0 drops a throttle sent before a view's first document and lifts it for each new
+     * document, so a backgrounded page is not reliably slowed yet (#88 investigates).
      */
-    fun setAppForeground(foreground: Boolean) = submit {
-        if (foreground == appForeground) return@submit
-        appForeground = foreground
-        selectedNative?.let { engine.setThrottled(it, !foreground) }
+    fun setAppVisibility(visibility: AppVisibility) = submit {
+        if (visibility == this.visibility) return@submit
+        this.visibility = visibility
+        selectedNative?.let { engine.setThrottled(it, visibility == AppVisibility.BACKGROUND) }
     }
 
     /**
@@ -886,7 +887,7 @@ class BrowserCoordinator(
         }
         if (selectedNative != view.nativeTab) {
             selectedNative?.let { engine.setThrottled(it, true) }
-            engine.setThrottled(view.nativeTab, !appForeground)
+            engine.setThrottled(view.nativeTab, visibility == AppVisibility.BACKGROUND)
             engine.selectView(view.nativeTab)
             selectedNative = view.nativeTab
         }

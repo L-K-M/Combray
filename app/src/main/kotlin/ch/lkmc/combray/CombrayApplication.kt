@@ -8,6 +8,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import ch.lkmc.combray.core.browser.AppVisibility
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.EngineStatus
@@ -62,9 +63,9 @@ class CombrayApplication : Application(), OutboxHost {
     private fun persistProfileWhileRunning() {
         val process = ProcessLifecycleOwner.get()
         process.lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = graph.browser.setAppForeground(true)
+            override fun onStart(owner: LifecycleOwner) = graph.browser.setAppVisibility(AppVisibility.FOREGROUND)
             override fun onStop(owner: LifecycleOwner) {
-                graph.browser.setAppForeground(false)
+                graph.browser.setAppVisibility(AppVisibility.BACKGROUND)
                 graph.browser.persistProfile()
             }
         })

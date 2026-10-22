@@ -131,7 +131,6 @@ data class BrowserState(
     val notice: Notice? = null,
 )
 
-/** One row of the unified Recent list. */
 /**
  * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
  * must reach every retained visit, or a match older than the newest rows would be missed.
@@ -147,6 +146,9 @@ enum class HistoryDepth {
     }
 }
 
+/** Whether the app is on screen. While it is not, the shown page is asked to slow down too. */
+enum class AppVisibility { FOREGROUND, BACKGROUND }
+
 /** History rows Recent shows at most, newest first; open tabs are never cut. */
 const val RECENT_HISTORY_LIMIT = 500
 
@@ -160,6 +162,7 @@ fun List<RecentItem>.matching(query: String?, historyLimit: Int = RECENT_HISTORY
     return filter { it.matches(query) && (it !is RecentItem.Visit || history++ < historyLimit) }
 }
 
+/** One row of the unified Recent list. */
 sealed interface RecentItem {
     val key: String
     val url: String?
