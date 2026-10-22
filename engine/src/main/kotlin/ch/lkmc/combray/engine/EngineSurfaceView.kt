@@ -124,6 +124,8 @@ class EngineSurfaceView(
     private fun forwardKey(event: KeyEvent, action: Int): Boolean {
         // Back stays with Android so the Activity can handle navigation and dismissal.
         if (event.keyCode == KeyEvent.KEYCODE_BACK || !engineRunning()) return false
+        // So do keys the engine would drop: volume, media and call keys must still work.
+        if (!EngineKeys.handles(event.keyCode, event.unicodeChar)) return false
         NativeEngine.key(action, event.keyCode, event.unicodeChar)
         return true
     }

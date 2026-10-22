@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -62,6 +63,8 @@ class HisterTest {
 
         val result = runBlocking { hister.search(phrase) } as HisterSearch.Results
         assertEquals(listOf(url), result.hits.map { it.url })
+        // The fixture sends an empty page_key, like the pinned server: no "More results".
+        assertNull(result.nextPage)
     }
 
     @Test

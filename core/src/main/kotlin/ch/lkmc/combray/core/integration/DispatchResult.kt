@@ -35,6 +35,7 @@ sealed interface ConnectionCheck {
 /** Shared HTTP status handling for the service clients. */
 internal object HttpStatus {
     private const val MAX_RETRY_AFTER_MS = 6L * 60 * 60 * 1000
+    private const val MILLIS_PER_SECOND = 1000L
 
     fun classifyFailure(outcome: HttpOutcome.Response): DispatchResult = when (val status = outcome.status) {
         401, 403 -> DispatchResult.AuthRequired("http_$status")
@@ -44,10 +45,15 @@ internal object HttpStatus {
         else -> DispatchResult.Rejected("http_$status")
     }
 
-    /** `Retry-After` in seconds, bounded; HTTP-date values are ignored (the backoff applies). */
+    /**
+     * `Retry-After` in seconds, bounded; HTTP-date values are ignored (the backoff applies).
+     * The seconds are clamped before multiplying: a huge value would overflow `Long`, and
+     * the wrapped result would replace the server's "wait" with the ordinary backoff or an
+     * arbitrary delay.
+     */
     fun retryAfterMs(headers: Map<String, String>): Long? {
         val value = headers.entries.firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }?.value ?: return null
         val seconds = value.trim().toLongOrNull() ?: return null
-        return (seconds * 1000).coerceIn(0, MAX_RETRY_AFTER_MS)
+        return seconds.coerceIn(0, MAX_RETRY_AFTER_MS / MILLIS_PER_SECOND) * MILLIS_PER_SECOND
     }
 }

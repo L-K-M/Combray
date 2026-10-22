@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.integration
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -42,6 +43,26 @@ class HisterClientTest {
         assertEquals("<b>servo</b> engine", results.hits[1].excerpt)
         assertEquals("next-1", results.nextPage)
         assertEquals(3, results.total)
+    }
+
+    @Test
+    fun anEmptyPageKeyMeansThereIsNoNextPage() {
+        // The pinned server always sends page_key and leaves it empty on the last page.
+        server.searchBody = """{"documents":[{"url":"https://a.example/"}],"history":[],"total":1,"page_key":""}"""
+        val results = client.search(server.root, FakeHister.TOKEN, "servo") as HisterSearch.Results
+        assertNull(results.nextPage)
+    }
+
+    @Test
+    fun aPageKeyIsKeptAndSentIntactWithTheNextRequest() {
+        // Hister's real keys are JSON arrays of score and document id.
+        val pageKey = """["0.53","docid"]"""
+        server.searchBody = """{"documents":[{"url":"https://a.example/"}],"history":[],"total":2,"page_key":"[\"0.53\",\"docid\"]"}"""
+        val first = client.search(server.root, FakeHister.TOKEN, "servo") as HisterSearch.Results
+        assertEquals(pageKey, first.nextPage)
+
+        client.search(server.root, FakeHister.TOKEN, "servo", first.nextPage)
+        assertEquals("q=servo&format=json&page_key=%5B%220.53%22%2C%22docid%22%5D", server.searchQueries.last())
     }
 
     @Test

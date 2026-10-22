@@ -109,7 +109,9 @@ class HisterClient(private val transport: HttpTransport) {
         // Promoted history first, then documents not already listed: neither array is dropped.
         // Each address appears once, even when the server repeats it within one array.
         val hits = (history + documents).distinctBy { it.url }
-        return HisterSearch.Results(hits, (root["total"] as? JsonPrimitive)?.content?.toIntOrNull(), (root["page_key"] as? JsonPrimitive)?.takeIf { it.isString }?.content)
+        // Hister always sends page_key and leaves it empty on the last page; the server ignores
+        // an empty one, so asking with it would return the first page again.
+        return HisterSearch.Results(hits, (root["total"] as? JsonPrimitive)?.content?.toIntOrNull(), (root["page_key"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() })
     }
 
     private fun hit(element: JsonElement, fromHistory: Boolean): HisterHit? {

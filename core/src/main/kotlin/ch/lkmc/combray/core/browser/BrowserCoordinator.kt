@@ -265,15 +265,14 @@ class BrowserCoordinator(
 
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
-        val forgotten = database.withTransaction {
-            val visit = dao.visit(visitId) ?: return@withTransaction null
+        database.withTransaction {
+            val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
-            if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction null
+            if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
-            visit
+            capture?.forgetUrl(visit.url)
         }
-        forgotten?.let { capture?.forgetUrl(it.url) }
     }
 
     /**
@@ -285,8 +284,8 @@ class BrowserCoordinator(
         database.withTransaction {
             dao.deleteVisitsForHost(site, if (includeSubdomains) ".$site" else null)
             dao.deleteEmptyClosedTabs()
+            capture?.forgetHost(site, includeSubdomains)
         }
-        capture?.forgetHost(site, includeSubdomains)
     }
 
     /**
@@ -422,11 +421,13 @@ class BrowserCoordinator(
 
         database.withTransaction {
             val current = tab.currentVisitId?.let { dao.visit(it) }
+            // A single-page app can replace the article without replacing its document.
+            if (reader?.tabId == view.tabId && (event.kind == HistoryKind.DOCUMENT_COMMITTED || event.url != tab.url)) {
+                reader = null
+            }
             val visit = when (event.kind) {
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.currentDocument = event.document
-                    // Reader view shows the page it was opened on, never the next one.
-                    if (reader?.tabId == view.tabId) reader = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
@@ -441,7 +442,13 @@ class BrowserCoordinator(
                 }
             }
             visit?.let { view.documentVisits[event.document] = it.id }
-            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = visit?.title))
+            if (current != null && visit?.id != current.id) retireVisit(tab, current, now)
+
+            // Navigating in the focused tab is using it, so its Recent row stays above the pages it
+            // left. A hidden tab loading pages is not in use: closing unused tabs still closes it.
+            val focused = dao.session()?.activeTabId == tab.id
+            val lastFocusedAt = if (focused) now else tab.lastFocusedAt
+            dao.updateTab(tab.copy(currentVisitId = visit?.id, url = event.url, title = visit?.title, lastFocusedAt = lastFocusedAt))
         }
     }
 
@@ -600,8 +607,13 @@ class BrowserCoordinator(
         if (event.capture != readerRequest || reader != ReaderState.Loading(pending.tabId)) return
         // Status only: the detail can quote page script errors.
         Log.i(LOG_TAG, "reader article: ${event.status}")
+        // The saved view identity is not enough: a replaced or crashed renderer can still
+        // deliver that callback, and it must not cover the page now on screen.
+        val live = view(pending.view)?.takeIf {
+            !it.crashed && it.currentDocument == pending.document && pending.document !in it.errorDocuments
+        }
         val content = event.content?.takeIf {
-            event.status == CaptureStatus.CAPTURED && event.view == pending.view && event.document == pending.document
+            live != null && event.status == CaptureStatus.CAPTURED && event.view == pending.view && event.document == pending.document
         }
         val article = content?.let { ArticleJson.parse(it.text, it.truncated) }
         reader = article?.let { ReaderState.Ready(pending.tabId, pending.url, it) } ?: ReaderState.Unavailable(pending.tabId)
@@ -686,10 +698,7 @@ class BrowserCoordinator(
         val now = clock.now()
         database.withTransaction {
             val focused = dao.session()?.activeTabId == tab.id
-            val lastUse = if (focused) now - 1 else tab.lastFocusedAt
-            tab.currentVisitId?.let { id ->
-                dao.visit(id)?.let { dao.updateVisit(it.copy(lastSeenAt = maxOf(it.lastSeenAt, lastUse))) }
-            }
+            tab.currentVisitId?.let { dao.visit(it) }?.let { retireVisit(tab, it, now) }
             dao.updateTab(tab.copy(state = TabState.CLOSED, closedAt = now))
             if (focused) {
                 val successor = dao.openTabs().firstOrNull()
@@ -699,6 +708,17 @@ class BrowserCoordinator(
         }
         liveByTab[tab.id]?.let { closeView(it) }
         if (otherAppTab == tab.id) otherAppTab = null
+    }
+
+    /**
+     * [tab] leaves [visit] by navigating elsewhere or closing. The page takes its place in history,
+     * and its retention counts, from the tab's last use: the focused tab was in use until now, like
+     * a tab focus leaves ([activate]). The max keeps a later time, such as a hidden tab's own commit.
+     */
+    private suspend fun retireVisit(tab: TabEntity, visit: VisitEntity, now: Long) {
+        val focused = dao.session()?.activeTabId == tab.id
+        val lastUse = if (focused) now - 1 else tab.lastFocusedAt
+        dao.updateVisit(visit.copy(lastSeenAt = maxOf(visit.lastSeenAt, lastUse)))
     }
 
     private fun closeView(view: LiveView) {
@@ -831,6 +851,11 @@ class BrowserCoordinator(
         if (reader != null && reader?.tabId != tab?.id) reader = null
         val view = tab?.let { liveByTab[it.id] }
         val openCount = dao.openTabs().size
+        // Without a committed document (restored, released or not yet loaded) the stored visit
+        // still says whether the tab's page was an engine error page, whose title is not the page's.
+        val loadFailed = view?.currentDocument?.let { it in view.errorDocuments }
+            ?: tab?.currentVisitId?.let { dao.visit(it)?.failed }
+            ?: false
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -843,7 +868,7 @@ class BrowserCoordinator(
                         canGoForward = view?.takeIf { !it.crashed }?.canGoForward ?: false,
                         crashed = view?.crashed ?: false,
                         hasView = view != null,
-                        loadFailed = view?.currentDocument?.let { it in view.errorDocuments } ?: false,
+                        loadFailed = loadFailed,
                         openedByOtherApp = active.id == otherAppTab,
                     )
                 },

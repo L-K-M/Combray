@@ -43,7 +43,7 @@ The family's build, install, release, and CI tooling is in place ahead of the ap
 | Debug APK → `dist/` | `scripts/build.sh --debug` |
 | Build, install, launch on a device | `scripts/build.sh --install` (or `scripts/install.sh [--release]`) |
 | Resolved config, no build | `scripts/build.sh --check` |
-| CI gate | `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease` |
+| CI gate | `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease`, plus the schema, `cargo fmt` and page-script checks in `.github/workflows/ci.yml` |
 | Cut a release | `scripts/release.sh X.Y.Z [--push]` |
 
 `scripts/release.sh` is a stub over the shared `lkm-release` engine (`gradle-android` kind, https://github.com/L-K-M/release-tool): it bumps `versionName`, increments `versionCode`, updates the README version marker, commits, and tags `vX.Y.Z`; `--push` pushes branch and tag, and the tag runs `.github/workflows/release.yml` (tag/versionName gate, tests and lint, release APK, GitHub Release).

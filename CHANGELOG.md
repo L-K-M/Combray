@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Long-press the address chip to copy the exact current tab URL to the
+  clipboard, with an accessible "Copy address" action; a tap still opens the
+  editor and a blank tab offers no copy action. Copied addresses are marked
+  sensitive so Android 13+ redacts the system clipboard preview.
+- Share sends the page's title with its address (as the share's subject and
+  first line); sharing a link from the page's own menu keeps the address only.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.
@@ -77,12 +83,39 @@ All notable changes to this project are documented here. The format follows
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- CI also compiles the device checks, fails when Room's exported schemas
+  are not committed or a committed version's schema changed, and checks
+  the engine bridge's Rust formatting and page-script syntax.
 
 ### Fixed
 
+- A `Retry-After` header too large to convert to milliseconds now waits
+  the six-hour ceiling. The conversion overflowed, so the server's delay
+  was replaced by the ordinary backoff or an arbitrary one. A value beyond
+  64-bit range is still ignored.
+- Tapping Save with Karakeep not set up now says so even when the address
+  looks like it carries a login token, instead of claiming the address was
+  withheld for safety.
+- Credential-bearing parameter names are matched after a single percent-decode,
+  so an encoded `token`/`access_token`/`auth` name in a query or fragment is
+  still sensitive and is never sent to Karakeep or captured for Hister.
+  Double-encoded names and ordinary parameters are unchanged, and escapes the
+  decoder rejects remain conservative (sensitive).
+- The Recent tab-count badge caps its visible label at "99+" so large
+  counts fit the badge; TalkBack still hears the exact number.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
+- Hister search no longer shows a "More results" button that does nothing
+  after the last page, or under "No results in Hister." While more results
+  load, the button waits under a progress bar; if they fail, the reason
+  shows above the results.
+- Changing Karakeep's server address cancelled every unsent save without
+  a word. Those saves now wait in Settings, which offers to send them to
+  the current address or discard them.
+- In Recent, the current tab stays above the pages you browsed in it and
+  under the right day. A page you navigate away from is kept for seven days
+  from when you left it, not from when it loaded.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
@@ -93,19 +126,45 @@ All notable changes to this project are documented here. The format follows
   or `document.getAnimations()` so other pages are unaffected. If the
   polyfill cannot install, every later call reports that cause instead of
   "not a function".
+- Reader view drops an article whose renderer has crashed or been
+  replaced. The late callback no longer covers the page now on screen.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
   Each patch is now checked to have landed.
+- Settings' "Capture is paused" notice for the 20 MB budget cleared only
+  when another page was captured. It now follows the queue: it shows
+  while the waiting text leaves no room for a full-size capture, or for
+  the largest one refused so far, and clears once sent, expired or
+  discarded captures make room.
+- Abandoned Hister captures expire after seven days, including when a
+  running queue crosses the age limit. Expiry clears page bodies and
+  rejects late results without invalidating a live request's lease.
 - A page's prompt dialog labels its text field, so TalkBack names it.
 - A device check whose fixture server could not start (another run holds
   the port) now stops and says so instead of testing against no page and
   reporting timeouts.
+- `scripts/check-app.sh` skipped the reader view checks: its default run
+  now covers every device-check class, and `--list` prints them.
+- Forgetting a page or site commits local deletion and queued Hister
+  cancellation together, so a crash cannot leave forgotten text queued.
+- Volume, media, headset, camera and call keys work again after you touch
+  the page: the page kept every key, including the ones it cannot use.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.
+- Reader view leaves a page whose address changes, including single-page
+  and hash-routed navigation, and drops its delayed article result.
 - Local APK names now use the packaged architecture instead of always saying
   arm64. Staging rejects missing native libraries, wrong ELF architectures and
   stale APKs that do not match Gradle output metadata. Failed copying or
   hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
+- A Karakeep save with a chosen list stays pending if its acknowledgment
+  has no usable bookmark ID. Duplicate-safe retries recover the ID and
+  finish list membership, or stop with a visible failure.
+- A `data:` page could make the address chip, Recent and its dialog titles
+  name another site by putting `://` and that site's name in its own
+  address. Pages without a host now show a fixed label chosen by their
+  scheme alone ("data:", "file:", "about:blank"), never text from their
+  address, and their dialogs say "This page says".

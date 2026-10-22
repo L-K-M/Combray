@@ -3,17 +3,28 @@ package ch.lkmc.combray.core.integration
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import ch.lkmc.combray.core.browser.BrowserCoordinator
+import ch.lkmc.combray.core.browser.CaptureSink
 import ch.lkmc.combray.core.browser.CapturedPage
+import ch.lkmc.combray.core.browser.FakeEngine
+import ch.lkmc.combray.core.browser.Notice
+import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.ExclusionEntity
+import ch.lkmc.combray.core.data.JobKind
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
+import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.HistoryKind
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -46,17 +57,19 @@ class HisterIntegrationTest {
         database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java).build()
         // Background kicks never run here: only drain() sends, so queue states are deterministic.
         scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher())
-        integrations = Integrations(
-            database = database,
-            secrets = secrets,
-            transport = UrlConnectionTransport(timeoutMs = 2_000),
-            clock = { now },
-            newId = { "job${ids++}" },
-            scope = scope,
-            scheduler = {},
-        )
+        integrations = newIntegrations()
         runBlocking { assertEquals(Configured.Saved, hister.configure(server.root, FakeHister.TOKEN)) }
     }
+
+    private fun newIntegrations() = Integrations(
+        database = database,
+        secrets = secrets,
+        transport = UrlConnectionTransport(timeoutMs = 2_000),
+        clock = { now },
+        newId = { "job${ids++}" },
+        scope = scope,
+        scheduler = {},
+    )
 
     @After
     fun tearDown() {
@@ -136,6 +149,97 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun forgettingAVisitRollsBackBothHistoryAndCancellationWhenInvalidationFails() = runBlocking {
+        enable()
+        val url = "https://a.example/article"
+        capture(url, "forgotten text")
+        var fail = true
+        val sink = object : CaptureSink by hister {
+            override suspend fun forgetUrl(url: String) {
+                hister.forgetUrl(url)
+                check(!fail) { "invalidation failed" }
+            }
+        }
+        val browser = browserWithHistory(sink, listOf(url, "https://kept.example/"))
+        val visit = browser.recent().first().filterIsInstance<RecentItem.Visit>().single()
+
+        browser.forgetVisit(visit.visitId)
+        browser.awaitIdle()
+
+        assertNotNull(database.browser().visit(visit.visitId))
+        assertTrue(browser.browserState.value.notice is Notice.Problem)
+        assertEquals(JobState.PENDING, jobs().single().state)
+        assertTrue(jobs().single().payload.contains("forgotten text"))
+
+        fail = false
+        browser.forgetVisit(visit.visitId)
+        browser.awaitIdle()
+        assertNull(database.browser().visit(visit.visitId))
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+        assertEquals("", jobs().single().payload)
+
+        // New integration objects have no in-memory forget tombstones.
+        newIntegrations().dispatcher.drain()
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
+    fun forgettingASiteRollsBackBothStoresAndARetrySurvivesRestart() = runBlocking {
+        enable()
+        val site = "https://a.example/article"
+        val subdomain = "https://www.a.example/other"
+        val lookalike = "https://nota.example/"
+        listOf(site, subdomain, lookalike).forEach { capture(it, "text for $it") }
+        var fail = true
+        val sink = object : CaptureSink by hister {
+            override suspend fun forgetHost(host: String, includeSubdomains: Boolean) {
+                hister.forgetHost(host, includeSubdomains)
+                check(!fail) { "invalidation failed" }
+            }
+        }
+        val browser = browserWithHistory(sink, listOf(site, subdomain, lookalike, "https://a.example/open"))
+        val visits = browser.recent().first().filterIsInstance<RecentItem.Visit>()
+
+        browser.forgetSite("a.example", includeSubdomains = true)
+        browser.awaitIdle()
+
+        assertTrue(visits.all { database.browser().visit(it.visitId) != null })
+        assertTrue(browser.browserState.value.notice is Notice.Problem)
+        assertTrue(jobs().all { it.state == JobState.PENDING && it.payload.isNotEmpty() })
+
+        fail = false
+        browser.forgetSite("a.example", includeSubdomains = true)
+        browser.awaitIdle()
+        assertEquals(listOf(lookalike), browser.recent().first().filterIsInstance<RecentItem.Visit>().map { it.url })
+        assertEquals("https://a.example/open", browser.browserState.value.activeTab?.url)
+        assertEquals(listOf(JobState.CANCELLED, JobState.CANCELLED, JobState.PENDING), jobs().map { it.state })
+        assertTrue(jobs().take(2).all { it.payload.isEmpty() })
+
+        newIntegrations().dispatcher.drain()
+        assertEquals(1, server.added.size)
+        assertTrue(server.added.single().contains(lookalike))
+    }
+
+    private suspend fun browserWithHistory(sink: CaptureSink, urls: List<String>): BrowserCoordinator {
+        val engine = FakeEngine()
+        // Share the harness Job for cleanup; awaitIdle fences coordinator work on Default.
+        val browser = BrowserCoordinator(
+            database, engine, CoroutineScope(scope.coroutineContext + Dispatchers.Default),
+            clock = { now }, capture = sink,
+        )
+        browser.start()
+        engine.emit(EngineEvent.EngineReady(720, 1280))
+        browser.awaitIdle()
+        browser.openUrl(urls.first(), Placement.CURRENT_TAB)
+        browser.awaitIdle()
+        urls.forEachIndexed { index, url ->
+            engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, index.toLong(), url, index, index + 1))
+            browser.awaitIdle()
+        }
+        return browser
+    }
+
+    @Test
     fun pausingCaptureHoldsUnsentCaptures() {
         enable()
         capture("https://a.example/", "text")
@@ -153,7 +257,7 @@ class HisterIntegrationTest {
         enable()
         capture("https://a.example/", "old text")
         runBlocking { hister.setCaptureEnabled(false) }
-        now += 8L * 24 * 60 * 60 * 1000
+        now += 8 * DAY_MS
         drain()
         assertEquals(JobState.EXPIRED, jobs().single().state)
         enable()
@@ -162,12 +266,104 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun anAbandonedCaptureExpiresInsteadOfBeingSentAfterRestart() = runBlocking {
+        enable()
+        capture("https://a.example/", "old text")
+        val abandoned = integrations.outbox.claim("dead-worker", LEASE_MS)!!
+
+        now += 8 * DAY_MS
+        drain()
+
+        val expired = jobs().single()
+        assertEquals(JobState.EXPIRED, expired.state)
+        assertEquals("", expired.payload)
+        assertEquals(0, expired.payloadBytes)
+        assertNull(expired.leaseOwner)
+        assertNull(expired.leaseUntil)
+        assertTrue(server.added.isEmpty())
+        assertFalse(integrations.outbox.finish(abandoned, DispatchResult.Done(null)))
+    }
+
+    @Test
+    fun aCaptureThatAgesDuringADrainIsNeverDispatched() = runBlocking {
+        enable()
+        capture("https://a.example/first", "fresh text")
+        capture("https://a.example/second", "text about to expire")
+        val second = jobs().last()
+        database.integrations().updateJob(second.copy(createdAt = now - 7 * DAY_MS + 1_000))
+
+        val dispatcher = OutboxDispatcher(
+            integrations.outbox,
+            mapOf(JobKind.HISTER_ADD to JobHandler { job ->
+                // The first request takes the second body past its retention deadline.
+                now += 2_000
+                hister.dispatch(job)
+            }),
+            onDone = { _, _ -> },
+            scheduler = {},
+        )
+        dispatcher.drain()
+
+        assertEquals(JobState.EXPIRED, jobs().last().state)
+        assertEquals("", jobs().last().payload)
+        assertEquals(1, server.added.size)
+        assertTrue(server.added.single().contains("fresh text"))
+    }
+
+    @Test
+    fun expiryDoesNotInvalidateAnOldCaptureWithALiveLease() = runBlocking {
+        enable()
+        capture("https://a.example/", "in flight")
+        now += 7 * DAY_MS - 1_000
+        val live = integrations.outbox.claim("live-worker", LEASE_MS)!!
+        now += 2_000
+
+        integrations.outbox.prune()
+
+        assertEquals(JobState.RUNNING, jobs().single().state)
+        assertTrue(jobs().single().payload.isNotEmpty())
+        assertNull(integrations.outbox.claim("other-worker", LEASE_MS))
+        assertTrue(integrations.outbox.finish(live, DispatchResult.Done(null)))
+    }
+
+    @Test
     fun theContentBudgetPausesCapture() {
         enable()
         val text = "x".repeat(256 * 1024)
         repeat(90) { capture("https://a.example/$it", "$text$it") }
-        assertTrue(hister.captureBudgetReached.value)
+        assertTrue(runBlocking { hister.captureBudgetReached.first() })
         assertTrue(runBlocking { database.integrations().queuedCaptureBytes() } <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+    }
+
+    @Test
+    fun theBudgetWarningShowsWhileALargerThanEstimatedCaptureIsRefused() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        repeat(78) { capture("https://a.example/$it", "$text$it") }
+        // Leave room for the estimated largest payload, but less than this page needs: quotes
+        // in a JSON document's text are escaped, so its payload outgrows the 256 KiB text cap.
+        val fillerUrl = "https://a.example/filler"
+        val framing = Json.encodeToString(CapturePayload.serializer(), CapturePayload(fillerUrl, "Title", "")).length
+        val room = HisterIntegration.MAX_QUEUED_CAPTURE_BYTES - runBlocking { database.integrations().queuedCaptureBytes() }
+        capture(fillerUrl, "y".repeat((room - 310_000 - framing).toInt()))
+        assertFalse(runBlocking { hister.captureBudgetReached.first() })
+        val data = "\"name\": \"value\", ".repeat(256 * 1024 / 17 + 1).take(256 * 1024)
+        capture("https://a.example/data.json", data)
+
+        assertTrue(jobs().none { it.payload.contains("data.json") })
+        assertTrue(runBlocking { hister.captureBudgetReached.first() })
+    }
+
+    @Test
+    fun theBudgetWarningClearsWhenTheQueueDrainsWithoutNewCaptures() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        repeat(90) { capture("https://a.example/$it", "$text$it") }
+        assertTrue(runBlocking { hister.captureBudgetReached.first() })
+        // The queue drains by expiring: no new capture arrives to clear the flag.
+        now += 8 * DAY_MS
+        drain()
+        assertFalse(runBlocking { hister.captureBudgetReached.first() })
     }
 
     @Test
@@ -188,6 +384,26 @@ class HisterIntegrationTest {
         assertNull(wants("https://kagi.com/search?q=private+question"))
         assertNotNull(wants("https://notkagi.com/"))
         assertNull(wants("http://127.0.0.1:1/other"))
+    }
+
+    @Test
+    fun encodedCredentialNamesAreNeverCaptured() {
+        enable()
+        // A generation from an ordinary URL exercises URL policy, not staleness.
+        val generation = wants("https://a.example/")
+        assertNotNull(generation)
+        for (url in listOf(
+            "https://a.example/?%74oken=abc",
+            "https://a.example/?access%5Ftoken=abc",
+            "https://a.example/#%73essionid=abc",
+            "https://a.example/#access%5Ftoken=abc",
+        )) {
+            assertNull(wants(url))
+            capture(url, "page text", generation)
+        }
+        drain()
+        assertTrue(jobs().isEmpty())
+        assertTrue(server.added.isEmpty())
     }
 
     @Test
@@ -289,5 +505,10 @@ class HisterIntegrationTest {
         override fun delete(name: SecretName) {
             values.remove(name)
         }
+    }
+
+    private companion object {
+        const val DAY_MS = 24L * 60 * 60 * 1000
+        const val LEASE_MS = 60_000L
     }
 }

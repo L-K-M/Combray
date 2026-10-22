@@ -65,6 +65,8 @@ A New tab starts an internal Combray home/address state. Never feed an internal 
 
 Requested by the owner (20 October 2026). More › Reader view shows the focused page's main article as plain text in the app's own type: headings, paragraphs, lists, quotes, preformatted text and captions, with links; images, media and forms are left out. Mozilla's Readability.js (0.6.0, vendored in `native/src/vendor/`) finds the article inside the page's own document, through the same document-guarded path as Hister capture, and `native/src/reader.js` turns it into bounded JSON (512 KiB; a longer article says the rest is on the page). The page can shape that output, so it is parsed defensively and shown only as text; a link leaves reader view and opens in the tab through the address policy. Back or More › Leave reader view returns to the page; moving to another tab leaves it. A page without an article, or one replaced before the article arrived, says so.
 
+Reader invalidation checks (21 October 2026): an accepted address change leaves ready or pending Reader view, including same-document and hash-routed changes; a late article cannot reopen it. Same-address history updates keep the reading snapshot, and hidden-tab navigation does not dismiss it. These state rules pass in `core`'s `ReaderTest`; Reader links still explicitly leave Reader before navigation. A fragment cannot be assumed to be only an anchor, since sites also route articles through fragments.
+
 ### Recent: one mental model, several record types
 
 Recent combines open tabs and recent page visits. Show a small Open/active marker on live or restorable tab rows, title and domain, and relative time for history. Closing an open tab is a distinct accessible action. Its row remains findable as history. A closed row offers reopening; it never appears to have a live renderer. Old page visits within a still-open tab remain recoverable even after that tab navigates elsewhere.
@@ -81,7 +83,7 @@ Closing releases the native view and marks the logical tab closed while preservi
 
 A link from another app opens a new tab. Until the user moves to another tab, Back on that tab's first page closes it without an Undo notice and returns to the other app; its page stays in Recent as history only (owner request, 20 October 2026).
 
-The proposed seven-day retention applies to closed/local history, measured from the visit's last interaction. A closed tab's page takes its place in history by when the tab was last used (in focus, or its last navigation), not by when it closed, so closing does not move it to the top of Recent (owner request, 20 October 2026); a tab unused for longer than the retention period therefore leaves history at the next maintenance. An open tab's current recoverable record does not expire because of age, unless the owner turns on "Close tabs unused for 7 days" in Settings: then open tabs not in focus for the retention period close at maintenance, and their pages expire with them. The focused tab never closes this way, and a tab counts as used until focus leaves it. Purge on startup and periodic maintenance, rather than relying on an exact-time Android alarm. Explain that local expiry does not remove Hister content or Karakeep bookmarks.
+The proposed seven-day retention applies to closed/local history, measured from the visit's last interaction. A closed tab's page, like a page its tab navigates away from, takes its place in history by when the tab was last used (in focus, or its last navigation), not by when it closed, so closing does not move it to the top of Recent (owner request, 20 October 2026); a tab unused for longer than the retention period therefore leaves history at the next maintenance. An open tab's current recoverable record does not expire because of age, unless the owner turns on "Close tabs unused for 7 days" in Settings: then open tabs not in focus for the retention period close at maintenance, and their pages expire with them. The focused tab never closes this way, and a tab counts as used until focus leaves it. Purge on startup and periodic maintenance, rather than relying on an exact-time Android alarm. Explain that local expiry does not remove Hister content or Karakeep bookmarks.
 
 “Remove from Recent” removes local records under a defined scope. For an open tab, offer an explicit close-and-forget action, rather than erasing its only recovery record invisibly. “Forget this site” removes matching local history and pending captures, optionally adds an exclusion, and clearly describes whether it affects open tabs. Remote deletion is a separate action only if the installed API supports and verifies it. Never claim “deleted everywhere” from a local database transaction.
 
@@ -260,7 +262,7 @@ Queue ordering must account for repeated captures of the same effective remote d
 
 An HTTP timeout can leave an older server write in progress, so client serialization alone cannot prove strict latest-wins ordering after ambiguous completion. Inspect installed-server conditional/version-write support before promising it. If unavailable, record the limit, avoid parallel requests for that key, retain the newest payload for reconciliation, and verify the latest document after ambiguous writes settle where possible. Do not send a client timestamp and assume the server rejects older content; that behavior is not established. The acceptance goal is no preventable stale retry and honest reporting of unresolved remote order, not fictitious exactly-once delivery.
 
-History search uses **`GET {root}/search?q=<encoded query>&format=json`**, not a presumed `/api/search`. `Accept: application/json` is also supported at the inspected revision. The response contains `documents`, `history`, `total`, `page_key` and additional metadata. Decode `documents` and `history` as different shapes, merge their user-visible results without dropping promoted history hits, and treat `page_key` as an opaque cursor. An empty query may be rejected. Do not request stored HTML for ordinary result rows.
+History search uses **`GET {root}/search?q=<encoded query>&format=json`**, not a presumed `/api/search`. `Accept: application/json` is also supported at the inspected revision. The response contains `documents`, `history`, `total`, `page_key` and additional metadata. Decode `documents` and `history` as different shapes, merge their user-visible results without dropping promoted history hits, and treat `page_key` as an opaque cursor; the server always sends it and leaves it empty when there is no next page. An empty query may be rejected. Do not request stored HTML for ordinary result rows.
 
 The Hister chip opens an explicit Hister scope. A short debounce is reasonable within that selected scope; typing in local Recent must not contact Hister or Kagi. Attach a query generation so delayed results for a previous query cannot replace newer results. Support loading, no results, disconnected, unauthorized and server-error states separately. Escape excerpts as text; never execute stored HTML or inject untrusted highlights into a web-enabled component. Selecting a hit navigates to its original safe URL through Combray; an archived preview is optional future work.
 
@@ -282,7 +284,7 @@ Use exponential backoff with jitter for network failure, 408/429 and appropriate
 
 Suggested transient content budget: 20 MiB combined captured-text queue, maximum seven-day payload age, delete acknowledged bodies promptly, and expire terminal-failure bodies on the same age limit. Keep small action/error metadata long enough for understandable status, but not raw response bodies or tokens. At the budget limit, pause new automatic capture and show why; do not silently evict a pending explicit save. Karakeep save metadata can have a different retention policy because it is a deliberate user action; document the limit before retaining it indefinitely. Check limits on enqueue and dispatch and after clock changes/restart.
 
-Bind every job to a non-secret destination/account fingerprint and configuration generation. Changing server/account pauses or cancels old jobs; never silently send them to the new destination with new credentials. Rotation of a key for the same verified account can explicitly resume its jobs. A connection check is a read-only authorized request; saving a fixture bookmark or indexing a fixture page requires explicit test action because it changes the user's service.
+Bind every job to a non-secret destination/account fingerprint and configuration generation. Changing server/account pauses or cancels old jobs; never silently send them to the new destination with new credentials. Combray parks unsent Karakeep saves when the main address changes: Settings shows how many, and the user sends them to the current address (with its key) or discards them (after a confirmation). Parked saves have no age limit: they are deliberate saves and stay until the user sends or discards them. Unsent Hister captures are cancelled instead: they are automatic, made under the old server's policy, and not worth sending to another one. Rotation of a key for the same verified account can explicitly resume its jobs. A connection check is a read-only authorized request; saving a fixture bookmark or indexing a fixture page requires explicit test action because it changes the user's service.
 
 For exclusions/forgetting, update policy and invalidate matching pending jobs in a transaction. Maintain tombstones or generation checks so a delayed capture cannot enqueue erased content. Workers recheck policy and destination immediately before sending, and recheck before persisting results. Cancellation cannot retract bytes already delivered to a server: stop further retries and explain remote cleanup separately. Do not rebuild deleted local history from a late worker success or Hister search response.
 
@@ -402,8 +404,10 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Gate check | Result | Evidence |
 | --- | --- | --- |
 | One tap saves the page with its title | Passed on the device (`run9`) | `SaveTest#oneTapSavesThePageWithItsTitle` |
+| A list-bound save cannot finish without a usable bookmark ID | Passed against fake Karakeep (21 October 2026): malformed and missing-ID 200/201 responses retry, recover the same bookmark, or need attention after ten attempts; standalone acknowledgment is preserved | `IntegrationsTest` |
 | Lost answer after the server stored the link: retried, one bookmark | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | Rejected key pauses saves until resumed with a working key | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
+| A new main address parks unsent saves until the user sends them there or discards them | Passed in unit tests | `IntegrationsTest` |
 | Save targets the tapped page when the tab changes right after | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | Query with spaces, Unicode, `&` and `#` arrives intact | Passed through the real engine against the fixture server standing in for Kagi (`run9`); URI rules in unit tests | `BrowsingTest#aSearchQueryReachesTheServerEncodedExactlyOnce`, `AddressPolicyTest` |
 | Kagi login and cookie persistence on kagi.com | **Not run** (no live services); cookie persistence across a forced stop passed on the device with a fixture cookie (`ProcessDeathTest`) | — |
@@ -428,9 +432,10 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | A phrase only in the rendered page (written by script) becomes searchable | Passed on the device (`run9`) | `HisterTest#aPhraseThatExistsOnlyInTheRenderedPageBecomesSearchable` |
 | Excluded site never sent; paused capture sends nothing | Passed on the device (`run9`) and in unit tests | `HisterTest`, `HisterIntegrationTest` |
 | Same-URL reload, navigation during capture, stale results, delayed capture | Passed in unit tests and on the engine in M0 | `CaptureTest`, M0 section 5 |
-| Forget and exclusion cancel queued and in-flight captures | Passed in unit tests | `HisterIntegrationTest` |
+| Forget and exclusion cancel queued and in-flight captures | Passed in unit tests; forgetting also verifies shared-Room rollback, failure notice, retry, and restart without in-memory tombstones (21 October 2026) | `HisterIntegrationTest` |
 | Server switch cancels unsent captures; credentials bound to their server | Passed in unit tests | `HisterIntegrationTest`, `IntegrationsTest` |
 | Newer content supersedes unsent older content per document key | Passed in unit tests | `IntegrationsTest` |
+| Captured-body expiry after worker death and during a long drain | Passed in Room/fake-Hister tests (21 October 2026): abandoned claims and bodies crossing seven days expire before dispatch; live leases and fenced completion stay intact | `HisterIntegrationTest` |
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
 | Test against a deployed Hister; cleanup of the test document | **Not run** | — |
 
@@ -461,6 +466,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Page controls: `<select>`, `alert`/`confirm`/`prompt`, file upload | Passed on the emulator against real Servo (`PageControlsTest`, run `controls2`): a choice from the app's picker changed the page's `<select>`; confirm, prompt and alert answers reached the page in order under a "localhost says" title; the page read a staged upload with `FileReader`. Android's document picker itself (another app) and pinch zoom were not exercised |
 | Link menu on long-press | Passed on the emulator (`PageControlsTest.aLongPressOnALinkOffersToOpenItInANewTab`, runs `controls4` and `controls5`): a long-press on a link opened Combray's menu without following the link, and "Open in new tab" opened the link's page in a second tab. Full suite `full10` (same feature, before rebasing onto #9's final fixes): 21 of 22 passed; the select check failed once on a Compose idling timeout under host load and passed in both later runs. A tap misread as a long-press under emulator stalls failed the upload check in `controls6`; with the hold timed from when the app handled the press, all four checks passed (`controls7`) and `BrowsingTest` passed 9 of 9 (`browsing11`). Copy, share and image entries were not exercised on the device |
 | HTTP sign-in (Basic/Digest) | Passed on the emulator (`PageControlsTest.aSignInFromTheDialogReachesTheServer`, runs `signin1`, `signin2` and `signin3`, with the other four page-control checks): the dialog named `http://localhost:8766`, Cancel showed the server's 401 page, and the fixture's username and password loaded the protected page. The password appeared in neither logcat nor the test output. Proxy sign-in and Digest were not exercised |
+| Reader view | Incomplete: Sol's run ([ENGINE_SPIKE section 14](ENGINE_SPIKE.md#14-sol-review-validation-21-october-2026)) passed 2 of 3 `ReaderTest` checks; the article check passed its extraction and display assertions, but its final system Back was blocked by a System UI ANR on that emulator. `check-app.sh`'s default run now covers every device-check class, including `ReaderTest`; no default run is recorded yet |
 
 Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). Latest whole-suite device evidence: `full11` and `about4` (M1 status above).
 
@@ -517,7 +523,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Tune on the owner's device (M4) |
 | Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
 | Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |
-| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode |
+| IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode. A host is read only right after a leading `http://` or `https://` (or inside a `blob:` address); other pages (`data:`, `about:blank`, local files, other schemes) show a fixed label chosen by their scheme alone (`data:`, `about:blank`, `file:`, or a plain scheme name), never text from their address |
 | Seven-day closed-history retention | Proposed | Bounded short-term memory, counted from last use; open tabs exempt unless the owner turns on closing unused tabs |
 | Closing unused tabs | Confirmed (owner choice, 20 October 2026) | A Settings switch, off by default; uses the history retention period; the focused tab stays |
 | Browser preferences in SharedPreferences | Decided | One switch so far, with nothing bound to it transactionally; DataStore can replace it when preferences grow |
@@ -530,6 +536,32 @@ Suggested performance measurements are targets to establish after M0, not assert
 | API levels | Proposed (M1) | minSdk 30 (the native library links with API 30 wrappers), targetSdk 36 |
 | M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |
 | Server auth/version and target sites | Pending owner/configuration | Fixture work can proceed without secrets |
+
+### Owner decisions from the PR triage, 22 October 2026
+
+Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are the owner's words or a recommendation the owner accepted; "Proposed" rows are the triager's call on a question the owner left open. The PR column names where the work lands; an open PR is not behavior on main.
+
+| Decision | Status | PR |
+| --- | --- | --- |
+| Back on a page-opened tab with no history closes it and returns to the tab that opened it; on a tab another app opened, Back returns to that app | Confirmed | #57 with #47 |
+| Leaving Reader view: the bottom bar's Back leaves Reader, and "Show the page" sits at the top of the article; no floating close button | Confirmed | #57 (bar Back), #77 (Show the page); #27 and #101 closed |
+| Theme: an in-app Follow the system / Light / Dark choice; the pine and ivory palette stays the default; no Material You colors by default and no pitch-black variant | Confirmed | #62, #52; #98 closed |
+| Text size: one control. Page zoom (More › Text size) also scales Reader view, instead of a separate reader size | Proposed | #87, #52 |
+| Other apps can share links and text into Combray; "Save to Karakeep" from the share sheet asks for one tap before it saves | Confirmed | #61 |
+| Address suggestions: a history row opens in the tab being edited (a new tab when the editor is for a new tab); an open-tab row switches to that tab | Confirmed | #63 with #79 |
+| A typed private or loopback IP literal or `localhost` opens over plain HTTP in the page, with HTTPS one tap away | Confirmed | #69 |
+| Sensitive address parameters: also treat exact `key`, `ticket`, `pass`, names containing `token`, and path session parameters as credentials; anchors and hash routes without `name=value` stay ordinary | Proposed | #91 |
+| Links to other apps (`mailto:`, `tel:`, `intent:`, `market:` and the like) ask before Combray hands them to Android | Confirmed | #80, #84 |
+| Find in page runs in the page, so the page can observe the query and the selection | Confirmed | #86 |
+| Pages reached through an HTTP sign-in can be captured to Hister and saved to Karakeep; the sign-in itself never appears in an address | Confirmed | #89 |
+| Scroll buttons: scrolling up shows "Scroll to top", scrolling down shows "Scroll to bottom"; the button hides again shortly after scrolling stops | Confirmed (direction); Proposed (hiding) | #103 |
+| Below about 400dp the address gets its own row above the actions | Confirmed | #50 |
+| Swiping a tab row in Recent closes it; the close button stays | Confirmed | #53 |
+| Haptics: a tick when a save lands, a distinct one when it is refused, and one on a page long-press | Confirmed | #76 |
+| Long-pressing Recent switches to the previously used tab | Confirmed | #109 |
+| Swiping sideways on the bottom bar switches tabs | Confirmed (owner request) | New, with #109 |
+| The More sheet keeps "Resume history capture" while capture is paused | Proposed | #58 |
+| Saves that never reached the server do not use up the ten attempts; they need attention after seven days. Hister's deliberate refusals cancel the capture | Confirmed | #74 |
 
 ### Principal risks and response
 
@@ -556,6 +588,8 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, which needs the owner's signing key and a decision on building Servo in CI (hours of build time and tens of gigabytes per run). Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
 

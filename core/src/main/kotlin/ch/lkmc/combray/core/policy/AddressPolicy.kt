@@ -187,19 +187,40 @@ object AddressPolicy {
 
 /** Host handling for history, exclusions and site actions. */
 object HostNames {
+    private const val BLOB_PREFIX = "blob:"
+    private val AUTHORITY_PREFIX = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")
+
+    /**
+     * The only schemes whose authority is a web site. Any other scheme, page-chosen ones
+     * included ("a.b://accounts.example.com"), writes whatever it likes after "//".
+     */
+    private val SITE_SCHEMES = setOf("http", "https")
+
     /** Lowercase ASCII (punycode) host of a URL without trailing dot, or null. */
     fun of(url: String): String? {
+        val address = url.trim()
+        // A blob: address belongs to the web page that made it, named by its inner address.
+        if (address.startsWith(BLOB_PREFIX, ignoreCase = true)) {
+            val inner = address.substring(BLOB_PREFIX.length)
+            return if (isWeb(inner)) of(inner) else null
+        }
+
+        // Only "http(s)://" at the very start introduces a host. A data: or about: page chooses
+        // its whole address, so a "://" further in must not make it look like another site.
+        val prefix = AUTHORITY_PREFIX.find(address) ?: return null
+        if (prefix.groupValues[1].lowercase() !in SITE_SCHEMES) return null
+
         val host = try {
-            URI(url).host
+            URI(address).host
         } catch (malformed: URISyntaxException) {
             null
-        } ?: authorityHost(url) ?: return null
+        } ?: authorityHost(address.substring(prefix.value.length)) ?: return null
         return normalize(host)
     }
 
     /** java.net.URI has no host for Unicode (IDN) authorities: read it from the authority. */
-    private fun authorityHost(url: String): String? {
-        val authority = url.substringAfter("://", missingDelimiterValue = "")
+    private fun authorityHost(afterPrefix: String): String? {
+        val authority = afterPrefix
             .takeWhile { it != '/' && it != '?' && it != '#' }
             .substringAfterLast('@')
         if (authority.isEmpty() || authority.startsWith("[")) return null

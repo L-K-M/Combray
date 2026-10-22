@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -59,6 +61,7 @@ fun BottomBar(
     onShare: () -> Unit,
     onRecent: () -> Unit,
     onMore: () -> Unit,
+    onCopyAddress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(tonalElevation = 3.dp, modifier = modifier) {
@@ -70,14 +73,14 @@ fun BottomBar(
                 IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                 }
-                AddressChip(tab, onAddress, Modifier.weight(1f))
+                AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))
                 SaveButton(saveStatus, enabled = tab?.url != null, onSave)
                 IconButton(onClick = onShare, enabled = tab?.url != null) {
                     Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
                 }
                 val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                 IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
-                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(openTabs.toString()) } }) {
+                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(tabCountLabel(openTabs)) } }) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
                 }
@@ -95,6 +98,11 @@ fun BottomBar(
         }
     }
 }
+
+/** The badge's visible text: the exact count, or a capped label once it no longer fits. */
+@Composable
+private fun tabCountLabel(openTabs: Int): String =
+    if (openTabs > BADGE_LIMIT) stringResource(R.string.recent_badge_many, BADGE_LIMIT) else openTabs.toString()
 
 /** One tap saves; the icon says saved, saving or needs attention, the label says it in words. */
 @Composable
@@ -118,7 +126,7 @@ private fun SaveButton(status: SaveStatus, enabled: Boolean, onSave: () -> Unit)
 
 /** Shows where the page is from and whether the connection is encrypted; opens the editor. */
 @Composable
-private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, modifier: Modifier) {
+private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit, modifier: Modifier) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
     val secure = url?.startsWith("https:", ignoreCase = true) == true
@@ -131,14 +139,25 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, modifier: Modifier
     val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed).joinToString(", ")
 
     Surface(
-        onClick = onClick,
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp).semantics(mergeDescendants = true) {
-            contentDescription = label
-        },
+        modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
     ) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = if (url != null) onCopy else null,
+                    onLongClickLabel = if (url != null) stringResource(R.string.action_copy_address) else null,
+                    role = Role.Button,
+                )
+                .semantics(mergeDescendants = true) {
+                    contentDescription = label
+                }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (url != null) {
                 Icon(
                     when {
@@ -161,6 +180,9 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, modifier: Modifier
         }
     }
 }
+
+/** Beyond this many open tabs the badge shows a capped label instead of the count. */
+private const val BADGE_LIMIT = 99
 
 /**
  * Material's "star_border" (Apache License 2.0, like the icon library). The core icon set has no

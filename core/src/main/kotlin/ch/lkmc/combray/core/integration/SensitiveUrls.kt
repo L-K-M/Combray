@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.integration
 
 import java.net.URI
 import java.net.URISyntaxException
+import java.net.URLDecoder
 
 /**
  * Addresses that look like they carry a login or session credential (a Kagi private-session
@@ -23,7 +24,22 @@ object SensitiveUrls {
         if (uri.rawUserInfo != null) return true
         // OAuth implicit-flow callbacks carry tokens in the fragment (#access_token=...).
         return listOfNotNull(uri.rawQuery, uri.rawFragment).any { part ->
-            part.split('&').any { it.substringBefore('=').lowercase() in CREDENTIAL_PARAMETERS }
+            part.split('&').any { isCredentialName(it.substringBefore('=')) }
         }
+    }
+
+    /**
+     * Names are percent-decoded once so `%74oken` cannot hide a credential. Decoding again is
+     * not done: `%2574oken` becomes the literal name "%74oken", not a credential. An escape
+     * the decoder rejects is treated conservatively, like a malformed URI. [URI] already
+     * refuses such escapes before this runs, so the catch is defense in depth.
+     */
+    private fun isCredentialName(name: String): Boolean {
+        val decoded = try {
+            URLDecoder.decode(name, Charsets.UTF_8.name())
+        } catch (malformed: IllegalArgumentException) {
+            return true
+        }
+        return decoded.lowercase() in CREDENTIAL_PARAMETERS
     }
 }

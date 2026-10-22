@@ -1509,6 +1509,7 @@ fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption
 }
 
 /// Maps an Android key (character plus key code) to a DOM key.
+/// Mirrored by `EngineKeys.kt` in the engine module: change both together.
 fn servo_key(key: KeyInput) -> Option<Key> {
     if let Some(character) = char::from_u32(key.unicode).filter(|c| *c != '\0' && !c.is_control()) {
         return Some(Key::Character(character.to_string()));

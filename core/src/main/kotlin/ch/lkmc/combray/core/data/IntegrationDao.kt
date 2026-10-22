@@ -105,8 +105,15 @@ interface IntegrationDao {
     @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED')")
     suspend fun unfinishedJobs(service: ServiceKind): List<OutboxJobEntity>
 
-    @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED')")
+    /** Every job not finished yet, parked ones included: a removal or forgetting reaches them too. */
+    @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED', 'DESTINATION_CHANGED')")
     suspend fun openJobs(service: ServiceKind): List<OutboxJobEntity>
+
+    @Query("SELECT * FROM outbox WHERE service = :service AND state = 'DESTINATION_CHANGED' ORDER BY sequence")
+    suspend fun parkedJobs(service: ServiceKind): List<OutboxJobEntity>
+
+    @Query("SELECT * FROM outbox WHERE service = :service AND state = 'DESTINATION_CHANGED' ORDER BY sequence")
+    fun observeParkedJobs(service: ServiceKind): Flow<List<OutboxJobEntity>>
 
     @Query("SELECT * FROM outbox WHERE kind = :kind AND state = 'FAILED'")
     suspend fun failedJobs(kind: JobKind): List<OutboxJobEntity>
@@ -124,11 +131,13 @@ interface IntegrationDao {
     @Query("SELECT COALESCE(SUM(payloadBytes), 0) FROM outbox WHERE kind = 'HISTER_ADD' AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED')")
     fun observeQueuedCaptureBytes(): Flow<Long>
 
-    /** Captured content older than the maximum age is never sent. */
+    /** Expired bodies are never resent; an abandoned request may already have reached the server. */
     @Query(
         """
-        UPDATE outbox SET state = 'EXPIRED', updatedAt = :now
-        WHERE kind = 'HISTER_ADD' AND state IN ('PENDING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED') AND createdAt < :cutoff
+        UPDATE outbox SET state = 'EXPIRED', updatedAt = :now, leaseOwner = NULL, leaseUntil = NULL
+        WHERE kind = 'HISTER_ADD' AND createdAt < :cutoff
+          AND (state IN ('PENDING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED')
+               OR (state = 'RUNNING' AND leaseUntil < :now))
         """,
     )
     suspend fun expireCapturesBefore(cutoff: Long, now: Long): Int
@@ -159,4 +168,8 @@ interface IntegrationDao {
         """,
     )
     fun observeLatestSave(fingerprint: String, url: String): Flow<OutboxJobEntity?>
+
+    /** A save of [url] parked for an earlier main address, whatever that address was. */
+    @Query("SELECT * FROM outbox WHERE kind = 'KARAKEEP_SAVE' AND dedupeKey = :url AND state = 'DESTINATION_CHANGED' ORDER BY sequence DESC LIMIT 1")
+    fun observeParkedSave(url: String): Flow<OutboxJobEntity?>
 }
