@@ -1220,15 +1220,17 @@ impl Engine {
                     return;
                 };
                 let refusal = navigation::refusal(view, tab.opener, tab.shown);
+                // Only a link that can be handed over may use up the user's tap.
+                let deliverable = bounded && self.live_tab(refusal.owner).is_some();
                 // Before closing the window, which may be the visible tab: the user tapped in
                 // the opener, or in the window itself.
-                let tapped = bounded && self.take_activation(&[refusal.owner.tab, view.tab]);
+                let tapped = deliverable && self.take_activation(&[refusal.owner.tab, view.tab]);
                 if refusal.close {
                     // Reported like a page closing its own window, and before the link: the
                     // application drops the tab and shows the opener again, which then takes it.
                     self.close_tab(view.tab);
                 }
-                if !bounded || self.live_tab(refusal.owner).is_none() {
+                if !deliverable {
                     return;
                 }
                 if !tapped {
