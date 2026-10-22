@@ -29,10 +29,17 @@ object ExternalLinks {
     /** The schemes the engine hands on (`native/src/navigation.rs`); anything else is not launched. */
     private val APP_LINK_SCHEMES = setOf("mailto", "tel", "sms", "smsto", "mms", "geo", "market", "intent")
 
+    /**
+     * Device data an `intent:` link must not point another app at, as in Chrome. A `file:` URI
+     * would also make startActivity throw (Android's FileUriExposedException) inside Combray.
+     */
+    private val LOCAL_DATA_SCHEMES = setOf("file", "content")
+
     /** Whether [url] has one of the schemes the engine hands to the application for another app. */
     internal fun isAppLink(url: String): Boolean =
         url.substringBefore(':', missingDelimiterValue = "").lowercase() in APP_LINK_SCHEMES
 
+    /** [context] must be an Activity: the intents carry no flags, so no NEW_TASK either. */
     fun open(context: Context, url: String): ExternalOutcome {
         if (!isAppLink(url)) return ExternalOutcome.NoApp
         val intent = intentFor(url, context.packageName) ?: return ExternalOutcome.NoApp
@@ -51,7 +58,10 @@ object ExternalLinks {
         }
     }
 
-    /** The intent for [url]; null when it is malformed or names [ownPackage], Combray itself. */
+    /**
+     * The intent for [url]; null when it is malformed, names [ownPackage] (Combray itself), or
+     * points at device files.
+     */
     internal fun intentFor(url: String, ownPackage: String): Intent? {
         if (!url.startsWith(INTENT_SCHEME, ignoreCase = true)) {
             return Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
@@ -63,6 +73,7 @@ object ExternalLinks {
             return null
         }
         if (parsed.`package` == ownPackage) return null
+        if (parsed.data?.scheme?.lowercase() in LOCAL_DATA_SCHEMES) return null
         return parsed.apply {
             addCategory(Intent.CATEGORY_BROWSABLE)
             component = null

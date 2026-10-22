@@ -41,6 +41,13 @@ class ExternalIntentTest {
     }
 
     @Test
+    fun aPageCannotPointAnotherAppAtDeviceFiles() {
+        val own = InstrumentationRegistry.getInstrumentation().targetContext.packageName
+        assertNull(ExternalLinks.intentFor("intent:///etc/hosts#Intent;scheme=file;end", own))
+        assertNull(ExternalLinks.intentFor("intent://media/external/images/1#Intent;scheme=content;end", own))
+    }
+
+    @Test
     fun aPlainLinkIsABrowsableViewWithoutFlags() {
         val intent = checkNotNull(ExternalLinks.intentFor("tel:+41000000000", ownPackage))
         assertEquals(Intent.ACTION_VIEW, intent.action)

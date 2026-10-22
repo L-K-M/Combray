@@ -2,19 +2,25 @@
 //! hand a link to another app. The end of a scroll, a fling or a pinch is not.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 /// Movement up to which a touch still counts as a tap, in density-independent pixels, along
 /// either axis. Servo 0.6.0 starts scrolling, and then issues no click, past the same distance
 /// (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`, private there).
 pub const TAP_SLOP_DIP: f32 = 10.0;
 
+/// How long a pointer may stay down before it counts as one whose up was lost. Longer than any
+/// real hold, so only a lost up is forgotten: otherwise a lost up of a finger whose id does not
+/// come back would make every later gesture multi-touch.
+pub const STALE_POINTER: Duration = Duration::from_secs(60);
+
 /// Follows one touch gesture at a time, from the first pointer down to the last pointer up.
 #[derive(Debug)]
 pub struct TapRecognizer {
     /// [`TAP_SLOP_DIP`] in the touch coordinates' device pixels.
     slop: f32,
-    /// Where each pointer still down went down.
-    down: HashMap<i32, (f32, f32)>,
+    /// Where and when each pointer still down went down.
+    down: HashMap<i32, (f32, f32, Instant)>,
     /// The gesture had a second pointer or moved too far: it ends without a tap.
     spoiled: bool,
 }
@@ -30,14 +36,20 @@ impl TapRecognizer {
     }
 
     pub fn down(&mut self, pointer: i32, x: f32, y: f32) {
+        self.down_at(pointer, x, y, Instant::now());
+    }
+
+    pub fn down_at(&mut self, pointer: i32, x: f32, y: f32, at: Instant) {
         // A pointer that is down again never reported its up (Combray keeps a long press's up
         // from the engine): what was held belongs to an ended gesture.
         if self.down.contains_key(&pointer) {
             self.down.clear();
         }
+        self.down
+            .retain(|_, &mut (_, _, since)| at.saturating_duration_since(since) <= STALE_POINTER);
         // The first pointer starts a gesture; any further one makes it a multi-touch gesture.
         self.spoiled = !self.down.is_empty();
-        self.down.insert(pointer, (x, y));
+        self.down.insert(pointer, (x, y, at));
     }
 
     pub fn moved(&mut self, pointer: i32, x: f32, y: f32) {
@@ -65,9 +77,11 @@ impl TapRecognizer {
 
     /// False for a pointer that is not down: its gesture cannot be a tap.
     fn within_slop(&self, pointer: i32, x: f32, y: f32) -> bool {
-        self.down.get(&pointer).is_some_and(|&(start_x, start_y)| {
-            (x - start_x).abs() <= self.slop && (y - start_y).abs() <= self.slop
-        })
+        self.down
+            .get(&pointer)
+            .is_some_and(|&(start_x, start_y, _)| {
+                (x - start_x).abs() <= self.slop && (y - start_y).abs() <= self.slop
+            })
     }
 }
 
@@ -128,6 +142,20 @@ mod tests {
         taps.down(1, 300.0, 400.0);
         assert!(!taps.up(1, 300.0, 400.0));
         assert!(!taps.up(0, 100.0, 200.0));
+    }
+
+    #[test]
+    fn a_finger_whose_up_never_came_stops_spoiling_taps_after_a_while() {
+        let mut taps = TapRecognizer::new(SCALE);
+        let start = Instant::now();
+        // A second finger whose up was lost: its id may not come back.
+        taps.down_at(0, 100.0, 200.0, start);
+        taps.down_at(1, 300.0, 400.0, start);
+        assert!(!taps.up(0, 100.0, 200.0));
+
+        let later = start + STALE_POINTER + Duration::from_secs(1);
+        taps.down_at(0, 100.0, 200.0, later);
+        assert!(taps.up(0, 101.0, 199.0));
     }
 
     #[test]
