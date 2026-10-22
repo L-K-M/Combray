@@ -11,6 +11,8 @@
 //
 // Kinds: "h" heading (l = 1..6), "p" paragraph, "li" list item (l = nesting depth), "q" quote,
 // "pre" preformatted text, "cap" caption. A run is [text] or [text, absolute http(s) link].
+// The first block of a numbered (<ol>) list item has "o", the number the page shows for it
+// (-99999..99999); bulleted items have none.
 // Images, media and forms are left out. Budgets: at most __MAX_TEXT_BYTES__ bytes of UTF-8 JSON
 // (whole blocks are dropped past it) and __MAX_NODES__ elements, for Readability and for this
 // walk each.
@@ -49,6 +51,8 @@
     };
     var MAX_TITLE_CHARS = 1000;
     var MAX_BYLINE_CHARS = 300;
+    // Ordinals past it are shown as it: no real list counts that far.
+    var MAX_ORDINAL = 99999;
 
     var blocks = [];
     var visited = 0;
@@ -147,12 +151,14 @@
       return runs.filter(function (run) { return run[0] !== ""; });
     }
 
-    // Adds a block if it fits the byte budget; false once the budget is spent.
-    function emit(kind, level, runs) {
+    // Adds a block if it fits the byte budget; false once the budget is spent. A numbered list
+    // item's number goes on the first block it adds.
+    function emit(kind, level, runs, item) {
       if (stopped) return false;
       if (!runs.length) return true;
       var block = { k: kind, s: runs };
       if (level) block.l = level;
+      if (item && item.ordinal !== undefined) block.o = item.ordinal;
       var size = utf8Length(JSON.stringify(block)) + 1;
       if (size > budget) {
         result.truncated = true;
@@ -161,7 +167,28 @@
       }
       budget -= size;
       blocks.push(block);
+      if (item) item.ordinal = undefined;
       return true;
+    }
+
+    // An attribute as an HTML integer (leading digits, optional sign), or null.
+    function integerAttribute(element, name) {
+      var value = parseInt(element.getAttribute(name), 10);
+      return isNaN(value) ? null : value;
+    }
+
+    // How an <ol> numbers its items: from `start`, counting down when `reversed` (from the
+    // number of items unless `start` says otherwise).
+    function numberingOf(list) {
+      var reversed = list.hasAttribute("reversed");
+      var start = integerAttribute(list, "start");
+      if (start === null && reversed) {
+        start = 0;
+        for (var child = list.firstChild; child; child = child.nextSibling) {
+          if (child.nodeType === 1 && tagOf(child) === "LI") start++;
+        }
+      }
+      return { next: start === null ? 1 : start, step: reversed ? -1 : 1 };
     }
 
     // The children of `element`: block elements become blocks; inline content between them
@@ -171,7 +198,7 @@
       function flush() {
         var runs = runsOf(pending, false);
         pending = [];
-        return emit(context.kind, context.level, runs);
+        return emit(context.kind, context.level, runs, context);
       }
       for (var child = element.firstChild; child; child = child.nextSibling) {
         if (stopped) return false;
@@ -196,7 +223,16 @@
       if (tag === "FIGCAPTION") return emit("cap", 0, runsOf([element], false));
       if (tag === "UL" || tag === "OL") {
         var depth = context.kind === "li" ? context.level + 1 : 1;
-        return blocksIn(element, { kind: "li", level: depth });
+        return blocksIn(element, { kind: "li", level: depth, numbering: tag === "OL" ? numberingOf(element) : null });
+      }
+      if (tag === "LI" && context.numbering) {
+        // An item's own `value` sets its number, and the items after it count on from there.
+        var numbering = context.numbering;
+        var value = integerAttribute(element, "value");
+        var ordinal = value === null ? numbering.next : value;
+        numbering.next = ordinal + numbering.step;
+        ordinal = Math.max(-MAX_ORDINAL, Math.min(MAX_ORDINAL, ordinal));
+        return blocksIn(element, { kind: "li", level: context.level, ordinal: ordinal });
       }
       if (tag === "BLOCKQUOTE") return blocksIn(element, { kind: "q", level: 0 });
       if (tag === "TR") {
@@ -209,7 +245,7 @@
           if (cells.length) cells.push([" · "]);
           cells = cells.concat(runs);
         }
-        return emit(context.kind, context.level, cells);
+        return emit(context.kind, context.level, cells, context);
       }
       // Paragraphs, list items and containers: their own text takes the surrounding kind.
       return blocksIn(element, context);

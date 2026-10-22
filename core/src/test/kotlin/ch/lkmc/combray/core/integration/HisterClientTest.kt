@@ -89,8 +89,29 @@ class HisterClientTest {
         assertEquals(HisterSearch.Unauthorized, client.search(server.root, "wrong", "x"))
         server.searchBody = "<html>login</html>"
         assertEquals(HisterSearch.Malformed, client.search(server.root, FakeHister.TOKEN, "x"))
+        server.searchBody = """{"query":"x"}"""
+        assertEquals(HisterSearch.Malformed, client.search(server.root, FakeHister.TOKEN, "x"))
+        server.searchBody = """{"documents":"nope","history":[]}"""
+        assertEquals(HisterSearch.Malformed, client.search(server.root, FakeHister.TOKEN, "x"))
         server.close()
         assertTrue(client.search(server.root, FakeHister.TOKEN, "x") is HisterSearch.Unreachable)
+    }
+
+    @Test
+    fun thePinnedServersShapesAreResults() {
+        // The pinned server sends "history": null when nothing is promoted, and "page_key": "".
+        server.searchBody = """{"documents":[{"url":"https://a.example/"}],"history":null,"total":1,"page_key":""}"""
+        val pinned = client.search(server.root, FakeHister.TOKEN, "x") as HisterSearch.Results
+        assertEquals(listOf("https://a.example/"), pinned.hits.map { it.url })
+        assertEquals(null, pinned.nextPage)
+
+        server.searchBody = """{"documents":[{"url":"https://a.example/"}]}"""
+        assertEquals(1, (client.search(server.root, FakeHister.TOKEN, "x") as HisterSearch.Results).hits.size)
+        server.searchBody = """{"history":[{"url":"https://b.example/"}]}"""
+        assertEquals(1, (client.search(server.root, FakeHister.TOKEN, "x") as HisterSearch.Results).hits.size)
+        // Go sends an empty list as null: both null is an answer with no hits, not another API.
+        server.searchBody = """{"documents":null,"history":null,"total":0}"""
+        assertEquals(emptyList<HisterHit>(), (client.search(server.root, FakeHister.TOKEN, "x") as HisterSearch.Results).hits)
     }
 
     @Test

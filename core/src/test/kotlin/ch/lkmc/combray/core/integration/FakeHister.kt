@@ -13,7 +13,8 @@ class FakeHister(private val token: String = TOKEN) : AutoCloseable {
     val requestSizes = CopyOnWriteArrayList<Int>()
     val searchQueries = CopyOnWriteArrayList<String>()
     // Like the pinned server: page_key is always present and empty when there is no next page.
-    @Volatile var searchBody = """{"documents":[],"history":[],"total":0,"page_key":""}"""
+    /** Shaped like the pinned server's answer: "history" is null when nothing is promoted. */
+    @Volatile var searchBody = """{"documents":[],"history":null,"total":0,"page_key":""}"""
 
     /** An answer to authorized adds instead of storing them, such as 406 (skip rules) or 422. */
     @Volatile var refusal: Int? = null

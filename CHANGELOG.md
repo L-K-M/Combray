@@ -141,6 +141,14 @@ All notable changes to this project are documented here. The format follows
 - The address sheet no longer shows an error before you type, and its
   buttons stay on one line, shortened in the middle, with an icon for
   search or address.
+- Recent rows show the site's initial and, for open tabs too, when you
+  last used them, so two tabs on one page can be told apart. Only the
+  current tab is highlighted. Day headers name the weekday for the past
+  week. TalkBack announces the scope chips as tabs and says what tapping
+  a row does.
+- The Hister field's hint reads "Words you remember, searched in Hister…".
+- Reader view sets the article in a serif reading face (the system's Noto
+  Serif) with a larger title, and has a "Show the page" button at the top.
 
 ### Fixed
 
@@ -157,6 +165,10 @@ All notable changes to this project are documented here. The format follows
   decoder rejects remain conservative (sensitive).
 - The Recent tab-count badge caps its visible label at "99+" so large
   counts fit the badge; TalkBack still hears the exact number.
+- When the app goes to the background, Combray now also asks the engine to
+  slow the page on screen, not only hidden tabs, until you return. Servo
+  0.6.0 does not honor this reliably yet: it ignores the request for a page
+  that has not loaded yet and lifts it whenever a new page loads.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
@@ -170,15 +182,6 @@ All notable changes to this project are documented here. The format follows
 - In Recent, the current tab stays above the pages you browsed in it and
   under the right day. A page you navigate away from is kept for seven days
   from when you left it, not from when it loaded.
-- Recent rows show the site's initial and, for open tabs too, when you
-  last used them, so two tabs on one page can be told apart. Only the
-  current tab is highlighted. Day headers name the weekday for the past
-  week. TalkBack announces the scope chips as tabs and says what tapping
-  a row does.
-- The Hister field's hint reads "Words you remember, searched in Hister…".
-
-### Fixed
-
 - Recent's Open tabs said there were no recent pages, or that nothing
   matched, while All had some. It now says there is no open tab and
   offers to show all recent pages.
@@ -195,6 +198,20 @@ All notable changes to this project are documented here. The format follows
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Addresses with common credential parameters (`auth_token`, `accessToken`,
+  `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
+  `code` with its `state`, session IDs) could be saved to Karakeep or captured
+  to Hister. Parameter names are now compared without case or separators,
+  path matrix parameters (`;jsessionid=`) count too, and pagination cursors
+  such as `pageToken` and `NextToken` are still allowed. In a fragment only
+  `name=value` pairs count, so an anchor such as `#token-usage` is not
+  mistaken for a credential.
+- Reader view showed numbered lists as bullets, and section headings
+  smaller than the text under them. Numbered items now show the page's
+  numbers, and no heading is smaller than the body text.
+- A typed address, a reload, or a new or restored tab showed no loading line
+  until the server answered, so a slow server looked like a tap that did
+  nothing. The line now shows from the request.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
@@ -227,6 +244,10 @@ All notable changes to this project are documented here. The format follows
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.
+- A Hister search answer that is JSON but not a search result (neither a
+  `documents` nor a `history` field, or either of the wrong type) is
+  reported as malformed instead of an empty search. A null list, which
+  Hister sends for an empty one, still counts as empty.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
@@ -274,3 +295,11 @@ All notable changes to this project are documented here. The format follows
   name another site by putting `://` and that site's name in its own
   address. Pages without a host now show only their scheme ("data:",
   "about:blank", "file:"), and their dialogs say "This page says".
+- A typed home-server address opens over plain HTTP when that is likely:
+  `192.168.1.10`, `10.0.0.2:8080`, `localhost` and other private or
+  loopback addresses now go to `http://`, with HTTPS one tap away. Names
+  such as `keep.lan:3000` or `nas:5000` still try HTTPS first, but offer
+  `http://` instead of a Kagi search that would leak the name.
+- A typed `user:password@host` without `https://` was sent to Kagi as a
+  search, password included. It is now refused like other addresses with
+  credentials.

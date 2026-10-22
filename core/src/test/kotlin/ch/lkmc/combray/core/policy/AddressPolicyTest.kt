@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.policy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -31,11 +32,66 @@ class AddressPolicyTest {
         assertEquals(AddressDecision.Navigate("https://example.org/path"), interpretation.primary)
         assertTrue(interpretation.alternative is AddressDecision.Search)
 
-        navigates("localhost:8080", "https://localhost:8080")
-        navigates("192.168.1.10", "https://192.168.1.10")
-        navigates("[::1]:8443/x", "https://[::1]:8443/x")
         navigates("bücher.de", "https://bücher.de")
         navigates("xn--bcher-kva.de", "https://xn--bcher-kva.de")
+    }
+
+    @Test
+    fun publicHostsWithPortsOrAddressesKeepHttpsAndSearch() {
+        // Next to the private ranges, and names that only look local: still public.
+        val public = listOf(
+            "example.org:8443", "8.8.8.8", "11.0.0.1", "172.15.0.1", "172.32.0.1", "192.169.0.1", "169.255.0.1",
+            "[2001:db8::1]:8443/x", "[fe00::1]", "[fec0::1]", "keep.lan.example.org", "local.example.org",
+        )
+        for (input in public) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.primary)
+            assertTrue(input, interpretation.alternative is AddressDecision.Search)
+        }
+    }
+
+    @Test
+    fun aTypedSchemeIsKeptOnHomeAddresses() {
+        assertEquals(AddressDecision.Navigate("https://192.168.1.10"), primary("https://192.168.1.10"))
+        assertEquals(AddressDecision.Navigate("http://localhost:3000"), primary("http://localhost:3000"))
+        assertEquals(AddressDecision.Navigate("https://keep.lan:3000"), primary("https://keep.lan:3000"))
+    }
+
+    @Test
+    fun mappedAndZonedIpv6HomeAddressesGoOverHttp() {
+        assertEquals(AddressDecision.Navigate("http://[::ffff:192.168.1.1]"), primary("[::ffff:192.168.1.1]"))
+        assertEquals("https://[::ffff:8.8.8.8]", (primary("[::ffff:8.8.8.8]") as AddressDecision.Navigate).url)
+        // A zone names the interface of a link-local address; the address alone decides.
+        assertEquals(AddressDecision.Navigate("http://[fe80::1%25wlan0]"), primary("[fe80::1%25wlan0]"))
+        // Malformed dotted tails are no home address (and do not throw).
+        for (malformed in listOf("[::1.2]", "[::1.2.3]", "[::1.2.3.4.5]")) {
+            assertNotEquals(AddressDecision.Navigate("http://$malformed"), primary(malformed))
+        }
+    }
+
+    @Test
+    fun privateAddressesAndLocalhostGoOverHttpWithHttpsInstead() {
+        val local = listOf(
+            "192.168.1.10", "10.0.0.2:8080", "172.16.0.1", "172.31.255.255/x", "127.0.0.1:3000", "169.254.1.1",
+            "localhost", "LOCALHOST:8080", "[::1]:8443/x", "[0:0:0:0:0:0:0:1]", "[fd12:3456::1]", "[fe80::1]:80",
+        )
+        for (input in local) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("http://$input"), interpretation.primary)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.alternative)
+        }
+    }
+
+    @Test
+    fun homeNetworkNamesOfferHttpInsteadOfSearch() {
+        val names = listOf(
+            "keep.lan:3000", "Keep.LAN", "nas.local/x", "printer.home.arpa", "hister.internal:8080", "box.localdomain", "nas:5000",
+        )
+        for (input in names) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.primary)
+            assertEquals(input, AddressDecision.Navigate("http://$input"), interpretation.alternative)
+        }
     }
 
     @Test
@@ -117,6 +173,20 @@ class AddressPolicyTest {
     @Test
     fun credentialsInAddressesAreRejected() {
         assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("https://user:secret@example.org/"))
+    }
+
+    @Test
+    fun schemelessCredentialsAreRejectedNotSearched() {
+        // A search would put the password in Kagi's URL and search history.
+        for (input in listOf("admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas", "admin:pw@nas!", "u:p@1.2.3.4.5")) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
+            assertNull(input, interpretation.alternative)
+        }
+
+        // Without a colon before "@" it is no password; "define:x@example.com" is the accepted cost.
+        searches("alice@example.com")
+        assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("define:x@example.com"))
     }
 
     @Test

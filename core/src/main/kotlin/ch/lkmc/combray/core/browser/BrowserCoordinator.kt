@@ -73,6 +73,8 @@ class BrowserCoordinator(
     private val maxLiveViews: Int = MAX_LIVE_VIEWS,
     /** Read at each maintenance: whether open tabs unused for the retention period close. */
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
+    /** How long a request may wait for its page before the tab stops showing it as loading. */
+    private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -85,6 +87,9 @@ class BrowserCoordinator(
     private var nextRequest = 1L
     private var selectedNative: Long? = null
     private var engineReady = false
+
+    /** Process visibility; conservatively backgrounded until Android reports onStart. */
+    private var visibility = AppVisibility.BACKGROUND
     private val pendingCaptures = HashMap<Long, PendingCapture>()
     private val pendingArticles = HashMap<Long, PendingArticle>()
 
@@ -270,7 +275,10 @@ class BrowserCoordinator(
     private suspend fun navigateTab(tab: TabEntity, url: String) {
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
-            engine.navigate(view.nativeTab, nextRequest++, url)
+            val request = nextRequest++
+            engine.navigate(view.nativeTab, request, url)
+            awaitCommit(view)
+            view.awaitedRequest = request
             return
         }
         // No renderer yet (new tab, restored tab): the request becomes the recovery address.
@@ -381,7 +389,10 @@ class BrowserCoordinator(
                 closeView(view)
                 reconcile()
             }
-            else -> engine.reload(view.nativeTab)
+            else -> {
+                engine.reload(view.nativeTab)
+                awaitCommit(view)
+            }
         }
         publish()
     }
@@ -425,6 +436,18 @@ class BrowserCoordinator(
     /** Writes cookies and profile state, so logins survive Android killing the process. */
     fun persistProfile() = submit {
         if (engineReady) engine.persistProfile()
+    }
+
+    /**
+     * Process visibility from the lifecycle owner: while backgrounded the shown renderer is
+     * throttled too (hidden ones already are). Purely a hint; no logical state changes. Servo
+     * 0.6.0 drops a throttle sent before a view's first document and lifts it for each new
+     * document, so a backgrounded page is not reliably slowed yet (#88 investigates).
+     */
+    fun setAppVisibility(visibility: AppVisibility) = submit {
+        if (visibility == this.visibility) return@submit
+        this.visibility = visibility
+        selectedNative?.let { engine.setThrottled(it, visibility == AppVisibility.BACKGROUND) }
     }
 
     /**
@@ -504,6 +527,7 @@ class BrowserCoordinator(
                 Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
                 it.crashed = true
                 it.loading = false
+                it.awaitingCommit = false
                 it.controls.clear()
                 it.dialogDocument = null
                 it.dialogCount = 0
@@ -570,6 +594,7 @@ class BrowserCoordinator(
             }
             val visit = when (event.kind) {
                 HistoryKind.DOCUMENT_COMMITTED -> {
+                    view.awaitingCommit = false
                     view.currentDocument = event.document
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
@@ -577,6 +602,7 @@ class BrowserCoordinator(
                     committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
+                    view.awaitingCommit = false
                     scheduleCapture(view, event.document, captureTiming.debounceMs)
                     sameDocumentVisit(view, tab, current, event, now)
                 }
@@ -714,6 +740,25 @@ class BrowserCoordinator(
         view.captureTimer = scope.launch {
             delay(delayMs)
             submit { requestCapture(view, document) }
+        }
+    }
+
+    /**
+     * The app asked [view] for a page: the tab shows it loading until a document commits, which
+     * for a slow server can take seconds after the tap. A request that never commits (a 204
+     * answer, a download) stops showing after [navigationTimeoutMs].
+     */
+    private fun awaitCommit(view: LiveView) {
+        view.awaitingCommit = true
+        view.awaitedRequest = null
+        val request = ++view.commitRequests
+        scope.launch {
+            delay(navigationTimeoutMs)
+            submit {
+                if (view.commitRequests != request || !view.awaitingCommit) return@submit
+                view.awaitingCommit = false
+                publish()
+            }
         }
     }
 
@@ -970,7 +1015,11 @@ class BrowserCoordinator(
         Log.w(LOG_TAG, "engine refused a request: ${event.message}")
         val view = liveByNative[tab] ?: return
         if (view.generation != null) {
-            if (event.request != null) state.update { it.copy(notice = Notice.AddressNotOpened) }
+            if (event.request != null) {
+                // A refusal of an earlier address must not end the wait for a newer one.
+                if (event.request == view.awaitedRequest) view.awaitingCommit = false
+                state.update { it.copy(notice = Notice.AddressNotOpened) }
+            }
             return
         }
         val wasShown = selectedNative == view.nativeTab
@@ -999,7 +1048,7 @@ class BrowserCoordinator(
         }
         if (selectedNative != view.nativeTab) {
             selectedNative?.let { engine.setThrottled(it, true) }
-            engine.setThrottled(view.nativeTab, false)
+            engine.setThrottled(view.nativeTab, visibility == AppVisibility.BACKGROUND)
             engine.selectView(view.nativeTab)
             selectedNative = view.nativeTab
         }
@@ -1030,6 +1079,7 @@ class BrowserCoordinator(
             liveByTab[tabId] = it
             liveByNative[it.nativeTab] = it
             engine.createView(it.nativeTab, url)
+            awaitCommit(it)
         }
 
     /**
@@ -1068,7 +1118,7 @@ class BrowserCoordinator(
                         id = active.id,
                         url = active.url,
                         title = active.title,
-                        loading = view?.loading ?: false,
+                        loading = view?.let { it.loading || it.awaitingCommit } ?: false,
                         canGoBack = view?.takeIf { !it.crashed }?.canGoBack ?: false,
                         canGoForward = view?.takeIf { !it.crashed }?.canGoForward ?: false,
                         crashed = view?.crashed ?: false,
@@ -1096,6 +1146,13 @@ class BrowserCoordinator(
         var generation: Long? = null
         var currentDocument: Long? = null
         var loading = false
+
+        /** The app requested a page that has not committed yet (see awaitCommit). */
+        var awaitingCommit = false
+        var commitRequests = 0L
+
+        /** The engine request of the awaited address, so only its refusal ends the wait. */
+        var awaitedRequest: Long? = null
         var canGoBack = false
         var canGoForward = false
         var crashed = false
@@ -1153,6 +1210,9 @@ class BrowserCoordinator(
         /** Reader view budget: the article's JSON (native/src/reader.js); longer ones are cut. */
         const val MAX_ARTICLE_BYTES = 512 * 1024
         const val ARTICLE_TIMEOUT_MS = 15_000
+
+        /** Proposed default: well past a slow home server, short of a stuck bar. */
+        const val NAVIGATION_TIMEOUT_MS = 30_000L
     }
 }
 
