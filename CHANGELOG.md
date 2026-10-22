@@ -77,6 +77,9 @@ All notable changes to this project are documented here. The format follows
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
 - Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- CI also compiles the device checks, fails when Room's exported schemas
+  are not committed or a committed version's schema changed, and checks
+  the engine bridge's Rust formatting and page-script syntax.
 
 ### Fixed
 
@@ -101,6 +104,8 @@ All notable changes to this project are documented here. The format follows
 - A device check whose fixture server could not start (another run holds
   the port) now stops and says so instead of testing against no page and
   reporting timeouts.
+- `scripts/check-app.sh` skipped the reader view checks: its default run
+  now covers every device-check class, and `--list` prints them.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.

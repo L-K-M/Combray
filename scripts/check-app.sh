@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Run Combray's device checks on a booted device or emulator, against the real engine and the
-# fixture server (testing/fixtures/server.py): browsing (M1), Karakeep saves (M2), Hister capture
-# and search (M3), then process death across a killed process.
+# fixture server (testing/fixtures/server.py): every *Test.kt class in app/src/androidTest
+# (browsing, Karakeep saves, Hister, reader view and more), then process death across a killed
+# process.
 #
 #   scripts/check-app.sh [adb-serial [test-class...]]
+#   scripts/check-app.sh --list    # the classes a default run covers, in order; no device needed
 #
 # Build first: scripts/build-native.sh, then ./gradlew assembleDebug assembleDebugAndroidTest.
 # Results: build/device-checks/<UTC time>/ (or $COMBRAY_RESULTS): raw instrumentation output per
@@ -20,6 +22,27 @@ RUNNER="$PACKAGE.test/androidx.test.runner.AndroidJUnitRunner"
 APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
 TEST_APK="$ROOT/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
 FIXTURE_PORT=8766
+TEST_PACKAGE="ch.lkmc.combray"
+# Its two runs around a killed process come last.
+PROCESS_DEATH_CLASS="$TEST_PACKAGE.ProcessDeathTest"
+
+# Every device-check class except ProcessDeathTest, found by file name: a new class runs by
+# default without editing this script.
+device_check_classes() {
+    local file class
+    for file in "$ROOT/app/src/androidTest/kotlin/ch/lkmc/combray/"*Test.kt; do
+        [ -f "$file" ] || continue
+        class="$TEST_PACKAGE.$(basename "$file" .kt)"
+        [ "$class" = "$PROCESS_DEATH_CLASS" ] || echo "$class"
+    done
+}
+
+if [ "${1:-}" = "--list" ]; then
+    device_check_classes
+    echo "$PROCESS_DEATH_CLASS"
+    exit 0
+fi
+
 RESULTS="${COMBRAY_RESULTS:-$ROOT/build/device-checks/$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$RESULTS"
 
@@ -170,19 +193,12 @@ run() {
 if [ "$#" -gt 1 ]; then
     for class in "${@:2}"; do run "${class##*.}" -e class "$class"; done
 else
-    run browsing -e class ch.lkmc.combray.BrowsingTest
-    run saves -e class ch.lkmc.combray.SaveTest
-    run page-controls -e class ch.lkmc.combray.PageControlsTest
-    run about -e class ch.lkmc.combray.AboutTest
-    run accessibility -e class ch.lkmc.combray.AccessibilityTest
-    if [ -f "$ROOT/app/src/androidTest/kotlin/ch/lkmc/combray/HisterTest.kt" ]; then
-        run hister -e class ch.lkmc.combray.HisterTest
-    fi
+    for class in $(device_check_classes); do run "${class##*.}" -e class "$class"; done
     value="kill$RANDOM"
-    run process-death-prepare -e class ch.lkmc.combray.ProcessDeathTest#prepare -e value "$value"
+    run process-death-prepare -e class "$PROCESS_DEATH_CLASS#prepare" -e value "$value"
     # The run's end killed the process without a clean shutdown; make sure nothing survives.
     "${ADB[@]}" shell am force-stop "$PACKAGE"
-    run process-death-verify -e class ch.lkmc.combray.ProcessDeathTest#verify -e value "$value"
+    run process-death-verify -e class "$PROCESS_DEATH_CLASS#verify" -e value "$value"
 fi
 
 python3 -I "$ROOT/scripts/summarize-instrumentation.py" "$RESULTS" > "$RESULTS/summary.md" && status=0 || status=$?

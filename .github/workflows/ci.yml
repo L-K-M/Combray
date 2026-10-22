@@ -1,8 +1,12 @@
 # CI: prove every push to main and every PR.
 #
-#   scripts — bash -n + shellcheck over scripts/*.sh (always meaningful).
-#   android — JVM tests, Android lint, debug + release APKs, and a debug APK
-#             uploaded as a rolling artifact. The repo is set up before the
+#   scripts — bash -n + shellcheck over scripts/*.sh, the scripts' regression
+#             tests, rustfmt over native/ and a syntax check of the engine's
+#             page scripts (always meaningful; none needs the Servo tree).
+#   android — JVM tests, Android lint, debug + release APKs, the device
+#             checks' test APK (compiled, not run), a check that Room's
+#             exported schemas are committed, and a debug APK uploaded as a
+#             rolling artifact. The repo is set up before the
 #             app exists: until gradlew is committed this job records a notice
 #             and passes, then turns itself on with no workflow change.
 #
@@ -31,7 +35,7 @@ jobs:
   scripts:
     name: Shell scripts
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,6 +48,30 @@ jobs:
 
       - name: APK build-script regressions
         run: python3 -I -m unittest discover -s scripts/tests
+
+      # Formatting needs no Servo tree. The host unit tests (cargo test --lib)
+      # do: Cargo reads the Android-only path dependencies into servo-checkout/,
+      # so they stay a local check (README.md). The explicit toolchain skips the
+      # Android targets rust-toolchain.toml lists.
+      - name: Rust formatting
+        working-directory: native
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          [ -n "$toolchain" ] || { echo "::error::could not read channel from native/rust-toolchain.toml"; exit 1; }
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt --no-self-update
+          cargo "+$toolchain" fmt --check
+
+      # The engine embeds these with include_str!, so a syntax error would only
+      # show on a device (reader view finds no article, Hister capture stops).
+      # vm.Script compiles each as the classic script Servo evaluates; `node
+      # --check` would accept a top-level return. The placeholders the engine
+      # fills in (__MAX_NODES__ and so on) are identifiers, so the templates
+      # compile unfilled.
+      - name: Engine page-script syntax
+        run: |
+          for f in native/src/capture.js native/src/reader.js native/src/vendor/Readability.js; do
+            node -e 'const file = process.argv[1]; new (require("vm").Script)(require("fs").readFileSync(file, "utf8"), { filename: file })' "$f"
+          done
 
   android:
     name: Test, lint, assemble
@@ -81,9 +109,25 @@ jobs:
       - if: steps.detect.outputs.present == 'true'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
+      # assembleDebugAndroidTest compiles the device checks, which call core
+      # APIs directly; lint does not compile them. Running them needs a device.
       - name: Test, lint, and assemble
         if: steps.detect.outputs.present == 'true'
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+
+      # The build rewrites core/schemas from the entities. A changed or new file
+      # means an entity changed without a committed schema; MigrationTest's
+      # frozen hashes catch a changed schema that was committed.
+      - name: Room schemas are committed
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          # Lists modified, deleted and new files alike, before failing.
+          uncommitted="$(git status --porcelain -- core/schemas)"
+          if [ -n "$uncommitted" ]; then
+            echo "::error::Room schema files differ from what is committed:"
+            echo "$uncommitted"
+            exit 1
+          fi
 
       # The release variant is the only one that runs R8, and R8 failures are
       # invisible until they aren't: prove the APK that gets released still
