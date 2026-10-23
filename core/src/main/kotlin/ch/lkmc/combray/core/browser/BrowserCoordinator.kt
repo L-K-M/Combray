@@ -617,8 +617,9 @@ class BrowserCoordinator(
             // A page of a forgotten site stays open without a visit. Loading it again in a new
             // renderer (restore, eviction, a crash), reloading it or moving within it records
             // nothing (and requestCapture sends nothing); another page committing in the tab ends that.
+            // A new renderer's first page is the forgotten one unless the user typed another first.
             val forgotten = tab.pageForgotten && when (event.kind) {
-                HistoryKind.DOCUMENT_COMMITTED -> firstCommit || event.url == tab.url
+                HistoryKind.DOCUMENT_COMMITTED -> event.url == tab.url || (firstCommit && view.awaitedUrl == null)
                 HistoryKind.SAME_DOCUMENT, HistoryKind.LIST_UPDATED -> true
             }
             // A single-page app can replace the article without replacing its document.

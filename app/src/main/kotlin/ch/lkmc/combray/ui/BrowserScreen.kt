@@ -306,7 +306,7 @@ fun BrowserScreen(
             restartKey = launches,
             // Text another app sent, or the tab's address; on a Kagi results page, its search words.
             initialText = addressText ?: addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
-            // Suggestions search all retained history, like a Recent search.
+            // Suggestions search the retained history, like a Recent search.
             recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
             onDecision = { decision ->
                 dismiss()

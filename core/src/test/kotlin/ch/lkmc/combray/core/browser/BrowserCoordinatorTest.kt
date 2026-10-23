@@ -1176,6 +1176,26 @@ class BrowserCoordinatorTest {
         assertTrue("https://example.com/5" in urls)
     }
 
+    /** The forgotten flag waits for another page to commit, not for that page to be the first. */
+    @Test
+    fun anAddressTypedBeforeARestoredForgottenPageCommitsIsRecorded() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // After a restart the restored page is slow; the user types another address first.
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 11, "https://c.test/")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 12, "https://d.test/")
+
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://c.test/" })
+    }
+
     @Test
     fun aRestartRestoresOpenTabsAndRecreatesOnlyTheFocusedView() {
         ready()

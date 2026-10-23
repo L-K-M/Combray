@@ -138,12 +138,12 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable(restartKey) { mutableStateOf("") }
     var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
-    // One subscription per depth: browsing reads the newest rows, a search all retained ones.
+    // One subscription per depth: browsing reads the newest rows, a search the retained ones.
     // The filter runs in memory, so typing does not restart three Room observers per keystroke.
     val depth = HistoryDepth.forQuery(query)
     // Null until the first answer: an empty list before it would flash an empty-state message.
-    // Tagged with its depth: the first keystroke filters the newest rows until every retained
-    // one arrives, and those must not report "no matches" for an older page.
+    // Tagged with its depth: the first keystroke filters the newest rows until the retained
+    // ones arrive, and those must not report "no matches" for an older page.
     val answer by remember(browser, depth) { browser.recent(depth).map { depth to it } }.collectAsStateWithLifecycle(null)
     val items = answer?.second
     val rows = remember(items, query) { items?.let { LocalRows(query, it.matching(query)) } }
