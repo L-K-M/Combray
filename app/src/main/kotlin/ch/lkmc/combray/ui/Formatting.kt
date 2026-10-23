@@ -58,19 +58,53 @@ internal enum class HostlessPage {
     }
 }
 
+/**
+ * How a page's content reached the engine, by its address's scheme. A blob: page holds what the
+ * page that made it fetched, so "blob:http://..." is cleartext like that page, as [displayHost]
+ * names it by that page's host. HTTPS is not treated as verified: the engine does not report
+ * the certificate.
+ */
+internal enum class PageConnection {
+    HTTPS,
+    CLEARTEXT,
+
+    /** data:, about: and file: pages came over no connection: there is nothing to describe. */
+    NONE,
+    ;
+
+    companion object {
+        private const val BLOB_PREFIX = "blob:"
+
+        fun of(url: String): PageConnection {
+            val trimmed = url.trim()
+            val address = if (trimmed.startsWith(BLOB_PREFIX, ignoreCase = true)) trimmed.substring(BLOB_PREFIX.length) else trimmed
+            return when {
+                address.startsWith("https:", ignoreCase = true) -> HTTPS
+                address.startsWith("http:", ignoreCase = true) -> CLEARTEXT
+                else -> NONE
+            }
+        }
+    }
+}
+
 fun relativeTime(time: Long, now: Long): String =
     DateUtils.getRelativeTimeSpanString(time, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
 
 /**
  * The share's subject: the page's title with its whitespace collapsed (a title's line break
  * must not become a second line of the share) and capped, or null when it has nothing usable.
- * The page chooses its title, so it is bounded before it goes into the share twice.
+ * The page chooses its title, so it is bounded before it goes into the share twice. Bidi
+ * controls are dropped: the sender of a share chooses its subject too, and U+202E would show
+ * "moc.elgoog.stnuocca" as "accounts.google.com" next to the host in Save to Karakeep.
  */
 fun shareTitle(title: String?): String? =
-    title?.replace(TITLE_WHITESPACE, " ")?.trim()?.takeIf { it.isNotEmpty() }?.let(::capped)
+    title?.replace(BIDI_CONTROLS, "")?.replace(TITLE_WHITESPACE, " ")?.trim()?.takeIf { it.isNotEmpty() }?.let(::capped)
 
 /** Java's `\s` is ASCII-only; NEL and the Unicode line and paragraph separators belong with it. */
 private val TITLE_WHITESPACE = Regex("[\\s\\u0085\\u2028\\u2029]+")
+
+/** Invisible marks, embeddings, overrides and isolates that reorder the text around them. */
+private val BIDI_CONTROLS = Regex("[\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]")
 
 /** Long enough for any real headline, short enough to stay one line in a message. */
 private const val MAX_SHARE_TITLE = 200
@@ -78,8 +112,14 @@ private const val MAX_SHARE_TITLE = 200
 /** At most [MAX_SHARE_TITLE] characters plus an ellipsis, never splitting a surrogate pair. */
 private fun capped(title: String): String {
     if (title.length <= MAX_SHARE_TITLE) return title
-    val end = if (title[MAX_SHARE_TITLE - 1].isHighSurrogate()) MAX_SHARE_TITLE - 1 else MAX_SHARE_TITLE
-    return title.substring(0, end).trimEnd() + "\u2026"
+    return title.substring(0, cutAt(title, MAX_SHARE_TITLE)).trimEnd() + "\u2026"
+}
+
+/** Where to cut [text] to at most [max] chars without splitting a surrogate pair. */
+private fun cutAt(text: String, max: Int): Int = when {
+    text.length <= max -> text.length
+    text[max - 1].isHighSurrogate() -> max - 1
+    else -> max
 }
 
 /** What a share carries: the title as the first line (when there is one), then the address. */
@@ -117,13 +157,15 @@ internal fun dayName(day: Long, today: Long): DayName = when (today - day) {
 /**
  * [text] with each occurrence of the query's words in [style], ignoring case and accents, so
  * "cafe" marks "Café". Words shorter than [MIN_HIGHLIGHT_TERM] are left out: they would mark
- * almost every word. The text stays plain: nothing in it is read as markup.
+ * almost every word. The text stays plain: nothing in it is read as markup. Only its first
+ * [MAX_HIGHLIGHTED_LENGTH] characters are marked: a page chooses its title, and one span per
+ * match in a huge one makes laying out the row quadratic in the matches, enough to freeze typing.
  */
 internal fun highlightMatches(text: String, query: String, style: SpanStyle): AnnotatedString {
     val terms = query.split(WHITESPACE).map { FoldedText(it).value }.filter(::worthMarking).distinct()
     if (terms.isEmpty()) return AnnotatedString(text)
 
-    val folded = FoldedText(text)
+    val folded = FoldedText(text.substring(0, cutAt(text, MAX_HIGHLIGHTED_LENGTH)))
     val ranges = mergeRanges(terms.flatMap(folded::occurrences))
     return buildAnnotatedString {
         append(text)
@@ -218,6 +260,9 @@ private fun mergeRanges(ranges: List<IntRange>): List<IntRange> {
 
 private val WHITESPACE = Regex("\\s+")
 private const val MIN_HIGHLIGHT_TERM = 2
+
+/** More than a result shows: a title is one line and a Hister excerpt two, on the widest sheet. */
+private const val MAX_HIGHLIGHTED_LENGTH = 300
 
 /** A week ago would repeat today's weekday, so from then on headers show the date. */
 private const val LAST_WEEKDAY_NAMED = 6L

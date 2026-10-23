@@ -259,8 +259,9 @@ private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Uni
 private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit, modifier: Modifier) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
-    // Cleartext is a property of the scheme. HTTPS is not treated as verified.
-    val cleartext = url?.startsWith("http:", ignoreCase = true) == true
+    // Cleartext is a property of the scheme (a blob: page's is its maker's). HTTPS is not
+    // treated as verified.
+    val cleartext = url?.let(PageConnection::of) == PageConnection.CLEARTEXT
     val connection = if (cleartext) stringResource(R.string.address_insecure) else null
     val failed = if (tab?.loadFailed == true) stringResource(R.string.address_load_failed) else null
     val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed).joinToString(", ")

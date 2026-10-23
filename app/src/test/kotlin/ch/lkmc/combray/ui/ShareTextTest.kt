@@ -1,6 +1,7 @@
 package ch.lkmc.combray.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ShareTextTest {
@@ -30,6 +31,15 @@ class ShareTextTest {
             shareText("https://example.org/sailing", "How\u2028to\u2029Sail"),
         )
         assertEquals("How to Sail", shareTitle("\u0085How\u0085to Sail"))
+    }
+
+    @Test
+    fun bidiControlsAreDropped() {
+        // U+202E would show the sender's "moc.elgoog.stnuocca" as "accounts.google.com".
+        assertEquals("moc.elgoog.stnuocca", shareTitle("‮moc.elgoog.stnuocca"))
+        val controls = "؜‎‏‪‫‬‭‮⁦⁧⁨⁩"
+        assertEquals("How to Sail", shareTitle("How $controls to ${controls}Sail"))
+        assertNull(shareTitle(" $controls "))
     }
 
     @Test
