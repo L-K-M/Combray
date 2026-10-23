@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.browser
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.TabEntity
@@ -1022,6 +1023,27 @@ class BrowserCoordinatorTest {
         assertEquals(500, recent("page").size)
     }
 
+    /** A page can add a visit per pushState: searching still reads a bounded number of rows. */
+    @Test
+    fun searchingRecentReadsAtMostFiveThousandVisits() {
+        idle()
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            database.withTransaction {
+                (0..5_000).forEach { index ->
+                    dao.insertVisit(VisitEntity("visit$index", "closed", "https://flood.test/$index", "flood.test", null, null, VisitKind.SAME_DOCUMENT, START + index, START + index, false))
+                }
+            }
+        }
+
+        val visits = runBlocking { browser.recent(HistoryDepth.ALL_RETAINED).first() }.filterIsInstance<RecentItem.Visit>()
+        assertEquals(5_000, visits.size)
+        // The newest are kept.
+        assertEquals("https://flood.test/5000", visits.first().url)
+        assertTrue(visits.none { it.url == "https://flood.test/0" })
+    }
+
     @Test
     fun aClosedTabTakesItsPlaceInHistoryByLastUseNotByClosing() {
         ready()
@@ -1334,6 +1356,68 @@ class BrowserCoordinatorTest {
         val urls = recent().map { it.url }
         assertFalse("https://example.com/4" in urls)
         assertTrue("https://example.com/5" in urls)
+    }
+
+    /** The forgotten flag waits for another page to commit, not for that page to be the first. */
+    @Test
+    fun anAddressTypedBeforeARestoredForgottenPageCommitsIsRecorded() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // After a restart the restored page is slow; the user types another address first.
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 11, "https://c.test/")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 12, "https://d.test/")
+
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://c.test/" })
+    }
+
+    @Test
+    fun aRestoredForgottenPageCommittingBeforeTheTypedOneStaysForgotten() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        // The restored page was faster after all; then the typed one replaces it.
+        commit(view, 11, "https://example.com/4")
+        commit(view, 12, "https://c.test/")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 13, "https://d.test/")
+
+        val urls = recent().filterIsInstance<RecentItem.Visit>().map { it.url }
+        assertFalse("https://example.com/4" in urls)
+        assertTrue("https://c.test/" in urls)
+    }
+
+    @Test
+    fun aRefusedTypedAddressDoesNotUnforgetARestoredPage() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", view, engine.navigated.last().second)); idle()
+        // The restored forgotten page lands on its sign-in page.
+        commit(view, 11, "https://example.com/login")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 12, "https://d.test/")
+
+        assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://example.com/login" })
     }
 
     @Test

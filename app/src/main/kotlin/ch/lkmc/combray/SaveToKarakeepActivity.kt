@@ -1,10 +1,13 @@
 package ch.lkmc.combray
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
+import android.widget.Button
 import android.widget.Toast
 import androidx.annotation.StringRes
 import ch.lkmc.combray.core.integration.SaveRequest
@@ -25,6 +28,10 @@ import kotlinx.coroutines.withContext
  * can start it, and nothing reaches the owner's Karakeep without a tap here.
  */
 class SaveToKarakeepActivity : Activity() {
+    // The question's Save button, once it is shown.
+    private var saveButton: Button? = null
+    private val enableSave = Runnable { saveButton?.isEnabled = true }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Only shares are read. A recreated instance asks again: nothing was saved yet.
@@ -36,7 +43,7 @@ class SaveToKarakeepActivity : Activity() {
         // Some apps share a link as the subject only. The link goes through the address policy,
         // like a typed address, before it can be saved.
         val url = listOf(Intent.EXTRA_TEXT, Intent.EXTRA_SUBJECT).firstNotNullOfOrNull { name ->
-            intent.getCharSequenceExtra(name)?.toString()?.let(IncomingIntents::firstWebAddress)
+            IncomingIntents.textExtra(intent, name)?.let(IncomingIntents::firstWebAddress)
         }?.let { (AddressPolicy.interpret(it).primary as? AddressDecision.Navigate)?.url }
         if (url == null) {
             report(R.string.save_no_link)
@@ -44,20 +51,62 @@ class SaveToKarakeepActivity : Activity() {
         }
 
         // A subject that only holds the link is no title: Karakeep then uses the page's own. The
-        // sharing app chooses the subject, so it is one bounded line, below the real site.
-        val title = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
+        // sharing app chooses the subject, so it is one bounded line, quoted below the real site:
+        // "accounts.google.com" must not read as a second site name.
+        val title = IncomingIntents.textExtra(intent, Intent.EXTRA_SUBJECT)
             ?.takeIf { IncomingIntents.firstWebAddress(it) == null }
             ?.let(::shareTitle)
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.share_save_confirm)
-            .setMessage(listOfNotNull(displayHost(url), title).joinToString("\n"))
-            .setPositiveButton(R.string.action_save) { _, _ -> save(url, title) }
+            .setMessage(listOfNotNull(displayHost(url), title?.let { quoted(it) }).joinToString("\n"))
+            // Its click is set below, where the button exists.
+            .setPositiveButton(R.string.action_save, null)
             .setNegativeButton(R.string.action_cancel) { _, _ -> finish() }
             .setOnCancelListener { finish() }
             .show()
-        // Another app's overlay must not trick the tap that saves.
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).filterTouchesWhenObscured = true
+        saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+            // A click while Save is off, from an accessibility service or posted just before Save
+            // went off, does nothing.
+            setOnClickListener {
+                if (!isEnabled) return@setOnClickListener
+                dialog.dismiss()
+                save(url, title)
+            }
+            // Another app's overlay must not trick the tap that saves: not over Save, and not
+            // elsewhere over the dialog, hiding what it asks while Save stays uncovered. The
+            // listener only drops such touches; the others still click through performClick.
+            filterTouchesWhenObscured = true
+            @SuppressLint("ClickableViewAccessibility")
+            setOnTouchListener { _, event -> event.flags and OBSCURED != 0 }
+            // Off until the dialog has been in front for a moment, and again whenever another
+            // window takes the front from it.
+            isEnabled = false
+            viewTreeObserver.addOnWindowFocusChangeListener { hasFocus -> holdSave(enableLater = hasFocus) }
+        }
     }
+
+    // The end of the enter animation counts like focus, for a dialog whose focus is not reported.
+    // Focus can also come first, while the sending app's own enter animation still keeps the
+    // dialog almost transparent: this gate does not cover that, on Android versions that do not
+    // drop touches on a window still animating in.
+    override fun onEnterAnimationComplete() {
+        super.onEnterAnimationComplete()
+        holdSave(enableLater = true)
+    }
+
+    /**
+     * Turns Save off, and back on after [SAVE_DELAY_MILLIS] when [enableLater]: a tap the user
+     * aimed at the sharing app, landing as the dialog appears under it, must not save.
+     */
+    private fun holdSave(enableLater: Boolean) {
+        val button = saveButton ?: return
+        button.removeCallbacks(enableSave)
+        button.isEnabled = false
+        if (enableLater) button.postDelayed(enableSave, SAVE_DELAY_MILLIS)
+    }
+
+    // Its own quotation marks could close the quote early and leave a site name outside it.
+    private fun quoted(subject: String) = getString(R.string.share_save_subject, subject.filterNot { it in QUOTATION_MARKS })
 
     private fun save(url: String, title: String?) {
         val graph = (application as CombrayApplication).graph
@@ -86,4 +135,17 @@ class SaveToKarakeepActivity : Activity() {
     // The application context: the toast outlives this activity. Long enough to read the
     // longer messages.
     private fun toast(context: Context, @StringRes message: Int) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+
+    private companion object {
+        const val QUOTATION_MARKS = "\"“”„‟«»‹›"
+
+        /** How long the dialog is in front before Save works: longer than a tap already under way. */
+        const val SAVE_DELAY_MILLIS = 500L
+
+        /**
+         * Touches through or beside another app's window. The view's own filter only drops the
+         * first, so an overlay that hides the question but leaves Save uncovered would pass.
+         */
+        const val OBSCURED = MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED
+    }
 }

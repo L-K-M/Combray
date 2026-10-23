@@ -183,16 +183,17 @@ class BrowserCoordinator(
 
     /**
      * Recent: open tabs and local history, newest first, unfiltered. [depth] picks how much
-     * history: the newest [RECENT_HISTORY_LIMIT] visits to browse, or every retained visit
-     * to search, so a match older than the newest rows is still found. The filter runs in the
-     * caller with [matching] against one subscription per depth, so typing does not restart
-     * three Room observers on every keystroke. The query reads from the retention cutoff at
-     * subscription; each answer, and a slow clock while nothing changes, applies the cutoff as it
-     * is then, so a visit leaves an open sheet once it passes the retention period.
+     * history: the newest [RECENT_HISTORY_LIMIT] visits to browse, or up to
+     * [RETAINED_HISTORY_LIMIT] retained visits to search, so a match older than the newest rows
+     * is still found. The filter runs in the caller with [matching] against one subscription per
+     * depth, so typing does not restart three Room observers on every keystroke. The query reads
+     * from the retention cutoff at subscription; each answer, and a slow clock while nothing
+     * changes, applies the cutoff as it is then, so a visit leaves an open sheet once it passes
+     * the retention period.
      */
     fun recent(depth: HistoryDepth = HistoryDepth.NEWEST): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
-        val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else Int.MAX_VALUE
+        val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else RETAINED_HISTORY_LIMIT
         val ticks = flow {
             while (true) {
                 emit(Unit)
@@ -302,8 +303,9 @@ class BrowserCoordinator(
     private suspend fun navigateTab(tab: TabEntity, url: String) {
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
-            // Going somewhere else is the user leaving a forgotten page: what loads next is recorded.
-            if (tab.pageForgotten) dao.updateTab(tab.copy(pageForgotten = false))
+            // A forgotten page stays forgotten until another document commits ([onHistory]): this
+            // request may never commit (a refusal, a 204, a download), and until it does the
+            // forgotten page is still current and can reload or change its own address.
             val request = nextRequest++
             engine.navigate(view.nativeTab, request, url)
             awaitCommit(view)
@@ -750,8 +752,9 @@ class BrowserCoordinator(
             // A page of a forgotten site stays open without a visit. Loading it again in a new
             // renderer (restore, eviction, a crash), reloading it or moving within it records
             // nothing (and requestCapture sends nothing); another page committing in the tab ends that.
+            // A new renderer's first page is the forgotten one unless the user typed another first.
             val forgotten = tab.pageForgotten && when (event.kind) {
-                HistoryKind.DOCUMENT_COMMITTED -> firstCommit || event.url == tab.url
+                HistoryKind.DOCUMENT_COMMITTED -> event.url == tab.url || (firstCommit && view.awaitedUrl == null)
                 HistoryKind.SAME_DOCUMENT, HistoryKind.LIST_UPDATED -> true
             }
             // A single-page app can replace the article without replacing its document.
@@ -1239,8 +1242,12 @@ class BrowserCoordinator(
         val view = liveByNative[tab] ?: return
         if (view.generation != null) {
             if (event.request != null) {
-                // A refusal of an earlier address must not end the wait for a newer one.
-                if (event.request == view.awaitedRequest) view.awaitingCommit = false
+                // A refusal of an earlier address must not end the wait for a newer one. The
+                // refused address never commits, so it no longer marks a typed navigation.
+                if (event.request == view.awaitedRequest) {
+                    view.awaitingCommit = false
+                    view.awaitedUrl = null
+                }
                 state.update { it.copy(notice = Notice.AddressNotOpened) }
             }
             return
@@ -1491,6 +1498,13 @@ class BrowserCoordinator(
 
         /** How often an open Recent applies the retention cutoff when nothing else changes. */
         const val RECENT_CUTOFF_TICK_MS = 60_000L
+
+        /**
+         * Visits a search (Recent, the address sheet) reads at most, newest first. Far more than a
+         * week of browsing, so an old match is still found, but bounded: a page can add a visit
+         * per pushState, and every new visit makes an open search read its rows again.
+         */
+        const val RETAINED_HISTORY_LIMIT = 5_000
     }
 }
 

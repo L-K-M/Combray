@@ -201,6 +201,39 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun credentialsHiddenBehindSlashesLongDigitsOrOtherWordsAreRejected() {
+        val withCredentials = listOf(
+            // Leading slashes, as in a protocol-relative address, do not hide the user name.
+            "//admin:hunter2@192.168.1.1", "/user:pass@host", "\\\\admin:pw@nas",
+            // Six digits are no port: this is a password.
+            "admin:123456/x@nas",
+            // Any word of a text with spaces.
+            "Router: https://admin:hunter2@192.168.1.1", "see https://u:p@h", "(https://u:p@h)", "login admin:hunter2@nas please",
+            // Extra slashes after the scheme, and a link inside another link's query.
+            "see https:///admin:pw@nas", "see https:////admin:pw@192.168.1.1", "see https://a.example/r?u=https://admin:pw@nas",
+            // A colon after the host that starts no port is still a host: a trailing colon, a
+            // port too long, an unbracketed IPv6 address.
+            "admin:pw@nas:", "admin:pw@192.168.1.1:", "admin:pw@nas:/share", "admin:pw@nas:123456", "user:pass@host:8080:9090",
+            "admin:pw@host:abc/x", "admin:pw@::1", "admin:pw@fe80::1", "//admin:pw@nas:", "login admin:hunter2@192.168.1.1: please change",
+        )
+        for (input in withCredentials) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
+            assertNull(input, interpretation.alternative)
+        }
+
+        // An "@" in a link's path, a mail address and a mailto: link hold no password.
+        searches("follow https://mastodon.social/@proust")
+        searches("write to alice@example.com today")
+        searches("write mailto:alice@example.com today")
+        // What follows the "@" is no host and port: an image digest, not a password.
+        searches("docker pull nginx:1.25@sha256:4c0fdaa8b6341bfdeca5f18f7837462c80cff90527ee35ef185571e1c327beac")
+        searches("nginx:1.25@sha256:4c0fdaa8")
+        // A five-digit port before a path with an "@" stays an address.
+        assertEquals(AddressDecision.Navigate("https://nas:12345/@me"), primary("nas:12345/@me"))
+    }
+
+    @Test
     fun mailAndPhoneLinksGoToOtherApps() {
         assertEquals(AddressDecision.External("mailto:a@example.org"), primary("mailto:a@example.org"))
         assertEquals(AddressDecision.External("tel:+41123"), primary("tel:+41123"))

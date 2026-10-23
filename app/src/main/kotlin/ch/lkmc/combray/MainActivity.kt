@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val incoming = IncomingIntents.interpret(intent.action, intent.dataString) { name ->
-            intent.getCharSequenceExtra(name)?.toString()
+            IncomingIntents.textExtra(intent, name)
         } ?: return
         when (incoming) {
             is Incoming.Open -> graph.browser.openFromOtherApp(incoming.url)

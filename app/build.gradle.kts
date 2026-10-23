@@ -79,6 +79,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        // Robolectric builds activities with the app's own strings and themes.
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         jniLibs {
             // scripts/build-native.sh already strips the engine; keep the symbols JNI needs.

@@ -162,20 +162,20 @@ data class BrowserState(
     val notice: Notice? = null,
 )
 
-/**
- * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
- * must reach every retained visit, or a match older than the newest rows would be missed.
- */
 /** A step along the open tabs in Recent order, as a swipe along the bottom bar asks for one. */
 enum class TabStep { OLDER, NEWER }
 
+/**
+ * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
+ * reads further back, up to 5,000 retained visits, so a match older than those rows is found.
+ */
 enum class HistoryDepth {
     NEWEST,
     ALL_RETAINED,
     ;
 
     companion object {
-        /** The depth a Recent filter needs: everything retained once there is text to match. */
+        /** The depth a Recent filter needs: the retained visits once there is text to match. */
         fun forQuery(query: String?) = if (query.isNullOrBlank()) NEWEST else ALL_RETAINED
     }
 }

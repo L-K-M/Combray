@@ -11,7 +11,8 @@ All notable changes to this project are documented here. The format follows
 - Long-press Recent to switch to the tab you used before this one (a tap
   still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
   Recent's order. Repeated swipes keep going back; after a pause they
-  start from the tab you are on.
+  start from the tab you are on. Switching this way hides the keyboard, so
+  further typing does not reach the next tab's page.
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
   editor and a blank tab offers no copy action. Copied addresses are marked
@@ -25,12 +26,12 @@ All notable changes to this project are documented here. The format follows
   choice applies at once and keeps the system bar icons readable.
 - Other apps can send to Combray: a shared link opens in a new tab, other
   shared text and web searches wait in the address editor, "Search with
-  Kagi" in the text selection menu searches at once, and a "Save to
-  Karakeep" share target saves a link after one confirming tap, without
-  opening the browser.
+  Kagi" in the text selection menu searches at once (unless the selection
+  holds a password or a link with a token: that opens the address editor
+  instead), and a "Save to Karakeep" share target saves a link after one
+  confirming tap, without opening the browser. A shared link longer than
+  32,768 characters is refused.
 - Launcher shortcuts for New tab and Search history (Recent on Hister).
-- Long-press the Recent button to switch straight to the tab used before
-  the focused one; tapping Recent still opens the list.
 - Text size: More › Text size zooms every page from 80% to 150% with
   Servo's page zoom, so text rewraps to the screen. The choice is kept and
   applies to new tabs and to reader view.
@@ -54,14 +55,13 @@ All notable changes to this project are documented here. The format follows
   switch to it, or save it to Karakeep without leaving the page. Android 11
   and 12 now confirm a copied address.
 - HTTP sign-in: a dialog naming the server asks for a username and
-  password, warns on unencrypted connections and stores nothing.
+  password and warns on unencrypted connections. Combray stores no
+  credentials; what Servo keeps is in `docs/ENGINE_SPIKE.md`.
 - "Leave this page?" when a page you touched or typed into asks before it
   is left (`beforeunload`), so unsaved form text is not lost silently;
   pressing Back on the question stays. Servo 0.6.0 asks only when the page
   itself navigates (links, forms), on reload and on `window.close()`, not
   for a typed address, Back/Forward or closing the tab.
-  password and warns on unencrypted connections. Combray stores no
-  credentials; what Servo keeps is in `docs/ENGINE_SPIKE.md`.
 - Device check that the bottom bar, More menu and page dialogs keep 48dp,
   labeled touch targets at the narrowest width and largest font size.
 - Local release signing through environment variables, with explicit validation
@@ -125,8 +125,8 @@ All notable changes to this project are documented here. The format follows
   default purple or red, and the bottom bar's color reaches the screen
   edge under the navigation bar.
 - Recent no longer restarts three database observers on every keystroke
-  of its filter: it reads the newest rows while you browse and all
-  retained history once you type, and filters in memory.
+  of its filter: it reads the newest rows while you browse and up to
+  5,000 retained visits once you type, and filters in memory.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Save shows a bookmark instead of a star, which in Karakeep means
   Favourite: an outline, filled while saving, with a check once saved.
@@ -340,8 +340,8 @@ All notable changes to this project are documented here. The format follows
 - A reload that fails, such as offline or when a tab is restored, no longer
   hides the page from Recent or renames it "Error loading page", and a
   reload no longer blanks the page's title while the new one loads.
-- Searching Recent finds every page in local history, not only the newest
-  500 visits.
+- Searching Recent looks beyond the newest 500 visits, up to 5,000 retained
+  ones.
 - Undo after closing a tab other than the current one reopens it in the
   background instead of switching to it.
 - More and Settings open fully expanded instead of at half height, which
@@ -371,4 +371,9 @@ All notable changes to this project are documented here. The format follows
   `http://` instead of a Kagi search that would leak the name.
 - A typed `user:password@host` without `https://` was sent to Kagi as a
   search, password included. It is now refused like other addresses with
-  credentials.
+  credentials, also as one word of a longer text, so a search such as
+  `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
+  image digest (`nginx:1.25@sha256:…`) is still searched.
+- An address with `user:pass@` and a host Java's URI parser cannot read
+  (an underscore in it, for example) was not treated as sensitive, so it
+  could be captured to Hister or saved to Karakeep with its password.

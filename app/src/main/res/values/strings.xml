@@ -176,6 +176,8 @@
     <!-- Other apps and the launcher -->
     <string name="share_save_to_karakeep">Save to Karakeep</string>
     <string name="share_save_confirm">Save to Karakeep?</string>
+    <!-- The sharing app's subject below the site, quoted so it cannot pass for a second site name. -->
+    <string name="share_save_subject">“%1$s”</string>
     <string name="process_text_search_kagi">Search with Kagi</string>
     <string name="shortcut_search_history">Search history</string>
 

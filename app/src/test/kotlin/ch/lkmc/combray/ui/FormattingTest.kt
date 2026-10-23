@@ -68,6 +68,31 @@ class FormattingTest {
     }
 
     @Test
+    fun aHugeTitleIsMarkedOnlyWhereARowCanShowIt() {
+        // A page chooses its title. One span per occurrence in all of it made laying out the row
+        // quadratic in the number of matches, enough to freeze typing in Recent's filter.
+        val title = "news ".repeat(20_000)
+        val highlighted = highlightMatches(title, "news", style)
+        assertEquals(title, highlighted.text)
+        assertEquals(0, highlighted.spanStyles.first().start)
+        assertTrue(highlighted.spanStyles.size <= 60)
+        assertTrue(highlighted.spanStyles.all { it.end <= 300 })
+    }
+
+    @Test
+    fun aBlobPageHasTheConnectionOfThePageThatMadeIt() {
+        assertEquals(PageConnection.CLEARTEXT, PageConnection.of("http://bank.example/"))
+        assertEquals(PageConnection.CLEARTEXT, PageConnection.of("blob:http://bank.example/0b6a"))
+        assertEquals(PageConnection.CLEARTEXT, PageConnection.of("BLOB:HTTP://bank.example/0b6a"))
+        assertEquals(PageConnection.HTTPS, PageConnection.of("https://bank.example/"))
+        assertEquals(PageConnection.HTTPS, PageConnection.of("blob:https://bank.example/0b6a"))
+        assertEquals(PageConnection.NONE, PageConnection.of("data:text/html,x"))
+        assertEquals(PageConnection.NONE, PageConnection.of("about:blank"))
+        // A blob made by an opaque origin names no site and no connection.
+        assertEquals(PageConnection.NONE, PageConnection.of("blob:null/0b6a"))
+    }
+
+    @Test
     fun monogramIsTheHostsFirstLetter() {
         assertEquals("E", monogram("https://www.example.org/page"))
         assertEquals("K", monogram("https://kagi.com/search?q=x"))
