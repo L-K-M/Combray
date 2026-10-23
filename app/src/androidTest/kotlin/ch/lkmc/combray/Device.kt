@@ -48,6 +48,9 @@ object Fixtures {
 
     const val ONCE_TITLE = "ONCE"
 
+    /** Kimi's :has() DOM queries; stylesheet support stays disabled. */
+    const val HAS_SELECTOR = "$BASE/has-selector.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

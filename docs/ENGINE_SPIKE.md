@@ -304,3 +304,84 @@ adb -s emulator-5562 shell am instrument -w -r \
 The installed app contained Reader fix `2ae2b8b`; the second run used the test helper change later committed in `6b6d489`. Both complete runs passed 2/3 checks: unavailable-article handling and article-link navigation passed. Article extraction, markers and displayed text assertions passed, but the following system Back injection failed with `SecurityException: Injecting to another application requires INJECT_EVENTS permission`. The existing `Device.dismissSystemDialogs()` was added immediately before Back; it did not clear the interference reliably on this emulator.
 
 A read-only REA/adb screenshot showed “System UI isn't responding” covering the screen: 720×1440 PNG, SHA-256 `19884e2324b5e7ea5188ab40e2b012c152a5bc90d4a21b66797aa9f6d067e9c8`, Evidence `ev_9ec17de27963221eb3ed27bb7bada937afc55e82c0f5ac113a6ea96225207ac0`. Restarting System UI on this disposable emulator was attempted; the next run timed out and was stopped. **The device gate did not pass.** No physical phone, live service, personal history, Kagi login, dark/landscape sweep, or performance benchmark was exercised in this pass.
+
+## 16. Kimi article compatibility (23 October 2026)
+
+The owner's reported `https://www.kimi.ai/blog/kimi-k3-1-pro` failure reproduced
+on Android 11/API 30, x86_64 `emulator-5580`, SwiftShader, without KVM. The
+engine remained Servo v0.6.0 at the revision in section 2, Rust 1.97.1 and NDK
+r29. Temporary console diagnostics in the M0 harness exposed this exception:
+
+```text
+SyntaxError: ':scope > section > h1, .markdown :is(h2, h3):has(> strong), .markdown > p:has(> strong)' is an invalid selector
+```
+
+The article's startup calls `querySelectorAll` with that selector list. Stylo
+0.21.0's `servo/selector_parser.rs::parse_has` reads
+`layout.css.has-selector.enabled`, which defaults to false. Servo exposes no
+mapping for it. The exception reaches Next.js, which replaces the article with
+its client-side error screen. REA process capture
+`ev_d9a380b76cf730585f68d2e8da0ea47d3c51ad8d11b4de0b5a51119ea9892070`
+retains the exception and the resulting page text.
+
+The synthetic `/has-selector.html` fixture reproduced that exact rejection.
+A trial exposing and enabling the global Stylo switch let the live article
+load, but failed the fixture's dynamic stylesheet check: adding `active` to a
+child did not update its parent's `:has(> strong.active)` style. This trial is
+not sufficient for enabling stylesheet support. Local evidence is under
+`build/kimi-debug/` (ignored); `before` records the selector rejection and
+`after2` records the stale style.
+
+Patch `0007` instead adapts the parser only for `querySelector`,
+`querySelectorAll`, `matches` (including its WebKit alias) and `closest`.
+Stylo's native matching computes these results on demand, with selector flags
+and invalidation disabled by the existing DOM API paths. All other parser
+hooks delegate to Stylo. No global preference or dependency version changes.
+Recheck the adapter's delegation against `selectors::Parser` on engine updates.
+
+Modified covered files: `components/script/dom_selector_parser.rs` (new),
+`components/script/lib.rs`, `components/script/dom/element/element.rs`, and
+`components/script/layout_dom/servo_dangerous_style_node.rs`.
+
+**Limit:** stylesheet `:has()` rules remain ignored and
+`CSS.supports('selector(:has(*))')` remains false. Six of the page's 16 fetched
+stylesheets use `:has()`, including header, background and paragraph-spacing
+rules. Fixing startup does not establish visual parity. Full CSS support needs
+Servo's relative-selector invalidation wired for DOM, attribute and state
+changes; the global switch alone is unsafe.
+
+Validation used JDK 21 and the host's Zig 0.17 compiler wrappers with
+`-fno-sanitize=undefined`, as in BUILDING.md. Commands from the repository root
+(`COMBRAY_HOST_CC`/`COMBRAY_HOST_CXX` name those local wrappers):
+
+```sh
+ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+  COMBRAY_HOST_CC="$PWD/build/kimi-debug/host-cc" \
+  COMBRAY_HOST_CXX="$PWD/build/kimi-debug/host-c++" \
+  CARGO_BUILD_JOBS=8 scripts/build-native.sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+ANDROID_SDK_ROOT=/home/paseo/android-sdk COMBRAY_RESULTS=build/kimi-debug/final \
+  scripts/check-app.sh emulator-5580 ch.lkmc.combray.BrowsingTest ch.lkmc.combray.ReaderTest
+```
+
+The final x86_64 native build passed (131,007,968-byte engine library), as did
+22 native host tests, Rust formatting, the new parser's formatting, 32 script
+regressions, JVM unit tests, lint and APK assembly. The device run passed
+13/16 Browsing checks, including `pagesCanUseRelationalSelectors`, and all five
+Reader checks. The selector check covers the exact Kimi query, `matches`,
+`closest`, class mutations, other pseudo-classes, invalid selectors, and safe
+stylesheet rejection. The three failures were `aSharedLinkOpensInANewTab`,
+`backFromAnotherAppsLinkLeavesTheAppAndKeepsThePageInHistoryOnly`, and
+`anExternalLinkOpensInANewTab`: all timed out in `ActivityScenario.close`,
+waiting for `DESTROYED` after `PAUSED`. The broader UI run is not a pass.
+
+The final patch also passed a fresh live Kimi load in the M0 harness: after
+load completion and a 15-second settling interval, the document contained
+“Introducing Kimi K3.1 Pro” and article paragraphs instead of “Application
+error”, with `CSS.supports('selector(:has(*))')` false. Temporary console and
+harness diagnostics are excluded from the product. The validated x86_64 engine
+SHA-256 is `133daa3dd19bb0461a5d232b9de2b19e1be86334857d03612ba4e9fec2507c73`;
+the product debug APK is
+`2a88a0855472c5cb8945db250f83338d03c1dce95379553b8514708b4f30bab9`.
+No physical phone, live integration service, login or full CSS conformance was
+tested. All source changes remain downstream.

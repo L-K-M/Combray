@@ -20,7 +20,7 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 | --- | --- | --- |
 | Servo | v0.6.0 release (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `scripts/m0/env.sh` |
 | Servo source tarball | `servo-v0.6.0-src-vendored.tar.gz`, SHA-256 `1d828f9956fcb0fccfd5af02e4c75bfb948344f04ba7af1765faff78d4aec0e6` | GitHub release asset; checked by `fetch-servo.sh` |
-| Servo patches | `0001` build fix, `0002` document identity, `0003` render-error logging, `0004` cookie persistence on request | `native/servo/patches/` |
+| Servo patches | `0001` build fix, `0002` document identity, `0003` render-error logging, `0004` cookie persistence on request, `0007` relational DOM selectors | `native/servo/patches/` |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |
