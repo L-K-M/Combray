@@ -311,7 +311,7 @@ A read-only REA/adb screenshot showed “System UI isn't responding” covering 
 
 Owner-approved migration to [L-K-M/servo](https://github.com/L-K-M/servo/tree/combray/0.6), an independent downstream repository preserving upstream Git history. `servo/servo` is source pulls only. No contributions, reports, comments, fork API calls or outreach are permitted. The rule is in both repositories' `AGENTS.md` and global agent instructions.
 
-Base: `c78d2c206f80a1c8b67eefa97f773bba513205d3` (v0.6.0). Candidate downstream pin: `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. Engine changes are imported unchanged as separate commits:
+Base: `c78d2c206f80a1c8b67eefa97f773bba513205d3` (v0.6.0). Downstream pin: `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. Engine changes are imported unchanged as separate commits:
 
 | Former patch | Downstream commit | Scope |
 | --- | --- | --- |
@@ -349,15 +349,15 @@ scripts/check-app.sh emulator-5580 ch.lkmc.combray.ReaderTest ch.lkmc.combray.Hi
   'ch.lkmc.combray.BrowsingTest#rotationRecreatesTheSurfaceButKeepsTabsAndThePage'
 ```
 
-Full CI and review are pending on [migration PR #120](https://github.com/L-K-M/Combray/pull/120). ARM64 runtime, physical devices and macOS builds were not run. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).
+Hosted [Engine CI](https://github.com/L-K-M/Combray/actions/runs/40028430170) passed at Combray `e956163`: host tests, both native ABI builds, both APK architecture checks and all **57 device checks**, including selector queries, external intents, Reader, saves, Hister and both process-death phases. [Migration PR #120](https://github.com/L-K-M/Combray/pull/120) records CI and review; the stopping condition was reached with no confirmed important review findings, and remaining minor suggestions were deferred. [Downstream PR #1](https://github.com/L-K-M/servo/pull/1) merged the unchanged adapter, preserving the pinned commit. ARM64 runtime, physical devices and macOS builds were not run. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).
 
 The first Engine CI attempt passed host tests but both Android builds stopped before compilation: the hosted image exported `ANDROID_NDK_ROOT` pointing at r27. The workflow now clears that inherited override, allowing `env.sh` to select and install pinned r29. This does not change explicit local NDK overrides.
 
-The next attempt passed host tests, both native builds and both APK architecture checks, but fresh emulator creation failed because avdmanager and the emulator selected different Android preference homes. The workflow now aligns `ANDROID_USER_HOME`, `ANDROID_EMULATOR_HOME` and `ANDROID_AVD_HOME`. A real SDK probe created the expected `.ini` and `config.ini` under an isolated home, then deleted that test AVD. Full device CI is pending the retry.
+The next attempt passed host tests, both native builds and both APK architecture checks, but fresh emulator creation failed because avdmanager and the emulator selected different Android preference homes. The workflow now aligns `ANDROID_USER_HOME`, `ANDROID_EMULATOR_HOME` and `ANDROID_AVD_HOME`. A real SDK probe created the expected `.ini` and `config.ini` under an isolated home, then deleted that test AVD before retrying CI.
 
 That retry booted the hosted KVM emulator and ran all 57 device checks: 54 passed, including the selector regression and both process-death phases. The three external-intent cases failed as in section 16. Logcat explicitly said lifecycle callbacks were ignored because the current intent did not match the launch intent. AndroidX `ActivityScenario` 1.7.0 checks that match on every callback; `MainActivity.onNewIntent` legitimately changes the activity intent. Its observer therefore missed resume, stop and destroy, leaving stale `PAUSED` state.
 
-`BrowsingTest.deliverIncomingPage` now sends the real Android intent, waits for its page, then restores the scenario launch intent on the main thread, including on assertion failure. This makes Back and teardown observable without skipping the functional assertions. The three previously failing checks pass locally in `build/device-checks/intent-harness-fixed/`. The product APK remains byte-identical (`f4decaab…`); this correction is in the test driver. JVM tests, lint and both debug APK assemblies passed after the correction. Full hosted CI is being retried.
+`BrowsingTest.deliverIncomingPage` now sends the real Android intent, waits for its page, then restores the scenario launch intent on the main thread, including on assertion failure. This makes Back and teardown observable without skipping the functional assertions. The three previously failing checks pass locally in `build/device-checks/intent-harness-fixed/`. The product APK remains byte-identical (`f4decaab…`); this correction is in the test driver. JVM tests, lint and both debug APK assemblies passed after the correction, followed by the successful full hosted run linked above.
 
 ## 16. Kimi article compatibility (23 October 2026)
 
