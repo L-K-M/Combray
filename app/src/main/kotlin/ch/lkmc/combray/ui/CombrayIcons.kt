@@ -46,6 +46,9 @@ internal val ScheduleIcon: ImageVector = materialIcon(
         "M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z",
 )
 
+/** Material's "pause": the close X it replaces in More read as closing the tab. */
+internal val PauseIcon: ImageVector = materialIcon("Pause", "M6 19h4V5H6v14zm8-14v14h4V5h-4z")
+
 /** A 24dp icon of one filled path; [Icon][androidx.compose.material3.Icon] tints it. */
 private fun materialIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
     .addPath(addPathNodes(pathData), fill = SolidColor(Color.Black))

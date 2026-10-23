@@ -141,6 +141,19 @@ class IncomingIntentsTest {
     }
 
     @Test
+    fun searchWithKagiNeverOpensALinkTheLineLimitCut() {
+        val link = "https://example.org/" + "a".repeat(3_000)
+        assertEquals(Incoming.Open(link), processText(link))
+        assertEquals(Incoming.Open(link), processText("  $link.  "))
+        // Without a scheme there is no whole link to open: the editor shows what was kept.
+        val schemeless = "example.org/" + "a".repeat(3_000)
+        assertEquals(LaunchRequest.EditNewTab(schemeless.take(2_000)), processText(schemeless))
+        assertEquals(LaunchRequest.EditNewTab(schemeless.take(2_000)), processText("$schemeless https://other.example/"))
+        // Spaces around a short address are no cut.
+        assertEquals(Incoming.Open("https://example.org"), processText("  example.org  "))
+    }
+
+    @Test
     fun searchWithKagiNeverSendsAPasswordOrTokenInTheSelection() {
         // Refused by the address policy: the editor says why.
         val login = "Log in at https://me:secret@example.org/ today"

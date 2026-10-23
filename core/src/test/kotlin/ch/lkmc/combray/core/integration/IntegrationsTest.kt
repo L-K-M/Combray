@@ -337,7 +337,9 @@ class IntegrationsTest {
         configure(root = unreachableRoot())
         val created = now
         runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
-        while (job().state == JobState.RETRY_WAIT || job().state == JobState.PENDING) {
+        // A week of waiting takes about 50 drains; the bound turns a regression into a failure, not a hang.
+        var drains = 0
+        while ((job().state == JobState.RETRY_WAIT || job().state == JobState.PENDING) && drains++ < 1_000) {
             now = maxOf(now, job().nextAttemptAt)
             drain()
         }

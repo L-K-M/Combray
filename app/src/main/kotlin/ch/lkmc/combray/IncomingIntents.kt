@@ -144,7 +144,13 @@ object IncomingIntents {
     private fun searchNow(text: String): Incoming? {
         val query = oneLine(text) ?: return null
         return when (val decision = AddressPolicy.interpret(query).primary) {
-            is AddressDecision.Navigate -> Incoming.Open(decision.url)
+            // An address the line limit cut never opens in half: the whole link opens, as from a
+            // share, or the editor shows what was kept.
+            is AddressDecision.Navigate -> if (isCut(text, query)) {
+                firstWebAddress(text)?.takeIf { it.startsWith(query) }?.let(::open) ?: LaunchRequest.EditNewTab(query)
+            } else {
+                Incoming.Open(decision.url)
+            }
             // A link with a password or token among other words goes to the editor alone, as from
             // a share: searched with them, it would reach Kagi unseen.
             is AddressDecision.Search -> secretLink(query)?.let { LaunchRequest.EditNewTab(it) } ?: Incoming.Open(decision.url)
@@ -164,9 +170,14 @@ object IncomingIntents {
 
     private fun editNewTab(text: String): LaunchRequest.EditNewTab? = oneLine(text)?.let { LaunchRequest.EditNewTab(it) }
 
+    // Whether oneLine dropped the end of [text] to make [line].
+    private fun isCut(text: String, line: String) = normalized(text).length > line.length
+
+    private fun normalized(text: String) = text.trim().replace(WHITESPACE, " ")
+
     /** [text] as one bounded line, or null when it is blank. */
     private fun oneLine(text: String): String? {
-        val line = text.trim().replace(WHITESPACE, " ")
+        val line = normalized(text)
         if (line.isEmpty()) return null
         if (line.length <= MAX_TEXT_LENGTH) return line
         // Not between the two halves of a surrogate pair.
