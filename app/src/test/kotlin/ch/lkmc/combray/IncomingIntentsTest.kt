@@ -5,6 +5,7 @@ import android.content.Intent
 import ch.lkmc.combray.core.policy.AddressPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IncomingIntentsTest {
@@ -62,6 +63,32 @@ class IncomingIntentsTest {
         )
     }
 
+    // Any app can share without a tap, and this runs on the main thread: a trim that copied and
+    // recounted the link once per character took seconds here.
+    @Test(timeout = 1_000)
+    fun longRunsOfClosingCharactersAreTrimmedInOnePass() {
+        assertEquals("https://a", IncomingIntents.firstWebAddress("https://a" + ")".repeat(32_000)))
+        assertEquals("https://a", IncomingIntents.firstWebAddress("https://a" + ".".repeat(32_000)))
+        assertEquals("https://a/(b)", IncomingIntents.firstWebAddress("https://a/(b)" + "),".repeat(16_000)))
+    }
+
+    @Test
+    fun aLinkLongerThanTheEngineTakesIsRefusedNotCut() {
+        // 32,768 characters, the engine's limit (native MAX_URL_CHARS).
+        val longest = "https://a.example/" + "x".repeat(32_768 - 18)
+        assertEquals(longest, IncomingIntents.firstWebAddress(longest))
+        assertNull(IncomingIntents.firstWebAddress(longest + "x"))
+        assertTrue(send("see ${longest}x") !is Incoming.Open)
+    }
+
+    @Test
+    fun aLinkRunningPastTheSearchedPartOfAHugeShareIsRefusedNotCut() {
+        // Only the first 65,536 characters are searched for a link.
+        val text = "a ".repeat(32_760) + "https://a.example/" + "x".repeat(100)
+        assertNull(IncomingIntents.firstWebAddress(text))
+        assertNull(IncomingIntents.firstWebAddress("a ".repeat(40_000) + "https://a.example/"))
+    }
+
     @Test
     fun aSchemeWithoutAnAddressIsNoLink() {
         assertNull(IncomingIntents.firstWebAddress("https://."))
@@ -111,6 +138,21 @@ class IncomingIntentsTest {
         assertEquals(Incoming.Open("https://example.org/a"), processText("https://example.org/a"))
         assertEquals(LaunchRequest.EditNewTab("mailto:a@example.org"), processText("mailto:a@example.org"))
         assertEquals(LaunchRequest.EditNewTab("javascript:alert(1)"), processText("javascript:alert(1)"))
+    }
+
+    @Test
+    fun searchWithKagiNeverSendsAPasswordOrTokenInTheSelection() {
+        // Refused by the address policy: the editor says why.
+        val login = "Log in at https://me:secret@example.org/ today"
+        assertEquals(LaunchRequest.EditNewTab(login), processText(login))
+        assertEquals(LaunchRequest.EditNewTab("admin:hunter2@nas is the login"), processText("admin:hunter2@nas is the login"))
+        // A link with a token goes to the editor alone, as from a share.
+        assertEquals(
+            LaunchRequest.EditNewTab("https://accounts.example/reset?token=abc123"),
+            processText("Reset here https://accounts.example/reset?token=abc123 thanks"),
+        )
+        // A link with nothing secret in it is searched with its text.
+        assertEquals(Incoming.Open(AddressPolicy.kagiSearchUrl("what is https://example.org/a")), processText("what is https://example.org/a"))
     }
 
     @Test
