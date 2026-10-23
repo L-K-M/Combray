@@ -334,9 +334,26 @@ CARGO_TARGET_DIR=/home/paseo/workspace/Combray/servo-checkout/servo-v0.6.0/targe
 CARGO_BUILD_JOBS=4 scripts/build-native.sh
 ```
 
-Staged `libcombray_engine.so`: 131,035,584 bytes, SHA-256 `5fe65a66532b33211ed7e2ff30428ae014fc9b728fd93515b3b4e3925ea0ef26`. ARM64 and migrated-APK device checks are in progress. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).
+Staged x86_64 `libcombray_engine.so`: 131,035,584 bytes, SHA-256 `5fe65a66532b33211ed7e2ff30428ae014fc9b728fd93515b3b4e3925ea0ef26`.
+
+The ARM64 native build passed in 7m12s with the same source and tools, `COMBRAY_ABI=arm64` and `CARGO_TARGET_DIR=/home/paseo/workspace/Combray/servo-checkout/target-arm64`. Its staged engine is 121,892,944 bytes, SHA-256 `443c56cde7ee12c7a85957645b3b20cbe5830712e387ab727eb79330597fe257`. After merging Combray #119, the complete Gradle test/lint/debug/test-APK/release command passed again with this ARM64 engine staged. `verify-apk.py --expected-arch` passed for both ABIs. The ARM64 debug APK is `548721dc689b99200fe787cade7d942c70f435219bd698538794c17b6fe85aed`.
+
+The migrated x86_64 APK (`f4decaabe15ae39ddaf58b078a97f86e038fb884cc7b2ce7ef42887a4031444b`) passed 11 selected checks on Android 11/API 30 `emulator-5580`, SwiftShader without KVM: all five Reader and three Hister cases, navigation with Recent, same-address independent tabs and surface rotation. This run preceded the merge of #119's extra fixture case; it used the final imported engine code. The new selector regression's evidence remains in section 16. Local output is in `build/device-checks/servo-downstream/` (ignored).
+
+```sh
+ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_RESULTS="$PWD/build/device-checks/servo-downstream" \
+scripts/check-app.sh emulator-5580 ch.lkmc.combray.ReaderTest ch.lkmc.combray.HisterTest \
+  'ch.lkmc.combray.BrowsingTest#navigatingShowsTheNewPageAndKeepsTheOldOneInRecent' \
+  'ch.lkmc.combray.BrowsingTest#twoTabsAtTheSameAddressStayIndependent' \
+  'ch.lkmc.combray.BrowsingTest#rotationRecreatesTheSurfaceButKeepsTabsAndThePage'
+```
+
+Full CI and review are pending on [migration PR #120](https://github.com/L-K-M/Combray/pull/120). ARM64 runtime, physical devices and macOS builds were not run. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).
 
 The first Engine CI attempt passed host tests but both Android builds stopped before compilation: the hosted image exported `ANDROID_NDK_ROOT` pointing at r27. The workflow now clears that inherited override, allowing `env.sh` to select and install pinned r29. This does not change explicit local NDK overrides.
+
+The next attempt passed host tests, both native builds and both APK architecture checks, but fresh emulator creation failed because avdmanager and the emulator selected different Android preference homes. The workflow now aligns `ANDROID_USER_HOME`, `ANDROID_EMULATOR_HOME` and `ANDROID_AVD_HOME`. A real SDK probe created the expected `.ini` and `config.ini` under an isolated home, then deleted that test AVD. Full device CI is pending the retry.
 
 ## 16. Kimi article compatibility (23 October 2026)
 

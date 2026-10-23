@@ -232,16 +232,17 @@ jobs:
           sudo docker system prune -a -f --volumes || true
           df -h /
 
-      # Sources env.sh, which installs the pinned NDK r29 and the API 30 x86_64
-      # system image through the runner SDK's own sdkmanager.
-      - name: Boot the reference emulator
-        run: scripts/m0/emulator.sh
-
-      # The full app/src/androidTest suite plus the process-death runs against
-      # testing/fixtures/server.py. Exits 1 on any failed, empty or early-stopped
-      # run, so a check that did not execute cannot look green.
-      - name: Run the device checks
-        run: scripts/check-app.sh emulator-5560
+      # Keep Java's avdmanager and the emulator on one fresh profile home.
+      # Run the full fixture suite, including the process-death checks.
+      - name: Boot the reference emulator and run fixtures
+        env:
+          ANDROID_USER_HOME: ${{ runner.temp }}/combray-android
+          ANDROID_EMULATOR_HOME: ${{ runner.temp }}/combray-android
+          ANDROID_AVD_HOME: ${{ runner.temp }}/combray-android/avd
+        run: |
+          mkdir -p "$ANDROID_AVD_HOME"
+          scripts/m0/emulator.sh
+          scripts/check-app.sh emulator-5560
 
       - name: Upload device-check evidence
         if: always()
