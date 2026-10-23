@@ -87,7 +87,7 @@ The proposed seven-day retention applies to closed/local history, measured from 
 
 “Remove from Recent” removes local records under a defined scope. For an open tab, offer an explicit close-and-forget action, rather than erasing its only recovery record invisibly. “Forget this site” removes matching local history and pending captures, optionally adds an exclusion, and clearly describes whether it affects open tabs. Remote deletion is a separate action only if the installed API supports and verifies it. Never claim “deleted everywhere” from a local database transaction.
 
-Save is one tap with immediate **Pending**, then **Saved**, or an actionable failure. A saved checkmark means a server acknowledged that URL, not that downstream crawling/tagging finished. Repeated taps while pending do not create repeated jobs. Optional tags/notes are a later sheet; tagging failure must not turn a successful bookmark creation into a false total failure. Hister indexing normally stays unobtrusive, with a compact paused/error indication and a settings queue view when action is needed.
+Save is one tap with immediate **Pending**, then **Saved**, or an actionable failure. A saved checkmark means a server acknowledged that URL, not that downstream crawling/tagging finished. Repeated taps while pending do not create repeated jobs. Optional tags/notes are a later sheet; tagging failure must not turn a successful bookmark creation into a false total failure. Hister indexing normally stays unobtrusive, with a quiet mark once a page is accepted, a compact paused/error indication and a settings queue view when action is needed.
 
 ### Settings and accessibility
 
@@ -290,7 +290,7 @@ For exclusions/forgetting, update policy and invalidate matching pending jobs in
 
 ## 7. Privacy, security, and platform behavior
 
-Capture is initially off until the user configures Hister and explicitly enables it with a clear explanation. Apply exclusions before extraction, before storing a body, and before upload. Proposed defaults exclude the integration services' account/settings pages and known authentication flows. Let the owner exclude exact hosts and, explicitly, subdomains. Do not claim that a short generic exclusion list detects every sensitive site. Support pausing all indexing from the bottom menu or settings without closing tabs.
+Capture is initially off until the user configures Hister and explicitly enables it with a clear explanation. Apply exclusions before extraction, before storing a body, and before upload. Proposed defaults exclude the integration services' account/settings pages and known authentication flows. Let the owner exclude exact hosts and, explicitly, subdomains. Do not claim that a short generic exclusion list detects every sensitive site. Support pausing all indexing from Settings without closing tabs.
 
 Keep browser cookies/site storage in Servo's profile facilities, and API credentials in the native protected store. Do not extract integration keys into the web profile. Protect queued content with app-private storage; evaluate Keystore-backed encryption for stored sensitive bodies and keys. Explicitly define Android backup/data-extraction rules: do not back up credentials, raw captures or the Servo profile by default. A token that becomes unreadable after key loss should trigger reauthentication without destroying unrelated local history.
 
@@ -560,7 +560,7 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 | Haptics: a tick when a save lands, a distinct one when it is refused, and one on a page long-press | Confirmed | #76 |
 | Long-pressing Recent switches to the previously used tab | Confirmed | #109 |
 | Swiping sideways on the bottom bar switches tabs | Confirmed (owner request) | New, with #109 |
-| The More sheet keeps "Resume history capture" while capture is paused | Proposed | #58 |
+| The More sheet keeps "Resume history capture" while capture is paused | Superseded 23 October 2026: capture has no More row; Settings keeps the switch, and the address chip marks pages Hister accepted | #58 |
 | Saves that never reached the server do not use up the ten attempts; they need attention after seven days. Hister's deliberate refusals cancel the capture | Confirmed | #74 |
 
 ### Principal risks and response

@@ -74,6 +74,15 @@ class AccessibilityTest {
     }
 
     @Test
+    fun aPageSentToHisterHasAQuietAccessibleMark() {
+        show(DEFAULT_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, histerStored = true)
+        }
+
+        compose.onNodeWithContentDescription("Sent to Hister", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun addressCopyIsAnAccessibleLongClick() {
         show(DEFAULT_FONT) {
             Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
@@ -133,12 +142,13 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, readerOpen = false, {})
             }
         }
 
         assertTargetsAreAccessible()
         compose.onNodeWithText("Settings").assertIsDisplayed()
+        compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
     @Test
@@ -251,12 +261,14 @@ class AccessibilityTest {
         tab: ActiveTab?,
         openTabs: Int,
         saveStatus: SaveStatus,
+        histerStored: Boolean = false,
         onAddress: () -> Unit = {},
         onCopyAddress: () -> Unit = {},
     ) = BottomBar(
         tab = tab,
         openTabs = openTabs,
         saveStatus = saveStatus,
+        histerStored = histerStored,
         onBack = {},
         onAddress = onAddress,
         onSave = {},
