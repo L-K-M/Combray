@@ -90,6 +90,14 @@ jobs:
           # the action then retries with. Bigger chunks would hit that more
           # often, not less.
           MAX_CHUNK_CHARS: 25000
+          # The action's default lockfile patterns plus Markdown. Combray PR
+          # #112 still overran 330 min: its 26 chunks finished, then five
+          # escalated re-reviews did not, and about five chunks were Markdown
+          # (ANALYSIS.md, the changelog, the plan). Code gets the time; docs are
+          # left to scripts/check_docs.py and human review. A pattern matches the
+          # path or the file name, so "*.md" also covers docs/. The review
+          # comment lists the files it skipped.
+          EXCLUDE_PATTERNS: "*.lock,package-lock.json,yarn.lock,pnpm-lock.yaml,*.md"
           ZAI_REVIEWER_NAME: GLM 5.3 Code Review
           GITHUB_TOKEN: ${{ github.token }}
 
