@@ -7,16 +7,21 @@ import ch.lkmc.combray.core.browser.Clock
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.ExclusionEntity
 import ch.lkmc.combray.core.data.JobKind
+import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.data.ServiceKind
 import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -186,6 +191,19 @@ class HisterIntegration(
         token ?: return HisterSearch.Unauthorized
         return withContext(Dispatchers.IO) {
             routes.call(service) { transport, root -> HisterClient(transport).search(root, token, query, pageKey) }
+        }
+    }
+
+    /**
+     * Whether the newest capture of [url] was accepted by the configured Hister server. This is
+     * acknowledgment (HTTP 201), not proof that Hister indexed the text for search.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun captureStored(url: String?): Flow<Boolean> = service.flatMapLatest { current ->
+        if (current == null || url == null) {
+            flowOf(false)
+        } else {
+            dao.observeLatestCapture(current.fingerprint, documentKey(url)).map { it?.state == JobState.SUCCEEDED }
         }
     }
 

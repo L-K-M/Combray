@@ -117,7 +117,8 @@ fun BrowserScreen(
         val url = tab?.url
         graph.integrations.saveStatus(url).map { PageSaveStatus(url, it) }
     }.collectAsStateWithLifecycle(PageSaveStatus(null, SaveStatus.Unsaved))
-    val histerService by graph.integrations.hister.service.collectAsStateWithLifecycle(null)
+    val histerStored by remember(tab?.url) { graph.integrations.hister.captureStored(tab?.url) }
+        .collectAsStateWithLifecycle(false)
 
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
@@ -336,6 +337,7 @@ fun BrowserScreen(
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
+                histerStored = histerStored && tab?.loading != true,
                 backEnabled = state.reader != null || backInPage != null,
                 // Like system Back: Reader view closes first, then Back moves through the page.
                 onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
@@ -428,11 +430,6 @@ fun BrowserScreen(
             onCloseTab = { dismiss(); tab?.let { browser.closeTab(it.id) } },
             onPageInfo = { sheet = Sheet.PAGE_INFO },
             onSettings = { sheet = Sheet.SETTINGS },
-            captureEnabled = histerService?.captureEnabled,
-            onPauseCapture = {
-                dismiss()
-                scope.launch { graph.integrations.hister.setCaptureEnabled(false) }
-            },
             readerOpen = state.reader != null,
             onReader = {
                 dismiss()

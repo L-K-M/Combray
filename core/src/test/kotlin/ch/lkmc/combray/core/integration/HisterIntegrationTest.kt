@@ -102,6 +102,22 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun theStoredMarkFollowsTheNewestCaptureForTheConfiguredServer() = runBlocking {
+        enable()
+        assertFalse(hister.captureStored("https://a.example/").first())
+        capture("https://a.example/#top", "first")
+        assertFalse(hister.captureStored("https://a.example/?utm_source=feed").first())
+        drain()
+        assertTrue(hister.captureStored("https://a.example/").first())
+        assertFalse(hister.captureStored("https://b.example/").first())
+
+        capture("https://a.example/", "second")
+        assertFalse(hister.captureStored("https://a.example/").first())
+        drain()
+        assertTrue(hister.captureStored("https://a.example/").first())
+    }
+
+    @Test
     fun unchangedContentIsQueuedOnceAndNewerContentReplacesUnsentOlder() {
         enable()
         capture("https://a.example/#top", "v1")
