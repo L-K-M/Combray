@@ -36,8 +36,8 @@ class ShareTextTest {
     @Test
     fun bidiControlsAreDropped() {
         // U+202E would show the sender's "moc.elgoog.stnuocca" as "accounts.google.com".
-        assertEquals("moc.elgoog.stnuocca", shareTitle("‮moc.elgoog.stnuocca"))
-        val controls = "؜‎‏‪‫‬‭‮⁦⁧⁨⁩"
+        assertEquals("moc.elgoog.stnuocca", shareTitle("\u202Emoc.elgoog.stnuocca"))
+        val controls = "\u061C\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069"
         assertEquals("How to Sail", shareTitle("How $controls to ${controls}Sail"))
         assertNull(shareTitle(" $controls "))
     }
