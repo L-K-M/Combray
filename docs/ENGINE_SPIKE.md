@@ -355,6 +355,10 @@ The first Engine CI attempt passed host tests but both Android builds stopped be
 
 The next attempt passed host tests, both native builds and both APK architecture checks, but fresh emulator creation failed because avdmanager and the emulator selected different Android preference homes. The workflow now aligns `ANDROID_USER_HOME`, `ANDROID_EMULATOR_HOME` and `ANDROID_AVD_HOME`. A real SDK probe created the expected `.ini` and `config.ini` under an isolated home, then deleted that test AVD. Full device CI is pending the retry.
 
+That retry booted the hosted KVM emulator and ran all 57 device checks: 54 passed, including the selector regression and both process-death phases. The three external-intent cases failed as in section 16. Logcat explicitly said lifecycle callbacks were ignored because the current intent did not match the launch intent. AndroidX `ActivityScenario` 1.7.0 checks that match on every callback; `MainActivity.onNewIntent` legitimately changes the activity intent. Its observer therefore missed resume, stop and destroy, leaving stale `PAUSED` state.
+
+`BrowsingTest.deliverIncomingPage` now sends the real Android intent, waits for its page, then restores the scenario launch intent on the main thread, including on assertion failure. This makes Back and teardown observable without skipping the functional assertions. The three previously failing checks pass locally in `build/device-checks/intent-harness-fixed/`. The product APK remains byte-identical (`f4decaab…`); this correction is in the test driver. JVM tests, lint and both debug APK assemblies passed after the correction. Full hosted CI is being retried.
+
 ## 16. Kimi article compatibility (23 October 2026)
 
 The owner's reported `https://www.kimi.ai/blog/kimi-k3-1-pro` failure reproduced
