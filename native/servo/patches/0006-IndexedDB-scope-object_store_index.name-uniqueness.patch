@@ -1,0 +1,32 @@
+From edf1c9af5284e6d0529128e28a5b5062b78b8cb0 Mon Sep 17 00:00:00 2001
+From: Combray <combray@localhost>
+Date: Thu, 22 Oct 2026 20:31:28 +0000
+Subject: [PATCH] IndexedDB: scope object_store_index.name uniqueness per
+ object store
+
+---
+ components/storage/indexeddb/engines/sqlite/create.rs | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/components/storage/indexeddb/engines/sqlite/create.rs b/components/storage/indexeddb/engines/sqlite/create.rs
+index c841b98..23e5f2e 100644
+--- a/components/storage/indexeddb/engines/sqlite/create.rs
++++ b/components/storage/indexeddb/engines/sqlite/create.rs
+@@ -43,11 +43,11 @@ create table object_store_index (
+     primary key autoincrement,
+     object_store_id   integer        not null
+     references object_store,
+-    name              varchar        not null
+-    unique,
++    name              varchar        not null,
+     key_path          varbinary_blob not null,
+     unique_index      boolean        not null,
+-    multi_entry_index boolean        not null
++    multi_entry_index boolean        not null,
++    unique (object_store_id, name)
+ );"#;
+     conn.execute(OBJECT_STORE_INDEX, [])?;
+ 
+-- 
+2.39.5
+

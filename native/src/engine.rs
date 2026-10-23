@@ -476,6 +476,12 @@ impl Engine {
         // Off by default in Servo 0.6.0 (servoshell lists it as experimental), but sites built
         // on Next.js call it on start-up and show an error page without it.
         preferences.set_value("dom_intersection_observer_enabled", PrefValue::Bool(true));
+        // Off by default in Servo 0.6.0, but apps like Mastodon read `indexedDB` during boot
+        // and show their crash page ("browser compatibility issue") on the ReferenceError.
+        preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
+        // Off by default, but mobile apps read `window.visualViewport` for keyboard and layout
+        // handling; an absent global makes even `visualViewport?.x` a ReferenceError.
+        preferences.set_value("dom_visual_viewport_enabled", PrefValue::Bool(true));
 
         let servo = ServoBuilder::default()
             .opts(opts)
