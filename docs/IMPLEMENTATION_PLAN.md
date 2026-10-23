@@ -591,6 +591,8 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
+The recovered scroll-chaining patch remains draft WIP. Before merging, run its native scroll-tree test and device swipe fixture, then reproduce the reported Reddit problem; the original commit did not prove that fix.
+
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, which needs the owner's signing key and a decision on building Servo in CI (hours of build time and tens of gigabytes per run). Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
 
 1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.

@@ -146,6 +146,15 @@ ANIMATE_PAGE = page(
     "} catch (e) { fail(e.message); }</script>",
 )
 
+# Reddit's closed menu: an invisible fixed layer holding a scroll box with nothing to scroll.
+# A swipe over it scrolls the page, whose top band (40vh) gives way to a long second one.
+FIXED_LAYER_PAGE = page(
+    "FIXED-LAYER",
+    "<div class='layer'><div class='box'></div></div><div class='top'></div><div class='rest'></div>",
+    "<style>html,body{margin:0}.layer{position:fixed;inset:0}.box{height:100%;overflow-y:auto}"
+    ".top{height:40vh;background:#b03a2e}.rest{height:300vh;background:#2e6b4f}</style>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -248,6 +257,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":
             return self.send(200, ANIMATE_PAGE)
+        if path == "/fixed-layer.html":
+            return self.send(200, FIXED_LAYER_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

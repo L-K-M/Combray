@@ -43,6 +43,9 @@ object Fixtures {
     /** Titled `WA:ok` once Element.animate() behaves, `WA:missing` without it, `WA:fail:<why>` otherwise. */
     const val ANIMATE = "$BASE/animate.html"
 
+    /** Red over green, under an invisible fixed layer that holds a scroll box (as Reddit's menu). */
+    const val FIXED_LAYER = "$BASE/fixed-layer.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

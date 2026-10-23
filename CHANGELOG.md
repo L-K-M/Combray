@@ -128,6 +128,9 @@ All notable changes to this project are documented here. The format follows
   "not a function".
 - Reader view drops an article whose renderer has crashed or been
   replaced. The late callback no longer covers the page now on screen.
+- Recovered scroll-chaining WIP: Servo patch 0005 proposes forwarding scrolls
+  from fixed layers to the viewport. The fixture test compiles; a Reddit
+  fix and device behavior remain unverified.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
