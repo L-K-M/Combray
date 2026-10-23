@@ -109,9 +109,11 @@ private fun LinkMenu(
     val context = LocalContext.current
     val linkCopied = stringResource(R.string.link_copied)
     val imageCopied = stringResource(R.string.image_address_copied)
+    val clipLabel = stringResource(R.string.page_info_address)
     val copy = { url: String, copied: String ->
         // Marked sensitive like a copied page address: a link can carry a one-time token too.
-        copyAddressToClipboard(context, url, url)
+        // The same fixed label as the bar's copy, never the address: a label is not redacted.
+        copyAddressToClipboard(context, clipLabel, url)
         // Android 13 and later confirm a copy on screen themselves; Android 11 and 12 show nothing.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onNotify(copied)
     }

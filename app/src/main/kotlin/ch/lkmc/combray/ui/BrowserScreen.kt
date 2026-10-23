@@ -136,6 +136,17 @@ fun BrowserScreen(
         }
     }
 
+    // Showing another tab (a swipe on the bar, Recent's long-press, a snackbar's Show, a page's
+    // window) hides the keyboard: the engine sends typing to the page shown, so keys meant for
+    // one page's field must not go on into the next page. Before the request below, so a field
+    // the new page focuses at once still gets the keyboard.
+    var keyboardTab by remember { mutableStateOf(tab?.id) }
+    LaunchedEffect(tab?.id) {
+        if (tab?.id == keyboardTab) return@LaunchedEffect
+        keyboardTab = tab?.id
+        surfaceView?.hideKeyboard()
+    }
+
     // The page focused or left an editable element.
     LaunchedEffect(state.keyboard, surfaceView) {
         val request = state.keyboard ?: return@LaunchedEffect
@@ -529,7 +540,8 @@ private fun share(context: Context, url: String, chooserTitle: String, title: St
 /**
  * Copied addresses can carry one-time tokens (a recovery URL before a commit), so they are
  * marked sensitive: Android 13+ redacts the system preview and well-behaved keyboards keep
- * them out of suggestions/history. A rendering hint, not access control.
+ * them out of suggestions/history. A rendering hint, not access control. The hint covers the
+ * text, not [label], so the label is a fixed name ("Address"), never the address itself.
  * `ClipDescription.extras` exists since API 24; the app requires API 30.
  */
 internal fun copyAddressToClipboard(context: Context, label: String, url: String) {
