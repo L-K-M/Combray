@@ -2,6 +2,7 @@ package ch.lkmc.combray.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -186,13 +187,21 @@ private fun SuggestionRow(item: RecentItem, opensHere: Boolean, onClick: () -> U
     val title = item.title?.takeIf { it.isNotBlank() } ?: host.orEmpty()
     val isTab = item is RecentItem.OpenTab
     val switchToTab = stringResource(R.string.address_switch_to_tab)
-    // "Switch to tab" leads the second line instead of trailing the row: a trailing label would
-    // leave the title little room at large font sizes on a narrow phone.
-    val details = if (isTab) listOfNotNull(switchToTab, host) else listOfNotNull(host)
 
     ListItem(
         headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { Text(details.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = {
+            // "Switch to tab" leads the second line instead of trailing the row: a trailing label
+            // would leave the title little room at large font sizes on a narrow phone. The host
+            // is its own text, shortened from its start like the address chip's: a page's title
+            // can name any site, and a long host must not lose the registrable domain.
+            Row {
+                if (isTab) {
+                    Text(if (host != null) "$switchToTab ·" else switchToTab, maxLines = 1, modifier = Modifier.padding(end = 4.dp))
+                }
+                host?.let { Text(it, maxLines = 1, overflow = TextOverflow.StartEllipsis) }
+            }
+        },
         leadingContent = { Icon(if (isTab) TabIcon else HistoryIcon, contentDescription = null) },
         colors = if (isTab) {
             ListItemDefaults.colors(containerColor = Color.Transparent, headlineColor = MaterialTheme.colorScheme.primary)
@@ -210,15 +219,55 @@ private fun SuggestionRow(item: RecentItem, opensHere: Boolean, onClick: () -> U
     )
 }
 
-/** One line shortened in the middle: the start of an address (its host) and its end stay. */
+/**
+ * One line. An address shows its host in its own text, which shortens from its start like the
+ * address chip's, so a long host keeps the registrable domain that names the site. The words and
+ * scheme before it stay whole; the path after it gets what room is left. A search shortens in
+ * the middle.
+ */
 @Composable
 private fun DecisionLabel(decision: AddressDecision, text: String) {
     decisionIcon(decision)?.let { icon ->
         Icon(icon, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.width(ButtonDefaults.IconSpacing))
     }
-    Text(text, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+    val url = when (decision) {
+        is AddressDecision.Navigate -> decision.url
+        is AddressDecision.External -> decision.url
+        is AddressDecision.Search, is AddressDecision.Rejected -> null
+    }
+    val split = url?.let { splitAtHost(text, it) }
+    if (split == null) {
+        Text(text, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+        return
+    }
+    // The button's row measures these in order: the host gets the room the words leave, and
+    // the path whatever is left after it.
+    Text(split.lead, maxLines = 1)
+    Text(split.host, maxLines = 1, overflow = TextOverflow.StartEllipsis)
+    Text(split.tail, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
+
+/** A button's label around an address: the words and scheme before its host, the host, the rest. */
+internal data class HostSplit(val lead: String, val host: String, val tail: String)
+
+/**
+ * [text] split around the host (with any port) of [url], which it contains. Null when [url] has
+ * no authority after its scheme (mailto:, tel:) or [text] does not contain it.
+ */
+internal fun splitAtHost(text: String, url: String): HostSplit? {
+    val start = AUTHORITY_START.find(url)?.value?.length ?: return null
+    val end = url.indexOfAny(HOST_ENDS, start).takeIf { it >= 0 } ?: url.length
+    if (end == start) return null
+    val at = text.lastIndexOf(url).takeIf { it >= 0 } ?: return null
+    return HostSplit(text.substring(0, at + start), url.substring(start, end), text.substring(at + end))
+}
+
+/** Only "scheme://" at the very start introduces an authority; one further in is path or query. */
+private val AUTHORITY_START = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
+
+/** Where a host ends: its path, query or fragment. The engine reads "\" as "/" in a web address. */
+private val HOST_ENDS = charArrayOf('/', '?', '#', '\\')
 
 private fun decisionIcon(decision: AddressDecision): ImageVector? = when (decision) {
     is AddressDecision.Navigate -> Icons.AutoMirrored.Filled.ArrowForward

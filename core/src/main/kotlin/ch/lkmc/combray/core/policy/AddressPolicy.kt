@@ -67,6 +67,8 @@ object AddressPolicy {
     private val LABEL = Regex("^(?!-)[\\p{L}\\p{N}-]{1,63}(?<!-)$")
     private val TOP_LEVEL = Regex("^(\\p{L}{2,63}|xn--[a-z0-9-]{1,59})$", RegexOption.IGNORE_CASE)
     private val IPV6_GROUP = Regex("^[0-9A-Fa-f]{1,4}$")
+    // Unicode spaces too: text pasted from a web page often has no-break spaces between words.
+    private val WHITESPACE = Regex("[\\s\\p{Z}]+")
 
     /** Where a user name or a port would end in an address: its path, query or fragment. */
     private const val URL_DELIMITERS = "/?#"
@@ -100,11 +102,12 @@ object AddressPolicy {
         if (scheme != null && scheme in KNOWN_SCHEMES) {
             return AddressInterpretation(withScheme(text.replace(" ", "%20"), scheme) ?: search, null)
         }
-        if (text.any { it.isWhitespace() }) return AddressInterpretation(search, null)
-        // "admin:hunter2@192.168.1.1" names no known scheme, but a search would send the password.
-        if (hasSchemelessCredentials(text)) {
+        // "admin:hunter2@192.168.1.1" names no known scheme, but a search would send the password,
+        // as it would from any word of "Router: https://admin:hunter2@192.168.1.1".
+        if (text.split(WHITESPACE).any(::hasCredentials)) {
             return AddressInterpretation(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), null)
         }
+        if (text.any { it.isWhitespace() }) return AddressInterpretation(search, null)
         if (scheme != null && !looksLikeHostAndPort(text)) {
             return AddressInterpretation(withScheme(text, scheme) ?: return AddressInterpretation(search, null), null)
         }
@@ -213,19 +216,33 @@ object AddressPolicy {
     }
 
     /**
+     * Whether a word of the input would send a password: "admin:pw@nas", or a link whose
+     * authority holds an "@" ("https://admin:pw@nas"). An "@" in a link's path
+     * ("https://example.social/@me") or a mail link ("mailto:a@example.org") is no password.
+     */
+    private fun hasCredentials(word: String): Boolean {
+        val colon = word.indexOf(':')
+        if (colon < 0) return false
+        if (word.startsWith("//", colon + 1)) return authorityOf(word)?.contains('@') == true
+        if (word.substring(0, colon).lowercase() in EXTERNAL_SCHEMES) return false
+        return hasSchemelessCredentials(word)
+    }
+
+    /**
      * "user:password@host/path": a user name, a colon and a password before the text's last "@".
      * The password may hold "/", "?" or "#" ("admin:p/ss@nas"); the user name may not, so
-     * "example.com/a:b@c" stays an address, and neither may a port ("localhost:3000/@me"). What
-     * follows the "@" need not be a valid host: "admin:pw@nas!" would still send the password as
-     * a search.
+     * "example.com/a:b@c" stays an address, and neither may a port ("localhost:3000/@me"), but
+     * leading slashes ("//admin:pw@nas") do not hide it, and more digits than a port has
+     * ("admin:123456/x@nas") are a password. What follows the "@" need not be a valid host:
+     * "admin:pw@nas!" would still send the password as a search.
      */
     private fun hasSchemelessCredentials(text: String): Boolean {
-        val userInfo = text.substringBeforeLast('@', missingDelimiterValue = "")
+        val userInfo = text.trimStart('/', '\\').substringBeforeLast('@', missingDelimiterValue = "")
         if (':' !in userInfo || userInfo.substringBefore(':').any { it in URL_DELIMITERS }) return false
 
         val afterColon = userInfo.substringAfter(':')
         val port = afterColon.takeWhile { it.isDigit() }
-        return port.isEmpty() || afterColon.getOrNull(port.length)?.let { it in URL_DELIMITERS } != true
+        return !PORT.matches(port) || afterColon.getOrNull(port.length)?.let { it in URL_DELIMITERS } != true
     }
 
     /** "host:1234" is a host with a port, not a URL with scheme "host". */

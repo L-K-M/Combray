@@ -46,7 +46,9 @@ object SensitiveUrls {
         } catch (malformed: URISyntaxException) {
             return true
         }
-        if (uri.rawUserInfo != null) return true
+        // Not rawUserInfo: when URI does not accept the host as a server name (my_host.example), it
+        // keeps a registry-based authority with no user info, though browsers read user:pass@ there.
+        if ('@' in uri.rawAuthority.orEmpty()) return true
         // OAuth implicit-flow callbacks carry tokens in the fragment (#access_token=...), after
         // the route in hash-routed apps (#/callback?access_token=...); Java servlets rewrite
         // session IDs into the path (/cart;jsessionid=...).

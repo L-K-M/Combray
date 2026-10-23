@@ -2,6 +2,7 @@ package ch.lkmc.combray
 
 import android.app.SearchManager
 import android.content.Intent
+import ch.lkmc.combray.core.integration.SensitiveUrls
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 
@@ -30,6 +31,7 @@ sealed interface LaunchRequest : Incoming {
  * SEND "madeleine"                    -> EditNewTab "madeleine"
  * WEB_SEARCH "madeleine"              -> EditNewTab "madeleine"
  * PROCESS_TEXT "madeleine"            -> Open https://kagi.com/search?q=madeleine
+ * PROCESS_TEXT "see https://a/?token=1" -> EditNewTab "https://a/?token=1"
  * ```
  */
 object IncomingIntents {
@@ -41,6 +43,13 @@ object IncomingIntents {
 
     // The address field holds one line; longer text is cut before it is shown or searched.
     private const val MAX_TEXT_LENGTH = 2_000
+
+    // Any app can share without a tap, and this runs on the main thread: a huge share is searched
+    // for a link only this far.
+    private const val MAX_SCANNED_LENGTH = 65_536
+
+    // The longest link taken from shared text, as in the engine (native MAX_URL_CHARS).
+    private const val MAX_LINK_LENGTH = 32_768
 
     private val WEB_ADDRESS = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
     private val WHITESPACE = Regex("\\s+")
@@ -63,20 +72,51 @@ object IncomingIntents {
     }
 
     /**
+     * The text extra [name] of [intent], or null. Reading one extra unparcels them all, and on
+     * API 30 to 32 another app's extra of a class Combray does not have throws: that is no text,
+     * not a crash.
+     */
+    fun textExtra(intent: Intent, name: String): String? = try {
+        intent.getCharSequenceExtra(name)?.toString()
+    } catch (unreadable: RuntimeException) {
+        null
+    }
+
+    /**
      * The first http(s) link in [text], without the punctuation or bracket that closes the
      * sentence around it: "(see https://example.org/Foo_(bar))." -> "https://example.org/Foo_(bar)".
+     * A link longer than the engine takes, or running past the part of [text] searched, is
+     * refused rather than cut.
      */
     fun firstWebAddress(text: String): String? {
-        var address = WEB_ADDRESS.find(text)?.value ?: return null
-        while (endsOutsideTheLink(address)) address = address.dropLast(1)
+        val scanned = text.take(MAX_SCANNED_LENGTH)
+        val match = WEB_ADDRESS.find(scanned) ?: return null
+        val cut = match.range.last == scanned.lastIndex && text.length > scanned.length
+        if (cut || match.value.length > MAX_LINK_LENGTH) return null
+
+        val address = match.value.substring(0, linkEnd(match.value))
         return address.takeIf { it.substringAfter("://").isNotEmpty() }
     }
 
-    private fun endsOutsideTheLink(address: String): Boolean {
-        val last = address.lastOrNull() ?: return false
-        if (last in TRAILING_PUNCTUATION) return true
-        val opening = BRACKET_PAIRS[last] ?: return false
-        return address.count { it == last } > address.count { it == opening }
+    /**
+     * Where the link in [address] ends: before the punctuation, and the closing brackets it does
+     * not open itself, that end the sentence. One pass, with each bracket's count kept as the end
+     * moves back.
+     */
+    private fun linkEnd(address: String): Int {
+        val counts = address.groupingBy { it }.eachCount().toMutableMap()
+        var end = address.length
+        while (end > 0) {
+            val last = address[end - 1]
+            val opening = BRACKET_PAIRS[last]
+            if (opening != null && counts.getValue(last) > (counts[opening] ?: 0)) {
+                counts[last] = counts.getValue(last) - 1
+            } else if (last !in TRAILING_PUNCTUATION) {
+                break
+            }
+            end--
+        }
+        return end
     }
 
     private fun open(address: String): Incoming.Open? =
@@ -105,11 +145,17 @@ object IncomingIntents {
         val query = oneLine(text) ?: return null
         return when (val decision = AddressPolicy.interpret(query).primary) {
             is AddressDecision.Navigate -> Incoming.Open(decision.url)
-            is AddressDecision.Search -> Incoming.Open(decision.url)
+            // A link with a password or token among other words goes to the editor alone, as from
+            // a share: searched with them, it would reach Kagi unseen.
+            is AddressDecision.Search -> secretLink(query)?.let { LaunchRequest.EditNewTab(it) } ?: Incoming.Open(decision.url)
             // mailto:, tel: and refused addresses: the editor says what they are.
             is AddressDecision.External, is AddressDecision.Rejected -> LaunchRequest.EditNewTab(query)
         }
     }
+
+    /** The first link in [text] if it must not leave as search text: refused, or carrying a token. */
+    private fun secretLink(text: String): String? =
+        firstWebAddress(text)?.takeIf { open(it) == null || SensitiveUrls.looksSensitive(it) }
 
     private fun editNewTab(text: String): LaunchRequest.EditNewTab? = oneLine(text)?.let { LaunchRequest.EditNewTab(it) }
 

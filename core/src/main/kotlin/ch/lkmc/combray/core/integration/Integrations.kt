@@ -349,7 +349,13 @@ class Integrations(
         // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
         val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
         val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
-        return if (added is DispatchResult.Done) created else added
+        return when {
+            added is DispatchResult.Done -> created
+            // The bookmark was created, so this attempt reached the server: it counts toward the
+            // limit, and the save is not shown as waiting for a server that answered.
+            added is DispatchResult.Retry && added.delivery == Delivery.NOT_SENT -> added.copy(delivery = Delivery.MAY_HAVE_ARRIVED)
+            else -> added
+        }
     }
 
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {

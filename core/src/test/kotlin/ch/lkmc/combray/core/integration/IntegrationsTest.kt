@@ -44,6 +44,9 @@ class IntegrationsTest {
 
     /** Like a phone away from home: no request connects, so nothing is sent. */
     @Volatile private var offline = false
+
+    /** Like a connection lost between requests: adding to a list connects nowhere. */
+    @Volatile private var listsOffline = false
     private val secrets = MemorySecrets()
     private var now = 1_760_000_000_000L
     private var ids = 0
@@ -59,6 +62,7 @@ class IntegrationsTest {
             transport = UrlConnectionTransport(timeoutMs = 500).let { http ->
                 HttpTransport { request ->
                     if (offline) return@HttpTransport HttpOutcome.NotConnected("network")
+                    if (listsOffline && request.method == "PUT") return@HttpTransport HttpOutcome.NotConnected("network")
                     sent += request.url
                     http.execute(request)
                 }
@@ -773,6 +777,28 @@ class IntegrationsTest {
         drain()
         assertEquals(SaveStatus.Saved, status())
         assertEquals(setOf("bm1"), server.lists["later"])
+        assertEquals(1, server.bookmarks.size)
+    }
+
+    /** The bookmark exists, so this attempt reached the server: it counts, and the save is not "waiting". */
+    @Test
+    fun aListAdditionThatCannotConnectAfterTheBookmarkWasCreatedCountsAsAnAttempt() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        listsOffline = true
+        runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
+        drain()
+        assertEquals(1, server.bookmarks.size)
+        assertEquals(JobState.RETRY_WAIT, job().state)
+        assertEquals(1, job().attempts)
+        assertEquals(SaveStatus.Pending, status())
+
+        listsOffline = false
+        now = job().nextAttemptAt
+        drain()
+        assertEquals(SaveStatus.Saved, status())
+        assertEquals(setOf("bm1"), server.lists["reading"])
         assertEquals(1, server.bookmarks.size)
     }
 

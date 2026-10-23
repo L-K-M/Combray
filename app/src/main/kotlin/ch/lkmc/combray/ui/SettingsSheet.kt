@@ -595,11 +595,10 @@ fun SectionTitle(label: Int) {
 /** The page's address and what the engine can say about its connection. */
 @Composable
 fun PageInfoDialog(url: String, onDismiss: () -> Unit) {
-    // data:, about: and file: pages came over no connection, so there is nothing to describe.
-    val connection = when {
-        url.startsWith("https:", ignoreCase = true) -> R.string.page_info_https
-        url.startsWith("http:", ignoreCase = true) -> R.string.page_info_http
-        else -> null
+    val connection = when (PageConnection.of(url)) {
+        PageConnection.HTTPS -> R.string.page_info_https
+        PageConnection.CLEARTEXT -> R.string.page_info_http
+        PageConnection.NONE -> null
     }
     AlertDialog(
         onDismissRequest = onDismiss,

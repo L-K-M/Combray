@@ -201,6 +201,30 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun credentialsHiddenBehindSlashesLongDigitsOrOtherWordsAreRejected() {
+        val withCredentials = listOf(
+            // Leading slashes, as in a protocol-relative address, do not hide the user name.
+            "//admin:hunter2@192.168.1.1", "/user:pass@host", "\\\\admin:pw@nas",
+            // Six digits are no port: this is a password.
+            "admin:123456/x@nas",
+            // Any word of a text with spaces.
+            "Router: https://admin:hunter2@192.168.1.1", "see https://u:p@h", "(https://u:p@h)", "login admin:hunter2@nas please",
+        )
+        for (input in withCredentials) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
+            assertNull(input, interpretation.alternative)
+        }
+
+        // An "@" in a link's path, a mail address and a mailto: link hold no password.
+        searches("follow https://mastodon.social/@proust")
+        searches("write to alice@example.com today")
+        searches("write mailto:alice@example.com today")
+        // A five-digit port before a path with an "@" stays an address.
+        assertEquals(AddressDecision.Navigate("https://nas:12345/@me"), primary("nas:12345/@me"))
+    }
+
+    @Test
     fun mailAndPhoneLinksGoToOtherApps() {
         assertEquals(AddressDecision.External("mailto:a@example.org"), primary("mailto:a@example.org"))
         assertEquals(AddressDecision.External("tel:+41123"), primary("tel:+41123"))

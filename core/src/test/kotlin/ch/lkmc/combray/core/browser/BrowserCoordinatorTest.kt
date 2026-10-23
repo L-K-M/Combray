@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.browser
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.TabEntity
@@ -856,6 +857,27 @@ class BrowserCoordinatorTest {
         // The oldest visit is still within retention, so a search finds it.
         assertEquals(listOf("Lentil soup"), recent("lentil").map { it.title })
         assertEquals(500, recent("page").size)
+    }
+
+    /** A page can add a visit per pushState: searching still reads a bounded number of rows. */
+    @Test
+    fun searchingRecentReadsAtMostFiveThousandVisits() {
+        idle()
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            database.withTransaction {
+                (0..5_000).forEach { index ->
+                    dao.insertVisit(VisitEntity("visit$index", "closed", "https://flood.test/$index", "flood.test", null, null, VisitKind.SAME_DOCUMENT, START + index, START + index, false))
+                }
+            }
+        }
+
+        val visits = runBlocking { browser.recent(HistoryDepth.ALL_RETAINED).first() }.filterIsInstance<RecentItem.Visit>()
+        assertEquals(5_000, visits.size)
+        // The newest are kept.
+        assertEquals("https://flood.test/5000", visits.first().url)
+        assertTrue(visits.none { it.url == "https://flood.test/0" })
     }
 
     @Test

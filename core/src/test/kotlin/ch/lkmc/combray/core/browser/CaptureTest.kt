@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -72,6 +73,9 @@ class CaptureTest {
         idle()
     }
 
+    /** The pages Recent lists as history (open tabs excluded). */
+    private fun history() = runBlocking { browser.recent().first() }.filterIsInstance<RecentItem.Visit>().map { it.url }
+
     private fun result(native: Long, document: Long, capture: Long, text: String, status: CaptureStatus = CaptureStatus.CAPTURED) {
         val content = if (status == CaptureStatus.CAPTURED) CapturedContent("ignored-page-url", "Title", text, text.length, "hash-$text", false) else null
         engine.emit(EngineEvent.CaptureResult(capture, engine.view(native), document, status, content, null))
@@ -105,6 +109,46 @@ class CaptureTest {
         load(1, 11, "https://a.test/")
         settle()
         assertEquals(1, engine.captures.size)
+    }
+
+    /** A request that never commits (a refusal, a 204, a download) leaves the forgotten page shown. */
+    @Test
+    fun aForgottenPageStaysForgottenAfterANavigationThatDoesNotCommit() {
+        browser.openUrl("https://a.test/secret", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/secret")
+        settle()
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+
+        browser.openUrl("https://b.test/no-content", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", 1, engine.navigated.last().second)); idle()
+        // Still on the forgotten page, the user reloads it.
+        load(1, 11, "https://a.test/secret")
+        settle()
+        assertEquals(1, engine.captures.size)
+
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        load(1, 12, "https://c.test/")
+        assertTrue("https://a.test/secret" !in history())
+    }
+
+    /** Until the requested page commits, the forgotten one is current and can change its own address. */
+    @Test
+    fun aForgottenPageMovingWithinItselfWhileANavigationIsPendingRecordsNothing() {
+        browser.openUrl("https://a.test/app", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/app")
+        settle()
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+
+        browser.openUrl("https://b.test/slow", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.SAME_DOCUMENT, 10, "https://a.test/app/inbox", 0, 1))
+        settle()
+        assertEquals(1, engine.captures.size)
+
+        // The requested page committing ends it: that page is captured.
+        load(1, 11, "https://b.test/slow")
+        settle()
+        assertEquals(11L, engine.captures.last().first)
+        assertTrue(history().none { it.startsWith("https://a.test/") })
     }
 
     @Test
