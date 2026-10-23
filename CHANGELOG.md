@@ -128,9 +128,9 @@ All notable changes to this project are documented here. The format follows
   "not a function".
 - Reader view drops an article whose renderer has crashed or been
   replaced. The late callback no longer covers the page now on screen.
-- Reddit's mobile pages could not be scrolled by touch: a swipe that began
-  over an invisible fixed layer (its closed menu) went nowhere. Servo patch
-  0005 passes such scrolls on to the page, as other browsers do.
+- Recovered scroll-chaining WIP: Servo patch 0005 proposes forwarding scrolls
+  from fixed layers to the viewport. The fixture test compiles; a Reddit
+  fix and device behavior remain unverified.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
