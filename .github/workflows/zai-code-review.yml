@@ -31,7 +31,7 @@ jobs:
     # failure, which the reporting step can act on, and leaves "cancelled" to
     # mean only what the concurrency group above means by it: a newer push took
     # over.
-    timeout-minutes: 180
+    timeout-minutes: 340
     # pull_request_target exposes repository secrets and a write-capable token.
     # Never run this privileged job for branches from untrusted forks.
     if: >-
@@ -52,10 +52,12 @@ jobs:
         # size. Measured on Seance PR #89 (29 reviewed files, +5856/-205): a clean
         # revision took 16 chunks at a 4.7 min mean, 76 min total; the next one
         # needed 17 chunks at a 6.2 min mean, about 105 min, and overran the
-        # former 90 min budget twice in a row while posting nothing. 170 min
-        # covers roughly 27 chunks at that mean, so a diff half again the size
-        # of #89 still fits.
-        timeout-minutes: 170
+        # former 90 min budget twice in a row while posting nothing. Combray PR
+        # #112 (+6533/-655) split into 26 chunks at an 8.4 min mean, about 220
+        # min, and overran the former 170 min budget after 19 of them. 330 min
+        # covers roughly 39 chunks at that mean. GitHub-hosted runners stop a
+        # job at 360 min, so the job backstop above stays below that.
+        timeout-minutes: 330
         # Pin privileged third-party actions to an immutable commit.
         # 13a9ddb = v0.0.15. Verify before bumping:
         #   git ls-remote https://github.com/L-K-M/zai-code-review 'refs/tags/v0.0.15*'
@@ -103,7 +105,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
           # Keep in step with the review step's timeout-minutes above.
-          REVIEW_BUDGET_MINUTES: "170"
+          REVIEW_BUDGET_MINUTES: "330"
         run: |
           set -euo pipefail
 
