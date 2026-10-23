@@ -106,6 +106,15 @@ class AccessibilityTest {
     }
 
     @Test
+    fun aPageSentToHisterHasAQuietAccessibleMark() {
+        show(DEFAULT_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, histerStored = true)
+        }
+
+        compose.onNodeWithContentDescription("Sent to Hister", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun addressCopyIsAnAccessibleLongClick() {
         show(DEFAULT_FONT) {
             Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
@@ -175,15 +184,16 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, captureEnabled = true, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, readerOpen = false, {})
             }
         }
 
         assertTargetsAreAccessible()
         // The rows scroll when they outgrow the window: bring each into view before checking it.
-        for (label in listOf("Close tab", "Pause history capture", "Settings")) {
+        for (label in listOf("Close tab", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
+        compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
     @Test
@@ -326,6 +336,7 @@ class AccessibilityTest {
         tab: ActiveTab?,
         openTabs: Int,
         saveStatus: SaveStatus,
+        histerStored: Boolean = false,
         onAddress: () -> Unit = {},
         onCopyAddress: () -> Unit = {},
         width: Dp = NARROW_WIDTH,
@@ -333,6 +344,7 @@ class AccessibilityTest {
         tab = tab,
         openTabs = openTabs,
         saveStatus = PageSaveStatus(tab?.url, saveStatus),
+        histerStored = histerStored,
         backEnabled = tab?.canGoBack == true,
         onBack = {},
         onAddress = onAddress,

@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Info
@@ -38,15 +37,12 @@ fun MoreSheet(
     onCloseTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
-    /** Null when Hister is not set up; otherwise whether capture is on. */
-    captureEnabled: Boolean?,
-    onPauseCapture: () -> Unit,
     readerOpen: Boolean,
     onReader: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
+        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, readerOpen, onReader)
     }
 }
 
@@ -60,15 +56,13 @@ internal fun MoreActions(
     onCloseTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
-    captureEnabled: Boolean?,
-    onPauseCapture: () -> Unit,
     /** Reader view is open over the page: the row leaves it. */
     readerOpen: Boolean,
     onReader: () -> Unit,
 ) {
     // Scrolls when the rows are taller than the window, as in landscape, so Settings stays reachable.
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-        for (action in moreActions(tab, captureEnabled)) {
+        for (action in moreActions(tab)) {
             when (action) {
                 MoreAction.FORWARD -> MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
                 MoreAction.RELOAD -> MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
@@ -77,8 +71,6 @@ internal fun MoreActions(
                 MoreAction.PAGE_INFO -> MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
                 MoreAction.READER ->
                     MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
-                MoreAction.PAUSE_CAPTURE -> MoreRow(PauseIcon, R.string.action_pause_capture, onPauseCapture)
-                MoreAction.RESUME_CAPTURE -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
                 MoreAction.SETTINGS -> MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
             }
         }
@@ -86,10 +78,10 @@ internal fun MoreActions(
 }
 
 /** A row of the More sheet. */
-internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, PAUSE_CAPTURE, RESUME_CAPTURE, SETTINGS }
+internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, SETTINGS }
 
 /** The rows More offers for [tab], in order. */
-internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAction> = buildList {
+internal fun moreActions(tab: ActiveTab?): List<MoreAction> = buildList {
     val onPage = tab?.url != null
     if (tab?.canGoForward == true) add(MoreAction.FORWARD)
     if (onPage) add(MoreAction.RELOAD)
@@ -101,13 +93,7 @@ internal fun moreActions(tab: ActiveTab?, captureEnabled: Boolean?): List<MoreAc
         add(MoreAction.PAGE_INFO)
         add(MoreAction.READER)
     }
-    // Pausing is one tap. Resuming leads to Settings, which explains what is sent: paused
-    // capture stays as visible here as the switch that paused it.
-    when (captureEnabled) {
-        true -> add(MoreAction.PAUSE_CAPTURE)
-        false -> add(MoreAction.RESUME_CAPTURE)
-        null -> Unit
-    }
+    // Hister capture is switched in Settings (owner decision, 23 October 2026).
     add(MoreAction.SETTINGS)
 }
 

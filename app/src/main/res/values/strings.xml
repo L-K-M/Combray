@@ -62,6 +62,7 @@
     <string name="address_search">Search Kagi for “%1$s”</string>
     <string name="address_external">Open in another app: %1$s</string>
     <string name="address_copied">Address copied</string>
+    <string name="address_sent_hister">Sent to Hister</string>
     <string name="address_reject_empty">Type an address or a search.</string>
     <string name="address_reject_scheme">Combray does not open this kind of address.</string>
     <string name="address_reject_credentials">Addresses that contain a user name or password are not opened.</string>
@@ -232,8 +233,6 @@
     <string name="hister_exclusion_remove">Remove exclusion for %1$s</string>
     <string name="hister_exclusion_invalid">Enter a site name, like example.org.</string>
     <string name="hister_queue_title">Unfinished captures</string>
-    <string name="action_pause_capture">Pause history capture</string>
-    <string name="action_resume_capture">Resume history capture</string>
 
     <!-- Search all history -->
     <string name="search_all_hint">Words you remember, searched in Hister…</string>

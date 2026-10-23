@@ -105,7 +105,7 @@ every bullet), and #96's throttle is a hint the engine may drop.
 | #43 | `grok/no-decorative-lock` | The chip marks only failed and cleartext loads; HTTPS is not called verified |
 | #57 | `opus/back-to-opener` | Back on a page-opened tab returns to its opener; one Back action for system Back and the bar, which leaves Reader first |
 | #47 | `grok/bottom-back` | Back on a tab another app opened returns to that app (merged as part of #57) |
-| #58 | `opus/more-close-tab` | Close tab in More; "Resume history capture" stays while capture is paused (Proposed) |
+| #58 | `opus/more-close-tab` | Close tab in More; its capture rows were later removed by #117 (Settings keeps the switch) |
 | #59 | `opus/link-menu` | Open in background and Save link in the link menu; copies use the sensitive clipboard helper |
 | #63 | `opus/address-suggestions` | Address suggestions from open tabs and Recent, with #79's single subscription, address-policy filter and heading |
 | #61 | `opus/share-to-combray` | Other apps share links and text into Combray; "Save to Karakeep" asks once before saving; launcher shortcuts |

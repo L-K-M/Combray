@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
@@ -80,6 +81,7 @@ fun BottomBar(
     tab: ActiveTab?,
     openTabs: Int,
     saveStatus: PageSaveStatus,
+    histerStored: Boolean,
     /** Whether Back has somewhere to go: BrowserScreen decides, for this button and system Back alike. */
     backEnabled: Boolean,
     onBack: () -> Unit,
@@ -133,7 +135,7 @@ fun BottomBar(
                 val stacked = maxWidth < STACKED_BAR_BELOW
                 Column {
                     if (stacked) {
-                        AddressChip(tab, onAddress, onCopyAddress, Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp))
+                        AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp))
                     }
                     Row(
                         Modifier
@@ -146,7 +148,7 @@ fun BottomBar(
                         IconButton(onClick = onBack, enabled = backEnabled) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
-                        if (!stacked) AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))
+                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.weight(1f))
                         SaveButton(saveStatus, enabled = tab?.url != null, onSave)
                         IconButton(onClick = onShare, enabled = tab?.url != null) {
                             Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
@@ -256,7 +258,13 @@ private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Uni
 
 /** Shows the site name. A lock is not drawn: the engine does not report a verified connection. */
 @Composable
-private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit, modifier: Modifier) {
+private fun AddressChip(
+    tab: ActiveTab?,
+    histerStored: Boolean,
+    onClick: () -> Unit,
+    onCopy: () -> Unit,
+    modifier: Modifier,
+) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
     // Cleartext is a property of the scheme (a blob: page's is its maker's). HTTPS is not
@@ -264,7 +272,8 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
     val cleartext = url?.let(PageConnection::of) == PageConnection.CLEARTEXT
     val connection = if (cleartext) stringResource(R.string.address_insecure) else null
     val failed = if (tab?.loadFailed == true) stringResource(R.string.address_load_failed) else null
-    val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed).joinToString(", ")
+    val hister = if (histerStored) stringResource(R.string.address_sent_hister) else null
+    val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed, hister).joinToString(", ")
 
     Surface(
         shape = RoundedCornerShape(24.dp),
@@ -302,6 +311,16 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
                 overflow = if (host != null) TextOverflow.StartEllipsis else TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge,
             )
+            // A quiet mark that Hister accepted this page; the address stays the chip's main text.
+            if (histerStored) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }

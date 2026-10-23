@@ -15,10 +15,9 @@ class MoreActionsTest {
                 MoreAction.CLOSE_TAB,
                 MoreAction.PAGE_INFO,
                 MoreAction.READER,
-                MoreAction.PAUSE_CAPTURE,
                 MoreAction.SETTINGS,
             ),
-            moreActions(PAGE.copy(canGoForward = true), captureEnabled = true),
+            moreActions(PAGE.copy(canGoForward = true)),
         )
     }
 
@@ -26,30 +25,13 @@ class MoreActionsTest {
     fun aNewTabHomeCanBeClosedButHasNoPageRows() {
         assertEquals(
             listOf(MoreAction.NEW_TAB, MoreAction.CLOSE_TAB, MoreAction.SETTINGS),
-            moreActions(PAGE.copy(url = null, title = null, hasView = false), captureEnabled = null),
+            moreActions(PAGE.copy(url = null, title = null, hasView = false)),
         )
     }
 
     @Test
     fun withoutATabThereIsNothingToClose() {
-        assertEquals(listOf(MoreAction.NEW_TAB, MoreAction.SETTINGS), moreActions(null, captureEnabled = null))
-    }
-
-    /** Paused capture offers its way back, through Settings, which explains what is sent. */
-    @Test
-    fun pausedCaptureOffersResume() {
-        assertEquals(
-            listOf(
-                MoreAction.RELOAD,
-                MoreAction.NEW_TAB,
-                MoreAction.CLOSE_TAB,
-                MoreAction.PAGE_INFO,
-                MoreAction.READER,
-                MoreAction.RESUME_CAPTURE,
-                MoreAction.SETTINGS,
-            ),
-            moreActions(PAGE, captureEnabled = false),
-        )
+        assertEquals(listOf(MoreAction.NEW_TAB, MoreAction.SETTINGS), moreActions(null))
     }
 
     private companion object {

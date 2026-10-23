@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   Recent's order. Repeated swipes keep going back; after a pause they
   start from the tab you are on. Switching this way hides the keyboard, so
   further typing does not reach the next tab's page.
+- A quiet check beside the address when Hister accepts the current page.
+  It means the server acknowledged the capture, not that search indexing
+  finished.
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
   editor and a blank tab offers no copy action. Copied addresses are marked
@@ -110,6 +113,8 @@ All notable changes to this project are documented here. The format follows
 - Recent no longer restarts three database observers on every keystroke
   of its filter: it reads the newest rows while you browse and up to
   5,000 retained visits once you type, and filters in memory.
+- Hister capture no longer has a pause/resume row in More; the capture switch
+  stays in Settings.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Save shows a bookmark instead of a star, which in Karakeep means
   Favourite: an outline, filled while saving, with a check once saved.
@@ -135,8 +140,6 @@ All notable changes to this project are documented here. The format follows
 - CI also compiles the device checks, fails when Room's exported schemas
   are not committed or a committed version's schema changed, and checks
   the engine bridge's Rust formatting and page-script syntax.
-- More's "Pause history capture" row has a pause icon instead of an X,
-  which read as closing the tab.
 - On a Kagi results page, the address sheet starts with your search words
   instead of the results address.
 - The address sheet no longer shows an error before you type, and its

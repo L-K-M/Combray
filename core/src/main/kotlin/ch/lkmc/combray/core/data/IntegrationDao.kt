@@ -172,4 +172,13 @@ interface IntegrationDao {
     /** A save of [url] parked for an earlier main address, whatever that address was. */
     @Query("SELECT * FROM outbox WHERE kind = 'KARAKEEP_SAVE' AND dedupeKey = :url AND state = 'DESTINATION_CHANGED' ORDER BY sequence DESC LIMIT 1")
     fun observeParkedSave(url: String): Flow<OutboxJobEntity?>
+
+    /** The newest capture for one Hister document on one server, in any state. */
+    @Query(
+        """
+        SELECT * FROM outbox WHERE kind = 'HISTER_ADD' AND fingerprint = :fingerprint AND dedupeKey = :key
+        ORDER BY sequence DESC LIMIT 1
+        """,
+    )
+    fun observeLatestCapture(fingerprint: String, key: String): Flow<OutboxJobEntity?>
 }
