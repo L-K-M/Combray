@@ -22,10 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import ch.lkmc.combray.R
@@ -134,11 +131,3 @@ private fun MoreRow(icon: ImageVector, label: Int, onClick: () -> Unit) {
         colors = sheetListItemColors(),
     )
 }
-
-/**
- * Material's "pause" (Apache License 2.0, like the icon library), absent from the core set. The
- * close X it replaces read as closing the tab.
- */
-private val PauseIcon: ImageVector = ImageVector.Builder("Pause", 24.dp, 24.dp, 24f, 24f)
-    .addPath(addPathNodes("M6 19h4V5H6v14zm8-14v14h4V5h-4z"), fill = SolidColor(Color.Black))
-    .build()

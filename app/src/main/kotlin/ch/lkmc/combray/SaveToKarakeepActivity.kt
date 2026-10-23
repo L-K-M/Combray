@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.MotionEvent
 import android.widget.Button
 import android.widget.Toast
@@ -15,6 +16,7 @@ import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.ui.displayHost
 import ch.lkmc.combray.ui.shareTitle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -113,13 +115,22 @@ class SaveToKarakeepActivity : Activity() {
         val app = applicationContext
         // The process scope: closing this screen must not cancel a save while it is queued.
         graph.scope.launch {
-            val message = when (graph.integrations.save(url, title)) {
-                SaveRequest.Queued -> R.string.save_state_pending
-                SaveRequest.NotConfigured -> R.string.save_not_set_up
-                SaveRequest.NotSaveable -> R.string.save_not_saveable
-                SaveRequest.Sensitive -> R.string.save_sensitive
-                SaveRequest.AlreadyQueued -> R.string.save_already_queued
-                SaveRequest.NeedsAttention -> R.string.save_needs_attention
+            val message = try {
+                when (graph.integrations.save(url, title)) {
+                    SaveRequest.Queued -> R.string.save_state_pending
+                    SaveRequest.NotConfigured -> R.string.save_not_set_up
+                    SaveRequest.NotSaveable -> R.string.save_not_saveable
+                    SaveRequest.Sensitive -> R.string.save_sensitive
+                    SaveRequest.AlreadyQueued -> R.string.save_already_queued
+                    SaveRequest.NeedsAttention -> R.string.save_needs_attention
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                // Storage failed (a full disk, an I/O error): nothing was queued, and this screen
+                // is gone, so a crash here would end the process without a word.
+                Log.e(LOG_TAG, "saving a shared link failed", failure)
+                R.string.save_failed
             }
             withContext(Dispatchers.Main) { toast(app, message) }
         }
@@ -137,6 +148,8 @@ class SaveToKarakeepActivity : Activity() {
     private fun toast(context: Context, @StringRes message: Int) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 
     private companion object {
+        const val LOG_TAG = "CombraySave"
+
         const val QUOTATION_MARKS = "\"“”„‟«»‹›"
 
         /** How long the dialog is in front before Save works: longer than a tap already under way. */

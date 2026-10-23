@@ -1820,8 +1820,12 @@ class BrowserCoordinatorTest {
         // A 204 answer, for one, leaves the page as it was and commits nothing.
         browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
         assertTrue(state().activeTab!!.loading)
-        Thread.sleep(SHORT_TIMEOUT_MS * 3)
-        idle()
+        // Real time: the timeout runs on the coordinator's own scope. Waits only as long as needed.
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TEST_WAIT_MS)
+        while (state().activeTab!!.loading && System.nanoTime() < deadline) {
+            Thread.sleep(50)
+            idle()
+        }
         assertFalse(state().activeTab!!.loading)
     }
 

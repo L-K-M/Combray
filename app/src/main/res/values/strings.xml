@@ -106,6 +106,7 @@
     <string name="save_sensitive">Not saved: this address looks like it contains a login or session token.</string>
     <string name="save_already_queued">Already saving this page.</string>
     <string name="save_needs_attention">Saving this page is paused. Check Karakeep in Settings.</string>
+    <string name="save_failed">Not saved: Combray could not store the link.</string>
     <string name="save_state_saved">Saved to Karakeep</string>
     <string name="save_state_pending">Saving to Karakeep</string>
     <string name="save_state_waiting">Waiting for Karakeep</string>
