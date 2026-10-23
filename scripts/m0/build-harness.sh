@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build the M0 engine harness: native/ (patched Servo + JNI bridge) and spike/android (APK).
-# Run `scripts/m0/fetch-servo.sh` first.
+# Prepares the pinned downstream source before building.
 #
 # Output: spike/android/app/build/outputs/apk/debug/app-debug.apk
 set -euo pipefail
 
+"$(dirname "${BASH_SOURCE[0]}")/fetch-servo.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 echo "==> cargo build ($COMBRAY_RUST_TARGET, release)"

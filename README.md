@@ -13,7 +13,7 @@ Combray connects to **Karakeep** for quick saves, **Hister** for long-term histo
 
 ## Status
 
-Combray runs on a pinned, patched Servo v0.6.0 through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging and local signing support; personal signing, release CI and dependency notices remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
+Combray runs on a pinned commit of [our downstream Servo](https://github.com/L-K-M/servo/tree/combray/0.6), based on v0.6.0, through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging and local signing support; personal signing, release CI and dependency notices remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
 
 ## Start here
 
@@ -38,7 +38,7 @@ The app's unit tests and lint run with `./gradlew testDebugUnitTest lintDebug` a
 
 ## Build and release tooling
 
-Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). CI builds the Kotlin code only: its APKs contain no engine and say so. It also compiles the device checks without running them, checks that Room's exported schemas are committed and unchanged, and checks the engine bridge's Rust formatting and page-script syntax. `scripts/build.sh` builds the engine first (fetching and patching Servo as needed; the first run takes an hour or more), then checks the packaged engine and architecture before staging. Local release signing uses environment variables; see [BUILDING.md](docs/BUILDING.md#local-release-signing). Publishing still needs native/signing CI and dependency notices (M4).
+Build, install, release, and CI tooling works with the app's Gradle project; see [AGENTS.md](AGENTS.md#build-and-release-tooling). Routine CI checks Kotlin, schemas, scripts and formatting; its APK has no engine. The separate Engine workflow builds both native ABIs and runs x86_64 fixture checks for engine-related PRs. `scripts/build.sh` builds the engine first from the exact downstream commit, then checks the packaged engine and architecture before staging. Local release signing uses environment variables; see [BUILDING.md](docs/BUILDING.md#local-release-signing). Publishing still needs the signed native release path (M4).
 
 ```sh
 scripts/build.sh                 # release APK -> dist/
@@ -56,7 +56,7 @@ scripts/release.sh X.Y.Z --push  # bump, tag vX.Y.Z, push; the tag publishes the
 | `docs/design/` | Existing UI concepts, sample interactions, and design guidance |
 | `docs/ENGINE_SPIKE.md`, `docs/BUILDING.md` | M0 results, decisions and reproducible build |
 | `app/`, `core/`, `engine/` | The Android app: Compose UI; logical tabs, history, outbox and service clients; Kotlin engine port |
-| `native/` | Combray's Rust bridge to Servo, with the pinned Servo patches |
+| `native/` | Combray's Rust bridge to the downstream Servo commit in `scripts/m0/servo-pin.sh` |
 | `testing/fixtures/` | Synthetic pages and fake Karakeep/Hister servers for the device checks (`scripts/check-app.sh`) |
 | `spike/` | M0 engine harness app and fixture site (test tooling) |
 | `scripts/m0/` | Fetch, build, emulator and check scripts for M0 |

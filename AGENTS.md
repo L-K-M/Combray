@@ -6,6 +6,7 @@ Read [README.md](README.md), then [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTAT
 
 ## Product boundaries
 
+- **Servo upstream is pulls only.** Owner instruction, 23 October 2026: `servo/servo` rejects AI-generated contributions. Never contact or contribute to it: no issues, PRs, comments, discussions, reviews, reactions, pushes, GitHub fork API calls or outreach. Only pull/fetch source. Keep changes, reports and reviews in our downstream repositories. Pass this rule to every helper.
 - The app is **Combray**, a personal **Android** browser. **Servo is mandatory.** Do not replace it with Android WebView, Chromium, GeckoView, a remote renderer, or an external browser to pass a milestone. Report a concrete blocker and preserve the Servo direction.
 - Keep routine UI actions at the bottom. Tabs and short-term history share one Recent UI. Karakeep saves, Hister content/history search, and Kagi web search are core requirements.
 - Preserve the existing `LICENSE` and `media-sources/icon.png`. Icon artwork is square, opaque, edge-to-edge, with sharp outer corners. Launcher masking is Android's concern; do not bake a squircle into the source artwork.
@@ -55,7 +56,7 @@ Published assets follow the fleet naming rule `<base>-<vX.Y.Z>-<os>-<arch>`: `co
 The Gradle project exists at the repo root (`app`, `core`, `engine`), with the wrapper committed, so CI's Android job runs.
 
 1. Done: `namespace`/`applicationId` `ch.lkmc.combray`, debug suffix `.debug`, `versionName = "0.1.0"` and `versionCode = 1` as plain literals (the release engine and CI tag gate rewrite them with `sed`).
-2. Open: CI and `release.yml` build Kotlin only (JDK 17, plain Gradle). The native engine (`scripts/build-native.sh`: pinned Servo, NDK r29, Rust 1.97.1) is not built in CI, so CI APKs have no engine and the app says so. A released APK needs `COMBRAY_ABI=arm64 scripts/build-native.sh` first.
+2. Routine CI and `release.yml` build Kotlin only (JDK 17, plain Gradle). The separate Engine workflow builds both native ABIs and runs emulator fixture checks for engine-related PRs. Release publishing still needs the native build and signing wired in. Engine source is an exact downstream commit in `scripts/m0/servo-pin.sh`; do not restore an independently maintained patch directory. Maintenance and rollback: [BUILDING.md](docs/BUILDING.md#updating-servo).
 3. Local release signing is supported through four environment variables ([BUILDING.md](docs/BUILDING.md#local-release-signing)), verified with a disposable key. The personal signing key and CI signing configuration remain pending. `release.yml` also needs a native build before a release tag can publish a usable APK. Keep signing keys out of Git.
 4. Done: a `gradle` Dependabot entry. No `cargo` entry on purpose: `native/Cargo.lock` mirrors the pinned Servo release's lockfile.
 5. Done: launcher icons generated from `media-sources/icon.png` by `scripts/generate-launcher-icons.py` (rerun it after changing the artwork).

@@ -12,7 +12,7 @@ name = "combray_engine"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
-# Servo comes from the pinned, patched release tree that `scripts/m0/fetch-servo.sh` prepares.
+# Servo comes from the pinned downstream commit that `scripts/m0/fetch-servo.sh` prepares.
 # Feature choices mirror servoshell's Android build (the configuration upstream CI exercises);
 # trimming them is an M1 decision that needs its own build and size measurements.
 [dependencies]
@@ -35,7 +35,7 @@ rustls = { version = "=0.23.45", default-features = false, features = ["aws-lc-r
 url = "=2.5.8"
 
 [target.'cfg(target_os = "android")'.dependencies.servo]
-path = "../servo-checkout/servo-v0.6.0/components/servo"
+path = "../servo-checkout/servo/components/servo"
 default-features = false
 features = [
     "background_hang_monitor",
@@ -53,5 +53,5 @@ features = [
 # Android enforces tagged pointers in the system allocator, which SpiderMonkey does not
 # tolerate (servo/servo#32175), so Servo's Android builds use jemalloc.
 [target.'cfg(target_os = "android")'.dependencies.servo-allocator]
-path = "../servo-checkout/servo-v0.6.0/components/allocator"
+path = "../servo-checkout/servo/components/allocator"
 features = ["use-jemalloc"]

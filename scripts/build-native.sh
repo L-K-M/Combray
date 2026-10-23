@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build the native engine (native/: patched Servo + JNI bridge) for the app and stage it where
 # the engine module packages it. Prepares what it can on the way: the pinned NDK (through
-# sdkmanager), Rust toolchain and target, and the patched Servo tree (scripts/m0/fetch-servo.sh,
-# rerun whenever the patches change). The first run downloads several gigabytes and compiles
+# sdkmanager), Rust toolchain and target, and the pinned Servo tree (scripts/m0/fetch-servo.sh).
+# The first run downloads several gigabytes and compiles
 # Servo, which takes an hour or more.
 #
 #   scripts/build-native.sh                 # x86_64 (emulator)
@@ -28,17 +28,11 @@ if ! rustup target list --toolchain "$COMBRAY_RUST_TOOLCHAIN" --installed 2> /de
     rustup toolchain install "$COMBRAY_RUST_TOOLCHAIN" --profile minimal --target "$COMBRAY_RUST_TARGET"
 fi
 
-# Servo must be the pinned release with exactly the current patches.
-PATCHES=("$COMBRAY_ROOT"/native/servo/patches/*.patch)
-# Assigned, not compared inline: a failure inside [ "$(...)" ] would read as an empty, matching stamp.
-expected="$(combray_servo_stamp harness "${PATCHES[@]}")"
-if [ "$(cat "$COMBRAY_SERVO_STAMP" 2> /dev/null)" != "$expected" ]; then
-    echo "==> the Servo tree is missing or was not prepared with the current patches; preparing it"
-    "$COMBRAY_ROOT/scripts/m0/fetch-servo.sh"
-    # Again, for the Python environment fetch-servo.sh just created.
-    # shellcheck source=m0/env.sh disable=SC1091
-    . "$COMBRAY_ROOT/scripts/m0/env.sh"
-fi
+# Check the actual commit and local edits on every build, even when preparation is cached.
+"$COMBRAY_ROOT/scripts/m0/fetch-servo.sh"
+# Again, for the Python environment fetch-servo.sh may have created.
+# shellcheck source=m0/env.sh disable=SC1091
+. "$COMBRAY_ROOT/scripts/m0/env.sh"
 
 echo "==> cargo build ($COMBRAY_RUST_TARGET, release)"
 cd "$COMBRAY_ROOT/native"

@@ -2,6 +2,8 @@
 
 **Date:** 18 October 2026. **Scope:** milestone M0 of the [implementation plan](IMPLEMENTATION_PLAN.md#m0--prove-servo-on-android). This report records what was built, how, and what ran on Android. Build commands are in [BUILDING.md](BUILDING.md).
 
+The numbered M0 sections retain their original release-and-patch evidence. Current source maintenance is recorded in [Downstream engine maintenance](#downstream-engine-maintenance-23-october-2026).
+
 ## Summary
 
 | Capability (M0) | Verdict | Evidence |
@@ -32,7 +34,7 @@ Software emulation is slow and timing-sensitive: Android's own framework timed o
 
 ## 2. Servo selection and integration decision
 
-**Pinned:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from the release's source tarball (SHA-256 `1d828f99…e0c6`, full value in [BUILDING.md](BUILDING.md#pinned-inputs)) with three small patches.
+**M0 input:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from `servo-v0.6.0-src-vendored.tar.gz` (SHA-256 `1d828f9956fcb0fccfd5af02e4c75bfb948344f04ba7af1765faff78d4aec0e6`) with three small patches. The current downstream pin is in [BUILDING.md](BUILDING.md#pinned-inputs).
 
 - **Why v0.6.0:** it is the base of Servo's current long-term-support line (SpiderMonkey ESR 153); the LTS policy covers the `servo` library crate, which is what Combray embeds, and not servoshell. v0.7.0 (5 October) is newer but will be superseded monthly. Moving to a later 0.6.x LTS update means re-applying those patches.
 - **Why not upstream's Android shell:** servoshell's JNI layer drives one active WebView at a time, reports no tab or document identity, and has no JavaScript evaluation entry point (source inspection, confirmed by the research verification). Extending it would mean carrying a fork of a demo shell outside LTS scope.
@@ -82,7 +84,7 @@ Patch 0002 (131 added and 19 removed lines in 12 files; additive for existing em
 | `WebView::evaluate_javascript_in_document(document, …)`: constellation refuses with `DocumentNotFound` unless `document` is active | A result can only come from the named document |
 | `evaluate_js_on_global` returns `DocumentNotFound` instead of asserting when script cannot run | Removes the crash for every caller: embedder evaluation, WebDriver `ExecuteScript`, user scripts |
 
-Patch 0003 logs WebRender render errors, which `Painter::render` discarded (an upstream TODO); it was added to diagnose a stale-frame problem (section 6). The changes look suitable for upstream discussion; they have not been proposed upstream yet.
+Patch 0003 logs WebRender render errors, which `Painter::render` discarded (an upstream TODO); it was added to diagnose a stale-frame problem (section 6). These changes stay downstream. The owner prohibits upstream contributions and contact.
 
 ## 5. Checks and results
 
@@ -171,7 +173,7 @@ What the checks establish, beyond pass or fail:
 - The problem needs the large page; the same operations with small pages are fine.
 - It was seen only with SwiftShader under software emulation. No GPU device was available.
 
-**Next steps.** Run the reproduction on an arm64 phone. Test whether a resize alone clears it, since rotation does and a same-size surface rebind does not; that would also be a cheap workaround. If it persists, capture WebRender state (`WebView::capture_webrender`, debug flags) and report upstream with the harness reproduction. Candidate workarounds to evaluate, not yet tested: one `OffscreenRenderingContext` per tab composited into the window context, or rebuilding the shared painter after view churn.
+**Next steps.** Run the reproduction on an arm64 phone. Test whether a resize alone clears it, since rotation does and a same-size surface rebind does not; that would also be a cheap workaround. If it persists, capture WebRender state (`WebView::capture_webrender`, debug flags) and keep the reproduction downstream. Candidate workarounds to evaluate, not yet tested: one `OffscreenRenderingContext` per tab composited into the window context, or rebuilding the shared painter after view churn.
 
 ## 7. Navigation event taxonomy
 
@@ -239,11 +241,11 @@ scripts/m0/run-checks.sh emulator-5560
 ## 12. Next steps
 
 1. Run the harness on an arm64 phone (the owner's device if possible) and record the same checks there.
-2. Narrow the stale-frame defect on a real GPU; report it upstream with the reproduction.
-3. Report cookie persistence and embedder-script interruption upstream; decide whether Combray carries a cookie-flush patch.
-4. Offer patch 0002 (document identity and the crash fix) and patch 0003 upstream.
+2. Narrow the stale-frame defect on a real GPU; keep the reproduction downstream.
+3. Investigate embedder-script interruption downstream. Cookie persistence is addressed by the change formerly carried as patch 0004.
+4. Maintain document identity, the crash fix and render diagnostics downstream. Never offer them upstream.
 5. Done: M1 started from `native/` and kept the engine thread, identity model and capture path ([section 13](#13-after-m0-engine-changes-for-the-app)).
-6. Offer patch 0004 upstream with the cookie-loss reproduction.
+6. Keep the profile-persistence change and cookie-loss reproduction downstream.
 
 ## 13. After M0: engine changes for the app
 
@@ -304,3 +306,32 @@ adb -s emulator-5562 shell am instrument -w -r \
 The installed app contained Reader fix `2ae2b8b`; the second run used the test helper change later committed in `6b6d489`. Both complete runs passed 2/3 checks: unavailable-article handling and article-link navigation passed. Article extraction, markers and displayed text assertions passed, but the following system Back injection failed with `SecurityException: Injecting to another application requires INJECT_EVENTS permission`. The existing `Device.dismissSystemDialogs()` was added immediately before Back; it did not clear the interference reliably on this emulator.
 
 A read-only REA/adb screenshot showed “System UI isn't responding” covering the screen: 720×1440 PNG, SHA-256 `19884e2324b5e7ea5188ab40e2b012c152a5bc90d4a21b66797aa9f6d067e9c8`, Evidence `ev_9ec17de27963221eb3ed27bb7bada937afc55e82c0f5ac113a6ea96225207ac0`. Restarting System UI on this disposable emulator was attempted; the next run timed out and was stopped. **The device gate did not pass.** No physical phone, live service, personal history, Kagi login, dark/landscape sweep, or performance benchmark was exercised in this pass.
+
+## Downstream engine maintenance, 23 October 2026
+
+Owner-approved migration to [L-K-M/servo](https://github.com/L-K-M/servo/tree/combray/0.6), an independent downstream repository preserving upstream Git history. `servo/servo` is source pulls only. No contributions, reports, comments, fork API calls or outreach are permitted. The rule is in both repositories' `AGENTS.md` and global agent instructions.
+
+Base: `c78d2c206f80a1c8b67eefa97f773bba513205d3` (v0.6.0). Candidate downstream pin: `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. Engine changes are imported unchanged as separate commits:
+
+| Former patch | Downstream commit | Scope |
+| --- | --- | --- |
+| 0001, crates.io workaround | Not needed | Git source already uses crates.io; only the release tarball added vendor redirection |
+| 0002, document identity | `f860cdf98ec` | 12 files: constellation, identified embedder messages, script document/global handling, guarded JavaScript evaluation and WebView delegates |
+| 0003, render diagnostics | `70b288de85e` | `components/paint/painter.rs` |
+| 0004, profile persistence | `718bb542539` | `components/net/resource_thread.rs`, `components/servo/site_data_manager.rs`, `components/shared/base/lib.rs`, `components/shared/net/lib.rs` |
+| 0007, DOM relational queries | `97be6cb1fb5` | Four files in `components/script/`; all 15 Parser hooks preserved, only `parse_has` overridden. Stylesheet `:has()` and `CSS.supports` remain disabled. Imported unchanged in [downstream PR #1](https://github.com/L-K-M/servo/pull/1), from the candidate in [Combray PR #119](https://github.com/L-K-M/Combray/pull/119) |
+
+Copied upstream workflows, `CODEOWNERS` and Dependabot configuration were removed before the first downstream push. The source checkout is now `servo-checkout/servo`, selected by a full SHA in `scripts/m0/servo-pin.sh`. No patch files are applied. The old release extraction and its build cache are preserved. The checkout is verified on every build; dirty source is refused instead of overwritten. The baseline mode fetches the original upstream SHA from our downstream repository.
+
+Migration checks: all 14 source-preparation regressions pass, including exact SHA despite a moving branch, no SDK, offline reuse, mode switching with cache preserved, local edits and detached commits, pin updates, deleted Python environments, failed preparation retry, unavailable commits and inherited Git state. Review found the detached-commit and stale-environment cases; regression tests failed before their fixes and passed afterward. The complete script suite passes 44 tests. Documentation, shellcheck, Rust formatting and all 22 Rust host tests pass. `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease` passed locally (JDK 21); this first Gradle run had no staged engine.
+
+The x86_64 native build of the candidate passed in 6m31s, reusing the previous target cache, with Rust 1.97.1, NDK r29 and four Cargo jobs. Host compiler wrappers call the reference Zig C/C++ wrappers with `-fno-sanitize=undefined`. The downstream `components/` tree is byte-identical to the tested release extraction with patches 0002, 0003, 0004 and final 0007 (`git diff --no-index --stat` returned no differences).
+
+```sh
+ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_HOST_CC="$PWD/build/host-cc" COMBRAY_HOST_CXX="$PWD/build/host-cxx" \
+CARGO_TARGET_DIR=/home/paseo/workspace/Combray/servo-checkout/servo-v0.6.0/target \
+CARGO_BUILD_JOBS=4 scripts/build-native.sh
+```
+
+Staged `libcombray_engine.so`: 131,035,584 bytes, SHA-256 `5fe65a66532b33211ed7e2ff30428ae014fc9b728fd93515b3b4e3925ea0ef26`. ARM64 and migrated-APK device checks are in progress. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).

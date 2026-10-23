@@ -1,4 +1,4 @@
-# Must match the pinned Servo release (servo-checkout/servo-v0.6.0/rust-toolchain.toml).
+# Must match the pinned Servo checkout (servo-checkout/servo/rust-toolchain.toml).
 [toolchain]
 channel = "1.97.1"
 profile = "minimal"

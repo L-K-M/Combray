@@ -304,7 +304,7 @@ Servo is evolving and arbitrary browsing requires evaluating engine security and
 
 Logs use event IDs, integration/status codes and sanitized host/error categories. No page text, full query strings, credentials, request bodies, login links or authorization headers in release logs. Diagnostics export is user initiated and redacted. Crash reports/analytics are not part of the initial scope. Do not send browsing data to an LLM service as part of extraction or history indexing.
 
-For a usable personal release, assess target sites including authenticated pages, modern JS applications and Kagi. If an essential site cannot work in Servo, document the reproduction and upstream issue. Continue independent work where possible, but do not declare the browser ready until critical limitations are resolved or the owner explicitly accepts them.
+For a usable personal release, assess target sites including authenticated pages, modern JS applications and Kagi. If an essential site cannot work in Servo, record the reproduction downstream. `servo/servo` is source pulls only: never contact it or contribute AI-assisted work. Do not declare the browser ready until critical limitations are resolved or the owner explicitly accepts them.
 
 ## 8. Build and repository strategy
 
@@ -312,7 +312,7 @@ For a usable personal release, assess target sites including authenticated pages
 
 M0 added the engine build: `native/` (Rust bridge against pinned Servo), `spike/android/` (Gradle harness) and `scripts/m0/`. M1 added the product modules `app/`, `core/` and `engine/` ([BUILDING.md](BUILDING.md)). The design HTML remains a reference.
 
-Use an exact Servo commit or verified release branch, record its upstream URL and license, and document any patch set. The current Rust docs and Android book are mutable; their latest APIs may differ from that commit. For a fork, keep a small patch series and document how to rebase/update it. Do not commit a huge generated engine build or native binary without a deliberate reproducibility/artifact decision.
+Pin a full commit SHA from [L-K-M/servo](https://github.com/L-K-M/servo), the independent downstream repository with upstream history. Its published branch is `combray/0.6`; Combray's source of truth is `scripts/m0/servo-pin.sh`. Keep engine changes small and preserve MPL notices. Merge tested upstream maintenance revisions without rewriting published history, then update Combray's pin through native validation ([BUILDING.md](BUILDING.md#updating-servo)). `servo/servo` permits source pulls only: no issues, PRs, comments, fork API calls or outreach (owner instruction, 23 October 2026). Do not commit generated engine builds or native binaries.
 
 ### Engine build investigation
 
@@ -535,7 +535,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Reader view through Readability.js in the page | Decided (20 October 2026) | Firefox's article detection, run in the document shown (no second fetch, no cookies leave Servo); rendered natively as text, never as page markup. A page can only misreport its own article |
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
-| Engine revision/toolchain/packaging | Decided (M0) | Servo v0.6.0 + `native/servo/patches/`, Rust 1.97.1, NDK r29; [ENGINE_SPIKE.md](ENGINE_SPIKE.md#2-servo-selection-and-integration-decision) |
+| Engine revision/toolchain/packaging | Updated (owner, 23 October 2026) | Exact `L-K-M/servo` commit from `combray/0.6`, based on v0.6.0; Rust 1.97.1, NDK r29. Source pulls only from `servo/servo`; all work downstream. [Maintenance](BUILDING.md#updating-servo) |
 | Application ID | Confirmed (19 October 2026) | Owner confirmed `ch.lkmc.combray`; `.debug` suffix for debug builds |
 | API levels | Proposed (M1) | minSdk 30 (the native library links with API 30 wrappers), targetSdk 36 |
 | M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |
@@ -569,9 +569,9 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 
 ### Principal risks and response
 
-**Android wrapper work:** multi-tab identity and extraction required upstream changes; M0 carries them as `native/servo/patches/0002` (document identity, crash fix). Keep the patch set small and offer it upstream; rebase it when moving to a later 0.6.x LTS release.
+**Android wrapper work:** multi-tab identity and extraction required engine changes (formerly patch 0002). They now live in `L-K-M/servo`. Keep the downstream changes small and reconcile them when merging a tested 0.6.x maintenance update. Never offer them upstream.
 
-**Engine defects found in M0:** a stale frame after creating views while a large page is visible (WebRender level, reproduced on SwiftShader only so far), cookies lost on process death (addressed by patch 0004 since: written on request, at most five minutes of foreground changes at risk), and no interruption for embedder scripts. Each needs an upstream report with the M0 reproduction; see [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
+**Engine defects found in M0:** a stale frame after creating views while a large page is visible (WebRender level, reproduced on SwiftShader only so far), cookies lost on process death (addressed downstream: written on request, at most five minutes of foreground changes at risk), and no interruption for embedder scripts. Keep reproductions and fixes downstream; see [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
 
 **Engine security and compatibility:** Servo remains pre-1.0 and its demo wrapper has different maintenance scope from its library. Record real Android protections and critical target-site failures; keep an update path and avoid unsupported security promises.
 
