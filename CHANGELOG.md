@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Long-press Recent to switch to the tab you used before this one (a tap
+  still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
+  Recent's order. Repeated swipes keep going back; after a pause they
+  start from the tab you are on. Switching this way hides the keyboard, so
+  further typing does not reach the next tab's page.
 - A quiet check beside the address when Hister accepts the current page.
   It means the server acknowledged the capture, not that search indexing
   finished.
@@ -17,6 +22,19 @@ All notable changes to this project are documented here. The format follows
   sensitive so Android 13+ redacts the system clipboard preview.
 - Share sends the page's title with its address (as the share's subject and
   first line); sharing a link from the page's own menu keeps the address only.
+- Swiping a tab row in Recent closes the tab, with the same Undo as its
+  close button. History rows keep their explicit menu: removing a visit
+  has no undo.
+- Settings › Display › Appearance: follow the system, light or dark. The
+  choice applies at once and keeps the system bar icons readable.
+- Other apps can send to Combray: a shared link opens in a new tab, other
+  shared text and web searches wait in the address editor, "Search with
+  Kagi" in the text selection menu searches at once (unless the selection
+  holds a password or a link with a token: that opens the address editor
+  instead), and a "Save to Karakeep" share target saves a link after one
+  confirming tap, without opening the browser. A shared link longer than
+  32,768 characters is refused.
+- Launcher shortcuts for New tab and Search history (Recent on Hister).
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.
@@ -25,6 +43,9 @@ All notable changes to this project are documented here. The format follows
   the Java/Kotlin libraries, checked and listed by the Licensee plugin.
 - Long-press on a link or image: open in a new tab, copy or share the
   address.
+- Long-press on a link: open it in the background, where it loads when you
+  switch to it, or save it to Karakeep without leaving the page. Android 11
+  and 12 now confirm a copied address.
 - HTTP sign-in: a dialog naming the server asks for a username and
   password, warns on unencrypted connections and stores nothing.
 - Device check that the bottom bar, More menu and page dialogs keep 48dp,
@@ -69,18 +90,46 @@ All notable changes to this project are documented here. The format follows
   for what you type; a result opens in a new tab.
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
+- Recent, Hister and Karakeep results mark the words you typed, ignoring
+  case and accents.
+- A launch screen with the Combray icon, shown until your open tabs are
+  restored (at most two seconds).
+- More › Close tab closes the current tab, with the same Undo as Recent.
+- The address sheet lists up to five open tabs and recent pages that match
+  what you type, under "On this device": a tab switches to that tab, and a
+  page opens where the typed address would. The matches come from this
+  device; nothing is sent while you type.
 
 ### Changed
 
+- Paint heartbeats and other engine events that cannot change anything
+  stop running three database reads on the command queue, and the open
+  tab count is a COUNT query instead of loading every open row; taps
+  and page events share that queue, so it stays short.
+- A complete pine and ivory palette in light and dark mode: sheets,
+  dialogs, menus, snackbars and the tab count no longer show Material's
+  default purple or red, and the bottom bar's color reaches the screen
+  edge under the navigation bar.
+- Recent no longer restarts three database observers on every keystroke
+  of its filter: it reads the newest rows while you browse and up to
+  5,000 retained visits once you type, and filters in memory.
 - Hister capture no longer has a pause/resume row in More; the capture switch
   stays in Settings.
 - Share is in the bottom bar, next to Save, instead of the More menu.
+- Save shows a bookmark instead of a star, which in Karakeep means
+  Favourite: an outline, filled while saving, with a check once saved.
+  Recent shows stacked pages instead of a list.
+- Touch feedback, if enabled on the phone: a long-press on a page, a save
+  Karakeep acknowledged, and a save that needs attention.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.
 - A closed tab's page keeps its place in Recent, ordered by when the tab
   was last used rather than moved to the top.
 - Back on a page another app's link opened returns to that app; the page
   stays in history only, unless you switched tabs meanwhile.
+- Back on a tab a page opened, or that you opened with the link menu's
+  Open in new tab, closes it and returns to the tab you came from instead
+  of leaving the app. The page stays in history.
 - `scripts/build.sh` builds the engine first: it installs the pinned NDK
   and Rust toolchain when missing and fetches, verifies and patches Servo
   whenever the tree is missing or was prepared with other patches. Builds
@@ -91,6 +140,19 @@ All notable changes to this project are documented here. The format follows
 - CI also compiles the device checks, fails when Room's exported schemas
   are not committed or a committed version's schema changed, and checks
   the engine bridge's Rust formatting and page-script syntax.
+- On a Kagi results page, the address sheet starts with your search words
+  instead of the results address.
+- The address sheet no longer shows an error before you type, and its
+  buttons stay on one line, shortened in the middle, with an icon for
+  search or address.
+- Recent rows show the site's initial and, for open tabs too, when you
+  last used them, so two tabs on one page can be told apart. Only the
+  current tab is highlighted. Day headers name the weekday for the past
+  week. TalkBack announces the scope chips as tabs and says what tapping
+  a row does.
+- The Hister field's hint reads "Words you remember, searched in Hister…".
+- Reader view sets the article in a serif reading face (the system's Noto
+  Serif) with a larger title, and has a "Show the page" button at the top.
 
 ### Fixed
 
@@ -108,6 +170,10 @@ All notable changes to this project are documented here. The format follows
   decoder rejects remain conservative (sensitive).
 - The Recent tab-count badge caps its visible label at "99+" so large
   counts fit the badge; TalkBack still hears the exact number.
+- When the app goes to the background, Combray now also asks the engine to
+  slow the page on screen, not only hidden tabs, until you return. Servo
+  0.6.0 does not honor this reliably yet: it ignores the request for a page
+  that has not loaded yet and lifts it whenever a new page loads.
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
@@ -121,6 +187,36 @@ All notable changes to this project are documented here. The format follows
 - In Recent, the current tab stays above the pages you browsed in it and
   under the right day. A page you navigate away from is kept for seven days
   from when you left it, not from when it loaded.
+- Recent's Open tabs said there were no recent pages, or that nothing
+  matched, while All had some. It now says there is no open tab and
+  offers to show all recent pages.
+- Relative times and Today/Yesterday in Recent went stale while the sheet
+  stayed open; they now update every 30 seconds.
+- After scrolling Recent, a new filter or scope could leave its first
+  matches out of view; the list now starts at the top.
+- Starting the app with open tabs no longer shows "New tab" for a moment
+  before the restored page, as if the tabs were lost.
+- A save or capture made while its server cannot be reached no longer stops
+  after ten tries: attempts that could not connect sent nothing and do not
+  count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
+  and asks for attention once its server has not answered for a week.
+- A page Hister refuses on purpose (its skip rules, or sensitive content) is
+  dropped with its text instead of staying as a stopped capture that counts
+  against the capture budget.
+- Addresses with common credential parameters (`auth_token`, `accessToken`,
+  `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
+  `code` with its `state`, session IDs) could be saved to Karakeep or captured
+  to Hister. Parameter names are now compared without case or separators,
+  path matrix parameters (`;jsessionid=`) count too, and pagination cursors
+  such as `pageToken` and `NextToken` are still allowed. In a fragment only
+  `name=value` pairs count, so an anchor such as `#token-usage` is not
+  mistaken for a credential.
+- Reader view showed numbered lists as bullets, and section headings
+  smaller than the text under them. Numbered items now show the page's
+  numbers, and no heading is smaller than the body text.
+- A typed address, a reload, or a new or restored tab showed no loading line
+  until the server answered, so a slow server looked like a tap that did
+  nothing. The line now shows from the request.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
@@ -133,6 +229,35 @@ All notable changes to this project are documented here. The format follows
   "not a function".
 - Reader view drops an article whose renderer has crashed or been
   replaced. The late callback no longer covers the page now on screen.
+- Forgetting a site also removes the page an open tab is showing from
+  Recent. The tab keeps that address and title, and the page does not
+  come back after you navigate away or close the tab, nor when it loads
+  again in that tab: after a restart, when Android reclaimed its memory,
+  after a crash or on reload. It is not sent to Hister again either.
+  The next page the tab shows is recorded as usual.
+- A page whose tab is between renderers (evicted, restored, or sent back
+  home by a refused address) no longer disappears from Recent when the
+  tab moves on: it stays as ordinary history.
+- The durable queue: one broken job cycle (a storage error, a recorder
+  bug) no longer strands the jobs behind it or skips their wakeup; a job
+  whose worker died before finishing stops at the attempt limit instead
+  of being reclaimed forever; re-saving a failed page sends its current
+  title; a resumed job restarts its attempt budget; a claim that keeps
+  failing waits a minute between tries instead of retrying at once.
+- The address chip no longer draws a lock or says the connection is
+  encrypted just because the URL starts with `https`. Cleartext HTTP is
+  still called not encrypted. Page info no longer claims a verified
+  connection the engine has not reported.
+- The bottom Back button now does what system Back does: it leaves
+  Reader view first, and on the first page of a link another app opened
+  it closes that tab and returns to that app.
+- A Hister search answer that is JSON but not a search result (neither a
+  `documents` nor a `history` field, or either of the wrong type) is
+  reported as malformed instead of an empty search. A null list, which
+  Hister sends for an empty one, still counts as empty.
+- On a screen narrower than 400dp the address sits on its own row above
+  the actions, so the site name stays readable. Wider screens keep the
+  single row, and snackbars stay clear of the bar either way.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).
@@ -155,6 +280,15 @@ All notable changes to this project are documented here. The format follows
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch
   the page: the page kept every key, including the ones it cannot use.
+- A reload that fails, such as offline or when a tab is restored, no longer
+  hides the page from Recent or renames it "Error loading page", and a
+  reload no longer blanks the page's title while the new one loads.
+- Searching Recent looks beyond the newest 500 visits, up to 5,000 retained
+  ones.
+- Undo after closing a tab other than the current one reopens it in the
+  background instead of switching to it.
+- More and Settings open fully expanded instead of at half height, which
+  hid their last rows; More scrolls when it is taller than the window.
 - Device-check summaries no longer pass a run whose app process crashed or
   was killed as not responding after some checks passed: the check in
   progress shows as crashed and the unreached ones as not run.
@@ -173,3 +307,16 @@ All notable changes to this project are documented here. The format follows
   address. Pages without a host now show a fixed label chosen by their
   scheme alone ("data:", "file:", "about:blank"), never text from their
   address, and their dialogs say "This page says".
+- A typed home-server address opens over plain HTTP when that is likely:
+  `192.168.1.10`, `10.0.0.2:8080`, `localhost` and other private or
+  loopback addresses now go to `http://`, with HTTPS one tap away. Names
+  such as `keep.lan:3000` or `nas:5000` still try HTTPS first, but offer
+  `http://` instead of a Kagi search that would leak the name.
+- A typed `user:password@host` without `https://` was sent to Kagi as a
+  search, password included. It is now refused like other addresses with
+  credentials, also as one word of a longer text, so a search such as
+  `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
+  image digest (`nginx:1.25@sha256:…`) is still searched.
+- An address with `user:pass@` and a host Java's URI parser cannot read
+  (an underscore in it, for example) was not treated as sensitive, so it
+  could be captured to Hister or saved to Karakeep with its password.

@@ -36,6 +36,9 @@ sealed interface SaveStatus {
     /** Recorded durably; waiting for (or in) delivery. */
     data object Pending : SaveStatus
 
+    /** Recorded durably; the last attempt could not reach Karakeep, so nothing was sent yet. */
+    data object Waiting : SaveStatus
+
     /** The server acknowledged the link (not that crawling or tagging finished). */
     data object Saved : SaveStatus
 
@@ -278,6 +281,7 @@ class Integrations(
                 when {
                     job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
+                    job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
                     job != null -> SaveStatus.Pending
                     saved != null -> SaveStatus.Saved
                     // Queued for an earlier address: Settings offers to send it here or discard it.
@@ -345,7 +349,13 @@ class Integrations(
         // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
         val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
         val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
-        return if (added is DispatchResult.Done) created else added
+        return when {
+            added is DispatchResult.Done -> created
+            // The bookmark was created, so this attempt reached the server: it counts toward the
+            // limit, and the save is not shown as waiting for a server that answered.
+            added is DispatchResult.Retry && added.delivery == Delivery.NOT_SENT -> added.copy(delivery = Delivery.MAY_HAVE_ARRIVED)
+            else -> added
+        }
     }
 
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {

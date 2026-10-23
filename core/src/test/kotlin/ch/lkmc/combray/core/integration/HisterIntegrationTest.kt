@@ -15,6 +15,7 @@ import ch.lkmc.combray.core.data.ExclusionEntity
 import ch.lkmc.combray.core.data.JobKind
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
+import ch.lkmc.combray.core.data.ServiceKind
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.HistoryKind
 import kotlinx.coroutines.CoroutineScope
@@ -380,6 +381,24 @@ class HisterIntegrationTest {
         now += 8 * DAY_MS
         drain()
         assertFalse(runBlocking { hister.captureBudgetReached.first() })
+    }
+
+    @Test
+    fun aCaptureHisterRefusesOnPurposeIsCancelledAndItsTextDropped() {
+        enable()
+        for ((status, category) in listOf(406 to "skipped_by_server", 422 to "sensitive_content")) {
+            server.refusal = status
+            capture("https://a.example/$status", "refused text $status")
+            drain()
+            val job = jobs().last()
+            assertEquals(JobState.CANCELLED, job.state)
+            assertEquals(category, job.error)
+            assertEquals("", job.payload)
+        }
+        // Nothing left to retry, in the budget or in Settings' list of unfinished captures.
+        assertEquals(0L, runBlocking { database.integrations().queuedCaptureBytes() })
+        assertTrue(runBlocking { integrations.openJobs(ServiceKind.HISTER).first() }.isEmpty())
+        assertTrue(server.added.isEmpty())
     }
 
     @Test

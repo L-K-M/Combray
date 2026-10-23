@@ -15,12 +15,14 @@ import androidx.room.RoomDatabase
         TabEntity::class, VisitEntity::class, SessionEntity::class,
         ServiceEntity::class, OutboxJobEntity::class, SavedItemEntity::class, ExclusionEntity::class,
     ],
-    version = 3,
+    version = 4,
     autoMigrations = [
         // Services gained an optional alternate address.
         AutoMigration(from = 1, to = 2),
         // Karakeep gained a list for saves.
         AutoMigration(from = 2, to = 3),
+        // Tabs remember that their page was forgotten.
+        AutoMigration(from = 3, to = 4),
     ],
 )
 abstract class CombrayDatabase : RoomDatabase() {

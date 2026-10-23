@@ -1,7 +1,12 @@
 package ch.lkmc.combray
 
 import android.view.KeyEvent
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
@@ -73,6 +78,28 @@ class ReaderTest {
         device.awaitPage(target)
         assertEquals(null, device.browser.browserState.value.reader)
         assertEquals(1, device.browser.browserState.value.openTabCount)
+    }
+
+    @Test
+    fun aNumberedListKeepsThePagesNumbers() {
+        val reader = openReader(Fixtures.ARTICLE, ARTICLE_TITLE) as ReaderState.Ready
+        fun ordinalOf(marker: String) = reader.article.blocks.single { block -> block.spans.any { it.text == marker } }.ordinal
+        // <ol start='3'>, its third item with value='9'; the bulleted list has no numbers.
+        assertEquals(listOf(3, 4, 9), listOf("READER-STEP-THREE", "READER-STEP-FOUR", "READER-STEP-NINE").map(::ordinalOf))
+        // <ol reversed> without start counts down from its number of items.
+        assertEquals(listOf(3, 2, 1), listOf("READER-COUNTDOWN-THREE", "READER-COUNTDOWN-TWO", "READER-COUNTDOWN-ONE").map(::ordinalOf))
+        assertEquals(null, ordinalOf("READER-ITEM-ONE"))
+
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("9."))
+        compose.onNodeWithText("9.").assertIsDisplayed()
+    }
+
+    @Test
+    fun showThePageAtTheTopOfTheArticleLeavesReaderView() {
+        openReader(Fixtures.ARTICLE, ARTICLE_TITLE)
+        compose.onNodeWithText("Show the page").assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
+        val state = device.awaitState { it.reader == null }
+        assertEquals(Fixtures.ARTICLE, state.activeTab?.url)
     }
 
     @Test

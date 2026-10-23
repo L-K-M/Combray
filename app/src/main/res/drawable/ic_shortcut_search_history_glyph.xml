@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A 24-unit glyph scaled to the middle of the 108dp adaptive layer, well inside its safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="0.37"
+        android:scaleY="0.37">
+        <!-- Ring: outer radius 6.5, inner 4.5. -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M10,3.5a6.5,6.5 0,1 0,0 13a6.5,6.5 0,1 0,0 -13zM10,5.5a4.5,4.5 0,1 1,0 9a4.5,4.5 0,1 1,0 -9z" />
+        <!-- Handle, starting inside the ring's band. -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M14.98,13.42L20.78,19.22L19.22,20.78L13.42,14.98z" />
+    </group>
+</vector>

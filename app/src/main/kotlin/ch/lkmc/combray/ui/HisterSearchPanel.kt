@@ -121,14 +121,18 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         }
     }
 
+    val highlight = matchStyle()
     LazyColumn(Modifier.fillMaxWidth()) {
         items(hits, key = { it.url }) { hit ->
+            // Remembered per row: folding text for matching is not free on every recomposition.
+            val title = remember(hit, query, highlight) { highlightMatches(hit.title ?: displayHost(hit.url), query, highlight) }
+            val excerpt = remember(hit, query, highlight) { hit.excerpt?.let { highlightMatches(it, query, highlight) } }
             ListItem(
-                headlineContent = { Text(hit.title ?: displayHost(hit.url), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 supportingContent = {
                     Column {
                         // Plain text only: stored excerpts are never rendered as HTML.
-                        hit.excerpt?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        excerpt?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                         Text(
                             listOfNotNull(displayHost(hit.url), if (hit.fromHistory) stringResource(R.string.search_all_from_history) else null).joinToString(" · "),
                             maxLines = 1,
@@ -136,6 +140,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
                     }
                 },
                 modifier = Modifier.clickable { onOpen(hit.url) },
+                colors = sheetListItemColors(),
             )
         }
         nextPage?.let { page ->

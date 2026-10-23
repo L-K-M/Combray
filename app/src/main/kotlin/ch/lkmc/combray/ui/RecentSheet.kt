@@ -1,23 +1,33 @@
 package ch.lkmc.combray.ui
 
+import android.text.format.DateFormat as AndroidDateFormat
+import androidx.annotation.StringRes
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -32,62 +42,128 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.BrowserCoordinator
+import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.matching
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.policy.HostNames
 import java.text.DateFormat
-import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Date
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
-private enum class RecentScope(val label: Int) {
+enum class RecentScope(@StringRes val label: Int) {
     OPEN(R.string.recent_filter_open),
     ALL(R.string.recent_filter_all),
     HISTER(R.string.recent_scope_hister),
     KARAKEEP(R.string.recent_scope_karakeep),
 }
 
+/** What an empty local Recent list says, and whether All has rows to offer instead. */
+internal enum class RecentEmpty(val message: Int, val offersAll: Boolean) {
+    NOTHING(R.string.recent_empty, offersAll = false),
+    NO_MATCHES(R.string.recent_no_matches, offersAll = false),
+    NO_OPEN_TABS(R.string.recent_open_empty, offersAll = true),
+    NO_OPEN_TAB_MATCHES(R.string.recent_open_no_matches, offersAll = true),
+}
+
 /**
- * Open tabs and recently visited pages in one most-recently-used list (R5), opening on the
- * tabs. Filtering them stays on the device; Hister and Karakeep are separate, labeled scopes.
+ * Null while [shown] has rows. [matching] is every row [query] matches, in every scope (what
+ * Recent's projection returned for it); [shown] is the part of it the scope shows.
+ */
+internal fun recentEmpty(query: String, matching: List<RecentItem>, shown: List<RecentItem>): RecentEmpty? = when {
+    shown.isNotEmpty() -> null
+    matching.isEmpty() -> if (query.isBlank()) RecentEmpty.NOTHING else RecentEmpty.NO_MATCHES
+    // Rows exist but none is shown: only Open tabs hides rows, so they are pages under All.
+    query.isBlank() -> RecentEmpty.NO_OPEN_TABS
+    else -> RecentEmpty.NO_OPEN_TAB_MATCHES
+}
+
+/**
+ * Open tabs and recently visited pages in one most-recently-used list (R5), opening on
+ * [initialScope] (normally the tabs); a new [restartKey] returns to it. Filtering them stays on
+ * the device; Hister and Karakeep are separate, labeled scopes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentSheet(
     browser: BrowserCoordinator,
     integrations: Integrations,
+    initialScope: RecentScope,
+    restartKey: Int,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     snackbar: SnackbarHostState,
     onDismiss: () -> Unit,
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var scope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
-    val items by remember(query) { browser.recent(query) }.collectAsStateWithLifecycle(emptyList())
-    var forgetting by rememberSaveable { mutableStateOf<String?>(null) }
-    val shown = if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
-    val now = System.currentTimeMillis()
+    var query by rememberSaveable(restartKey) { mutableStateOf("") }
+    var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
+    // One subscription per depth: browsing reads the newest rows, a search the retained ones.
+    // The filter runs in memory, so typing does not restart three Room observers per keystroke.
+    val depth = HistoryDepth.forQuery(query)
+    // Null until the first answer: an empty list before it would flash an empty-state message.
+    // Tagged with its depth: the first keystroke filters the newest rows until the retained
+    // ones arrive, and those must not report "no matches" for an older page.
+    val answer by remember(browser, depth) { browser.recent(depth).map { depth to it } }.collectAsStateWithLifecycle(null)
+    val items = answer?.second
+    val rows = remember(items, query) { items?.let { LocalRows(query, it.matching(query)) } }
+    val complete = answer?.first == depth
+    var forgetting by rememberSaveable(restartKey) { mutableStateOf<String?>(null) }
+    val shown = remember(rows, scope) {
+        val items = rows?.items.orEmpty()
+        if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
+    }
+    // Relative times and day headers stay right while the sheet stays open.
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(CLOCK_TICK_MS)
+            value = System.currentTimeMillis()
+        }
+    }
+
+    // A new filter or scope shows its best matches first, once its rows are there.
+    val listState = rememberLazyListState()
+    LaunchedEffect(rows?.query, scope) { listState.scrollToItem(0) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         // The sheet is its own window: the Undo for a tab closed here must be shown inside it.
@@ -96,11 +172,18 @@ fun RecentSheet(
             Column {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            stringResource(R.string.recent_title),
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.weight(1f).semantics { heading() },
-                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.recent_title),
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.semantics { heading() },
+                            )
+                            Text(
+                                stringResource(R.string.recent_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         TextButton(onClick = onNewTab, modifier = Modifier.heightIn(min = 48.dp)) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                             Text(stringResource(R.string.action_new_tab), modifier = Modifier.padding(start = 8.dp))
@@ -108,13 +191,15 @@ fun RecentSheet(
                     }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp).selectableGroup(),
                     ) {
                         RecentScope.entries.forEach { option ->
                             FilterChip(
                                 selected = scope == option,
                                 onClick = { scope = option },
                                 label = { Text(stringResource(option.label)) },
+                                // One scope at a time: announced as tabs, not as checkboxes.
+                                modifier = Modifier.semantics { role = Role.Tab },
                             )
                         }
                     }
@@ -133,7 +218,19 @@ fun RecentSheet(
                 when (scope) {
                     RecentScope.HISTER -> HisterSearchPanel(integrations.hister, initialQuery = query, onOpen = onOpenUrl)
                     RecentScope.KARAKEEP -> KarakeepPanel(integrations, initialQuery = query, onOpen = onOpenUrl)
-                    RecentScope.OPEN, RecentScope.ALL -> LocalRecent(browser, shown, query, now, onDismiss) { forgetting = it }
+                    RecentScope.OPEN, RecentScope.ALL -> rows?.let { answered ->
+                        LocalRecent(
+                            browser = browser,
+                            shown = shown,
+                            empty = if (complete) recentEmpty(answered.query, answered.items, shown) else null,
+                            query = answered.query,
+                            now = now,
+                            listState = listState,
+                            onShowAll = { scope = RecentScope.ALL },
+                            onDismiss = onDismiss,
+                            onForgetSite = { forgetting = it },
+                        )
+                    }
                 }
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
@@ -152,53 +249,122 @@ fun RecentSheet(
     }
 }
 
-/** Tabs and history on this device, grouped by day. */
+/** Tabs and history on this device, grouped by day. [query] is the filter [shown] answers. */
 @Composable
 private fun LocalRecent(
     browser: BrowserCoordinator,
     shown: List<RecentItem>,
+    empty: RecentEmpty?,
     query: String,
     now: Long,
+    listState: LazyListState,
+    onShowAll: () -> Unit,
     onDismiss: () -> Unit,
     onForgetSite: (String) -> Unit,
 ) {
-    if (shown.isEmpty()) {
-        Text(
-            stringResource(if (query.isBlank()) R.string.recent_empty else R.string.recent_no_matches),
-            modifier = Modifier.padding(24.dp),
-        )
+    if (empty != null) {
+        EmptyRecent(empty, onShowAll)
+        return
     }
-    LazyColumn(Modifier.fillMaxWidth()) {
+
+    val days = remember(shown) { shown.map { calendarDay(it.time) } }
+    val today = calendarDay(now)
+    LazyColumn(Modifier.fillMaxWidth(), state = listState) {
         var lastDay: Long? = null
-        for (item in shown) {
-            val day = startOfDay(item.time)
+        shown.forEachIndexed { index, item ->
+            val day = days[index]
             if (day != lastDay) {
                 lastDay = day
-                item(key = "day:$day") { DayHeader(day, now) }
+                item(key = "day:$day") { DayHeader(day, today) }
             }
             item(key = item.key) {
-                RecentRow(
-                    item = item,
-                    now = now,
-                    onOpen = {
-                        when (item) {
-                            is RecentItem.OpenTab -> browser.selectTab(item.tabId)
-                            is RecentItem.Visit -> browser.openVisit(item.visitId)
-                        }
-                        onDismiss()
-                    },
-                    onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
-                    onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
-                    onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
-                )
+                val row: @Composable () -> Unit = {
+                    RecentRow(
+                        item = item,
+                        query = query,
+                        now = now,
+                        onOpen = {
+                            when (item) {
+                                is RecentItem.OpenTab -> browser.selectTab(item.tabId)
+                                is RecentItem.Visit -> browser.openVisit(item.visitId)
+                            }
+                            onDismiss()
+                        },
+                        onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
+                        onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
+                        onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                    )
+                }
+                if (item is RecentItem.OpenTab) {
+                    // A swipe closes the tab exactly like its close button, with the Undo
+                    // snackbar as the way back. History rows keep their explicit menu: removing
+                    // a visit has no undo, so it must stay a deliberate tap.
+                    SwipeToCloseTab(onClose = { browser.closeTab(item.tabId) }, row = row)
+                } else {
+                    row()
+                }
             }
         }
+    }
+}
+
+/** Why the list is empty and, when All has rows, a way there that keeps the filter. */
+@Composable
+private fun EmptyRecent(empty: RecentEmpty, onShowAll: () -> Unit) {
+    Column(Modifier.padding(24.dp)) {
+        Text(stringResource(empty.message))
+        if (empty.offersAll) {
+            TextButton(onClick = onShowAll, modifier = Modifier.heightIn(min = 48.dp)) {
+                // With a filter, All shows the matching pages, not every page.
+                Text(stringResource(if (empty == RecentEmpty.NO_OPEN_TAB_MATCHES) R.string.recent_show_matching else R.string.recent_show_all))
+            }
+        }
+    }
+}
+
+/**
+ * A tab row that a start-to-end swipe closes. The state is remembered, not saved: after Undo
+ * the same row key comes back and must not restore as already dismissed. The row is drawn on
+ * the sheet's colour so the close background shows only beside it while it moves.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToCloseTab(onClose: () -> Unit, row: @Composable () -> Unit) {
+    val threshold = SwipeToDismissBoxDefaults.positionalThreshold
+    val state = remember { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, threshold) }
+    val close by rememberUpdatedState(onClose)
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd) CloseRowBackground()
+        },
+        enableDismissFromEndToStart = false,
+        onDismiss = { close() },
+    ) {
+        Box(Modifier.fillMaxWidth().background(BottomSheetDefaults.ContainerColor)) { row() }
+    }
+}
+
+/** Behind a swiped tab row: closing, with the row's own close icon in the error tint. */
+@Composable
+private fun CloseRowBackground() {
+    Box(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(start = 20.dp),
+        )
     }
 }
 
 @Composable
 private fun RecentRow(
     item: RecentItem,
+    query: String,
     now: Long,
     onOpen: () -> Unit,
     onClose: () -> Unit,
@@ -211,19 +377,34 @@ private fun RecentRow(
     val host = item.url?.let { displayHost(it) }
     // The site actions name the exact host they act on ("www.example.org", not "example.org").
     val site = item.url?.let(HostNames::of)?.let(HostNames::forDisplay)
+    val colors = MaterialTheme.colorScheme
+    val isCurrentTab = item is RecentItem.OpenTab && item.active
+    val marker = when {
+        item !is RecentItem.OpenTab -> null
+        item.active -> stringResource(R.string.recent_active_marker)
+        else -> stringResource(R.string.recent_open_marker)
+    }
+    // Open tabs show their time too, so two tabs on one page can be told apart.
+    val details = buildAnnotatedString {
+        marker?.let {
+            withStyle(SpanStyle(color = colors.primary, fontWeight = FontWeight.Medium)) { append(it) }
+            append(DETAIL_SEPARATOR)
+        }
+        append(listOfNotNull(host, relativeTime(item.time, now)).joinToString(DETAIL_SEPARATOR))
+    }
 
     ListItem(
-        headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = {
-            val details = when (item) {
-                is RecentItem.OpenTab -> listOfNotNull(
-                    stringResource(if (item.active) R.string.recent_active_marker else R.string.recent_open_marker),
-                    host,
-                )
-                is RecentItem.Visit -> listOfNotNull(host, relativeTime(item.time, now))
-            }
-            Text(details.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        leadingContent = { SiteTile(monogram(item.url)) },
+        headlineContent = {
+            val style = matchStyle()
+            Text(
+                remember(title, query, style) { highlightMatches(title, query, style) },
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
+        supportingContent = { Text(details, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingContent = {
             when (item) {
                 is RecentItem.OpenTab -> IconButton(onClick = onClose) {
@@ -232,13 +413,36 @@ private fun RecentRow(
                 is RecentItem.Visit -> VisitMenu(title, site, onRemove, onForgetSite)
             }
         },
-        colors = if (item is RecentItem.OpenTab) {
-            ListItemDefaults.colors(headlineColor = MaterialTheme.colorScheme.primary)
-        } else {
-            ListItemDefaults.colors()
-        },
-        modifier = Modifier.clickable(onClick = onOpen),
+        // Rows take the sheet's colour; only the current tab stands out.
+        colors = ListItemDefaults.colors(
+            containerColor = if (isCurrentTab) colors.secondaryContainer.copy(alpha = CURRENT_TAB_ALPHA) else Color.Transparent,
+            headlineColor = colors.onSurface,
+        ),
+        modifier = Modifier.clickable(
+            onClickLabel = stringResource(if (item is RecentItem.OpenTab) R.string.recent_switch_to_tab else R.string.recent_open_in_new_tab),
+            onClick = onOpen,
+        ),
     )
+}
+
+/** The site's initial on a small tile, so a list of similar titles scans faster. Decorative. */
+@Composable
+private fun SiteTile(letter: String) {
+    // Fixed like the tile around it: the title beside it grows with the font scale instead.
+    val letterSize = with(LocalDensity.current) { TILE_LETTER_SIZE.toSp() }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(TILE_SIZE)
+            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(TILE_CORNER))
+            .clearAndSetSemantics {},
+    ) {
+        Text(
+            letter,
+            style = MaterialTheme.typography.titleSmall.copy(fontSize = letterSize, lineHeight = letterSize),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
 }
 
 @Composable
@@ -292,13 +496,23 @@ private fun ForgetSiteDialog(host: String, onConfirm: (Boolean) -> Unit, onDismi
     )
 }
 
+/** [day] and [today] are [calendarDay]s. */
 @Composable
-private fun DayHeader(day: Long, now: Long) {
-    val today = startOfDay(now)
-    val label = when (day) {
-        today -> stringResource(R.string.recent_today)
-        startOfDay(today - 1) -> stringResource(R.string.recent_yesterday)
-        else -> DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(day))
+private fun DayHeader(day: Long, today: Long) {
+    val locale = LocalConfiguration.current.locales[0]
+    val name = dayName(day, today)
+    val label = when (name) {
+        DayName.TODAY -> stringResource(R.string.recent_today)
+        DayName.YESTERDAY -> stringResource(R.string.recent_yesterday)
+        DayName.WEEKDAY, DayName.DATE -> remember(day, name, locale) {
+            val start = Date(LocalDate.ofEpochDay(day).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+            val format = if (name == DayName.WEEKDAY) {
+                SimpleDateFormat(AndroidDateFormat.getBestDateTimePattern(locale, WEEKDAY_SKELETON), locale)
+            } else {
+                DateFormat.getDateInstance(DateFormat.MEDIUM, locale)
+            }
+            format.format(start)
+        }
     }
     Text(
         label,
@@ -308,11 +522,13 @@ private fun DayHeader(day: Long, now: Long) {
     )
 }
 
-private fun startOfDay(time: Long): Long = Calendar.getInstance().run {
-    timeInMillis = time
-    set(Calendar.HOUR_OF_DAY, 0)
-    set(Calendar.MINUTE, 0)
-    set(Calendar.SECOND, 0)
-    set(Calendar.MILLISECOND, 0)
-    timeInMillis
-}
+/** Local Recent rows and the filter text they answer. */
+private data class LocalRows(val query: String, val items: List<RecentItem>)
+
+private const val CLOCK_TICK_MS = 30_000L
+private const val DETAIL_SEPARATOR = " · "
+private const val CURRENT_TAB_ALPHA = 0.5f
+private const val WEEKDAY_SKELETON = "EEEE"
+private val TILE_SIZE = 32.dp
+private val TILE_CORNER = 9.dp
+private val TILE_LETTER_SIZE = 14.dp

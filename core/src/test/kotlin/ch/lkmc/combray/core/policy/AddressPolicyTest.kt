@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.policy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -31,11 +32,68 @@ class AddressPolicyTest {
         assertEquals(AddressDecision.Navigate("https://example.org/path"), interpretation.primary)
         assertTrue(interpretation.alternative is AddressDecision.Search)
 
-        navigates("localhost:8080", "https://localhost:8080")
-        navigates("192.168.1.10", "https://192.168.1.10")
-        navigates("[::1]:8443/x", "https://[::1]:8443/x")
         navigates("bücher.de", "https://bücher.de")
         navigates("xn--bcher-kva.de", "https://xn--bcher-kva.de")
+    }
+
+    @Test
+    fun publicHostsWithPortsOrAddressesKeepHttpsAndSearch() {
+        // Next to the private ranges, and names that only look local: still public.
+        val public = listOf(
+            "example.org:8443", "8.8.8.8", "11.0.0.1", "172.15.0.1", "172.32.0.1", "192.169.0.1", "169.255.0.1",
+            "[2001:db8::1]:8443/x", "[fe00::1]", "[fec0::1]", "keep.lan.example.org", "local.example.org",
+            // Zero-padded octets are octal to Servo: this is 8.0.0.5, not 10.0.0.5.
+            "010.0.0.5",
+        )
+        for (input in public) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.primary)
+            assertTrue(input, interpretation.alternative is AddressDecision.Search)
+        }
+    }
+
+    @Test
+    fun aTypedSchemeIsKeptOnHomeAddresses() {
+        assertEquals(AddressDecision.Navigate("https://192.168.1.10"), primary("https://192.168.1.10"))
+        assertEquals(AddressDecision.Navigate("http://localhost:3000"), primary("http://localhost:3000"))
+        assertEquals(AddressDecision.Navigate("https://keep.lan:3000"), primary("https://keep.lan:3000"))
+    }
+
+    @Test
+    fun mappedAndZonedIpv6HomeAddressesGoOverHttp() {
+        assertEquals(AddressDecision.Navigate("http://[::ffff:192.168.1.1]"), primary("[::ffff:192.168.1.1]"))
+        assertEquals("https://[::ffff:8.8.8.8]", (primary("[::ffff:8.8.8.8]") as AddressDecision.Navigate).url)
+        // A zone names the interface of a link-local address; the address alone decides.
+        assertEquals(AddressDecision.Navigate("http://[fe80::1%25wlan0]"), primary("[fe80::1%25wlan0]"))
+        // Malformed dotted tails are no home address (and do not throw).
+        for (malformed in listOf("[::1.2]", "[::1.2.3]", "[::1.2.3.4.5]")) {
+            assertNotEquals(AddressDecision.Navigate("http://$malformed"), primary(malformed))
+        }
+    }
+
+    @Test
+    fun privateAddressesAndLocalhostGoOverHttpWithHttpsInstead() {
+        val local = listOf(
+            "192.168.1.10", "10.0.0.2:8080", "172.16.0.1", "172.31.255.255/x", "127.0.0.1:3000", "169.254.1.1",
+            "localhost", "LOCALHOST:8080", "[::1]:8443/x", "[0:0:0:0:0:0:0:1]", "[fd12:3456::1]", "[fe80::1]:80",
+        )
+        for (input in local) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("http://$input"), interpretation.primary)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.alternative)
+        }
+    }
+
+    @Test
+    fun homeNetworkNamesOfferHttpInsteadOfSearch() {
+        val names = listOf(
+            "keep.lan:3000", "Keep.LAN", "nas.local/x", "printer.home.arpa", "hister.internal:8080", "box.localdomain", "nas:5000",
+        )
+        for (input in names) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Navigate("https://$input"), interpretation.primary)
+            assertEquals(input, AddressDecision.Navigate("http://$input"), interpretation.alternative)
+        }
     }
 
     @Test
@@ -63,6 +121,51 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun aKagiResultsAddressGivesBackItsQuery() {
+        for (query in listOf("servo android build", "Zürich 😀 日本", "a&b=c", "#1 c#", "C++ a+b", "100% %20", "  padded  ")) {
+            assertEquals(query, AddressPolicy.kagiQuery(AddressPolicy.kagiSearchUrl(query)))
+        }
+
+        // Kagi's own search field submits "+" for spaces. Other parameters and the fragment are
+        // ignored, and of two q parameters the first counts.
+        assertEquals("foo bar", AddressPolicy.kagiQuery("https://kagi.com/search?q=foo+bar"))
+        assertEquals("a b", AddressPolicy.kagiQuery("HTTPS://KAGI.com/search?r=ch&q=a%20b&q=c#top"))
+    }
+
+    @Test
+    fun otherAddressesAndMissingQueriesGiveNoKagiQuery() {
+        val others = listOf(
+            "http://kagi.com/search?q=x",
+            "https://www.kagi.com/search?q=x",
+            "https://kagi.com.evil.test/search?q=x",
+            "https://evil.test/search?q=x",
+            "https://evil.test/?u=https://kagi.com/search?q=x",
+            "https://kagi.com:8443/search?q=x",
+            "https://user@kagi.com/search?q=x",
+            "https://kagi.com/search/?q=x",
+            "https://kagi.com/images?q=x",
+            "https://kagi.com/?q=x",
+            // Malformed escapes give nothing rather than text the user never typed.
+            "https://kagi.com/search?q=%zz",
+            "not an address",
+        )
+        val missing = listOf(
+            "https://kagi.com/search",
+            "https://kagi.com/search?r=ch",
+            "https://kagi.com/search?q",
+            "https://kagi.com/search?q=",
+            "https://kagi.com/search?q=%20",
+            "https://kagi.com/search?qq=x",
+            // Parameter names are case-sensitive.
+            "https://kagi.com/search?Q=x",
+            "https://kagi.com/search#q=x",
+        )
+        for (url in others + missing) {
+            assertNull(url, AddressPolicy.kagiQuery(url))
+        }
+    }
+
+    @Test
     fun unsafeSchemesAreRejectedNotSearched() {
         for (input in listOf("javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "intent://x#Intent;end", "ftp://example.org")) {
             assertEquals(input, AddressDecision.Rejected(RejectReason.UNSUPPORTED_SCHEME), primary(input))
@@ -72,6 +175,62 @@ class AddressPolicyTest {
     @Test
     fun credentialsInAddressesAreRejected() {
         assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("https://user:secret@example.org/"))
+    }
+
+    @Test
+    fun schemelessCredentialsAreRejectedNotSearched() {
+        // A search would put the password in Kagi's URL and search history.
+        val withCredentials = listOf(
+            "admin:hunter2@192.168.1.1", "admin:hunter2@192.168.1.1:8080", "u:p@example.com/x", "admin:p@ss@nas", "admin:pw@nas!",
+            "u:p@1.2.3.4.5", "admin:1234@nas",
+            // A password may hold what would end an address's host.
+            "admin:Ab#3x@192.168.1.1", "admin:p/ss@nas", "admin:a?b@10.0.0.2",
+        )
+        for (input in withCredentials) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
+            assertNull(input, interpretation.alternative)
+        }
+
+        // Without a colon before "@" it is no password; "define:x@example.com" is the accepted cost.
+        searches("alice@example.com")
+        // A path holding a colon and an "@", and a port before a path with an "@", are addresses.
+        assertEquals(AddressDecision.Navigate("https://example.com/a:b@c"), primary("example.com/a:b@c"))
+        assertEquals(AddressDecision.Navigate("http://localhost:3000/@me"), primary("localhost:3000/@me"))
+        assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("define:x@example.com"))
+    }
+
+    @Test
+    fun credentialsHiddenBehindSlashesLongDigitsOrOtherWordsAreRejected() {
+        val withCredentials = listOf(
+            // Leading slashes, as in a protocol-relative address, do not hide the user name.
+            "//admin:hunter2@192.168.1.1", "/user:pass@host", "\\\\admin:pw@nas",
+            // Six digits are no port: this is a password.
+            "admin:123456/x@nas",
+            // Any word of a text with spaces.
+            "Router: https://admin:hunter2@192.168.1.1", "see https://u:p@h", "(https://u:p@h)", "login admin:hunter2@nas please",
+            // Extra slashes after the scheme, and a link inside another link's query.
+            "see https:///admin:pw@nas", "see https:////admin:pw@192.168.1.1", "see https://a.example/r?u=https://admin:pw@nas",
+            // A colon after the host that starts no port is still a host: a trailing colon, a
+            // port too long, an unbracketed IPv6 address.
+            "admin:pw@nas:", "admin:pw@192.168.1.1:", "admin:pw@nas:/share", "admin:pw@nas:123456", "user:pass@host:8080:9090",
+            "admin:pw@host:abc/x", "admin:pw@::1", "admin:pw@fe80::1", "//admin:pw@nas:", "login admin:hunter2@192.168.1.1: please change",
+        )
+        for (input in withCredentials) {
+            val interpretation = AddressPolicy.interpret(input)
+            assertEquals(input, AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), interpretation.primary)
+            assertNull(input, interpretation.alternative)
+        }
+
+        // An "@" in a link's path, a mail address and a mailto: link hold no password.
+        searches("follow https://mastodon.social/@proust")
+        searches("write to alice@example.com today")
+        searches("write mailto:alice@example.com today")
+        // What follows the "@" is no host and port: an image digest, not a password.
+        searches("docker pull nginx:1.25@sha256:4c0fdaa8b6341bfdeca5f18f7837462c80cff90527ee35ef185571e1c327beac")
+        searches("nginx:1.25@sha256:4c0fdaa8")
+        // A five-digit port before a path with an "@" stays an address.
+        assertEquals(AddressDecision.Navigate("https://nas:12345/@me"), primary("nas:12345/@me"))
     }
 
     @Test

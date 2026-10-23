@@ -8,6 +8,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import ch.lkmc.combray.core.browser.AppVisibility
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.EngineStatus
@@ -56,12 +57,17 @@ class CombrayApplication : Application(), OutboxHost {
     /**
      * Servo writes cookies only when asked (patch 0004) or at a clean exit, which Android rarely
      * allows. Write them when the app leaves the foreground, and periodically while it is used,
-     * so a killed process loses at most five minutes of cookie changes.
+     * so a killed process loses at most five minutes of cookie changes. The same observer feeds
+     * the browser process visibility, so a backgrounded renderer is throttled.
      */
     private fun persistProfileWhileRunning() {
         val process = ProcessLifecycleOwner.get()
         process.lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStop(owner: LifecycleOwner) = graph.browser.persistProfile()
+            override fun onStart(owner: LifecycleOwner) = graph.browser.setAppVisibility(AppVisibility.FOREGROUND)
+            override fun onStop(owner: LifecycleOwner) {
+                graph.browser.setAppVisibility(AppVisibility.BACKGROUND)
+                graph.browser.persistProfile()
+            }
         })
         process.lifecycleScope.launch {
             process.repeatOnLifecycle(Lifecycle.State.STARTED) {

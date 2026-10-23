@@ -12,7 +12,10 @@ Pages
   /cookie-echo               title COOKIE:<Cookie header>
   /opener.html               link with target=_blank to /solid/3b4f8a.html
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
+  /once.html?k=<alnum>       title ONCE on the first request per key; later ones close unanswered
+                             (a reload that fails like a lost connection)
   /private.html              page for exclusion checks
+  /slow.html                 answers after SLOW_PAGE_SECONDS; title SLOW
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
@@ -47,6 +50,8 @@ KARAKEEP_KEY = "fixture-key"
 SIGN_IN = ("ada", "lovelace")
 HISTER_TOKEN = "fixture-token"
 HANG_SECONDS = 20
+# Long enough for a check to see the tab loading before the page commits.
+SLOW_PAGE_SECONDS = 8
 COOKIE_NAME = "combray"
 COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60
 MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -60,6 +65,7 @@ def fresh_lists():
 
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": []}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
+once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 
 
 def page(title, body, head=""):
@@ -85,7 +91,10 @@ ARTICLE_BODY = (
     f"<p>{ARTICLE_PARAGRAPH * 3}</p>"
     "<h2>READER-HEADING</h2>"
     f"<p>READER-BODY-TWO {ARTICLE_PARAGRAPH * 3}</p>"
-    "<ul><li>READER-ITEM-ONE</li><li>READER-ITEM-TWO</li></ul></article>"
+    "<ul><li>READER-ITEM-ONE</li><li>READER-ITEM-TWO</li></ul>"
+    # Numbered from 3, then from an item's own value: reader view shows 3., 4. and 9.
+    "<ol start='3'><li>READER-STEP-THREE</li><li>READER-STEP-FOUR</li><li value='9'>READER-STEP-NINE</li></ol>"
+    "<ol reversed><li>READER-COUNTDOWN-THREE</li><li>READER-COUNTDOWN-TWO</li><li>READER-COUNTDOWN-ONE</li></ol></article>"
     "<aside>READER-ASIDE-TEXT related stories</aside><footer>READER-FOOTER-TEXT</footer>"
 )
 
@@ -248,11 +257,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":
             return self.send(200, ANIMATE_PAGE)
+        if path == "/slow.html":
+            time.sleep(SLOW_PAGE_SECONDS)
+            return self.send(200, page("SLOW", "<p>SLOW</p>"))
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
+        if path == "/once.html":
+            key = "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:40]
+            if not key:
+                return self.send(400, page("ONCE-NEEDS-K", "<p>missing or empty k</p>"))
+            with lock:
+                first = key not in once_served
+                once_served.add(key)
+            if first:
+                return self.send(200, page("ONCE", "<p>ONCE</p>"))
+            # No response at all: the engine sees a network failure and commits its error page.
+            self.close_connection = True
+            return None
         if path == "/auth.html":
             expected = "Basic " + base64.b64encode(":".join(SIGN_IN).encode()).decode()
             if self.headers.get("Authorization") == expected:
@@ -288,7 +312,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "query": text,
                 "total": len(docs),
                 "documents": [{"url": d["url"], "title": d["title"], "text": d["text"][:200]} for d in docs],
-                "history": [],
+                # Like the pinned server: null when no history is promoted.
+                "history": None,
                 # Like the pinned server: always present, empty when there is no next page.
                 "page_key": "",
             })
@@ -310,6 +335,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state["lists"].update(fresh_lists())
                 state["hister"].clear()
                 state["log"].clear()
+                once_served.clear()
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})

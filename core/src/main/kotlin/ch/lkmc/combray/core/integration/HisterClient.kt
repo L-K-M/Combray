@@ -3,6 +3,7 @@ package ch.lkmc.combray.core.integration
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -44,11 +45,15 @@ class HisterClient(private val transport: HttpTransport) {
             // Hister updates a document key in place, so resending the same content is harmless.
             HttpOutcome.Timeout -> DispatchResult.Retry("timeout")
             is HttpOutcome.Failure -> DispatchResult.Retry(outcome.category)
-            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category)
-            is HttpOutcome.Response -> if (outcome.status in 200..299) {
-                DispatchResult.Done(null)
-            } else {
-                HttpStatus.classifyFailure(outcome)
+            is HttpOutcome.NotConnected -> DispatchResult.Retry(outcome.category, delivery = Delivery.NOT_SENT)
+            is HttpOutcome.Response -> when (outcome.status) {
+                in 200..299 -> DispatchResult.Done(null)
+                // Hister's rules skip the page: skip rules, an allow list it misses, Hister's own host.
+                406 -> DispatchResult.Declined("skipped_by_server")
+                // Sensitive content. The pinned revision checks only submitted HTML and Combray sends
+                // none, so this is defensive: such a refusal must not fail the capture.
+                422 -> DispatchResult.Declined("sensitive_content")
+                else -> HttpStatus.classifyFailure(outcome)
             }
         }
     }
@@ -104,11 +109,21 @@ class HisterClient(private val transport: HttpTransport) {
         } catch (malformed: IllegalArgumentException) {
             null
         } ?: return HisterSearch.Malformed
-        val documents = (root["documents"] as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = false) }
-        val history = (root["history"] as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = true) }
+        // A null list is an empty one: the pinned server is written in Go, which sends an empty
+        // list as null ("history": null when nothing is promoted). A response with neither key,
+        // or a list of the wrong type, is not an empty search: that would hide a server that is
+        // not speaking this API.
+        if ("documents" !in root && "history" !in root) return HisterSearch.Malformed
+        val documents = root["documents"]?.takeUnless { it is JsonNull }
+        val history = root["history"]?.takeUnless { it is JsonNull }
+        if ((documents != null && documents !is JsonArray) || (history != null && history !is JsonArray)) {
+            return HisterSearch.Malformed
+        }
+        val documentHits = (documents as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = false) }
+        val historyHits = (history as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = true) }
         // Promoted history first, then documents not already listed: neither array is dropped.
         // Each address appears once, even when the server repeats it within one array.
-        val hits = (history + documents).distinctBy { it.url }
+        val hits = (historyHits + documentHits).distinctBy { it.url }
         // Hister always sends page_key and leaves it empty on the last page; the server ignores
         // an empty one, so asking with it would return the first page again.
         return HisterSearch.Results(hits, (root["total"] as? JsonPrimitive)?.content?.toIntOrNull(), (root["page_key"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() })

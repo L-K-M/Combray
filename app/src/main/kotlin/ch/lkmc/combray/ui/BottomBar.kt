@@ -1,42 +1,62 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -48,48 +68,129 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.TabStep
 import ch.lkmc.combray.core.integration.SaveStatus
 
-/** Back, address, Save, Share, Recent and More: every routine action within thumb reach. */
+/**
+ * Back, address, Save, Share, Recent and More: every routine action within thumb reach. A
+ * sideways swipe along the bar steps through open tabs ([onSwipeTab]); the Recent sheet stays
+ * the visible way to switch, so nothing depends on the gesture.
+ */
 @Composable
 fun BottomBar(
     tab: ActiveTab?,
     openTabs: Int,
-    saveStatus: SaveStatus,
+    saveStatus: PageSaveStatus,
     histerStored: Boolean,
+    /** Whether Back has somewhere to go: BrowserScreen decides, for this button and system Back alike. */
+    backEnabled: Boolean,
     onBack: () -> Unit,
     onAddress: () -> Unit,
     onSave: () -> Unit,
     onShare: () -> Unit,
     onRecent: () -> Unit,
+    /** Long-press shortcut: focus the tab used before the focused one. */
+    onRecentLongPress: () -> Unit,
     onMore: () -> Unit,
     onCopyAddress: () -> Unit,
+    onSwipeTab: (TabStep) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(tonalElevation = 3.dp, modifier = modifier) {
+    // A drag along the bar is a swipe once it covers TAB_SWIPE_DISTANCE; shorter drags and taps
+    // keep their meaning, and a drag that starts on a button cancels that button's click. A
+    // swipe from the screen edge never arrives: Android keeps it for its Back gesture.
+    val swipeDistance = with(LocalDensity.current) { TAB_SWIPE_DISTANCE.toPx() }
+    var dragged by remember { mutableFloatStateOf(0f) }
+    val swipe = Modifier.draggable(
+        orientation = Orientation.Horizontal,
+        state = rememberDraggableState { delta -> dragged += delta },
+        onDragStarted = { dragged = 0f },
+        onDragStopped = {
+            // Physical directions, like going back and forward: right is the older tab.
+            when {
+                dragged >= swipeDistance -> onSwipeTab(TabStep.OLDER)
+                dragged <= -swipeDistance -> onSwipeTab(TabStep.NEWER)
+            }
+            dragged = 0f
+        },
+    )
+    // The bar's color runs under the navigation bar and, in landscape, a cutout; only its
+    // actions keep clear of them. A hairline along its top edge separates it from the page.
+    // Explicit content colours: contentColorFor matches by value, and a role sharing a tier's
+    // value would give its own on-colour.
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier,
+    ) {
         Box {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            BoxWithConstraints(
+                Modifier
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                    .then(swipe)
+                    .fillMaxWidth(),
             ) {
-                IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                }
-                AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.weight(1f))
-                SaveButton(saveStatus, enabled = tab?.url != null, onSave)
-                IconButton(onClick = onShare, enabled = tab?.url != null) {
-                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
-                }
-                val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
-                IconButton(onClick = onRecent, modifier = Modifier.semantics { contentDescription = recentLabel }) {
-                    BadgedBox(badge = { if (openTabs > 0) Badge { Text(tabCountLabel(openTabs)) } }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                // Five 48dp actions leave a narrow phone's chip too little room for a site name, so
+                // the address takes a row of its own above them (owner decision, 22 October 2026).
+                val stacked = maxWidth < STACKED_BAR_BELOW
+                Column {
+                    if (stacked) {
+                        AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp))
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = if (stacked) STACKED_ACTION_ROW_HEIGHT else BAR_HEIGHT)
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = if (stacked) Arrangement.SpaceEvenly else Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onBack, enabled = backEnabled) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.weight(1f))
+                        SaveButton(saveStatus, enabled = tab?.url != null, onSave)
+                        IconButton(onClick = onShare, enabled = tab?.url != null) {
+                            Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                        }
+                        val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
+                        val switchPrevious = stringResource(R.string.recent_switch_previous)
+                        // Combined click/long-click: IconButton has no long-press overload. Same 48dp
+                        // target, role and ripple; the long-press is a shortcut beside the Recent sheet's rows.
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .combinedClickable(
+                                    interactionSource = null,
+                                    indication = ripple(bounded = false, radius = 20.dp),
+                                    role = Role.Button,
+                                    onLongClickLabel = switchPrevious,
+                                    onClick = onRecent,
+                                    onLongClick = onRecentLongPress,
+                                )
+                                .semantics { contentDescription = recentLabel },
+                        ) {
+                            // A count, not an alert: pine rather than Material's error red.
+                            BadgedBox(
+                                badge = {
+                                    if (openTabs > 0) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+                                            Text(tabCountLabel(openTabs))
+                                        }
+                                    }
+                                },
+                            ) {
+                                Icon(TabStackIcon, contentDescription = null)
+                            }
+                        }
+                        IconButton(onClick = onMore) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                        }
                     }
                 }
-                IconButton(onClick = onMore) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
-                }
             }
+            HorizontalDivider(Modifier.align(Alignment.TopCenter), color = MaterialTheme.colorScheme.outlineVariant)
             // Overlaid on the bar's top edge: loading never moves or covers an action.
             if (tab?.loading == true) {
                 val loading = stringResource(R.string.loading)
@@ -106,19 +207,48 @@ fun BottomBar(
 private fun tabCountLabel(openTabs: Int): String =
     if (openTabs > BADGE_LIMIT) stringResource(R.string.recent_badge_many, BADGE_LIMIT) else openTabs.toString()
 
-/** One tap saves; the icon says saved, saving or needs attention, the label says it in words. */
+/** One tap saves; the icon says saved, saving, waiting or needs attention, the label in words. */
 @Composable
-private fun SaveButton(status: SaveStatus, enabled: Boolean, onSave: () -> Unit) {
+private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Unit) {
+    val status = save.status
     val (icon, label) = when (status) {
-        SaveStatus.Saved -> Icons.Filled.Star to stringResource(R.string.save_state_saved)
-        SaveStatus.Pending -> StarBorder to stringResource(R.string.save_state_pending)
+        SaveStatus.Saved -> BookmarkAddedIcon to stringResource(R.string.save_state_saved)
+        SaveStatus.Pending -> BookmarkIcon to stringResource(R.string.save_state_pending)
+        // Karakeep could not be reached: nothing is being sent, so no spinner.
+        SaveStatus.Waiting -> ScheduleIcon to stringResource(R.string.save_state_waiting)
         is SaveStatus.NeedsAttention -> Icons.Filled.Warning to stringResource(R.string.save_state_attention)
-        SaveStatus.NotConfigured, SaveStatus.Unsaved -> StarBorder to stringResource(R.string.action_save)
+        SaveStatus.NotConfigured, SaveStatus.Unsaved -> BookmarkBorderIcon to stringResource(R.string.action_save)
     }
-    // A live region: TalkBack announces when the save finishes or needs attention.
-    IconButton(onClick = onSave, enabled = enabled, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+
+    // A save that ends on the shown page is felt too. Through the view, so the system's touch
+    // feedback setting applies.
+    val haptics = LocalHapticFeedback.current
+    var previous by remember { mutableStateOf(save) }
+    LaunchedEffect(save) {
+        when (saveFeedback(previous, save)) {
+            SaveFeedback.CONFIRM -> haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+            SaveFeedback.REJECT -> haptics.performHapticFeedback(HapticFeedbackType.Reject)
+            null -> Unit
+        }
+        previous = save
+    }
+
+    // A live region: TalkBack announces when the save finishes or needs attention. The label is
+    // the button's, not the icon's: during the cross-fade both icons are composed.
+    IconButton(
+        onClick = onSave,
+        enabled = enabled,
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = label
+        },
+    ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label)
+            AnimatedContent(
+                icon,
+                transitionSpec = { (scaleIn(initialScale = SAVE_ICON_START_SCALE) + fadeIn()) togetherWith fadeOut() },
+                label = "save icon",
+            ) { shown -> Icon(shown, contentDescription = null) }
             if (status == SaveStatus.Pending) {
                 CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 2.dp)
             }
@@ -126,7 +256,7 @@ private fun SaveButton(status: SaveStatus, enabled: Boolean, onSave: () -> Unit)
     }
 }
 
-/** Shows where the page is from and whether the connection is encrypted; opens the editor. */
+/** Shows the site name. A lock is not drawn: the engine does not report a verified connection. */
 @Composable
 private fun AddressChip(
     tab: ActiveTab?,
@@ -137,19 +267,18 @@ private fun AddressChip(
 ) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
-    val secure = url?.startsWith("https:", ignoreCase = true) == true
-    val connection = when {
-        url == null -> null
-        secure -> stringResource(R.string.address_secure)
-        else -> stringResource(R.string.address_insecure)
-    }
+    // Cleartext is a property of the scheme (a blob: page's is its maker's). HTTPS is not
+    // treated as verified.
+    val cleartext = url?.let(PageConnection::of) == PageConnection.CLEARTEXT
+    val connection = if (cleartext) stringResource(R.string.address_insecure) else null
     val failed = if (tab?.loadFailed == true) stringResource(R.string.address_load_failed) else null
     val hister = if (histerStored) stringResource(R.string.address_sent_hister) else null
     val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed, hister).joinToString(", ")
 
     Surface(
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
     ) {
         Row(
@@ -167,13 +296,9 @@ private fun AddressChip(
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (url != null) {
+            if (url != null && (tab.loadFailed || cleartext)) {
                 Icon(
-                    when {
-                        tab.loadFailed -> Icons.Filled.Warning
-                        secure -> Icons.Filled.Lock
-                        else -> Icons.Outlined.Info
-                    },
+                    if (tab.loadFailed) Icons.Filled.Warning else Icons.Outlined.Info,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )
@@ -192,7 +317,7 @@ private fun AddressChip(
                 Icon(
                     Icons.Filled.Check,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.55f),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     modifier = Modifier.size(14.dp),
                 )
             }
@@ -200,19 +325,20 @@ private fun AddressChip(
     }
 }
 
+/** The single-row bar's height. */
+private val BAR_HEIGHT = 64.dp
+
+/** Below this width the address gets its own row; at 400dp the single row leaves the host about 115dp. */
+private val STACKED_BAR_BELOW = 400.dp
+
+/** The action row's height under the address row: 48dp targets with a little room. */
+private val STACKED_ACTION_ROW_HEIGHT = 56.dp
+
+/** How far a drag along the bar must go to switch tabs: well past a tap's slop, short of the bar. */
+private val TAB_SWIPE_DISTANCE = 56.dp
+
 /** Beyond this many open tabs the badge shows a capped label instead of the count. */
 private const val BADGE_LIMIT = 99
 
-/**
- * Material's "star_border" (Apache License 2.0, like the icon library). The core icon set has no
- * empty star: its outlined Star is filled, which made saved and unsaved pages look the same.
- */
-private val StarBorder: ImageVector = ImageVector.Builder("StarBorder", 24.dp, 24.dp, 24f, 24f)
-    .addPath(
-        addPathNodes(
-            "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24z" +
-                "M12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z",
-        ),
-        fill = SolidColor(Color.Black),
-    )
-    .build()
+/** The save icon grows into place from this fraction of its size as it fades in. */
+private const val SAVE_ICON_START_SCALE = 0.6f

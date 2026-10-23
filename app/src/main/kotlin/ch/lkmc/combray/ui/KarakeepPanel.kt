@@ -111,12 +111,18 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
         }
     }
 
+    val highlight = matchStyle()
     LazyColumn(Modifier.fillMaxWidth()) {
         items(bookmarks, key = { it.id }) { bookmark ->
+            // Remembered per row: folding text for matching is not free on every recomposition.
+            val title = remember(bookmark, query, highlight) { highlightMatches(bookmark.title ?: displayHost(bookmark.url), query, highlight) }
+            // The host is marked too: a search for part of a site's name matches no title.
+            val host = remember(bookmark, query, highlight) { highlightMatches(displayHost(bookmark.url), query, highlight) }
             ListItem(
-                headlineContent = { Text(bookmark.title ?: displayHost(bookmark.url), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                supportingContent = { Text(displayHost(bookmark.url), maxLines = 1) },
+                headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                supportingContent = { Text(host, maxLines = 1) },
                 modifier = Modifier.clickable { onOpen(bookmark.url) },
+                colors = sheetListItemColors(),
             )
         }
         nextCursor?.let { cursor ->

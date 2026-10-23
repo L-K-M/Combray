@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -17,13 +18,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -36,11 +40,13 @@ import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
+import ch.lkmc.combray.ui.PageSaveStatus
 import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,6 +77,32 @@ class AccessibilityTest {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aNarrowBarGivesTheAddressARowAboveTheActions() {
+        show(DEFAULT_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
+        }
+
+        val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
+        val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
+        val more = compose.onNodeWithContentDescription("More").getUnclippedBoundsInRoot()
+        assertTrue(address.bottom <= back.top)
+        // The chip spans the actions under it.
+        assertTrue(address.left <= back.left && address.right >= more.right)
+    }
+
+    @Test
+    fun aWideBarKeepsOneRow() {
+        show(DEFAULT_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, width = WIDE_WIDTH)
+        }
+
+        val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
+        val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
+        assertTrue(address.top < back.bottom && address.bottom > back.top)
+        assertTrue(address.left >= back.right)
     }
 
     @Test
@@ -130,6 +162,16 @@ class AccessibilityTest {
     }
 
     @Test
+    fun aSaveWaitingForKarakeepIsLabeledAsSuch() {
+        show(LARGE_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Waiting)
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Waiting for Karakeep").assertIsDisplayed()
+    }
+
+    @Test
     fun theBottomBarOnANewTabIsAccessible() {
         show(LARGE_FONT) {
             Bar(null, openTabs = 0, SaveStatus.NotConfigured)
@@ -142,12 +184,15 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, readerOpen = false, {})
             }
         }
 
         assertTargetsAreAccessible()
-        compose.onNodeWithText("Settings").assertIsDisplayed()
+        // The rows scroll when they outgrow the window: bring each into view before checking it.
+        for (label in listOf("Close tab", "Settings")) {
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+        }
         compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
@@ -174,8 +219,26 @@ class AccessibilityTest {
     )
 
     @Test
-    fun aLinkMenuIsAccessible() =
-        assertControlIsAccessible(PageControlContent.LinkMenu("https://example.org/a", "https://example.org/a.png"))
+    fun aLinkMenuIsAccessible() {
+        assertControlIsAccessible(PageControlContent.LinkMenu("https://example.org/a", image = null))
+        for (label in listOf("Open in new tab", "Open in background", "Save link to Karakeep", "Copy link", "Share link")) {
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun anImageMenuIsAccessible() = assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+
+    /**
+     * A linked image lists both menus. At the largest font they can need to scroll on the
+     * reference emulator's 360x720dp screen, and a row scrolled out of view has no touch area to
+     * measure.
+     */
+    @Test
+    fun aLinkedImageMenuIsAccessible() = assertControlIsAccessible(
+        PageControlContent.LinkMenu("https://example.org/a", "https://example.org/a.png"),
+        fontScale = DEFAULT_FONT,
+    )
 
     /** The check itself: a target without a label fails it. */
     @Test
@@ -199,13 +262,25 @@ class AccessibilityTest {
         assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
     }
 
-    /** A page's dialog, as the browser shows it, at the largest font size. */
-    private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false) {
+    /** A page's dialog, as the browser shows it, at the largest font size unless [fontScale] says otherwise. */
+    private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false, fontScale: Float = LARGE_FONT) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val staging = UploadStaging(File(context.cacheDir, "accessibility-uploads"), context.contentResolver)
         val control = PageControl(id = 1, site = "example.org", content = content, offerBlocking = offerBlocking)
-        show(LARGE_FONT) {
-            PageControlDialog(control, staging, MainScope(), { _, _ -> }, {}, canOpenInNewTab = { true }, {}, {})
+        show(fontScale) {
+            PageControlDialog(
+                control,
+                staging,
+                MainScope(),
+                { _, _ -> },
+                {},
+                isWebAddress = { true },
+                onOpenInNewTab = {},
+                onOpenInBackground = {},
+                onSaveLink = {},
+                onShare = {},
+                onNotify = {},
+            )
         }
 
         assertTargetsAreAccessible()
@@ -215,7 +290,7 @@ class AccessibilityTest {
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                CombrayTheme(content)
+                CombrayTheme(content = content)
             }
         }
     }
@@ -264,19 +339,25 @@ class AccessibilityTest {
         histerStored: Boolean = false,
         onAddress: () -> Unit = {},
         onCopyAddress: () -> Unit = {},
+        width: Dp = NARROW_WIDTH,
     ) = BottomBar(
         tab = tab,
         openTabs = openTabs,
-        saveStatus = saveStatus,
+        saveStatus = PageSaveStatus(tab?.url, saveStatus),
         histerStored = histerStored,
+        backEnabled = tab?.canGoBack == true,
         onBack = {},
         onAddress = onAddress,
         onSave = {},
         onShare = {},
         onRecent = {},
+        onRecentLongPress = {},
         onMore = {},
         onCopyAddress = onCopyAddress,
-        modifier = Modifier.width(NARROW_WIDTH),
+        onSwipeTab = {},
+        // Required, not just preferred: the reference emulator is 360dp wide, and a wider bar must
+        // still measure its own width to take the single-row layout.
+        modifier = Modifier.requiredWidth(width),
     )
 
     private companion object {
@@ -289,6 +370,9 @@ class AccessibilityTest {
 
         /** Small phones are 320dp wide. */
         val NARROW_WIDTH = 320.dp
+
+        /** Wide enough for the single-row bar. */
+        val WIDE_WIDTH = 412.dp
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp

@@ -2,20 +2,28 @@ package ch.lkmc.combray.core.browser
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
+import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
+import ch.lkmc.combray.core.data.VisitEntity
+import ch.lkmc.combray.core.data.VisitKind
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,6 +35,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Logical-state invariants (docs/IMPLEMENTATION_PLAN.md section 4) against a fake engine. */
 @RunWith(RobolectricTestRunner::class)
@@ -54,9 +65,12 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(): BrowserCoordinator {
+    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
         engine = FakeEngine()
-        return BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs }).also { it.start() }
+        return BrowserCoordinator(
+            database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
+            navigationTimeoutMs = navigationTimeoutMs,
+        ).also { it.start() }
     }
 
     private fun idle() = runBlocking { browser.awaitIdle() }
@@ -68,7 +82,10 @@ class BrowserCoordinatorTest {
 
     private fun state() = browser.browserState.value
 
-    private fun recent(query: String? = null) = runBlocking { browser.recent(query).first() }
+    /** What RecentSheet shows for [query]: the depth it subscribes to, filtered and capped. */
+    private fun recent(query: String? = null) = runBlocking {
+        browser.recent(HistoryDepth.forQuery(query)).first().matching(query)
+    }
 
     /** Simulates Servo committing [url] as [document] in the view the coordinator created for it. */
     private fun commit(native: Long, document: Long, url: String, kind: HistoryKind = HistoryKind.DOCUMENT_COMMITTED, index: Int = 0, length: Int = 1) {
@@ -76,9 +93,44 @@ class BrowserCoordinatorTest {
         idle()
     }
 
-    private fun title(native: Long, document: Long, title: String, attribution: Attribution = Attribution.CURRENT) {
+    private fun loaded(native: Long, document: Long) {
+        engine.emit(EngineEvent.LoadStatus(engine.view(native), document, LoadPhase.COMPLETE, Attribution.CURRENT))
+        idle()
+    }
+
+    private fun title(native: Long, document: Long, title: String?, attribution: Attribution = Attribution.CURRENT) {
         engine.emit(EngineEvent.TitleChanged(engine.view(native), document, title, attribution))
         idle()
+    }
+
+    /**
+     * Heartbeats and echoes skip publish()'s Room reads on the serialized queue; an event that
+     * can move published state still publishes. Counted as SELECTs, so the gate is pinned by
+     * what it saves, not by a copy of its list.
+     */
+    @Test
+    fun heartbeatsAndEchoesSkipThePublishReads() {
+        val reads = AtomicInteger()
+        database.close()
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ -> if (sql.trimStart().startsWith("SELECT", ignoreCase = true)) reads.incrementAndGet() }, Runnable::run)
+            .build()
+        browser = newCoordinator()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        idle() // the view's creation events are queued from inside the work queue
+        reads.set(0)
+
+        engine.emit(EngineEvent.Painted(engine.view(1), frames = 3))
+        engine.emit(EngineEvent.TabSelected(engine.view(1)))
+        engine.emit(EngineEvent.SurfaceUnbound)
+        idle()
+        assertEquals(0, reads.get())
+
+        engine.emit(EngineEvent.ImeHidden(engine.view(1)))
+        idle()
+        assertTrue(reads.get() > 0)
     }
 
     @Test
@@ -91,6 +143,170 @@ class BrowserCoordinatorTest {
         ready()
         assertEquals(listOf(1L to "https://a.test/"), engine.created)
         assertEquals(1L, engine.selected.last())
+    }
+
+    @Test
+    fun aViewCreatedBeforeForegroundArrivesStaysThrottled() {
+        // The coordinator starts conservatively backgrounded until Android reports visibility.
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        assertEquals(listOf(1L to "https://a.test/"), engine.created)
+        assertEquals(1L, engine.selected.last())
+        assertEquals(1L to true, engine.throttling.last())
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun aForegroundSignalBeforeReadinessUnthrottlesTheCreatedView() {
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertTrue(engine.created.isEmpty())
+        assertTrue(engine.throttling.isEmpty())
+        ready()
+        assertEquals(listOf(1L to false), engine.throttling)
+        assertEquals(1L, engine.selected.last())
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun foregroundTogglesOnlyTheShownRenderer() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        val tabId = state().activeTab!!.id
+        val native = engine.created.single().first
+        assertEquals(native to true, engine.throttling.last())
+
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        idle()
+        assertEquals(native to false, engine.throttling.last())
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        idle()
+        assertEquals(native to true, engine.throttling.last())
+
+        // Duplicate signals emit no extra commands.
+        val size = engine.throttling.size
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        idle()
+        assertEquals(size, engine.throttling.size)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        idle()
+        assertEquals(size + 1, engine.throttling.size)
+
+        assertTrue(engine.closed.isEmpty())
+        assertEquals(tabId, state().activeTab!!.id)
+        assertEquals("https://a.test/", state().activeTab!!.url)
+        assertEquals(tabId, runBlocking { database.browser().openTabs() }.single().id)
+    }
+
+    @Test
+    fun backgroundedSwitchingNeverUnthrottlesUntilResume() {
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        val aTab = state().activeTab!!.id
+        val aNative = engine.created.single().first
+        browser.openUrl("https://b.test/", Placement.NEW_TAB)
+        idle()
+        val bNative = engine.created.last().first
+
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        idle()
+        engine.throttling.clear()
+
+        // Switch to the first tab and open a third while backgrounded.
+        browser.selectTab(aTab)
+        idle()
+        browser.openUrl("https://c.test/", Placement.NEW_TAB)
+        idle()
+        val cNative = engine.created.last().first
+
+        // Everything emitted while backgrounded is a throttle; nothing is released.
+        assertTrue(engine.throttling.isNotEmpty())
+        assertTrue(engine.throttling.all { it.second })
+        assertTrue(engine.closed.isEmpty())
+
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        idle()
+        // Resuming unthrottles only the shown renderer; hidden views stay throttled.
+        assertEquals(listOf(cNative to false), engine.throttling.filter { !it.second })
+        assertTrue(engine.throttling.none { (it.first == aNative || it.first == bNative) && !it.second })
+        assertEquals("https://c.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun visibilityChangesOnTheInternalHomeEmitNoEngineCommands() {
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        ready()
+        browser.closeTab(state().activeTab!!.id)
+        idle()
+        assertNull(state().activeTab?.url)
+
+        // The retired view must not receive throttle commands for visibility changes.
+        engine.throttling.clear()
+        val created = engine.created.toList()
+        val closed = engine.closed.toList()
+        val selected = engine.selected.toList()
+
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        idle()
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        idle()
+        browser.setAppVisibility(AppVisibility.BACKGROUND)
+        idle()
+
+        assertTrue(engine.throttling.isEmpty())
+        assertEquals(created, engine.created)
+        assertEquals(closed, engine.closed)
+        assertEquals(selected, engine.selected)
+    }
+
+    @Test
+    fun aViewRestoredWhileBackgroundedStaysThrottledUntilForeground() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        val tabId = state().activeTab!!.id
+        // Nothing reaches the engine before readiness, whatever the visibility.
+        assertTrue(engine.created.isEmpty())
+        assertTrue(engine.throttling.isEmpty())
+        assertTrue(engine.selected.isEmpty())
+
+        ready()
+        assertEquals(listOf(1L to "https://a.test/"), engine.created)
+        assertEquals(1L, engine.selected.last())
+        assertEquals(1L to true, engine.throttling.last())
+        assertEquals(tabId, state().activeTab!!.id)
+        assertEquals("https://a.test/", state().activeTab!!.url)
+
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        idle()
+        assertEquals(listOf(1L to true, 1L to false), engine.throttling)
+        assertEquals(tabId, state().activeTab!!.id)
+        assertEquals("https://a.test/", state().activeTab!!.url)
+    }
+
+    @Test
+    fun aPageClosingItselfInTheBackgroundLeavesItsSuccessorThrottled() {
+        browser.setAppVisibility(AppVisibility.FOREGROUND)
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        browser.setAppVisibility(AppVisibility.BACKGROUND); idle()
+
+        // The page closes its own window: its successor is shown, but nobody sees it yet (#88).
+        engine.emit(EngineEvent.TabClosed(engine.view(2))); idle()
+        assertEquals(1L, engine.selected.last())
+        assertEquals(1L to true, engine.throttling.last { it.first == 1L })
+
+        browser.setAppVisibility(AppVisibility.FOREGROUND); idle()
+        assertEquals(1L to false, engine.throttling.last())
     }
 
     @Test
@@ -143,6 +359,141 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aQuickSwitchFocusesTheTabUsedBeforeTheFocusedOneAndBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val tabB = state().activeTab!!.id
+
+        browser.focusPreviousTab(); idle()
+        val tabA = state().activeTab!!.id
+        assertNotEquals(tabB, tabA)
+        assertEquals(1L, engine.selected.last())
+
+        // Back on the older tab, the same shortcut returns to the one just left.
+        browser.focusPreviousTab(); idle()
+        assertEquals(tabB, state().activeTab?.id)
+        assertEquals(2L, engine.selected.last())
+    }
+
+    /** Opens a.test, b.test and c.test a second apart; c.test ends focused. Returns their tab ids. */
+    private fun openThreeTabs(): List<String> = listOf("a", "b", "c").mapIndexed { index, name ->
+        if (index > 0) now += 1_000
+        browser.openUrl("https://$name.test/", Placement.NEW_TAB); idle()
+        commit(index + 1L, (index + 1L) * 10, "https://$name.test/")
+        state().activeTab!!.id
+    }
+
+    @Test
+    fun aQuickSwitchFollowsFocusOrderNotCreationOrder() {
+        ready()
+        val (a, b, _) = openThreeTabs()
+        now += 1_000
+        browser.selectTab(b); idle()
+        now += 1_000
+        browser.selectTab(a); idle()
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(b, state().activeTab?.id)
+    }
+
+    /** Correctness item 17: the window slides for a sheet that stays open. */
+    @Test
+    fun anOpenRecentDropsAVisitOnceItPassesTheRetentionPeriod() {
+        ready()
+        browser.openUrl("https://old.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://old.test/")
+        commit(1, 11, "https://new.test/", index = 1, length = 2)
+        val answers = Channel<List<RecentItem>>(Channel.UNLIMITED)
+        val sheet = scope.launch { browser.recent().collect { answers.send(it) } }
+        runBlocking {
+            assertTrue(answers.receive().any { it.url == "https://old.test/" })
+
+            now += 8 * DAY
+            title(1, 11, "New")
+            withTimeout(TEST_WAIT_MS) {
+                while (answers.receive().any { it.url == "https://old.test/" }) Unit
+            }
+        }
+        sheet.cancel()
+    }
+
+    @Test
+    fun aQuickSwitchSkipsATabOpenedInTheBackground() {
+        ready()
+        val (a, _, c) = openThreeTabs()
+        now += 1_000
+        browser.selectTab(a); idle()
+        now += 1_000
+        browser.selectTab(c); idle()
+        // A link opened in the background ranks right behind the focused tab, unseen.
+        now += 1_000
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun aQuickSwitchWithOneTabIsANoOp() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        val only = state().activeTab!!.id
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(only, state().activeTab?.id)
+    }
+
+    @Test
+    fun aHiddenTabNavigatingDoesNotBecomeThePreviousTab() {
+        ready()
+        val (_, b, _) = openThreeTabs()
+        // a.test loads another page while hidden: that is not using it (#71).
+        now += 1_000
+        commit(1, 11, "https://a.test/next")
+
+        browser.focusPreviousTab(); idle()
+        assertEquals(b, state().activeTab?.id)
+    }
+
+    @Test
+    fun aRunOfBarSwipesWalksBackThroughRecentOrder() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+
+        // Each swipe focuses a tab and so reorders Recent; the run keeps walking the old order.
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+        // Nothing older than the oldest tab.
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(b, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(c, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(c, state().activeTab?.id)
+    }
+
+    @Test
+    fun aPauseBetweenSwipesStartsFromTheNewOrder() {
+        ready()
+        val (_, b, c) = openThreeTabs()
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+
+        // After a pause b.test is the newest tab, so the next swipe goes back to c.test.
+        now += 4_000 // longer than a run's pause (SWIPE_RUN_MS)
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(c, state().activeTab?.id)
+    }
+
+    @Test
     fun closingTheActiveTabFocusesTheMostRecentlyUsedOneAndUndoReopensIt() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
@@ -163,13 +514,83 @@ class BrowserCoordinatorTest {
         browser.closeTab(tabC); idle()
         // A was focused after B, so A is the successor.
         assertEquals(tabA, state().activeTab?.id)
-        assertEquals(Notice.TabClosed(tabC, null), state().notice)
+        assertEquals(Notice.TabClosed(tabC, null, wasActive = true), state().notice)
         // Its page stays in Recent as history.
         assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://c.test/" })
 
-        browser.reopenTab(tabC); idle()
+        browser.reopenTab(tabC, ReopenFocus.FOCUS); idle()
         assertEquals(tabC, state().activeTab?.id)
         assertEquals(4L to "https://c.test/", engine.created.last())
+    }
+
+    @Test
+    fun undoAfterClosingABackgroundTabKeepsTheCurrentOne() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = state().activeTab!!.id
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val tabB = state().activeTab!!.id
+        now += 1_000
+        browser.openUrl("https://c.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://c.test/")
+        val tabC = state().activeTab!!.id
+        now += 1_000
+        browser.selectTab(tabA); idle()
+
+        // Recent's close on a row that is not the current tab.
+        browser.closeTab(tabB); idle()
+        assertEquals(tabA, state().activeTab?.id)
+        assertEquals(Notice.TabClosed(tabB, null, wasActive = false), state().notice)
+        now += 1_000
+        browser.reopenTab(tabB, ReopenFocus.KEEP_CURRENT); idle()
+
+        assertEquals(tabA, state().activeTab?.id)
+        assertEquals(1L, engine.selected.last())
+        // Back in its old place among the open tabs, loaded only once it is selected.
+        assertEquals(listOf(tabA, tabC, tabB), recent().filterIsInstance<RecentItem.OpenTab>().map { it.tabId })
+        assertEquals(3, engine.created.size)
+        browser.selectTab(tabB); idle()
+        assertEquals(4L to "https://b.test/", engine.created.last())
+    }
+
+    @Test
+    fun aBackgroundTabKeepsFocusWhereItIsAndLoadsWhenSelected() {
+        ready()
+        browser.openUrl("https://older.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://older.test/")
+        now += 1_000
+        browser.openUrl("https://reading.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://reading.test/")
+        val reading = state().activeTab!!.id
+        now += 1_000
+
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+        assertEquals(reading, state().activeTab?.id)
+        assertEquals(3, state().openTabCount)
+        // No renderer until it is selected, and the page being read stays shown.
+        assertEquals(2, engine.created.size)
+        assertEquals(2L, engine.selected.last())
+        val later = (state().notice as Notice.OpenedInBackground).tabId
+        // Right after the focused tab in Recent, before the tabs used earlier.
+        val order = recent().filterIsInstance<RecentItem.OpenTab>().map { it.url }
+        assertEquals(listOf("https://reading.test/", "https://later.test/", "https://older.test/"), order)
+
+        browser.selectTab(later); idle()
+        assertEquals(later, state().activeTab?.id)
+        assertEquals(3L to "https://later.test/", engine.created.last())
+        assertEquals(3L, engine.selected.last())
+    }
+
+    @Test
+    fun aBackgroundTabTakesFocusWhenNoTabHasIt() {
+        ready()
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+        assertEquals("https://later.test/", state().activeTab?.url)
+        assertEquals(listOf(1L to "https://later.test/"), engine.created)
+        assertNull(state().notice)
     }
 
     @Test
@@ -236,6 +657,157 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aViewlessTabsPreviousPageStaysInRecentWhileItNavigates() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single().tabId
+
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.releaseHiddenViews(); idle()
+        assertTrue(1L in engine.closed)
+        // Releasing the renderer alone must not detach the page: the tab can still be
+        // restored to it, so it stays suppressed as the tab's current page.
+        assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://a.test/" })
+
+        // Navigating the renderer-less tab must not hide its old page from Recent: the tab is
+        // not showing it while the new address waits for a renderer.
+        browser.openUrlInTab(tabA, "https://a2.test/"); idle()
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+        // The requested address stays the tab's recovery URL until a renderer commits it.
+        assertEquals("https://a2.test/", runBlocking { database.browser().tab(tabA) }?.url)
+
+        // Once the new page commits, the tab owns it: suppressed, while the old page stays.
+        commit(3, 30, "https://a2.test/")
+        assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://a2.test/" })
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+    }
+
+    @Test
+    fun aTabThatReturnsHomeKeepsItsPreviousPageInRecent() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single().tabId
+
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.releaseHiddenViews(); idle()
+
+        // An address the engine cannot open returns the tab to the internal home.
+        engine.refusedUrls += "https://bad.test/"
+        browser.openUrlInTab(tabA, "https://bad.test/"); idle()
+        idle() // the refusal event is queued from inside the work queue
+        assertNull(state().activeTab?.url)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+        // The refused address never committed, so it must not appear as history either.
+        assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://bad.test/" })
+    }
+
+    @Test
+    fun aRestoredPageTheEngineRefusesStaysInRecent() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        // After a restart the tab is restored without a renderer; recreating it is refused.
+        browser = newCoordinator()
+        engine.refusedUrls += "https://a.test/"
+        ready()
+        idle() // the refusal event is queued from inside the work queue
+
+        assertNull(state().activeTab?.url)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://a.test/" })
+    }
+
+    @Test
+    fun aFailedReloadKeepsTheEarlierVisitAndItsTitle() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        title(1, 10, "Article")
+
+        // Reload offline: Servo reports a null, then an empty title for every new document
+        // before its own, here the error page's.
+        commit(1, 11, "https://a.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "", Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+        assertTrue(state().activeTab!!.loadFailed)
+        assertEquals("Error loading page", state().activeTab?.title)
+
+        browser.closeTab(state().activeTab!!.id); idle()
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://a.test/" to "Article", visit.url to visit.title)
+    }
+
+    @Test
+    fun aFailedReloadKeepsAnUntitledPageInHistory() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        title(1, 10, null)
+
+        commit(1, 11, "https://a.test/")
+        title(1, 11, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+        assertTrue(state().activeTab!!.loadFailed)
+
+        browser.closeTab(state().activeTab!!.id); idle()
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://a.test/" to null, visit.url to visit.title)
+    }
+
+    @Test
+    fun aReloadKeepsThePageTitleUntilTheNewDocumentReportsItsOwn() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        title(1, 10, "Article")
+
+        commit(1, 11, "https://a.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "", Attribution.HELD_UNTIL_COMMIT)
+        assertEquals("Article", state().activeTab?.title)
+        title(1, 11, "Article, updated")
+        assertEquals("Article, updated", state().activeTab?.title)
+    }
+
+    @Test
+    fun aFailedReloadOfAFailedPageStaysOutOfHistory() {
+        ready()
+        browser.openUrl("https://down.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://down.test/")
+        title(1, 10, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 10, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+        commit(1, 11, "https://down.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "Error loading page", Attribution.HELD_UNTIL_COMMIT)
+
+        commit(1, 12, "https://up.test/")
+        assertTrue(recent().none { it is RecentItem.Visit })
+    }
+
+    @Test
+    fun aReloadThatLoadsAFailedPageRecordsItEvenWithoutATitle() {
+        ready()
+        browser.openUrl("https://down.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://down.test/")
+        title(1, 10, "Error loading page")
+
+        // Back online; the page has no <title>, so the error page's title must not stay.
+        commit(1, 11, "https://down.test/")
+        title(1, 11, null, Attribution.HELD_UNTIL_COMMIT)
+        title(1, 11, "", Attribution.HELD_UNTIL_COMMIT)
+        assertFalse(state().activeTab!!.loadFailed)
+        assertNull(state().activeTab?.title)
+
+        commit(1, 12, "https://up.test/")
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single()
+        assertEquals("https://down.test/" to null, visit.url to visit.title)
+    }
+
+    @Test
     fun aRestoredTabStillKnowsItsLastLoadFailed() {
         ready()
         browser.openUrl("https://down.test/", Placement.CURRENT_TAB); idle()
@@ -266,6 +838,46 @@ class BrowserCoordinatorTest {
         assertTrue(items.any { it is RecentItem.OpenTab && it.url == "https://old-open.test/" })
         assertTrue(items.none { it.url == "https://old-closed.test/" })
         assertEquals(1, runBlocking { database.browser().openTabs() }.size)
+    }
+
+    @Test
+    fun searchingRecentLooksAtEveryRetainedVisitNotOnlyTheNewest() {
+        idle() // start-up maintenance must not remove the tab before its visits exist
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            (0 until 600).forEach { index ->
+                val (host, title) = if (index == 0) "recipe.test" to "Lentil soup" else "other.test" to "Page $index"
+                dao.insertVisit(VisitEntity("visit$index", "closed", "https://$host/$index", host, title, null, VisitKind.DOCUMENT, START + index, START + index, false))
+            }
+        }
+
+        assertEquals(500, recent().size)
+        assertTrue(recent().none { it.title == "Lentil soup" })
+        // The oldest visit is still within retention, so a search finds it.
+        assertEquals(listOf("Lentil soup"), recent("lentil").map { it.title })
+        assertEquals(500, recent("page").size)
+    }
+
+    /** A page can add a visit per pushState: searching still reads a bounded number of rows. */
+    @Test
+    fun searchingRecentReadsAtMostFiveThousandVisits() {
+        idle()
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            database.withTransaction {
+                (0..5_000).forEach { index ->
+                    dao.insertVisit(VisitEntity("visit$index", "closed", "https://flood.test/$index", "flood.test", null, null, VisitKind.SAME_DOCUMENT, START + index, START + index, false))
+                }
+            }
+        }
+
+        val visits = runBlocking { browser.recent(HistoryDepth.ALL_RETAINED).first() }.filterIsInstance<RecentItem.Visit>()
+        assertEquals(5_000, visits.size)
+        // The newest are kept.
+        assertEquals("https://flood.test/5000", visits.first().url)
+        assertTrue(visits.none { it.url == "https://flood.test/0" })
     }
 
     @Test
@@ -458,6 +1070,175 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aForgottenSitesCurrentPageDoesNotReturnAfterNavigation() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.NEW_TAB)
+        idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false)
+        idle()
+        assertEquals("https://example.com/4", state().activeTab?.url)
+
+        browser.openUrl("https://other.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 11, "https://other.test/")
+
+        val items = recent()
+        assertEquals("https://other.test/", items.filterIsInstance<RecentItem.OpenTab>().single().url)
+        assertFalse(items.map { it.url }.contains("https://example.com/4"))
+    }
+
+    @Test
+    fun aForgottenSitesCurrentPageDoesNotReturnWhenItsTabCloses() {
+        ready()
+        browser.openUrl("https://sub.example.com/4", Placement.NEW_TAB)
+        idle()
+        commit(1, 10, "https://sub.example.com/4")
+        val tabId = state().activeTab!!.id
+        browser.forgetSite("example.com", includeSubdomains = true)
+        idle()
+
+        browser.closeTab(tabId)
+        idle()
+
+        assertFalse(recent().map { it.url }.contains("https://sub.example.com/4"))
+    }
+
+    @Test
+    fun aForgottenPageKeepsItsTitleWhileItStaysOpen() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.NEW_TAB)
+        idle()
+        commit(1, 10, "https://example.com/4")
+        title(1, 10, "Four")
+        browser.forgetSite("example.com", includeSubdomains = false)
+        idle()
+
+        commit(1, 10, "https://example.com/4", HistoryKind.LIST_UPDATED)
+        assertEquals("Four", state().activeTab?.title)
+
+        commit(1, 10, "https://example.com/4#notes", HistoryKind.SAME_DOCUMENT)
+        assertEquals("Four", state().activeTab?.title)
+
+        // Moving within the forgotten page recorded nothing that leaving it could bring back.
+        browser.openUrl("https://other.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 11, "https://other.test/")
+        assertTrue(recent().none { it is RecentItem.Visit && it.url.orEmpty().startsWith("https://example.com/") })
+    }
+
+    /** The triage's condition for #41: a new renderer loading the forgotten page records nothing. */
+    @Test
+    fun aForgottenPageStaysForgottenWhenItsRendererIsRecreated() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        val forgottenTab = state().activeTab!!.id
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // Android trims memory: the hidden tab loses its renderer, and returning recreates it.
+        browser.releaseHiddenViews(); idle()
+        assertTrue(1L in engine.closed)
+        browser.selectTab(forgottenTab); idle()
+        val recreated = engine.created.last().first
+        commit(recreated, 30, "https://example.com/4")
+        // Reloading it is loading it again too.
+        commit(recreated, 31, "https://example.com/4")
+
+        // Leaving it finds no visit to put back in Recent.
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(recreated, 32, "https://c.test/")
+        assertTrue(recent().none { it.url == "https://example.com/4" })
+        assertTrue(recent().any { it is RecentItem.OpenTab && it.url == "https://c.test/" })
+    }
+
+    @Test
+    fun aRestartDoesNotBringAForgottenPageBack() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        title(1, 10, "Four")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // Process death: the restored tab loads its page in a new renderer.
+        browser = newCoordinator()
+        ready()
+        commit(engine.created.single().first, 10, "https://example.com/4")
+        assertEquals("Four", state().activeTab?.title)
+
+        // A link to another page of the site is a new page: that one is recorded.
+        commit(engine.created.single().first, 11, "https://example.com/5")
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(engine.created.single().first, 12, "https://c.test/")
+        val urls = recent().map { it.url }
+        assertFalse("https://example.com/4" in urls)
+        assertTrue("https://example.com/5" in urls)
+    }
+
+    /** The forgotten flag waits for another page to commit, not for that page to be the first. */
+    @Test
+    fun anAddressTypedBeforeARestoredForgottenPageCommitsIsRecorded() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // After a restart the restored page is slow; the user types another address first.
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 11, "https://c.test/")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 12, "https://d.test/")
+
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://c.test/" })
+    }
+
+    @Test
+    fun aRestoredForgottenPageCommittingBeforeTheTypedOneStaysForgotten() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        // The restored page was faster after all; then the typed one replaces it.
+        commit(view, 11, "https://example.com/4")
+        commit(view, 12, "https://c.test/")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 13, "https://d.test/")
+
+        val urls = recent().filterIsInstance<RecentItem.Visit>().map { it.url }
+        assertFalse("https://example.com/4" in urls)
+        assertTrue("https://c.test/" in urls)
+    }
+
+    @Test
+    fun aRefusedTypedAddressDoesNotUnforgetARestoredPage() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", view, engine.navigated.last().second)); idle()
+        // The restored forgotten page lands on its sign-in page.
+        commit(view, 11, "https://example.com/login")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 12, "https://d.test/")
+
+        assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://example.com/login" })
+    }
+
+    @Test
     fun aRestartRestoresOpenTabsAndRecreatesOnlyTheFocusedView() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
@@ -473,6 +1254,44 @@ class BrowserCoordinatorTest {
         assertEquals(2, state().openTabCount)
         ready()
         assertEquals(listOf(1L to "https://b.test/"), engine.created)
+    }
+
+    @Test
+    fun theSessionIsRestoringUntilStartPublishesTheStoredTabs() {
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        val active = state().activeTab!!.id
+
+        // Process death: the new coordinator's restore (maintenance, then publish) waits at the gate.
+        val gate = CountDownLatch(1)
+        engine = FakeEngine()
+        browser = BrowserCoordinator(database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = {
+            gate.await(GATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            UnusedTabs.KEEP
+        })
+        assertEquals(SessionState.RESTORING, state().session)
+        browser.start()
+        assertEquals(SessionState.RESTORING, state().session)
+        assertNull(state().activeTab)
+
+        gate.countDown()
+        idle()
+        assertEquals(SessionState.RESTORED, state().session)
+        assertEquals(active, state().activeTab?.id)
+    }
+
+    @Test
+    fun aFailedRestoreStillEndsRestoring() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        browser = BrowserCoordinator(database, FakeEngine(), scope, unusedTabs = { error("settings unreadable") })
+        browser.start()
+        idle()
+
+        // The screen must not stay blank: the state shows what there is, with the problem.
+        assertEquals(SessionState.RESTORED, state().session)
+        assertEquals("https://a.test/", state().activeTab?.url)
+        // The user did nothing yet: the notice is about the tabs, not "the last action".
+        assertEquals(Notice.Problem("Your open tabs could not be fully restored."), state().notice)
     }
 
     @Test
@@ -526,6 +1345,130 @@ class BrowserCoordinatorTest {
         browser.closeTab(opener); idle()
         engine.openWindow(opener = 1, tab = PAGE_TAB + 1); idle()
         assertTrue(PAGE_TAB + 1 in engine.closed)
+        assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun backOnAPageOpenedWindowClosesItAndReturnsToItsOpener() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://popup.test/")
+        val popup = state().activeTab!!
+        assertTrue(popup.returnsToOpener)
+
+        browser.returnToOpener(popup.id); idle()
+        assertEquals(opener, state().activeTab?.id)
+        assertFalse(state().activeTab!!.returnsToOpener)
+        assertEquals(1, state().openTabCount)
+        assertEquals(1L, engine.selected.last())
+        // No Undo: Back is not a close the user might regret; the page stays in history.
+        assertNull(state().notice)
+        assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://popup.test/" })
+    }
+
+    @Test
+    fun aLinkOpenedInANewTabFromThePageReturnsToItsOpenerEvenAfterNavigating() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+
+        browser.openUrlFromTab("https://b.test/", opener); idle()
+        commit(2, 20, "https://b.test/")
+        assertTrue(state().activeTab!!.returnsToOpener)
+        // Its own history goes first (the UI checks canGoBack); the way back to the opener stays.
+        commit(2, 21, "https://b.test/next", index = 1, length = 2)
+        assertTrue(state().activeTab!!.canGoBack)
+        assertTrue(state().activeTab!!.returnsToOpener)
+
+        browser.returnToOpener(state().activeTab!!.id); idle()
+        assertEquals(opener, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun lookingAtAnEarlierTabOfAChainKeepsTheWholeWayBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val first = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://b.test/")
+        val second = state().activeTab!!.id
+        engine.openWindow(opener = PAGE_TAB, tab = PAGE_TAB + 1); idle()
+        commit(PAGE_TAB + 1, 60, "https://c.test/")
+        val third = state().activeTab!!.id
+
+        // A, which opened B, which opened C: looking at A is inside that chain.
+        browser.selectTab(first); idle()
+        browser.selectTab(third); idle()
+        assertTrue(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(third); idle()
+        assertEquals(second, state().activeTab?.id)
+        assertTrue(state().activeTab!!.returnsToOpener)
+    }
+
+    @Test
+    fun focusingAThirdTabEndsTheWayBackToTheOpener() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+        browser.openUrl("https://other.test/", Placement.NEW_TAB); idle()
+        val other = state().activeTab!!.id
+        browser.selectTab(opener); idle()
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        val popup = state().activeTab!!.id
+
+        // Looking at the opener and coming back keeps the pair.
+        browser.selectTab(opener); idle()
+        browser.selectTab(popup); idle()
+        assertTrue(state().activeTab!!.returnsToOpener)
+
+        browser.selectTab(other); idle()
+        browser.selectTab(popup); idle()
+        assertFalse(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(popup); idle()
+        assertEquals(popup, state().activeTab?.id)
+        assertEquals(3, state().openTabCount)
+    }
+
+    @Test
+    fun aPageOpenedWindowWhoseOpenerClosedStaysOpenOnBack() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        val popup = state().activeTab!!.id
+
+        browser.closeTab(opener); idle()
+        assertFalse(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(popup); idle()
+        assertEquals(popup, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun aChainOfPageOpenedWindowsUnwindsOneBackAtATime() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val first = state().activeTab!!.id
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        commit(PAGE_TAB, 50, "https://b.test/")
+        val second = state().activeTab!!.id
+        engine.openWindow(opener = PAGE_TAB, tab = PAGE_TAB + 1); idle()
+        commit(PAGE_TAB + 1, 60, "https://c.test/")
+
+        browser.returnToOpener(state().activeTab!!.id); idle()
+        assertEquals(second, state().activeTab?.id)
+        assertTrue(state().activeTab!!.returnsToOpener)
+        browser.returnToOpener(second); idle()
+        assertEquals(first, state().activeTab?.id)
         assertEquals(1, state().openTabCount)
     }
 
@@ -603,12 +1546,106 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.TabClosed(engine.view(2))); idle()
         assertEquals(1, state().openTabCount)
         assertEquals(tabA, state().activeTab?.id)
-        assertEquals(Notice.TabClosed(tabB, null), state().notice)
+        assertEquals(Notice.TabClosed(tabB, null, wasActive = true), state().notice)
         // The page destroyed the view itself; the coordinator must not close it again.
         assertTrue(engine.closed.isEmpty())
         assertEquals(1L, engine.selected.last())
         // Its page stays in Recent as history, as after a user close.
         assertTrue(recent().any { it is RecentItem.Visit && it.url == "https://b.test/" })
+    }
+
+    @Test
+    fun anAddressShowsLoadingFromItsRequestNotOnlyFromItsCommit() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        assertTrue("a new tab's first load", state().activeTab!!.loading)
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        assertFalse(state().activeTab!!.loading)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        assertTrue("a typed address on a loaded page", state().activeTab!!.loading)
+        commit(1, 11, "https://b.test/", index = 1, length = 2)
+        loaded(1, 11)
+        assertFalse(state().activeTab!!.loading)
+
+        browser.reload(); idle()
+        assertTrue("a reload", state().activeTab!!.loading)
+        commit(1, 12, "https://b.test/", index = 1, length = 2)
+        loaded(1, 12)
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun onlyTheAwaitedAddressEndsTheWaitWithinAPage() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        // The old page rewrites its own address while b.test is on its way.
+        commit(1, 10, "https://a.test/#progress", HistoryKind.SAME_DOCUMENT)
+        assertTrue(state().activeTab!!.loading)
+        commit(1, 11, "https://b.test/", index = 1, length = 2)
+        loaded(1, 11)
+
+        // A typed part of the page shown arrives within it.
+        browser.openUrl("https://b.test/#part", Placement.CURRENT_TAB); idle()
+        assertTrue(state().activeTab!!.loading)
+        commit(1, 11, "https://b.test/#part", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aRequestThatNeverCommitsStopsShowingLoading() {
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        browser = newCoordinator(navigationTimeoutMs = SHORT_TIMEOUT_MS)
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        // A 204 answer, for one, leaves the page as it was and commits nothing.
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        assertTrue(state().activeTab!!.loading)
+        // Real time: the timeout runs on the coordinator's own scope. Waits only as long as needed.
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TEST_WAIT_MS)
+        while (state().activeTab!!.loading && System.nanoTime() < deadline) {
+            Thread.sleep(50)
+            idle()
+        }
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aRefusedAddressStopsShowingLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        val request = engine.navigated.last().second
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", 1, request))
+        idle()
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aLateRefusalOfAnEarlierAddressKeepsTheNewerOneLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        val earlier = engine.navigated.last().second
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", 1, earlier))
+        idle()
+        assertTrue(state().activeTab!!.loading)
     }
 
     @Test
@@ -867,5 +1904,10 @@ class BrowserCoordinatorTest {
         const val PAGE_TAB = 1L shl 52
         const val START = 1_760_000_000_000L
         const val DAY = 24L * 60 * 60 * 1000
+        const val GATE_TIMEOUT_SECONDS = 10L
+        const val TEST_WAIT_MS = 5_000L
+        const val SHORT_TIMEOUT_MS = 1_000L
+        /** Longer than any test: a request does not time out unless the test means it to. */
+        const val LONG_TIMEOUT_MS = 10L * 60 * 1000
     }
 }

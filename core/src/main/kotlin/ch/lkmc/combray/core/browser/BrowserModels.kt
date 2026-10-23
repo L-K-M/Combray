@@ -39,6 +39,8 @@ data class ActiveTab(
     val loadFailed: Boolean = false,
     /** Another app's link opened this tab and the user has not moved to another tab since. */
     val openedByOtherApp: Boolean = false,
+    /** A page in another tab opened this one, and Back on its first page returns there ([BrowserCoordinator.returnToOpener]). */
+    val returnsToOpener: Boolean = false,
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView
@@ -46,12 +48,27 @@ data class ActiveTab(
 
 /** A short notice the UI shows once, optionally with an action. */
 sealed interface Notice {
-    data class TabClosed(val tabId: String, val title: String?) : Notice
+    /** [wasActive]: it was the focused tab when it closed. */
+    data class TabClosed(val tabId: String, val title: String?, val wasActive: Boolean) : Notice {
+        /** Undo focuses the tab again only if it was focused. */
+        val undoFocus get() = if (wasActive) ReopenFocus.FOCUS else ReopenFocus.KEEP_CURRENT
+    }
 
     data class Problem(val message: String) : Notice
 
     /** The engine could not open an address (it does not parse as a URL Servo can load). */
     data object AddressNotOpened : Notice
+
+    /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
+    data class OpenedInBackground(val tabId: String) : Notice
+}
+
+/** Whether Undo of a tab close moves focus to the reopened tab. */
+enum class ReopenFocus {
+    FOCUS,
+
+    /** The tab was closed in the background: focus stays on the current tab. */
+    KEEP_CURRENT,
 }
 
 sealed interface KeyboardRequest {
@@ -95,8 +112,18 @@ sealed interface ReaderState {
     data class Unavailable(override val tabId: String) : ReaderState
 }
 
+/** Whether the stored session has been read since the process started. */
+enum class SessionState {
+    /** Not yet: no focused tab does not mean the internal home, so neither may be shown. */
+    RESTORING,
+
+    /** The stored tabs are published, or reading them failed and the state shows what there is. */
+    RESTORED,
+}
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
+    val session: SessionState = SessionState.RESTORING,
     /** Null: no tab is focused, the internal home is shown. */
     val activeTab: ActiveTab? = null,
     val openTabCount: Int = 0,
@@ -109,6 +136,40 @@ data class BrowserState(
     val notice: Notice? = null,
 )
 
+/** A step along the open tabs in Recent order, as a swipe along the bottom bar asks for one. */
+enum class TabStep { OLDER, NEWER }
+
+/**
+ * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
+ * reads further back, up to 5,000 retained visits, so a match older than those rows is found.
+ */
+enum class HistoryDepth {
+    NEWEST,
+    ALL_RETAINED,
+    ;
+
+    companion object {
+        /** The depth a Recent filter needs: the retained visits once there is text to match. */
+        fun forQuery(query: String?) = if (query.isNullOrBlank()) NEWEST else ALL_RETAINED
+    }
+}
+
+/** Whether the app is on screen. While it is not, the shown page is asked to slow down too. */
+enum class AppVisibility { FOREGROUND, BACKGROUND }
+
+/** History rows Recent shows at most, newest first; open tabs are never cut. */
+const val RECENT_HISTORY_LIMIT = 500
+
+/**
+ * The rows a Recent filter shows: matches of [query] in this newest-first list, keeping at most
+ * [historyLimit] history rows. The cap applies after filtering, so a search over all retained
+ * history still finds an old match.
+ */
+fun List<RecentItem>.matching(query: String?, historyLimit: Int = RECENT_HISTORY_LIMIT): List<RecentItem> {
+    var history = 0
+    return filter { it.matches(query) && (it !is RecentItem.Visit || history++ < historyLimit) }
+}
+
 /** One row of the unified Recent list. */
 sealed interface RecentItem {
     val key: String
@@ -117,6 +178,14 @@ sealed interface RecentItem {
 
     /** Time used for ordering: last use for tabs (focus, or navigation in focus), last interaction for history. */
     val time: Long
+
+    /** Whether the local Recent filter keeps this row; a blank query keeps everything. */
+    fun matches(query: String?): Boolean {
+        if (query.isNullOrBlank()) return true
+        val needle = query.trim()
+        return (title?.contains(needle, ignoreCase = true) ?: false) ||
+            (url?.contains(needle, ignoreCase = true) ?: false)
+    }
 
     data class OpenTab(
         val tabId: String,

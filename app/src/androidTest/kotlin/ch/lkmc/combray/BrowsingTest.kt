@@ -12,6 +12,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.ReopenFocus
 import ch.lkmc.combray.core.policy.AddressPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -98,7 +99,7 @@ class BrowsingTest {
         // The closed page must not stay painted under the home screen.
         assertFalse(device.matches(device.screenColor(), Device.OCHRE))
 
-        device.browser.reopenTab(tab)
+        device.browser.reopenTab(tab, ReopenFocus.FOCUS)
         device.awaitPage(Fixtures.solid(Device.OCHRE))
         assertEquals(tab, device.browser.browserState.value.activeTab?.id)
         assertScreen(Device.OCHRE)
@@ -111,6 +112,20 @@ class BrowsingTest {
         device.browser.openUrl(unreachable, Placement.CURRENT_TAB)
         device.awaitState { it.activeTab?.url == unreachable && it.activeTab?.title == "Error loading page" }
         assertTrue(device.recent().none { it is RecentItem.Visit && it.url == unreachable })
+    }
+
+    @Test
+    fun aFailedReloadKeepsThePageInRecentWithItsTitle() {
+        // A key of its own: the fixture answers it once, so the reload fails.
+        val url = Fixtures.once(System.currentTimeMillis().toString())
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.url == url && it.activeTab?.title == Fixtures.ONCE_TITLE && it.activeTab?.loading == false }
+
+        device.browser.reload()
+        device.awaitState { it.activeTab?.loadFailed == true && it.activeTab?.title == "Error loading page" }
+        device.browser.closeTab(device.browser.browserState.value.activeTab!!.id)
+        device.awaitState { it.activeTab == null }
+        assertTrue(device.recent().any { it is RecentItem.Visit && it.url == url && it.title == Fixtures.ONCE_TITLE })
     }
 
     @Test
@@ -148,7 +163,7 @@ class BrowsingTest {
     }
 
     @Test
-    fun aWindowOpenedByThePageBecomesAFocusedTab() {
+    fun aWindowOpenedByThePageBecomesAFocusedTabThatBackReturnsFrom() {
         val opener = "${Fixtures.BASE}/opener.html"
         device.browser.openUrl(opener, Placement.CURRENT_TAB)
         device.awaitState { it.activeTab?.title == "OPENER" && it.activeTab?.loading == false }
@@ -161,6 +176,15 @@ class BrowsingTest {
         assertNotEquals(openerTab, device.browser.browserState.value.activeTab?.id)
         assertEquals(2, device.browser.browserState.value.openTabCount)
         assertScreen(Device.BLUE)
+
+        // Back on its first page closes it and returns to the opener, without leaving the app.
+        assertTrue(device.browser.browserState.value.activeTab!!.returnsToOpener)
+        compose.waitForIdle()
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        val state = device.awaitState { it.openTabCount == 1 }
+        assertEquals(openerTab, state.activeTab?.id)
+        assertScreen(Device.VIOLET)
+        assertEquals(Lifecycle.State.RESUMED, compose.activityRule.scenario.state)
     }
 
     @Test
@@ -170,6 +194,22 @@ class BrowsingTest {
         compose.activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName))
         device.awaitPage(url)
         assertEquals(2, device.browser.browserState.value.openTabCount)
+        assertScreen(Device.OCHRE)
+    }
+
+    @Test
+    fun aSharedLinkOpensInANewTab() {
+        open(Device.GREEN)
+        val url = Fixtures.solid(Device.OCHRE)
+        // As a chat app shares it: inside a sentence, a full stop after it. Explicit, because the
+        // Save to Karakeep target takes shared text too.
+        val share = Intent(Intent.ACTION_SEND).setClass(compose.activity, MainActivity::class.java)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, "Look at $url.")
+        compose.activity.startActivity(share)
+        device.awaitPage(url)
+        assertEquals(2, device.browser.browserState.value.openTabCount)
+        assertTrue(device.browser.browserState.value.activeTab!!.openedByOtherApp)
         assertScreen(Device.OCHRE)
     }
 
@@ -239,7 +279,20 @@ class BrowsingTest {
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))
     }
 
+    @Test
+    fun aSlowPageShowsLoadingBeforeItsServerAnswers() {
+        open(Device.GREEN)
+        device.browser.openUrl(Fixtures.SLOW, Placement.CURRENT_TAB)
+
+        // The server has not answered: the tab still shows the green page, and says it loads.
+        val waiting = device.awaitState(SLOW_ANSWER_MS) { it.activeTab?.loading == true }
+        assertEquals(Fixtures.solid(Device.GREEN), waiting.activeTab!!.url)
+        device.awaitPage(Fixtures.SLOW)
+    }
+
     private companion object {
+        /** Under the fixture's SLOW_PAGE_SECONDS, so the check runs before the answer. */
+        const val SLOW_ANSWER_MS = 5_000L
         const val STOP_TIMEOUT_MS = 10_000L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"
