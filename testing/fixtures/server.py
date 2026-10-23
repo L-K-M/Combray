@@ -155,6 +155,59 @@ ANIMATE_PAGE = page(
     "} catch (e) { fail(e.message); }</script>",
 )
 
+# Kimi queries this selector list during startup. DOM matching can support :has() independently
+# of stylesheet invalidation, which remains disabled until Servo implements it.
+HAS_SELECTOR_PAGE = page(
+    "HAS:waiting",
+    "<main id='root'><section><h1 id='intro'>Intro</h1></section>"
+    "<div class='markdown'><h2 id='heading'><strong>Heading</strong></h2>"
+    "<h3>Plain heading</h3><p id='paragraph'><strong>Paragraph</strong></p>"
+    "<p><em><strong>Nested, not a direct child</strong></em></p></div></main>"
+    "<div id='probe'></div><script>"
+    "function expect(actual, expected) {"
+    " if (actual !== expected) throw new Error(actual + ' != ' + expected);"
+    "}"
+    "try {"
+    " var root = document.getElementById('root');"
+    " var selector = ':scope > section > h1, .markdown :is(h2, h3):has(> strong), .markdown > p:has(> strong)';"
+    " expect(Array.from(root.querySelectorAll(selector), function (e) { return e.id; }).join(','),"
+    "  'intro,heading,paragraph');"
+    " expect(root.querySelector('h2:has(> strong)').id, 'heading');"
+    " var heading = document.getElementById('heading');"
+    " expect(heading.matches(':is(h2,h3):has(> strong)'), true);"
+    " expect(heading.firstChild.closest('h2:has(> strong)'), heading);"
+    " expect(heading.matches('h2:not(:has(> em))'), true);"
+    " expect(heading.matches('h2:has(+ h3)'), true);"
+    " expect(heading.matches('h2:has(~ p > em)'), true);"
+    " expect(heading.matches(':is(h2,h3):not([hidden])'), true);"
+    " root.lang = 'en'; expect(heading.matches(':lang(en)'), true);"
+    " expect(heading.matches(':empty'), false);"
+    " [':has(:has(strong))', 'svg|path', ':combray-unknown'].forEach(function (invalid) {"
+    "  var rejected = false;"
+    "  try { root.querySelector(invalid); } catch (e) { rejected = e.name === 'SyntaxError'; }"
+    "  expect(rejected, true);"
+    " });"
+    " var probe = document.getElementById('probe');"
+    " function color() { return getComputedStyle(probe).color; }"
+    " expect(CSS.supports('selector(:has(*))'), false);"
+    " expect(color(), 'rgb(10, 20, 30)');"
+    " var child = document.createElement('strong'); probe.appendChild(child);"
+    " expect(probe.matches(':has(> strong.active)'), false);"
+    " child.className = 'active'; expect(probe.matches(':has(> strong.active)'), true);"
+    " expect(document.querySelector('#probe:has(> strong.active)'), probe);"
+    " expect(color(), 'rgb(10, 20, 30)');"
+    " child.className = ''; expect(probe.matches(':has(> strong.active)'), false);"
+    " expect(document.querySelector('#probe:has(> strong.active)'), null);"
+    " child.remove(); expect(color(), 'rgb(10, 20, 30)');"
+    " expect(probe.matches(':has(> strong)'), false);"
+    " document.title = 'HAS:ok';"
+    "} catch (e) { document.title = 'HAS:fail:' + e.message; }"
+    "</script>",
+    "<style>#probe{color:rgb(10,20,30)}"
+    "#probe:has(> strong){color:rgb(40,50,60)}"
+    "#probe:has(> strong.active){color:rgb(70,80,90)}</style>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -260,6 +313,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/slow.html":
             time.sleep(SLOW_PAGE_SECONDS)
             return self.send(200, page("SLOW", "<p>SLOW</p>"))
+        if path == "/has-selector.html":
+            return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))

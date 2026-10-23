@@ -268,6 +268,15 @@ class BrowsingTest {
         assertEquals(ANIMATE_OK, state.activeTab?.title)
     }
 
+    @Test
+    fun pagesCanUseRelationalSelectors() {
+        device.browser.openUrl(Fixtures.HAS_SELECTOR, Placement.CURRENT_TAB)
+        val state = device.awaitState {
+            it.activeTab?.title?.let { title -> title.startsWith(HAS_PREFIX) && title != HAS_WAITING } == true
+        }
+        assertEquals(HAS_OK, state.activeTab?.title)
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -299,5 +308,8 @@ class BrowsingTest {
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val HAS_PREFIX = "HAS:"
+        const val HAS_WAITING = "HAS:waiting"
+        const val HAS_OK = "HAS:ok"
     }
 }
