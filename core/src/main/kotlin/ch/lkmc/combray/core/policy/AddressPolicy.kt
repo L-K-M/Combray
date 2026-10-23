@@ -63,6 +63,8 @@ object AddressPolicy {
     private val EXTERNAL_SCHEMES = setOf("mailto", "tel")
     private val SCHEME = Regex("^([A-Za-z][A-Za-z0-9+.-]*):")
     private val PORT = Regex("^\\d{1,5}$")
+    // A content digest after an "@", as in "nginx:1.25@sha256:4c0f…": no host, so no password.
+    private val DIGEST = Regex("^(?:sha256|sha384|sha512|blake3):[0-9A-Fa-f]+$")
     private val IPV4 = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
     private val LABEL = Regex("^(?!-)[\\p{L}\\p{N}-]{1,63}(?<!-)$")
     private val TOP_LEVEL = Regex("^(\\p{L}{2,63}|xn--[a-z0-9-]{1,59})$", RegexOption.IGNORE_CASE)
@@ -238,14 +240,13 @@ object AddressPolicy {
      * "example.com/a:b@c" stays an address, and neither may a port ("localhost:3000/@me"), but
      * leading slashes ("//admin:pw@nas") do not hide it, and more digits than a port has
      * ("admin:123456/x@nas") are a password. What follows the "@" need not be a valid host:
-     * "admin:pw@nas!" would still send the password as a search. But a colon after it that starts
-     * no port ("nginx:1.25@sha256:4c0f…", an image digest) shows it is not an address at all.
+     * "admin:pw@nas!" would still send the password as a search. Only a content digest after it
+     * ("nginx:1.25@sha256:4c0f…", an image reference) shows it is no address at all.
      */
     private fun hasSchemelessCredentials(text: String): Boolean {
         val userInfo = text.trimStart('/', '\\').substringBeforeLast('@', missingDelimiterValue = "")
         if (':' !in userInfo || userInfo.substringBefore(':').any { it in URL_DELIMITERS }) return false
-        val host = text.substringAfterLast('@').takeWhile { it !in URL_DELIMITERS }
-        if (!host.startsWith('[') && ':' in host && !PORT.matches(host.substringAfter(':'))) return false
+        if (DIGEST.matches(text.substringAfterLast('@'))) return false
 
         val afterColon = userInfo.substringAfter(':')
         val port = afterColon.takeWhile { it.isDigit() }

@@ -58,7 +58,7 @@ class SaveToKarakeepActivity : Activity() {
             ?.let(::shareTitle)
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.share_save_confirm)
-            .setMessage(listOfNotNull(displayHost(url), title?.let { "\u201C$it\u201D" }).joinToString("\n"))
+            .setMessage(listOfNotNull(displayHost(url), title?.let { quoted(it) }).joinToString("\n"))
             // Its click is set below, where the button exists.
             .setPositiveButton(R.string.action_save, null)
             .setNegativeButton(R.string.action_cancel) { _, _ -> finish() }
@@ -105,6 +105,9 @@ class SaveToKarakeepActivity : Activity() {
         if (enableLater) button.postDelayed(enableSave, SAVE_DELAY_MILLIS)
     }
 
+    // Its own quotation marks could close the quote early and leave a site name outside it.
+    private fun quoted(subject: String) = getString(R.string.share_save_subject, subject.filterNot { it in QUOTATION_MARKS })
+
     private fun save(url: String, title: String?) {
         val graph = (application as CombrayApplication).graph
         val app = applicationContext
@@ -134,6 +137,8 @@ class SaveToKarakeepActivity : Activity() {
     private fun toast(context: Context, @StringRes message: Int) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 
     private companion object {
+        const val QUOTATION_MARKS = "\"“”„‟«»‹›"
+
         /** How long the dialog is in front before Save works: longer than a tap already under way. */
         const val SAVE_DELAY_MILLIS = 500L
 

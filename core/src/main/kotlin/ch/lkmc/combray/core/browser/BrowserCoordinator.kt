@@ -1062,8 +1062,12 @@ class BrowserCoordinator(
         val view = liveByNative[tab] ?: return
         if (view.generation != null) {
             if (event.request != null) {
-                // A refusal of an earlier address must not end the wait for a newer one.
-                if (event.request == view.awaitedRequest) view.awaitingCommit = false
+                // A refusal of an earlier address must not end the wait for a newer one. The
+                // refused address never commits, so it no longer marks a typed navigation.
+                if (event.request == view.awaitedRequest) {
+                    view.awaitingCommit = false
+                    view.awaitedUrl = null
+                }
                 state.update { it.copy(notice = Notice.AddressNotOpened) }
             }
             return

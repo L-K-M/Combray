@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows
   still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
   Recent's order. Repeated swipes keep going back; after a pause they
   start from the tab you are on. Switching this way hides the keyboard, so
-  typing does not carry on into the next tab's page.
+  further typing does not reach the next tab's page.
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
   editor and a blank tab offers no copy action. Copied addresses are marked
@@ -280,8 +280,8 @@ All notable changes to this project are documented here. The format follows
 - A reload that fails, such as offline or when a tab is restored, no longer
   hides the page from Recent or renames it "Error loading page", and a
   reload no longer blanks the page's title while the new one loads.
-- Searching Recent finds every page in local history, not only the newest
-  500 visits.
+- Searching Recent looks beyond the newest 500 visits, up to 5,000 retained
+  ones.
 - Undo after closing a tab other than the current one reopens it in the
   background instead of switching to it.
 - More and Settings open fully expanded instead of at half height, which

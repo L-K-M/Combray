@@ -94,6 +94,10 @@ class SaveToKarakeepGateTest {
         val (_, dialog) = ask(share().putExtra(Intent.EXTRA_SUBJECT, "accounts.google.com"))
         // The sending app picks the subject: quoted, it cannot pass for the site above it.
         assertEquals("example.org\n\u201Caccounts.google.com\u201D", shadowOf(dialog).message.toString())
+
+        // Its own quotation marks cannot close the quote and leave a site name outside it.
+        val (_, closing) = ask(share().putExtra(Intent.EXTRA_SUBJECT, "Digest\u201D accounts.google.com \u201CSaved"))
+        assertEquals("example.org\n\u201CDigest accounts.google.com Saved\u201D", shadowOf(closing).message.toString())
     }
 
     @Test

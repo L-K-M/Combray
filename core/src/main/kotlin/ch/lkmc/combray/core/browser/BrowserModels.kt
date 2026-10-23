@@ -141,7 +141,7 @@ enum class TabStep { OLDER, NEWER }
 
 /**
  * How much history [BrowserCoordinator.recent] reads. Browsing shows the newest rows; a search
- * reads up to 5,000 retained visits, or a match older than the newest rows would be missed.
+ * reads further back, up to 5,000 retained visits, so a match older than those rows is found.
  */
 enum class HistoryDepth {
     NEWEST,

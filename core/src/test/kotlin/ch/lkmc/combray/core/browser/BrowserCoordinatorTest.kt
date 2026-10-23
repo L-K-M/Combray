@@ -1197,6 +1197,48 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aRestoredForgottenPageCommittingBeforeTheTypedOneStaysForgotten() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        // The restored page was faster after all; then the typed one replaces it.
+        commit(view, 11, "https://example.com/4")
+        commit(view, 12, "https://c.test/")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 13, "https://d.test/")
+
+        val urls = recent().filterIsInstance<RecentItem.Visit>().map { it.url }
+        assertFalse("https://example.com/4" in urls)
+        assertTrue("https://c.test/" in urls)
+    }
+
+    @Test
+    fun aRefusedTypedAddressDoesNotUnforgetARestoredPage() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        browser = newCoordinator()
+        ready()
+        val view = engine.created.single().first
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        engine.emit(EngineEvent.EngineError("not a URL Servo loads", view, engine.navigated.last().second)); idle()
+        // The restored forgotten page lands on its sign-in page.
+        commit(view, 11, "https://example.com/login")
+        browser.openUrl("https://d.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 12, "https://d.test/")
+
+        assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://example.com/login" })
+    }
+
+    @Test
     fun aRestartRestoresOpenTabsAndRecreatesOnlyTheFocusedView() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()

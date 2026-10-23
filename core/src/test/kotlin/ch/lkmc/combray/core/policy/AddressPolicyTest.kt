@@ -211,6 +211,10 @@ class AddressPolicyTest {
             "Router: https://admin:hunter2@192.168.1.1", "see https://u:p@h", "(https://u:p@h)", "login admin:hunter2@nas please",
             // Extra slashes after the scheme, and a link inside another link's query.
             "see https:///admin:pw@nas", "see https:////admin:pw@192.168.1.1", "see https://a.example/r?u=https://admin:pw@nas",
+            // A colon after the host that starts no port is still a host: a trailing colon, a
+            // port too long, an unbracketed IPv6 address.
+            "admin:pw@nas:", "admin:pw@192.168.1.1:", "admin:pw@nas:/share", "admin:pw@nas:123456", "user:pass@host:8080:9090",
+            "admin:pw@host:abc/x", "admin:pw@::1", "admin:pw@fe80::1", "//admin:pw@nas:", "login admin:hunter2@192.168.1.1: please change",
         )
         for (input in withCredentials) {
             val interpretation = AddressPolicy.interpret(input)

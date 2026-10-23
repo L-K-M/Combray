@@ -146,6 +146,7 @@ class IncomingIntentsTest {
         val login = "Log in at https://me:secret@example.org/ today"
         assertEquals(LaunchRequest.EditNewTab(login), processText(login))
         assertEquals(LaunchRequest.EditNewTab("admin:hunter2@nas is the login"), processText("admin:hunter2@nas is the login"))
+        assertEquals(LaunchRequest.EditNewTab("login admin:hunter2@192.168.1.1: please"), processText("login admin:hunter2@192.168.1.1: please"))
         // A link with a token goes to the editor alone, as from a share.
         assertEquals(
             LaunchRequest.EditNewTab("https://accounts.example/reset?token=abc123"),
