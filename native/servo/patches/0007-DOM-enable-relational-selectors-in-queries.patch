@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Combray <combray@localhost>
+Date: Fri, 23 Oct 2026 18:56:00 +0000
+Subject: [PATCH] DOM: enable relational selectors in queries
+
+Kimi's article startup calls querySelectorAll with :has(), which Stylo
+implements but disables by default. Enabling its global switch also
+enables stylesheet rules whose relative invalidation Servo has not wired.
+
+Use a parser adapter for the three stateless DOM selector paths only.
+Forward every other parser hook to Stylo. Stylesheets and CSS.supports
+retain the disabled preference; no global preference is changed.
+---
+diff --git a/components/script/dom_selector_parser.rs b/components/script/dom_selector_parser.rs
+new file mode 100644
+--- /dev/null
++++ b/components/script/dom_selector_parser.rs
+@@ -0,0 +1,116 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
++
++//! Selector parsing for stateless DOM queries, independently of stylesheet support.
++
++use cssparser::{CowRcStr, Parser as CssParser, ParserInput, SourceLocation};
++use selectors::parser::{ParseRelative, Parser, SelectorList};
++use style::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl, SelectorParser};
++use style::stylesheets::{Namespaces, Origin, UrlExtraData};
++use style::{Namespace, Prefix};
++use style_traits::{ParseError, StyleParseErrorKind};
++
++/// Parse DOM selectors with native :has() matching, which needs no style invalidation.
++/// Stylesheets and CSS.supports must keep using Stylo's preference-gated parser.
++pub(crate) fn parse_dom_selectors<'i>(
++    input: &'i str,
++    url_data: &UrlExtraData,
++) -> Result<SelectorList<SelectorImpl>, ParseError<'i>> {
++    let namespaces = Namespaces::default();
++    let parser = DomSelectorParser(SelectorParser {
++        stylesheet_origin: Origin::Author,
++        namespaces: &namespaces,
++        url_data,
++        for_supports_rule: false,
++    });
++    let mut input = ParserInput::new(input);
++    SelectorList::parse(&parser, &mut CssParser::new(&mut input), ParseRelative::No)
++}
++
++struct DomSelectorParser<'a>(SelectorParser<'a>);
++
++// Forward every other hook: DOM selectors keep Stylo's namespace and pseudo-class rules.
++// Recheck this list when updating the pinned selectors crate; its hooks have default bodies.
++impl<'i> Parser<'i> for DomSelectorParser<'_> {
++    type Impl = SelectorImpl;
++    type Error = StyleParseErrorKind<'i>;
++
++    fn parse_has(&self) -> bool {
++        true
++    }
++
++    fn parse_slotted(&self) -> bool {
++        self.0.parse_slotted()
++    }
++
++    fn parse_part(&self) -> bool {
++        self.0.parse_part()
++    }
++
++    fn parse_nth_child_of(&self) -> bool {
++        self.0.parse_nth_child_of()
++    }
++
++    fn parse_is_and_where(&self) -> bool {
++        self.0.parse_is_and_where()
++    }
++
++    fn parse_parent_selector(&self) -> bool {
++        self.0.parse_parent_selector()
++    }
++
++    fn is_is_alias(&self, name: &str) -> bool {
++        self.0.is_is_alias(name)
++    }
++
++    fn parse_host(&self) -> bool {
++        self.0.parse_host()
++    }
++
++    fn allow_forgiving_selectors(&self) -> bool {
++        self.0.allow_forgiving_selectors()
++    }
++
++    fn parse_non_ts_pseudo_class(
++        &self,
++        location: SourceLocation,
++        name: CowRcStr<'i>,
++    ) -> Result<NonTSPseudoClass, ParseError<'i>> {
++        self.0.parse_non_ts_pseudo_class(location, name)
++    }
++
++    fn parse_non_ts_functional_pseudo_class<'t>(
++        &self,
++        name: CowRcStr<'i>,
++        parser: &mut CssParser<'i, 't>,
++        after_part: bool,
++    ) -> Result<NonTSPseudoClass, ParseError<'i>> {
++        self.0
++            .parse_non_ts_functional_pseudo_class(name, parser, after_part)
++    }
++
++    fn parse_pseudo_element(
++        &self,
++        location: SourceLocation,
++        name: CowRcStr<'i>,
++    ) -> Result<PseudoElement, ParseError<'i>> {
++        self.0.parse_pseudo_element(location, name)
++    }
++
++    fn parse_functional_pseudo_element<'t>(
++        &self,
++        name: CowRcStr<'i>,
++        arguments: &mut CssParser<'i, 't>,
++    ) -> Result<PseudoElement, ParseError<'i>> {
++        self.0.parse_functional_pseudo_element(name, arguments)
++    }
++
++    fn default_namespace(&self) -> Option<Namespace> {
++        self.0.default_namespace()
++    }
++
++    fn namespace_for_prefix(&self, prefix: &Prefix) -> Option<Namespace> {
++        self.0.namespace_for_prefix(prefix)
++    }
++}
+diff --git a/components/script/lib.rs b/components/script/lib.rs
+--- a/components/script/lib.rs
++++ b/components/script/lib.rs
+@@ -29,6 +29,7 @@ mod fetch;
+ #[macro_use]
+ mod dom;
+ pub(crate) use dom::canvas_context;
++mod dom_selector_parser;
+ mod drag;
+ mod engine;
+ mod event_loop;
+diff --git a/components/script/dom/element/element.rs b/components/script/dom/element/element.rs
+--- a/components/script/dom/element/element.rs
++++ b/components/script/dom/element/element.rs
+@@ -52,7 +52,7 @@ use style::properties::{
+     parse_style_attribute,
+ };
+ use style::rule_tree::{CascadeLevel, CascadeOrigin};
+-use style::selector_parser::{RestyleDamage, SelectorParser, Snapshot};
++use style::selector_parser::{RestyleDamage, Snapshot};
+ use style::shared_lock::Locked;
+ use style::stylesheets::layer_rule::LayerOrder;
+ use style::stylesheets::{CssRuleType, UrlExtraData};
+@@ -181,6 +181,7 @@ use crate::dom::types::DOMStringMap;
+ use crate::dom::validitystate::ValidationFlags;
+ use crate::dom::window::Window;
+ use crate::dom::window::scrolling_box::{ScrollAxisState, ScrollingBox};
++use crate::dom_selector_parser::parse_dom_selectors;
+ use crate::event_loop::script_thread::ScriptThread;
+ use crate::layout_dom::ServoDangerousStyleElement;
+ use crate::realms::enter_auto_realm;
+@@ -3926,8 +3927,5 @@ impl ElementMethods<DomTypeHolder> for Element {
+         let document = self.owner_document();
+         let url = document.url();
+-        let selectors = match SelectorParser::parse_author_origin_no_namespace(
+-            &selectors.str(),
+-            &UrlExtraData(url.get_arc()),
+-        ) {
++        let selectors = match parse_dom_selectors(&selectors.str(), &UrlExtraData(url.get_arc())) {
+             Err(_) => {
+                 return Err(Error::Syntax(
+@@ -3962,8 +3960,5 @@ impl ElementMethods<DomTypeHolder> for Element {
+         let document = self.owner_document();
+         let url = document.url();
+-        let selectors = match SelectorParser::parse_author_origin_no_namespace(
+-            &selectors.str(),
+-            &UrlExtraData(url.get_arc()),
+-        ) {
++        let selectors = match parse_dom_selectors(&selectors.str(), &UrlExtraData(url.get_arc())) {
+             Err(_) => return Err(Error::Syntax(None)),
+             Ok(selectors) => selectors,
+diff --git a/components/script/layout_dom/servo_dangerous_style_node.rs b/components/script/layout_dom/servo_dangerous_style_node.rs
+--- a/components/script/layout_dom/servo_dangerous_style_node.rs
++++ b/components/script/layout_dom/servo_dangerous_style_node.rs
+@@ -11,7 +11,6 @@ use servo_arc::Arc;
+ use style;
+ use style::dom::{NodeInfo, TNode};
+ use style::dom_apis::{MayUseInvalidation, SelectorQuery, query_selector};
+-use style::selector_parser::SelectorParser;
+ use style::stylesheets::UrlExtraData;
+ use url::Url;
+ 
+@@ -19,6 +18,7 @@ use super::{ServoDangerousStyleDocument, ServoDangerousStyleShadowRoot};
+ use crate::dom::bindings::error::Error;
+ use crate::dom::bindings::root::LayoutDom;
+ use crate::dom::node::{Node, NodeFlags};
++use crate::dom_selector_parser::parse_dom_selectors;
+ use crate::layout_dom::{ServoDangerousStyleElement, ServoLayoutDomTypeBundle, ServoLayoutNode};
+ 
+ /// A wrapper around [`LayoutDom<_, Node>`] to be used with `stylo` and `selectors`.
+@@ -47,8 +47,7 @@ impl<'dom> ServoDangerousStyleNode<'dom> {
+         let mut result = Query::Output::default();
+ 
+         // Step 1. Let selector be the result of parse a selector selectors.
+-        let selector_or_error =
+-            SelectorParser::parse_author_origin_no_namespace(selector, &UrlExtraData(document_url));
++        let selector_or_error = parse_dom_selectors(selector, &UrlExtraData(document_url));
+ 
+         // Step 2. If selector is failure, then throw a "SyntaxError" DOMException.
+         let Ok(selector_list) = selector_or_error else {
