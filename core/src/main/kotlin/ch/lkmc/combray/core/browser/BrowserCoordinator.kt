@@ -168,16 +168,17 @@ class BrowserCoordinator(
 
     /**
      * Recent: open tabs and local history, newest first, unfiltered. [depth] picks how much
-     * history: the newest [RECENT_HISTORY_LIMIT] visits to browse, or every retained visit
-     * to search, so a match older than the newest rows is still found. The filter runs in the
-     * caller with [matching] against one subscription per depth, so typing does not restart
-     * three Room observers on every keystroke. The query reads from the retention cutoff at
-     * subscription; each answer, and a slow clock while nothing changes, applies the cutoff as it
-     * is then, so a visit leaves an open sheet once it passes the retention period.
+     * history: the newest [RECENT_HISTORY_LIMIT] visits to browse, or up to
+     * [RETAINED_HISTORY_LIMIT] retained visits to search, so a match older than the newest rows
+     * is still found. The filter runs in the caller with [matching] against one subscription per
+     * depth, so typing does not restart three Room observers on every keystroke. The query reads
+     * from the retention cutoff at subscription; each answer, and a slow clock while nothing
+     * changes, applies the cutoff as it is then, so a visit leaves an open sheet once it passes
+     * the retention period.
      */
     fun recent(depth: HistoryDepth = HistoryDepth.NEWEST): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
-        val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else Int.MAX_VALUE
+        val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else RETAINED_HISTORY_LIMIT
         val ticks = flow {
             while (true) {
                 emit(Unit)
@@ -1268,6 +1269,13 @@ class BrowserCoordinator(
 
         /** How often an open Recent applies the retention cutoff when nothing else changes. */
         const val RECENT_CUTOFF_TICK_MS = 60_000L
+
+        /**
+         * Visits a search (Recent, the address sheet) reads at most, newest first. Far more than a
+         * week of browsing, so an old match is still found, but bounded: a page can add a visit
+         * per pushState, and every new visit makes an open search read its rows again.
+         */
+        const val RETAINED_HISTORY_LIMIT = 5_000
     }
 }
 
