@@ -5,9 +5,10 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Movement up to which a touch still counts as a tap, in density-independent pixels, along
-/// either axis. Servo 0.6.0 starts scrolling, and then issues no click, past the same distance
-/// (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`, private there).
+/// Movement up to which a touch still counts as a tap, in density-independent pixels at 100%
+/// page zoom, along either axis. Servo 0.6.0 starts scrolling, and then issues no click, past
+/// the same distance (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`, private there),
+/// which it scales by the density and the page zoom, though not by pinch zoom.
 pub const TAP_SLOP_DIP: f32 = 10.0;
 
 /// How long a pointer may stay down before it counts as one whose up was lost. Longer than any
@@ -27,13 +28,18 @@ pub struct TapRecognizer {
 }
 
 impl TapRecognizer {
-    /// `scale`: device pixels per density-independent pixel.
+    /// `scale`: device pixels per density-independent pixel, times the page zoom.
     pub fn new(scale: f32) -> Self {
         Self {
             slop: TAP_SLOP_DIP * scale,
             down: HashMap::new(),
             spoiled: false,
         }
+    }
+
+    /// For a new page zoom, which moves Servo's threshold too.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.slop = TAP_SLOP_DIP * scale;
     }
 
     pub fn down(&mut self, pointer: i32, x: f32, y: f32) {
@@ -165,6 +171,18 @@ mod tests {
         // The next gesture starts afresh.
         taps.down(0, 100.0, 200.0);
         assert!(taps.up(0, 101.0, 199.0));
+    }
+
+    #[test]
+    fn the_slop_follows_the_page_zoom() {
+        let mut taps = TapRecognizer::new(SCALE);
+        taps.down(0, 100.0, 200.0);
+        assert!(!taps.up(0, 125.0, 200.0));
+
+        // At 150% Servo still clicks after 25 px, so the touch is a tap here too.
+        taps.set_scale(SCALE * 1.5);
+        taps.down(0, 100.0, 200.0);
+        assert!(taps.up(0, 125.0, 200.0));
     }
 
     #[test]

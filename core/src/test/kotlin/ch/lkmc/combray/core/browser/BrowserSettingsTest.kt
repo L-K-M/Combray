@@ -78,6 +78,10 @@ class BrowserSettingsTest {
     /** A step a later version no longer offers must not leave pages at an unknown size. */
     @Test
     fun anUnknownStoredTextSizeFallsBackToTheDefault() {
+        // Pin the real storage key first: if it ever moves, the literal below must too.
+        BrowserSettings(preferences).setTextSize(TextSize.PERCENT_150)
+        assertEquals("PERCENT_150", preferences.getString("text_size", null))
+
         preferences.edit().putString("text_size", "PERCENT_300").commit()
 
         assertEquals(TextSize.DEFAULT, BrowserSettings(preferences).textSize.value)

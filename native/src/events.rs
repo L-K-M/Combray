@@ -4,7 +4,10 @@
 //! application plus the engine generation of the native view. Document-related events also carry
 //! the document ID (Servo's pipeline ID for the top-level document). Events cross the JNI
 //! boundary as one JSON object each, so the Kotlin side never sees a native handle. Every URL
-//! is serialized without `user:password@` (see [`crate::userinfo`]).
+//! is serialized without `user:password@` (see [`crate::userinfo`]), except a link for another
+//! app (`external_link`). That is never `http(s)`, the only URLs Servo writes sign-in
+//! credentials into, so its userinfo is the page's own and part of the address the user is
+//! asked to open: Android turns `intent://git@host/#Intent;scheme=ssh;end` into `ssh://git@host/`.
 
 use serde_json::{Value, json};
 
@@ -714,6 +717,20 @@ mod tests {
                 "generation": 9,
             })
         );
+    }
+
+    #[test]
+    fn links_for_other_apps_are_reported_as_the_page_wrote_them() {
+        let url = "intent://ada@example.org/#Intent;scheme=ssh;end";
+        let event = EngineEvent::ExternalLink {
+            view: ViewKey {
+                tab: 1,
+                generation: 2,
+            },
+            url: url.into(),
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+        assert_eq!(json["url"], url);
     }
 
     /// After an HTTP sign-in, Servo 0.6.0 reports the page (and every relative link on it)

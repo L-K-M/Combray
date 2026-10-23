@@ -876,6 +876,11 @@ impl Engine {
         for tab in self.tabs.values() {
             tab.webview.set_page_zoom(zoom);
         }
+        // Servo's tap/pan threshold grows with the zoom: the taps that count as the user's must
+        // stay the touches Servo turns into clicks.
+        let scale = self.config.density * zoom;
+        self.taps.set_scale(scale);
+        self.field_taps.set_scale(scale);
         // The shown page lays out again; paint it, as the other visual changes here do.
         self.needs_paint = true;
     }

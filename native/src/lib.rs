@@ -18,7 +18,6 @@
 //! `activation`, `animations`, `events`, `keyboard`, `media`, `navigation`, `page_zoom`,
 //! `panic_policy`, `profile`, `userinfo` and the pure parts of `capture` and `find` build on any
 //! host so their tests run without Servo.
-//! tests run without Servo.
 
 pub mod activation;
 mod animations;

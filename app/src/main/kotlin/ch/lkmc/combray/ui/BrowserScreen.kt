@@ -68,7 +68,6 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
-import ch.lkmc.combray.core.browser.ExternalLink
 import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.KeyboardRequest
 import ch.lkmc.combray.core.browser.Notice
@@ -180,20 +179,21 @@ fun BrowserScreen(
 
     // A page link for another app asks first (owner decision, 22 October 2026). Open hands it to
     // Android, or the link's own fallback page loads in the tab. Taken from the state before the
-    // question, so the engine's next link is a new request.
-    var appLink by remember { mutableStateOf<ExternalLink?>(null) }
+    // question, so the engine's next link is a new request. Saved, as the state no longer holds
+    // the link: recreating the activity (rotation, dark mode) must not drop the question.
+    var appLink by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.externalLink) {
         val link = state.externalLink ?: return@LaunchedEffect
-        appLink = link
+        appLink = link.url
         browser.externalLinkHandled(link)
     }
-    appLink?.let { link ->
+    appLink?.let { url ->
         AppLinkDialog(
-            url = link.url,
+            url = url,
             onOpen = {
                 appLink = null
                 val noApp = { scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) } }
-                when (val outcome = ExternalLinks.open(context, link.url)) {
+                when (val outcome = ExternalLinks.open(context, url)) {
                     ExternalOutcome.Opened -> Unit
                     is ExternalOutcome.Fallback -> {
                         val page = AddressPolicy.interpret(outcome.url).primary as? AddressDecision.Navigate

@@ -10,8 +10,9 @@
 
 use std::collections::HashSet;
 
-/// Servo's tap/pan threshold (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`): a
-/// finger that moves further than this on either axis pans, and Servo sends no click.
+/// Servo's tap/pan threshold (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`) at 100%
+/// page zoom: a finger that moves further than this on either axis pans, and Servo sends no
+/// click. Servo scales it by the density and the page zoom.
 const TAP_SLOP_DP: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -32,13 +33,18 @@ pub struct TapTracker {
 }
 
 impl TapTracker {
-    /// `density`: device pixels per density-independent pixel.
-    pub fn new(density: f32) -> Self {
+    /// `scale`: device pixels per density-independent pixel, times the page zoom.
+    pub fn new(scale: f32) -> Self {
         Self {
-            slop: TAP_SLOP_DP * density,
+            slop: TAP_SLOP_DP * scale,
             fingers: HashSet::new(),
             press: None,
         }
+    }
+
+    /// For a new page zoom, which moves Servo's threshold too.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.slop = TAP_SLOP_DP * scale;
     }
 
     pub fn down(&mut self, pointer: i32, x: f32, y: f32) {
@@ -110,6 +116,18 @@ mod tests {
         taps.down(0, 100.0, 200.0);
         taps.moved(0, 110.0, 190.0);
         assert_eq!(taps.up(0, 119.0, 181.0), Some((119.0, 181.0)));
+    }
+
+    #[test]
+    fn the_slop_follows_the_page_zoom() {
+        let mut taps = TapTracker::new(DENSITY);
+        taps.down(0, 100.0, 200.0);
+        assert_eq!(taps.up(0, 125.0, 200.0), None);
+
+        // At 150% Servo still clicks after 25 px, so the touch is a tap here too.
+        taps.set_scale(DENSITY * 1.5);
+        taps.down(0, 100.0, 200.0);
+        assert_eq!(taps.up(0, 125.0, 200.0), Some((125.0, 200.0)));
     }
 
     #[test]

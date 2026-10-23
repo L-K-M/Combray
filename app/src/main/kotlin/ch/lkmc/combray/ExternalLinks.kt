@@ -47,16 +47,20 @@ object ExternalLinks {
             context.startActivity(intent)
             ExternalOutcome.Opened
         } catch (none: ActivityNotFoundException) {
-            intent.getStringExtra(FALLBACK_EXTRA)
-                ?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
-                ?.let { ExternalOutcome.Fallback(it) }
-                ?: ExternalOutcome.NoApp
+            fallbackOrNoApp(intent)
         } catch (refused: SecurityException) {
             // The app that matched does not let Combray start it (not exported, or it needs a
-            // permission Combray lacks).
-            ExternalOutcome.NoApp
+            // permission Combray lacks). Its fallback page still applies, as in Chrome.
+            fallbackOrNoApp(intent)
         }
     }
+
+    /** The link's own web page (`S.browser_fallback_url`) when no app opens it. */
+    private fun fallbackOrNoApp(intent: Intent): ExternalOutcome =
+        intent.getStringExtra(FALLBACK_EXTRA)
+            ?.takeIf { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
+            ?.let { ExternalOutcome.Fallback(it) }
+            ?: ExternalOutcome.NoApp
 
     /**
      * The intent for [url]; null when it is malformed, names [ownPackage] (Combray itself), or

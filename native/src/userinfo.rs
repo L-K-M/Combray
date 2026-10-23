@@ -1,4 +1,5 @@
-//! Removes `user:password@` from every URL the bridge reports.
+//! Removes `user:password@` from every URL the bridge reports but a link for another app (see
+//! [`crate::events`]).
 //!
 //! After an HTTP sign-in, Servo 0.6.0 does not keep the answer as an authentication entry: it
 //! writes the username and password into the request URL (`components/net/http_loader.rs`,
