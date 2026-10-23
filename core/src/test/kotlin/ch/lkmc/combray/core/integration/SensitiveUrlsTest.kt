@@ -37,6 +37,21 @@ class SensitiveUrlsTest {
     }
 
     @Test
+    fun userInfoIsACredentialWhateverTheHostLooksLike() {
+        listOf(
+            "https://user:pass@host.example/",
+            "http://admin@router.lan/",
+            // Hosts java.net.URI does not accept as server names (an underscore, a label ending
+            // in "-") leave the authority registry-based, with no user info or host, although
+            // WHATWG URL parsing and Servo read user:pass@ from them.
+            "https://user:pass@my_host.example.com/",
+            "https://user:pass@a-.example.com/",
+            "http://admin:pw@media_box.lan/",
+            "https://:pass@host_x.example/",
+        ).forEach { assertTrue(it, SensitiveUrls.looksSensitive(it)) }
+    }
+
+    @Test
     fun anAuthorizationCodeCountsWhenItComesWithItsState() {
         assertTrue(SensitiveUrls.looksSensitive("https://app.example/callback?code=a&state=b"))
         assertTrue(SensitiveUrls.looksSensitive("https://app.example/callback#state=b&code=a"))
