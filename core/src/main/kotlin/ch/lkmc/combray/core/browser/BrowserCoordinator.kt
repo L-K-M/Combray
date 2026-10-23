@@ -287,8 +287,9 @@ class BrowserCoordinator(
     private suspend fun navigateTab(tab: TabEntity, url: String) {
         val view = liveByTab[tab.id]
         if (view != null && !view.crashed) {
-            // Going somewhere else is the user leaving a forgotten page: what loads next is recorded.
-            if (tab.pageForgotten) dao.updateTab(tab.copy(pageForgotten = false))
+            // A forgotten page stays forgotten until another document commits ([onHistory]): this
+            // request may never commit (a refusal, a 204, a download), and until it does the
+            // forgotten page is still current and can reload or change its own address.
             val request = nextRequest++
             engine.navigate(view.nativeTab, request, url)
             awaitCommit(view)
