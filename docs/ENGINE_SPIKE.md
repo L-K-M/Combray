@@ -317,3 +317,26 @@ adb -s emulator-5562 shell am instrument -w -r \
 The installed app contained Reader fix `2ae2b8b`; the second run used the test helper change later committed in `6b6d489`. Both complete runs passed 2/3 checks: unavailable-article handling and article-link navigation passed. Article extraction, markers and displayed text assertions passed, but the following system Back injection failed with `SecurityException: Injecting to another application requires INJECT_EVENTS permission`. The existing `Device.dismissSystemDialogs()` was added immediately before Back; it did not clear the interference reliably on this emulator.
 
 A read-only REA/adb screenshot showed “System UI isn't responding” covering the screen: 720×1440 PNG, SHA-256 `19884e2324b5e7ea5188ab40e2b012c152a5bc90d4a21b66797aa9f6d067e9c8`, Evidence `ev_9ec17de27963221eb3ed27bb7bada937afc55e82c0f5ac113a6ea96225207ac0`. Restarting System UI on this disposable emulator was attempted; the next run timed out and was stopped. **The device gate did not pass.** No physical phone, live service, personal history, Kagi login, dark/landscape sweep, or performance benchmark was exercised in this pass.
+
+## 15. Local recovery validation, 23 October 2026
+
+Source: `46bdba0`, pinned Servo v0.6.0 with patches 0001–0006. Host: Linux x86_64, JDK 21.0.12.1, Rust 1.97.1, NDK 29.0.14206865, with the Zig host wrappers documented in [BUILDING.md](BUILDING.md). Commands from the repository root:
+
+```sh
+ANDROID_HOME=/home/paseo/android-sdk ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_HOST_CC="$PWD/servo-checkout/hostbin/host-cc" \
+COMBRAY_HOST_CXX="$PWD/servo-checkout/hostbin/host-c++" \
+CARGO_BUILD_JOBS=4 scripts/build-native.sh
+
+ANDROID_HOME=/home/paseo/android-sdk ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+./gradlew assembleDebug assembleDebugAndroidTest
+
+ANDROID_HOME=/home/paseo/android-sdk ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_RESULTS="$PWD/build/device-checks/recovery-site-compat" \
+scripts/check-app.sh emulator-5580 \
+  'ch.lkmc.combray.BrowsingTest#pagesCanObserveWhatIsOnScreen'
+```
+
+Native build passed in 8m28s; APK assembly passed in 25s. The x86_64 engine library SHA-256 was `a932f49e6520c0344ed47989dd8a576932cbed66814815181b5c9d07d535864d`; the installed APK was `62a38262ceca1277507e4dd9afa8a816bca00c636b8d562f7aed9dc55286e136`. The existing IntersectionObserver smoke check passed (1/1) on Android 11/API 30 x86_64, `emulator-5580`. Host checks passed: 22 native unit tests, 32 script regressions, Rust formatting, documentation/whitespace and fixture JavaScript syntax. Host tests used `CARGO_TARGET_DIR="$PWD/servo-checkout/servo-v0.6.0/target" cargo test --manifest-path native/Cargo.toml --lib` because the old `native/target` symlink was broken.
+
+This smoke check does not establish WebGL or IndexedDB acceptance. Their targeted device tests and existing-database migration remain unresolved. Live sites/services and the separate scroll-chaining WIP were not exercised. Both recovered changes remain draft PRs for triage.
