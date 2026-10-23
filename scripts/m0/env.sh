@@ -14,23 +14,15 @@
 #   COMBRAY_HOST_CXX   host C++ compiler for build scripts (default: clang++)
 #   COMBRAY_ABI        x86_64 | arm64                      (default: x86_64)
 
-COMBRAY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export COMBRAY_ROOT
+# shellcheck source=servo-pin.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/servo-pin.sh"
 
 # Pinned inputs. Change them only together with docs/ENGINE_SPIKE.md and docs/BUILDING.md.
-export COMBRAY_SERVO_VERSION="0.6.0"
-export COMBRAY_SERVO_GIT_REVISION="c78d2c206f80a1c8b67eefa97f773bba513205d3"
-export COMBRAY_SERVO_TARBALL_SHA256="1d828f9956fcb0fccfd5af02e4c75bfb948344f04ba7af1765faff78d4aec0e6"
 export COMBRAY_RUST_TOOLCHAIN="1.97.1"
 export COMBRAY_NDK_VERSION="29.0.14206865"
 # Upstream compiles against API 29 but links with API 30 linker wrappers (.cargo/config.toml).
 export COMBRAY_ANDROID_API_LEVEL="29"
 COMBRAY_LINKER_API_LEVEL="30"
-
-export COMBRAY_WORK="$COMBRAY_ROOT/servo-checkout"
-export COMBRAY_SERVO_SRC="$COMBRAY_WORK/servo-v$COMBRAY_SERVO_VERSION"
-# Written by fetch-servo.sh once the tree is complete (combray_servo_stamp below).
-export COMBRAY_SERVO_STAMP="$COMBRAY_SERVO_SRC/.combray-prepared"
 
 # The SDK where Android Studio or Gradle already find it: macOS, then Linux default locations.
 if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
@@ -154,24 +146,6 @@ fi
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$COMBRAY_SERVO_SRC/target}"
 
 unset _llvm _clang_target _host_tag _ndk_default _sdk _sdkmanager
-
-# What scripts/m0/fetch-servo.sh prepared: its mode, the pinned revision and the hashes of each
-# applied patch and of the scripts that applied them. A tree that does not match (older patches or
-# scripts, `upstream` mode, an interrupted run) needs preparing again.
-#   combray_servo_stamp MODE PATCH...
-combray_servo_stamp() {
-    python3 -I - "$1" "$COMBRAY_SERVO_GIT_REVISION" "${@:2}" \
-        "$COMBRAY_ROOT/scripts/m0/fetch-servo.sh" "$COMBRAY_ROOT/scripts/m0/apply-patches.sh" <<'PY'
-import hashlib
-from pathlib import Path
-import sys
-
-mode, revision, *inputs = sys.argv[1:]
-print(mode, revision)
-for path in inputs:
-    print(hashlib.sha256(Path(path).read_bytes()).hexdigest(), Path(path).name)
-PY
-}
 
 # SHA-256 lines like sha256sum's; macOS has only shasum.
 combray_sha256() {

@@ -191,8 +191,7 @@ class BrowsingTest {
     fun anExternalLinkOpensInANewTab() {
         open(Device.GREEN)
         val url = Fixtures.solid(Device.OCHRE)
-        compose.activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName))
-        device.awaitPage(url)
+        deliverIncomingPage(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName), url)
         assertEquals(2, device.browser.browserState.value.openTabCount)
         assertScreen(Device.OCHRE)
     }
@@ -206,8 +205,7 @@ class BrowsingTest {
         val share = Intent(Intent.ACTION_SEND).setClass(compose.activity, MainActivity::class.java)
             .setType("text/plain")
             .putExtra(Intent.EXTRA_TEXT, "Look at $url.")
-        compose.activity.startActivity(share)
-        device.awaitPage(url)
+        deliverIncomingPage(share, url)
         assertEquals(2, device.browser.browserState.value.openTabCount)
         assertTrue(device.browser.browserState.value.activeTab!!.openedByOtherApp)
         assertScreen(Device.OCHRE)
@@ -217,7 +215,7 @@ class BrowsingTest {
     fun backFromAnotherAppsLinkLeavesTheAppAndKeepsThePageInHistoryOnly() {
         open(Device.GREEN)
         val url = Fixtures.solid(Device.OCHRE)
-        compose.activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName))
+        deliverIncomingPage(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(compose.activity.packageName), url)
         // The title comes from the engine, so the page has committed (a new tab has its address before).
         device.awaitState { it.activeTab?.url == url && it.activeTab?.title == Fixtures.title(Device.OCHRE) }
         assertTrue(device.browser.browserState.value.activeTab!!.openedByOtherApp)
@@ -232,6 +230,20 @@ class BrowsingTest {
         val recent = device.recent()
         assertTrue("$url not in history: ${recent.take(5)}", recent.any { it is RecentItem.Visit && it.url == url })
         awaitActivityStopped()
+    }
+
+    private fun deliverIncomingPage(intent: Intent, url: String) {
+        val activity = compose.activity
+        val launchIntent = activity.intent
+
+        try {
+            activity.startActivity(intent)
+            device.awaitPage(url)
+        } finally {
+            // ActivityScenario matches lifecycle callbacks by the launch intent. Restore it
+            // after real delivery so it can observe Back and its own teardown.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync { activity.intent = launchIntent }
+        }
     }
 
     private fun awaitActivityStopped() {

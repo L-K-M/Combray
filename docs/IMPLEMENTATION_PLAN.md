@@ -304,7 +304,7 @@ Servo is evolving and arbitrary browsing requires evaluating engine security and
 
 Logs use event IDs, integration/status codes and sanitized host/error categories. No page text, full query strings, credentials, request bodies, login links or authorization headers in release logs. Diagnostics export is user initiated and redacted. Crash reports/analytics are not part of the initial scope. Do not send browsing data to an LLM service as part of extraction or history indexing.
 
-For a usable personal release, assess target sites including authenticated pages, modern JS applications and Kagi. If an essential site cannot work in Servo, document the reproduction and upstream issue. Continue independent work where possible, but do not declare the browser ready until critical limitations are resolved or the owner explicitly accepts them.
+For a usable personal release, assess target sites including authenticated pages, modern JS applications and Kagi. If an essential site cannot work in Servo, record the reproduction downstream. `servo/servo` is source pulls only: never contact it or contribute AI-assisted work. Do not declare the browser ready until critical limitations are resolved or the owner explicitly accepts them.
 
 ## 8. Build and repository strategy
 
@@ -312,7 +312,7 @@ For a usable personal release, assess target sites including authenticated pages
 
 M0 added the engine build: `native/` (Rust bridge against pinned Servo), `spike/android/` (Gradle harness) and `scripts/m0/`. M1 added the product modules `app/`, `core/` and `engine/` ([BUILDING.md](BUILDING.md)). The design HTML remains a reference.
 
-Use an exact Servo commit or verified release branch, record its upstream URL and license, and document any patch set. The current Rust docs and Android book are mutable; their latest APIs may differ from that commit. For a fork, keep a small patch series and document how to rebase/update it. Do not commit a huge generated engine build or native binary without a deliberate reproducibility/artifact decision.
+Pin a full commit SHA from [L-K-M/servo](https://github.com/L-K-M/servo), the independent downstream repository with upstream history. Its published branch is `combray/0.6`; Combray's source of truth is `scripts/m0/servo-pin.sh`. Keep engine changes small and preserve MPL notices. Merge tested upstream maintenance revisions without rewriting published history, then update Combray's pin through native validation ([BUILDING.md](BUILDING.md#updating-servo)). `servo/servo` permits source pulls only: no issues, PRs, comments, fork API calls or outreach (owner instruction, 23 October 2026). Do not commit generated engine builds or native binaries.
 
 ### Engine build investigation
 
@@ -462,6 +462,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Local signing configuration | Passed on Linux/JDK 21 with a disposable key; `apksigner verify` confirmed the produced release certificate and v2 signature |
 | Artifact naming and native packaging | Passed: actual arm64 debug and x86_64 debug/release APKs; 13 script regressions cover architecture, missing libraries, malformed/truncated inputs, stale metadata, signing settings and interrupted staging |
 | Personal signing key, native/signing release CI | Pending; signed test output is not a distributable personal release |
+| Engine-update PR CI | Passed (23 October 2026): pinned downstream source, host tests, both native ABI builds, APK checks and all 57 x86_64 emulator checks. Evidence: [ENGINE_SPIKE.md](ENGINE_SPIKE.md#downstream-engine-maintenance-23-october-2026) |
 | Third-party notices and source link | Implemented: Settings › About lists 637 engine components (crates plus hand-checked bundled C/C++ libraries and libc++) and 113 Java/Kotlin libraries with license texts, and names the source repository. Device check `AboutTest` passed on the emulator (run `about3`). Not a legal review |
 | Touch targets and labels | Earlier revision passed on the emulator (`AccessibilityTest`, runs `a11y7` and `a11y9`): every element with a click action in the bottom bar (on a page and on a new tab), the More menu and the page dialogs (confirm with the block option, prompt, sign-in, select, link menu) is labeled and has a 48dp touch area no other target shares, at 320dp width and the largest font size. An unlabeled target and two adjacent 40dp targets fail the same check, and each rule was shown to be the one failing them. Checked on Compose semantics because Android's Accessibility Test Framework skips Compose content on this emulator. The check found the prompt's text field unlabeled; it is now labeled "Your answer". Recent, Settings, TalkBack itself, contrast, dark mode and landscape were not checked. With the link menu's two new rows the check covers link and image menus separately at the largest font, and a linked image's combined menu, which can need to scroll at that size, at the default size; that revision has not run on the emulator yet |
 | Physical phone, essential sites and deployed services | Not run; emulator-only validation selected for now, fixture-only service testing retained |
@@ -536,7 +537,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Reader view through Readability.js in the page | Decided (20 October 2026) | Firefox's article detection, run in the document shown (no second fetch, no cookies leave Servo); rendered natively as text, never as page markup. A page can only misreport its own article |
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
-| Engine revision/toolchain/packaging | Decided (M0) | Servo v0.6.0 + `native/servo/patches/`, Rust 1.97.1, NDK r29; [ENGINE_SPIKE.md](ENGINE_SPIKE.md#2-servo-selection-and-integration-decision) |
+| Engine revision/toolchain/packaging | Updated (owner, 23 October 2026) | Exact `L-K-M/servo` commit from `combray/0.6`, based on v0.6.0; Rust 1.97.1, NDK r29. Source pulls only from `servo/servo`; all work downstream. [Maintenance](BUILDING.md#updating-servo) |
 | Application ID | Confirmed (19 October 2026) | Owner confirmed `ch.lkmc.combray`; `.debug` suffix for debug builds |
 | API levels | Proposed (M1) | minSdk 30 (the native library links with API 30 wrappers), targetSdk 36 |
 | M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |
@@ -570,9 +571,9 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 
 ### Principal risks and response
 
-**Android wrapper work:** multi-tab identity and extraction required upstream changes; M0 carries them as `native/servo/patches/0002` (document identity, crash fix). Keep the patch set small and offer it upstream; rebase it when moving to a later 0.6.x LTS release.
+**Android wrapper work:** multi-tab identity and extraction required engine changes (formerly patch 0002). They now live in `L-K-M/servo`. Keep the downstream changes small and reconcile them when merging a tested 0.6.x maintenance update. Never offer them upstream.
 
-**Engine defects found in M0:** a stale frame after creating views while a large page is visible (WebRender level, reproduced on SwiftShader only so far), cookies lost on process death (addressed by patch 0004 since: written on request, at most five minutes of foreground changes at risk), and no interruption for embedder scripts. Each needs an upstream report with the M0 reproduction; see [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
+**Engine defects found in M0:** a stale frame after creating views while a large page is visible (WebRender level, reproduced on SwiftShader only so far), cookies lost on process death (addressed downstream: written on request, at most five minutes of foreground changes at risk), and no interruption for embedder scripts. Keep reproductions and fixes downstream; see [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
 
 **Engine security and compatibility:** Servo remains pre-1.0 and its demo wrapper has different maintenance scope from its library. Record real Android protections and critical target-site failures; keep an update path and avoid unsupported security promises.
 
@@ -596,7 +597,7 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
-M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. **Next task:** the native/signing release path, which needs the owner's signing key and a decision on building Servo in CI (hours of build time and tens of gigabytes per run). Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
+M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. Engine-related PRs now pass native builds and full emulator fixtures through the Engine workflow. **Next task:** wire native compilation into the release workflow and supply the owner's signing key. Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
 
 1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
 2. When live acceptance is authorized, obtain the Karakeep and Hister addresses and versions, sites that must work and hosts never to capture. Configure credentials in the app, not in chat.
