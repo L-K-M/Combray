@@ -72,6 +72,9 @@ object Fixtures {
     /** [Device.GREEN] in a light appearance, [Device.BLUE] when the page is told the theme is dark. */
     const val SCHEME = "$BASE/scheme.html"
 
+    /** Kimi's :has() DOM queries; stylesheet support stays disabled. */
+    const val HAS_SELECTOR = "$BASE/has-selector.html"
+
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 

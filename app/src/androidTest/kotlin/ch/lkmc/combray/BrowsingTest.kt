@@ -450,6 +450,15 @@ class BrowsingTest {
         return if (dark) Appearance.DARK else Appearance.LIGHT
     }
 
+    @Test
+    fun pagesCanUseRelationalSelectors() {
+        device.browser.openUrl(Fixtures.HAS_SELECTOR, Placement.CURRENT_TAB)
+        val state = device.awaitState {
+            it.activeTab?.title?.let { title -> title.startsWith(HAS_PREFIX) && title != HAS_WAITING } == true
+        }
+        assertEquals(HAS_OK, state.activeTab?.title)
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -487,5 +496,8 @@ class BrowsingTest {
         const val SCREEN_WIDTHS = 4
         const val MEDIA_FAILED = "MEDIA:errors:2"
         const val MEDIA_NOTICE = "This page’s audio or video can’t play in Combray."
+        const val HAS_PREFIX = "HAS:"
+        const val HAS_WAITING = "HAS:waiting"
+        const val HAS_OK = "HAS:ok"
     }
 }
