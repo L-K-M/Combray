@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Info
@@ -34,15 +32,12 @@ fun MoreSheet(
     onNewTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
-    /** Null when Hister is not set up; otherwise whether capture is on. */
-    captureEnabled: Boolean?,
-    onPauseCapture: () -> Unit,
     readerOpen: Boolean,
     onReader: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, captureEnabled, onPauseCapture, readerOpen, onReader)
+        MoreActions(tab, onForward, onReload, onNewTab, onPageInfo, onSettings, readerOpen, onReader)
     }
 }
 
@@ -55,8 +50,6 @@ internal fun MoreActions(
     onNewTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
-    captureEnabled: Boolean?,
-    onPauseCapture: () -> Unit,
     /** Reader view is open over the page: the row leaves it. */
     readerOpen: Boolean,
     onReader: () -> Unit,
@@ -70,12 +63,6 @@ internal fun MoreActions(
         if (url != null) {
             MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
             MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
-        }
-        // Pausing is one tap; switching capture on goes through Settings, which explains it.
-        when (captureEnabled) {
-            true -> MoreRow(Icons.Filled.Close, R.string.action_pause_capture, onPauseCapture)
-            false -> MoreRow(Icons.Filled.PlayArrow, R.string.action_resume_capture, onSettings)
-            null -> Unit
         }
         MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
     }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
@@ -55,6 +56,7 @@ fun BottomBar(
     tab: ActiveTab?,
     openTabs: Int,
     saveStatus: SaveStatus,
+    histerStored: Boolean,
     onBack: () -> Unit,
     onAddress: () -> Unit,
     onSave: () -> Unit,
@@ -73,7 +75,7 @@ fun BottomBar(
                 IconButton(onClick = onBack, enabled = tab?.canGoBack == true) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                 }
-                AddressChip(tab, onAddress, onCopyAddress, Modifier.weight(1f))
+                AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.weight(1f))
                 SaveButton(saveStatus, enabled = tab?.url != null, onSave)
                 IconButton(onClick = onShare, enabled = tab?.url != null) {
                     Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
@@ -126,7 +128,13 @@ private fun SaveButton(status: SaveStatus, enabled: Boolean, onSave: () -> Unit)
 
 /** Shows where the page is from and whether the connection is encrypted; opens the editor. */
 @Composable
-private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit, modifier: Modifier) {
+private fun AddressChip(
+    tab: ActiveTab?,
+    histerStored: Boolean,
+    onClick: () -> Unit,
+    onCopy: () -> Unit,
+    modifier: Modifier,
+) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
     val secure = url?.startsWith("https:", ignoreCase = true) == true
@@ -136,7 +144,8 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
         else -> stringResource(R.string.address_insecure)
     }
     val failed = if (tab?.loadFailed == true) stringResource(R.string.address_load_failed) else null
-    val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed).joinToString(", ")
+    val hister = if (histerStored) stringResource(R.string.address_sent_hister) else null
+    val label = listOfNotNull(stringResource(R.string.address_edit), host, connection, failed, hister).joinToString(", ")
 
     Surface(
         shape = RoundedCornerShape(24.dp),
@@ -177,6 +186,16 @@ private fun AddressChip(tab: ActiveTab?, onClick: () -> Unit, onCopy: () -> Unit
                 overflow = if (host != null) TextOverflow.StartEllipsis else TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge,
             )
+            // A quiet mark that Hister accepted this page; the address stays the chip's main text.
+            if (histerStored) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.55f),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }

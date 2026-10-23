@@ -87,7 +87,8 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
     val tab = state.activeTab
     val saveStatus by remember(tab?.url) { graph.integrations.saveStatus(tab?.url) }
         .collectAsStateWithLifecycle(SaveStatus.Unsaved)
-    val histerService by graph.integrations.hister.service.collectAsStateWithLifecycle(null)
+    val histerStored by remember(tab?.url) { graph.integrations.hister.captureStored(tab?.url) }
+        .collectAsStateWithLifecycle(false)
 
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
@@ -181,6 +182,7 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
+                histerStored = histerStored && tab?.loading != true,
                 onBack = browser::goBack,
                 onAddress = editAddress,
                 onSave = {
@@ -279,11 +281,6 @@ fun BrowserScreen(graph: AppGraph, onLeave: () -> Unit) {
             onNewTab = editNewTab,
             onPageInfo = { sheet = Sheet.PAGE_INFO },
             onSettings = { sheet = Sheet.SETTINGS },
-            captureEnabled = histerService?.captureEnabled,
-            onPauseCapture = {
-                dismiss()
-                scope.launch { graph.integrations.hister.setCaptureEnabled(false) }
-            },
             readerOpen = state.reader != null,
             onReader = {
                 dismiss()

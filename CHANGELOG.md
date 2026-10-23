@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A quiet check beside the address when Hister accepts the current page.
+  It means the server acknowledged the capture, not that search indexing
+  finished.
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
   editor and a blank tab offers no copy action. Copied addresses are marked
@@ -69,6 +72,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Hister capture no longer has a pause/resume row in More; the capture switch
+  stays in Settings.
 - Share is in the bottom bar, next to Save, instead of the More menu.
 - Recent opens on Open tabs. All, Hister and Karakeep are chips beside it;
   Hister search moved there from the "Search all history" button.
