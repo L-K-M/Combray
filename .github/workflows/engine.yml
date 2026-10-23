@@ -48,6 +48,11 @@ on:
 permissions:
   contents: read
 
+# Hosted images export an older NDK. Let env.sh select and install our pin.
+env:
+  ANDROID_NDK_ROOT: ""
+  ANDROID_NDK_HOME: ""
+
 concurrency:
   group: engine-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

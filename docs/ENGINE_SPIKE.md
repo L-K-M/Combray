@@ -335,3 +335,5 @@ CARGO_BUILD_JOBS=4 scripts/build-native.sh
 ```
 
 Staged `libcombray_engine.so`: 131,035,584 bytes, SHA-256 `5fe65a66532b33211ed7e2ff30428ae014fc9b728fd93515b3b4e3925ea0ef26`. ARM64 and migrated-APK device checks are in progress. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).
+
+The first Engine CI attempt passed host tests but both Android builds stopped before compilation: the hosted image exported `ANDROID_NDK_ROOT` pointing at r27. The workflow now clears that inherited override, allowing `env.sh` to select and install pinned r29. This does not change explicit local NDK overrides.
