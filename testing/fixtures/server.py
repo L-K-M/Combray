@@ -146,6 +146,219 @@ ANIMATE_PAGE = page(
     "} catch (e) { fail(e.message); }</script>",
 )
 
+# Reports capability probes used during site-compatibility triage.
+# The title carries a compact verdict: CAPS:ok or CAPS:fail:<comma-separated names>.
+# Worker script at /challenge-caps-worker.js; wasm (served as text/html like Vercel does) at
+# /challenge-caps.wasm.
+CHALLENGE_CAPS_WORKER = """
+self.onmessage = function (e) {
+  var port = e.data.port, out = { worker: true };
+  try {
+    out.fetch = typeof fetch === 'function';
+    out.cryptoSubtle = !!(crypto && crypto.subtle && crypto.subtle.digest);
+    out.instantiateStreaming = typeof WebAssembly.instantiateStreaming === 'function';
+  } catch (err) { out.workerErr = String(err); }
+  fetch('/challenge-caps.wasm').then(function (r) {
+    return WebAssembly.instantiateStreaming(r);
+  }).then(function () { out.wasm = true; }, function (err) {
+    out.wasm = String(err);
+    return fetch('/challenge-caps.wasm').then(function (r) { return r.arrayBuffer(); })
+      .then(function (b) { return WebAssembly.instantiate(b, {}); })
+      .then(function () { out.wasmBuffered = true; }, function (e2) { out.wasmBuffered = String(e2); });
+  }).finally(function () { port.postMessage(out); });
+};
+"""
+
+CHALLENGE_CAPS_PAGE = page(
+    "CAPS:running",
+    "<pre id='out'>probing</pre>"
+    "<script>"
+    "var out={},names=[];"
+    "function rec(n,v){out[n]=v;if(v!==true)names.push(n);}"
+    "function paint(){document.getElementById('out').textContent=JSON.stringify(out,null,1);"
+    "document.title='CAPS:'+(names.length?'fail:'+names.join(','):'ok');}"
+    "try{"
+    "rec('ua',navigator.userAgent);names=names.filter(function(n){return n!=='ua'});"
+    "var c=document.createElement('canvas');"
+    "try{var s=c.getContext('webgl')||c.getContext('experimental-webgl');"
+    "if(!s){rec('webgl','null context')}else{"
+    "var W=s.getExtension('WEBGL_debug_renderer_info');"
+    "rec('webglDebugRendererInfo',!!W);"
+    "rec('webgl',W?String(s.getParameter(W.UNMASKED_RENDERER_WEBGL)):'no debug_renderer_info');"
+    "names=names.filter(function(n){return n!=='webgl'});}}catch(e){rec('webgl',String(e))}"
+    "try{var d=document.createElement('canvas');var x=d.getContext('2d');"
+    "x.fillText('cap',4,12);rec('canvas2d',d.toDataURL().length>30);}catch(e){rec('canvas2d',String(e))}"
+    "rec('subtle',!!(crypto&&crypto.subtle&&crypto.subtle.digest));"
+    "rec('getRandomValues',typeof crypto.getRandomValues==='function');"
+    "rec('wasmObj',typeof WebAssembly==='object'||typeof WebAssembly==='function');"
+    "rec('workerCtor',typeof Worker==='function');"
+    "rec('msgChannel',typeof MessageChannel==='function');"
+    "rec('hasFocus',typeof document.hasFocus==='function');"
+    "rec('visibility',document.visibilityState);names=names.filter(function(n){return n!=='visibility'});"
+    "rec('hidden',document.hidden);names=names.filter(function(n){return n!=='hidden'});"
+    "rec('broadcastChannel','BroadcastChannel' in window);"
+    "rec('hwConcurrency',typeof navigator.hardwareConcurrency==='number');"
+    "rec('deviceMemory',navigator.deviceMemory===undefined?'missing':navigator.deviceMemory);"
+    "names=names.filter(function(n){return n!=='deviceMemory'});"
+    "rec('maxTouchPoints',navigator.maxTouchPoints===undefined?'missing':navigator.maxTouchPoints);"
+    "names=names.filter(function(n){return n!=='maxTouchPoints'});"
+    "rec('plugins',!!navigator.plugins?navigator.plugins.length:'missing');"
+    "names=names.filter(function(n){return n!=='plugins'});"
+    "rec('webdriver',navigator.webdriver);names=names.filter(function(n){return n!=='webdriver'});"
+    "rec('chrome',!!window.chrome);names=names.filter(function(n){return n!=='chrome'});"
+    "try{rec('tz',Intl.DateTimeFormat().resolvedOptions().timeZone||'empty');"
+    "names=names.filter(function(n){return n!=='tz'});}catch(e){rec('tz',String(e))}"
+    "try{rec('eval',window.eval('1+1')===2);}catch(e){rec('eval',String(e))}"
+    "}catch(e){out.fatal=String(e);names.push('fatal');}"
+    "paint();"
+    "try{var ch=new MessageChannel();var w=new Worker('/challenge-caps-worker.js');"
+    "var done=false;ch.port2.onmessage=function(ev){done=true;"
+    "var d=ev.data;out.workerFetch=d.fetch;out.workerSubtle=d.cryptoSubtle;"
+    "out.workerStreaming=d.instantiateStreaming;out.workerWasm=d.wasm;"
+    "if(d.wasmBuffered!==undefined)out.workerWasmBuffered=d.wasmBuffered;"
+    "if(d.workerErr)out.workerErr=d.workerErr;"
+    "if(d.fetch!==true)names.push('workerFetch');"
+    "if(d.cryptoSubtle!==true)names.push('workerSubtle');"
+    "if(d.instantiateStreaming!==true)names.push('workerStreaming');"
+    "if(d.wasm!==true&&d.wasmBuffered!==true)names.push('workerWasm');"
+    "names.push.apply(names,[]);paint();};"
+    "w.postMessage({port:ch.port1},[ch.port1]);"
+    "w.onerror=function(e){out.workerError=String(e.message||e);names.push('workerError');paint();};"
+    "setTimeout(function(){if(!done){out.workerTimeout=true;names.push('workerTimeout');paint();}},8000);"
+    "}catch(e){out.workerThrow=String(e);names.push('workerThrow');paint();}"
+    "</script>",
+)
+
+# Broad API-surface probe for site-compatibility triage. Each entry tries to exercise the API
+# the way a modern app bundle does at boot (not just existence): missing globals, missing methods
+# on present interfaces, and methods that throw are all reported. Title: APIS:ok or
+# APIS:fail:<comma-separated names>; the JSON detail is in the page body.
+API_PROBE_PAGE = page(
+    "APIS:running",
+    "<pre id='out'>probing</pre>"
+    "<script>"
+    "var results={},fails=[];"
+    "function t(name,fn){try{var r=fn();results[name]=r===true?'ok':String(r);"
+    "if(r!==true)fails.push(name);}catch(e){results[name]='THROW:'+e;fails.push(name);}}"
+    "function paint(){document.getElementById('out').textContent=JSON.stringify(results,null,1);"
+    "document.title='APIS:'+(fails.length?'fail':'ok');"
+    "try{fetch('/api-probe-report',{method:'POST',body:JSON.stringify(results)}).catch(function(){});}catch(e){}}"
+    "t('structuredClone',function(){return typeof structuredClone==='function'?structuredClone({a:1}).a===1:'missing'});"
+    "t('sendBeacon',function(){return typeof navigator.sendBeacon==='function'});"
+    "t('scrollRestoration',function(){return 'scrollRestoration' in history});"
+    "t('randomUUID',function(){return typeof crypto.randomUUID==='function'});"
+    "t('cryptoSubtle',function(){return !!(crypto.subtle&&crypto.subtle.digest)});"
+    "t('documentFonts',function(){return typeof document.fonts!=='undefined'});"
+    "t('fontFaceCtor',function(){return typeof FontFace==='function'});"
+    "t('fontFaceSetLoad',function(){return typeof document.fonts!=='undefined'&&typeof document.fonts.load==='function'});"
+    "t('matchMediaAE',function(){var m=matchMedia('(min-width:1px)');return typeof m.addEventListener==='function'});"
+    "t('matchMediaAL',function(){var m=matchMedia('(min-width:1px)');return typeof m.addListener==='function'});"
+    "t('resizeObserver',function(){return typeof ResizeObserver==='function'});"
+    "t('visualViewport',function(){return typeof visualViewport!=='undefined'});"
+    "t('navigationAPI',function(){return typeof navigation!=='undefined'});"
+    "t('schedulerPostTask',function(){return typeof scheduler!=='undefined'&&typeof scheduler.postTask==='function'});"
+    "t('cookieStore',function(){return typeof cookieStore!=='undefined'});"
+    "t('trustedTypes',function(){return typeof trustedTypes!=='undefined'});"
+    "t('customElements',function(){return typeof customElements!=='undefined'});"
+    "t('attachShadow',function(){return typeof Element.prototype.attachShadow==='function'});"
+    "t('elementAnimate',function(){return typeof Element.prototype.animate==='function'});"
+    "t('indexedDBOpen',function(){return typeof indexedDB!=='undefined'&&typeof indexedDB.open==='function'});"
+    "t('localStorage',function(){localStorage.setItem('k','1');var v=localStorage.getItem('k')==='1';localStorage.removeItem('k');return v});"
+    "t('sessionStorage',function(){sessionStorage.setItem('k','1');var v=sessionStorage.getItem('k')==='1';sessionStorage.removeItem('k');return v});"
+    "t('caches',function(){return typeof caches!=='undefined'});"
+    "t('serviceWorker',function(){return 'serviceWorker' in navigator});"
+    "t('sharedWorker',function(){return typeof SharedWorker==='function'});"
+    "t('createImageBitmap',function(){return typeof createImageBitmap==='function'});"
+    "t('offscreenCanvas',function(){return typeof OffscreenCanvas==='function'});"
+    "t('webgl2',function(){return typeof WebGL2RenderingContext==='function'});"
+    "t('readableStream',function(){return typeof ReadableStream==='function'});"
+    "t('textDecoderStream',function(){return typeof TextDecoderStream==='function'});"
+    "t('compressionStream',function(){return typeof CompressionStream==='function'});"
+    "t('abortSignalTimeout',function(){return typeof AbortSignal!=='undefined'&&typeof AbortSignal.timeout==='function'});"
+    "t('abortSignalAny',function(){return typeof AbortSignal!=='undefined'&&typeof AbortSignal.any==='function'});"
+    "t('urlCanParse',function(){return typeof URL.canParse==='function'});"
+    "t('intlSegmenter',function(){return typeof Intl!=='undefined'&&typeof Intl.Segmenter==='function'});"
+    "t('intlListFormat',function(){return typeof Intl!=='undefined'&&typeof Intl.ListFormat==='function'});"
+    "t('intlRelativeTime',function(){return typeof Intl!=='undefined'&&typeof Intl.RelativeTimeFormat==='function'});"
+    "t('performanceObserver',function(){return typeof PerformanceObserver==='function'});"
+    "t('performanceMark',function(){return typeof performance!=='undefined'&&typeof performance.mark==='function'});"
+    "t('reportError',function(){return typeof reportError==='function'});"
+    "t('requestIdle',function(){return typeof requestIdleCallback==='function'});"
+    "t('notification',function(){return typeof Notification==='function'});"
+    "t('mediaSource',function(){return typeof MediaSource==='function'});"
+    "t('mediaRecorder',function(){return typeof MediaRecorder==='function'});"
+    "t('rtcPeer',function(){return typeof RTCPeerConnection==='function'});"
+    "t('audioContext',function(){return typeof AudioContext==='function'||typeof webkitAudioContext==='function'});"
+    "t('speechSynth',function(){return typeof speechSynthesis!=='undefined'});"
+    "t('wakeLock',function(){return typeof navigator.wakeLock!=='undefined'});"
+    "t('userAgentData',function(){return typeof navigator.userAgentData!=='undefined'});"
+    "t('connection',function(){return typeof navigator.connection!=='undefined'});"
+    "t('clipboard',function(){return typeof navigator.clipboard!=='undefined'});"
+    "t('share',function(){return typeof navigator.share!=='undefined'});"
+    "t('vibrate',function(){return typeof navigator.vibrate==='function'});"
+    "t('getGamepads',function(){return typeof navigator.getGamepads==='function'});"
+    "t('permissions',function(){return typeof navigator.permissions!=='undefined'&&typeof navigator.permissions.query==='function'});"
+    "t('credentials',function(){return typeof navigator.credentials!=='undefined'});"
+    "t('locks',function(){return typeof navigator.locks!=='undefined'});"
+    "t('storage',function(){return typeof navigator.storage!=='undefined'});"
+    "t('mediaDevices',function(){return typeof navigator.mediaDevices!=='undefined'});"
+    "t('mediaSession',function(){return typeof navigator.mediaSession!=='undefined'});"
+    "t('xr',function(){return typeof navigator.xr!=='undefined'});"
+    "t('gpu',function(){return typeof navigator.gpu!=='undefined'});"
+    "t('presentation',function(){return typeof navigator.presentation!=='undefined'});"
+    "t('usbSerialBt',function(){return typeof navigator.usb!=='undefined'||typeof navigator.serial!=='undefined'||typeof navigator.bluetooth!=='undefined'});"
+    "t('documentEvaluate',function(){return typeof document.evaluate==='function'});"
+    "t('caretRange',function(){return typeof document.caretRangeFromPoint==='function'||typeof document.caretPositionFromPoint==='function'});"
+    "t('execCommand',function(){return typeof document.execCommand==='function'});"
+    "t('getSelection',function(){return typeof window.getSelection==='function'});"
+    "t('scrollIntoViewOpts',function(){var d=document.createElement('div');document.body.appendChild(d);d.scrollIntoView({block:'center',behavior:'instant'});return true});"
+    "t('scrollToOpts',function(){window.scrollTo({top:0,left:0,behavior:'instant'});return true});"
+    "t('cssSupports',function(){return typeof CSS!=='undefined'&&typeof CSS.supports==='function'&&CSS.supports('display','block')});"
+    "t('cssEscape',function(){return typeof CSS!=='undefined'&&typeof CSS.escape==='function'});"
+    "t('cssHighlights',function(){return typeof CSS!=='undefined'&&typeof CSS.highlights!=='undefined'});"
+    "t('domParserHtml',function(){var d=new DOMParser().parseFromString('<p>x</p>','text/html');return d.querySelector('p').textContent==='x'});"
+    "t('domParserSvg',function(){var d=new DOMParser().parseFromString('<svg/>','image/svg+xml');return !!d.documentElement});"
+    "t('xmlSerializer',function(){return typeof XMLSerializer==='function'});"
+    "t('treeWalker',function(){return typeof document.createTreeWalker==='function'});"
+    "t('rangeRect',function(){var r=document.createRange();r.selectNode(document.body);return typeof r.getBoundingClientRect==='function'});"
+    "t('elemFromPoint',function(){return typeof document.elementFromPoint==='function'});"
+    "t('getComputedStylePs',function(){return typeof getComputedStyle==='function'&&!!getComputedStyle(document.body,'::after')});"
+    "t('fileReader',function(){return typeof FileReader==='function'});"
+    "t('formData',function(){var f=new FormData();f.append('a','1');return f.get('a')==='1'});"
+    "t('blobText',function(){return typeof Blob.prototype.text==='function'});"
+    "t('arrayBufferAsync',function(){return typeof Blob.prototype.arrayBuffer==='function'});"
+    "t('imageDecode',function(){return typeof Image!=='undefined'&&typeof new Image().decode==='function'});"
+    "t('videoCanPlay',function(){var v=document.createElement('video');return typeof v.canPlayType==='function'});"
+    "t('audioTag',function(){return typeof Audio==='function'});"
+    "t('fullscreen',function(){return typeof document.documentElement.requestFullscreen==='function'});"
+    "t('pointerEvents',function(){return typeof PointerEvent==='function'});"
+    "t('touchEvents',function(){return typeof TouchEvent==='function'});"
+    "t('inputEvent',function(){return typeof InputEvent==='function'});"
+    "t('toggleEvent',function(){return typeof ToggleEvent==='function'});"
+    "t('submitEvent',function(){return typeof SubmitEvent==='function'});"
+    "t('popover',function(){return typeof Element.prototype.showPopover==='function'});"
+    "t('dialog',function(){return typeof HTMLDialogElement==='function'});"
+    "t('lazyLoadableScript',function(){return typeof HTMLScriptElement!=='undefined'&&typeof HTMLScriptElement.supports==='function'});"
+    "t('importMap',function(){return typeof HTMLScriptElement!=='undefined'&&typeof HTMLScriptElement.supports==='function'&&HTMLScriptElement.supports('importmap')});"
+    "t('errorCapture',function(){return typeof Error.captureStackTrace==='function'||true});"
+    "t('errorCause',function(){return new Error('x',{cause:'y'}).cause==='y'});"
+    "t('objectHasOwn',function(){return typeof Object.hasOwn==='function'});"
+    "t('arrayAt',function(){return typeof Array.prototype.at==='function'});"
+    "t('arrayFindLast',function(){return typeof Array.prototype.findLast==='function'});"
+    "t('stringReplaceAll',function(){return typeof String.prototype.replaceAll==='function'});"
+    "t('promiseAny',function(){return typeof Promise.any==='function'});"
+    "t('objectGroupBy',function(){return typeof Object.groupBy==='function'});"
+    "t('mapGroupBy',function(){return typeof Map.groupBy==='function'});"
+    "t('promiseWithResolvers',function(){return typeof Promise.withResolvers==='function'});"
+    "t('setMethods',function(){return typeof Set.prototype.intersection==='function'});"
+    "t('iteratorHelpers',function(){return typeof Iterator!=='undefined'&&typeof Iterator.from==='function'});"
+    "t('arrayFromAsync',function(){return typeof Array.fromAsync==='function'});"
+    "t('regexpV',function(){try{return /\\p{L}/v.test('a')}catch(e){return 'missing'}});"
+    "t('supArrayProto',function(){return typeof Array.prototype.toSorted==='function'});"
+    "paint();"
+    "</script>",
+)
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -253,6 +466,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page("EMPTY", ""))
         if path == "/private.html":
             return self.send(200, page("PRIVATE", "<p>PRIVATE-PAGE-TEXT</p>"))
+        if path == "/challenge-caps.html":
+            return self.send(200, CHALLENGE_CAPS_PAGE)
+        if path == "/api-probe.html":
+            return self.send(200, API_PROBE_PAGE)
+        if path == "/challenge-caps-worker.js":
+            return self.send(200, CHALLENGE_CAPS_WORKER, "application/javascript")
+        if path == "/challenge-caps.wasm":
+            # Deliberately text/html, like Vercel serves challenge.v2.wasm: streaming compilation
+            # must reject it and the worker has to fall back to buffering.
+            return self.send(200, b"\x00asm\x01\x00\x00\x00", "text/html; charset=utf-8")
         if path == "/auth.html":
             expected = "Basic " + base64.b64encode(":".join(SIGN_IN).encode()).decode()
             if self.headers.get("Authorization") == expected:
@@ -322,6 +545,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 faults[service] = [kind, int(query.get("count", ["1"])[0])]
             return self.send_json(200, {"ok": True})
 
+        if path == "/api-probe-report":
+            self.record({"service": "api-probe", "results": json.loads(raw or b"{}")})
+            return self.send_json(200, {"ok": True})
         if path == "/keep/api/v1/bookmarks":
             return self.karakeep_create(raw)
         if path == "/hister/api/add":

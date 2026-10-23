@@ -32,7 +32,7 @@ Software emulation is slow and timing-sensitive: Android's own framework timed o
 
 ## 2. Servo selection and integration decision
 
-**Pinned:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from the release's source tarball (SHA-256 `1d828f99…e0c6`, full value in [BUILDING.md](BUILDING.md#pinned-inputs)) with three small patches.
+**Pinned:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from the release's source tarball (SHA-256 `1d828f99…e0c6`, full value in [BUILDING.md](BUILDING.md#pinned-inputs)) with six small patches.
 
 - **Why v0.6.0:** it is the base of Servo's current long-term-support line (SpiderMonkey ESR 153); the LTS policy covers the `servo` library crate, which is what Combray embeds, and not servoshell. v0.7.0 (5 October) is newer but will be superseded monthly. Moving to a later 0.6.x LTS update means re-applying those patches.
 - **Why not upstream's Android shell:** servoshell's JNI layer drives one active WebView at a time, reports no tab or document identity, and has no JavaScript evaluation entry point (source inspection, confirmed by the research verification). Extending it would mean carrying a fork of a demo shell outside LTS scope.
@@ -40,6 +40,9 @@ Software emulation is slow and timing-sensitive: Android's own framework timed o
   - `0001` (build only): the release tarball's `vendor/` directory cannot build the mozjs glue crates, because their build scripts run `cbindgen` → `cargo metadata` against each crate's own `Cargo.lock` (`encoding_rs` 0.8.41 is not vendored). The patch drops the vendor redirection; Cargo then downloads the same locked versions from crates.io and checks their checksums.
   - `0002` (embedder API): document identity and a crash fix, described in [section 4](#4-servo-patch-0002-document-identity).
   - `0003` (diagnostics): log WebRender render errors instead of discarding them.
+  - `0004` (net): persist cookies, HSTS and HTTP auth on request (section 13).
+  - `0005` (WebGL): implement the `WEBGL_debug_renderer_info` extension (section 13).
+  - `0006` (IndexedDB): scope `object_store_index.name` uniqueness per object store (section 13).
 
 `native/Cargo.lock` starts from Servo's release lockfile, so every shared dependency stays at the release's versions.
 
@@ -264,8 +267,16 @@ The app (M1–M3) uses the same bridge, thread model and capture path. Changes s
 | `control_shown {control, kind}` / `control_hidden` and `respondToControl(control, json)` for `<select>` pickers, `alert`/`confirm`/`prompt` and `<input type=file>` | The engine dropped them, so Servo answered with defaults: dropdowns could not change, `confirm()` returned false and uploads were impossible. The engine keeps each Servo handle until the app answers or the page withdraws it; page strings are bounded (4,000 characters, 2,000 options) | `native/src/controls.rs`, `engine.rs` |
 | `contextClick(x, y)` and `link_menu {link, image}` | A long-press becomes a secondary click, so Servo fires `contextmenu` and, unless the page cancels it, offers its context menu; the app acts on the link or image address itself (open in a new tab through the address policy, copy, share) and dismisses Servo's menu. Menus without a link or image (editing actions) are dropped: the app has no clipboard bridge. The hold is timed from when the app handled the press, not from the event's timestamp (as Android's `GestureDetector` does), so after a main-thread stall a tap's queued lift still cancels it | `native/src/engine.rs`, `EngineSurfaceView.kt` |
 | `sign_in {origin, proxy}` and `credentials` answers | Servo's `request_authentication` (navigations only) becomes a page control naming the server's origin; the app's dialog answers with a username and password or cancels, and a dropped request loads the server's 401 page. Credentials are never stored by Combray; Servo keeps accepted ones for the session. Parse errors and `Debug` output leave out the password | `native/src/controls.rs`, `native/src/engine.rs`, `PageControlDialog.kt` |
+| Patch 0005: `WEBGL_debug_renderer_info` extension | Vercel's security checkpoint reads `UNMASKED_VENDOR_WEBGL`/`UNMASKED_RENDERER_WEBGL` unconditionally; without the extension the probe threw and the page failed with Code 11. The patch adds the WebIDL, the extension object, and a `WebGLCommand` that returns the real GL vendor/renderer strings | `native/servo/patches/0005-*` (7 files) |
+| Servo preference `dom_indexeddb_enabled` on | Off by default in Servo 0.6.0. Mastodon's `render-*.js` and a `blob:` worker both threw `indexedDB is not defined` at startup, and the page showed its browser-compatibility error | `native/src/engine.rs` |
+| Patch 0006: `object_store_index` uniqueness scoped to `(object_store_id, name)` | The v0.6.0 schema declared `name unique` globally; two object stores in one database cannot share an index name (IndexedDB requires uniqueness only within a store). Mastodon's upgrade transaction aborted with `UNIQUE constraint failed: object_store_index.name` | `native/servo/patches/0006-*` (1 file) |
+| Servo preference `dom_visual_viewport_enabled` on | Off by default. Mastodon's `application-*.js` reads `visualViewport` as a bare identifier for mobile layout; without the global the reference throws even under `?.` | `native/src/engine.rs` |
 
 Evidence on the emulator (`scripts/check-app.sh`, [BUILDING.md](BUILDING.md#emulator-and-checks)): after the app went to the background, the cookie jar on disk contained a cookie set moments earlier (`ProcessDeathTest#prepare`, passed), and after a forced stop and relaunch Servo sent that cookie again (`ProcessDeathTest#verify`, passed in run `run9`).
+
+Recovered notes from the previous session report that, with patches 0005 and 0006 and the preferences above, `https://www.typeui.sh/micro-interactions` passed Vercel's security checkpoint, `https://mastodon.social/` rendered a post, and `/challenge-caps.html` reported the emulator's WebGL renderer. These observations have not been rerun during recovery.
+
+Recovered Economist investigation notes did not reproduce the reported exception: live access was blocked, while an archived build (`5FfBjPvqZdr2nDh9UJDIa`) hydrated on the emulator. This does not establish live-site compatibility.
 
 Limitations found while building the app:
 
@@ -273,6 +284,8 @@ Limitations found while building the app:
 - **Screen density is read once.** The HiDPI factor passed to Servo at startup is not updated when the density changes in the same process (display size setting, moving between screens); pages then render at the old scale until the app restarts.
 - **Profile writes block the engine thread** for the duration of three small file writes; the five-minute interval keeps that rare.
 - **Emulator compositor.** After about 2.5 hours of headless running, the reference emulator's screenshots turned all black, the launcher included, while the app kept working. This was an emulator problem, not an engine one; `check-app.sh` now detects it before running checks.
+- **IndexedDB schema fix is not retroactive.** Patch 0006 changes database creation only. Existing databases retain the old constraint; migration remains unresolved. Do not clear a user's profile to apply this patch.
+- **Mastodon emoji support remains incomplete.** The previous session reported `getFromIndex is not a function`, with unicode emoji as the fallback.
 
 ## 14. Sol review validation, 21 October 2026
 

@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Recovered draft Servo compatibility work: `WEBGL_debug_renderer_info`,
+  IndexedDB and visual viewport support, with diagnostic fixture pages.
+  Existing IndexedDB databases still need a migration before release.
 - Long-press the address chip to copy the exact current tab URL to the
   clipboard, with an accessible "Copy address" action; a tap still opens the
   editor and a blank tab offers no copy action. Copied addresses are marked

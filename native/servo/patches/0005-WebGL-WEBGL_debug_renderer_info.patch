@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Combray <combray@localhost>
+Date: Thu, 22 Oct 2026 20:30:00 +0000
+Subject: [PATCH] WebGL: implement WEBGL_debug_renderer_info
+
+The Vercel security checkpoint's telemetry probe reads
+getExtension('WEBGL_debug_renderer_info').UNMASKED_* unconditionally; without the
+extension that dereference throws and the challenge reports a client-side
+browser failure (badInfo 1.1, shown to the user as Code 11).
+
+The extension is always supported (no underlying GL requirement) and unlocks
+UNMASKED_VENDOR_WEBGL/UNMASKED_RENDERER_WEBGL, which getParameter resolves to
+the real GL strings on the WebGL thread via a new GetParameterString command.
+
+---
+ components/script/dom/webgl/extensions/ext/mod.rs  |  1 +
+ .../webgl/extensions/ext/webgldebugrendererinfo.rs | 53 ++++++++++++++++++++++
+ .../script/dom/webgl/extensions/extensions.rs      | 13 ++++--
+ .../script/dom/webgl/webglrenderingcontext.rs      | 17 +++++++
+ .../webidls/WEBGLDebugRendererInfo.webidl          | 15 ++++++
+ components/shared/canvas/webgl.rs                  |  2 +
+ components/webgl/webgl_thread.rs                   |  3 ++
+ 7 files changed, 101 insertions(+), 3 deletions(-)
+
+diff --git a/components/script/dom/webgl/extensions/ext/mod.rs b/components/script/dom/webgl/extensions/ext/mod.rs
+index 14f9d08..15270b4 100644
+--- a/components/script/dom/webgl/extensions/ext/mod.rs
++++ b/components/script/dom/webgl/extensions/ext/mod.rs
+@@ -21,3 +21,4 @@ pub(crate) mod oesvertexarrayobject;
+ pub(crate) mod webglcolorbufferfloat;
+ pub(crate) mod webglcompressedtextureetc1;
+ pub(crate) mod webglcompressedtextures3tc;
++pub(crate) mod webgldebugrendererinfo;
+diff --git a/components/script/dom/webgl/extensions/ext/webgldebugrendererinfo.rs b/components/script/dom/webgl/extensions/ext/webgldebugrendererinfo.rs
+new file mode 100644
+index 0000000..8d59a55
+--- /dev/null
++++ b/components/script/dom/webgl/extensions/ext/webgldebugrendererinfo.rs
+@@ -0,0 +1,53 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
++
++use dom_struct::dom_struct;
++use js::context::JSContext;
++use script_bindings::reflector::{Reflector, reflect_dom_object_with_cx};
++
++use super::{WebGLExtension, WebGLExtensionSpec, WebGLExtensions};
++use crate::dom::bindings::codegen::Bindings::WEBGLDebugRendererInfoBinding::WEBGLDebugRendererInfoConstants;
++use crate::dom::bindings::reflector::DomGlobal;
++use crate::dom::bindings::root::DomRoot;
++use crate::dom::webgl::webglrenderingcontext::WebGLRenderingContext;
++
++#[dom_struct]
++pub(crate) struct WEBGLDebugRendererInfo {
++    reflector_: Reflector,
++}
++
++impl WEBGLDebugRendererInfo {
++    fn new_inherited() -> Self {
++        Self {
++            reflector_: Reflector::new(),
++        }
++    }
++}
++
++impl WebGLExtension for WEBGLDebugRendererInfo {
++    type Extension = Self;
++
++    fn new(cx: &mut JSContext, ctx: &WebGLRenderingContext) -> DomRoot<Self> {
++        reflect_dom_object_with_cx(Box::new(Self::new_inherited()), &*ctx.global(), cx)
++    }
++
++    fn spec() -> WebGLExtensionSpec {
++        WebGLExtensionSpec::All
++    }
++
++    // This extension is a WebGL-level construct with no underlying GL requirement; every
++    // conformant WebGL implementation is expected to offer it.
++    fn is_supported(_ext: &WebGLExtensions) -> bool {
++        true
++    }
++
++    fn enable(ext: &WebGLExtensions) {
++        ext.enable_get_parameter_name(WEBGLDebugRendererInfoConstants::UNMASKED_VENDOR_WEBGL);
++        ext.enable_get_parameter_name(WEBGLDebugRendererInfoConstants::UNMASKED_RENDERER_WEBGL);
++    }
++
++    fn name() -> &'static str {
++        "WEBGL_debug_renderer_info"
++    }
++}
+diff --git a/components/script/dom/webgl/extensions/extensions.rs b/components/script/dom/webgl/extensions/extensions.rs
+index e3455f0..e2f3df7 100644
+--- a/components/script/dom/webgl/extensions/extensions.rs
++++ b/components/script/dom/webgl/extensions/extensions.rs
+@@ -23,6 +23,7 @@ use crate::dom::bindings::codegen::Bindings::EXTTextureFilterAnisotropicBinding:
+ use crate::dom::bindings::codegen::Bindings::OESStandardDerivativesBinding::OESStandardDerivativesConstants;
+ use crate::dom::bindings::codegen::Bindings::OESTextureHalfFloatBinding::OESTextureHalfFloatConstants;
+ use crate::dom::bindings::codegen::Bindings::OESVertexArrayObjectBinding::OESVertexArrayObjectConstants;
++use crate::dom::bindings::codegen::Bindings::WEBGLDebugRendererInfoBinding::WEBGLDebugRendererInfoConstants;
+ use crate::dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::WebGLRenderingContextConstants as constants;
+ use crate::dom::bindings::trace::JSTraceable;
+ use crate::dom::webgl::extensions::extcolorbufferhalffloat::EXTColorBufferHalfFloat;
+@@ -51,17 +52,22 @@ const DEFAULT_NOT_FILTERABLE_TEX_TYPES: [GLenum; 2] = [
+ // Param names that are implemented for glGetParameter in a WebGL 1.0 context
+ // but must trigger a InvalidEnum error until the related WebGL Extensions are enabled.
+ // Example: https://www.khronos.org/registry/webgl/extensions/OES_standard_derivatives/
+-const DEFAULT_DISABLED_GET_PARAMETER_NAMES_WEBGL1: [GLenum; 3] = [
++const DEFAULT_DISABLED_GET_PARAMETER_NAMES_WEBGL1: [GLenum; 5] = [
+     EXTTextureFilterAnisotropicConstants::MAX_TEXTURE_MAX_ANISOTROPY_EXT,
+     OESStandardDerivativesConstants::FRAGMENT_SHADER_DERIVATIVE_HINT_OES,
+     OESVertexArrayObjectConstants::VERTEX_ARRAY_BINDING_OES,
++    WEBGLDebugRendererInfoConstants::UNMASKED_VENDOR_WEBGL,
++    WEBGLDebugRendererInfoConstants::UNMASKED_RENDERER_WEBGL,
+ ];
+ 
+ // Param names that are implemented for glGetParameter in a WebGL 2.0 context
+ // but must trigger a InvalidEnum error until the related WebGL Extensions are enabled.
+ // Example: https://www.khronos.org/registry/webgl/extensions/EXT_texture_filter_anisotropic/
+-const DEFAULT_DISABLED_GET_PARAMETER_NAMES_WEBGL2: [GLenum; 1] =
+-    [EXTTextureFilterAnisotropicConstants::MAX_TEXTURE_MAX_ANISOTROPY_EXT];
++const DEFAULT_DISABLED_GET_PARAMETER_NAMES_WEBGL2: [GLenum; 3] = [
++    EXTTextureFilterAnisotropicConstants::MAX_TEXTURE_MAX_ANISOTROPY_EXT,
++    WEBGLDebugRendererInfoConstants::UNMASKED_VENDOR_WEBGL,
++    WEBGLDebugRendererInfoConstants::UNMASKED_RENDERER_WEBGL,
++];
+ 
+ // Param names that are implemented for glGetTexParameter in a WebGL 1.0 context
+ // but must trigger a InvalidEnum error until the related WebGL Extensions are enabled.
+@@ -431,6 +437,7 @@ impl WebGLExtensions {
+         self.register::<ext::webglcolorbufferfloat::WEBGLColorBufferFloat>();
+         self.register::<ext::webglcompressedtextureetc1::WEBGLCompressedTextureETC1>();
+         self.register::<ext::webglcompressedtextures3tc::WEBGLCompressedTextureS3TC>();
++        self.register::<ext::webgldebugrendererinfo::WEBGLDebugRendererInfo>();
+     }
+ 
+     pub(crate) fn enable_element_index_uint(&self) {
+diff --git a/components/script/dom/webgl/webglrenderingcontext.rs b/components/script/dom/webgl/webglrenderingcontext.rs
+index 9f0a1fe..b750e09 100644
+--- a/components/script/dom/webgl/webglrenderingcontext.rs
++++ b/components/script/dom/webgl/webglrenderingcontext.rs
+@@ -43,6 +43,7 @@ use crate::dom::bindings::buffer_source::get_buffer_source_slice;
+ use crate::dom::bindings::codegen::Bindings::ANGLEInstancedArraysBinding::ANGLEInstancedArraysConstants;
+ use crate::dom::bindings::codegen::Bindings::EXTBlendMinmaxBinding::EXTBlendMinmaxConstants;
+ use crate::dom::bindings::codegen::Bindings::OESVertexArrayObjectBinding::OESVertexArrayObjectConstants;
++use crate::dom::bindings::codegen::Bindings::WEBGLDebugRendererInfoBinding::WEBGLDebugRendererInfoConstants;
+ use crate::dom::bindings::codegen::Bindings::WebGL2RenderingContextBinding::WebGL2RenderingContextConstants;
+ use crate::dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::{
+     TexImageSource, WebGLContextAttributes, WebGLRenderingContextConstants as constants,
+@@ -2293,6 +2294,22 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
+                 "Mozilla/Servo".to_jsval(cx, retval);
+                 return;
+             },
++            WEBGLDebugRendererInfoConstants::UNMASKED_VENDOR_WEBGL |
++            WEBGLDebugRendererInfoConstants::UNMASKED_RENDERER_WEBGL => {
++                // Reaching this arm means WEBGL_debug_renderer_info is enabled: the unmasked
++                // names are in the disabled-parameter set until it is.
++                let pname = if parameter ==
++                    WEBGLDebugRendererInfoConstants::UNMASKED_VENDOR_WEBGL
++                {
++                    glow::VENDOR
++                } else {
++                    glow::RENDERER
++                };
++                let (sender, receiver) = webgl_channel().unwrap();
++                self.send_command(WebGLCommand::GetParameterString(pname, sender));
++                DOMString::from(receiver.recv().unwrap()).to_jsval(cx, retval);
++                return;
++            },
+             constants::SHADING_LANGUAGE_VERSION => {
+                 "WebGL GLSL ES 1.0".to_jsval(cx, retval);
+                 return;
+diff --git a/components/script_bindings/webidls/WEBGLDebugRendererInfo.webidl b/components/script_bindings/webidls/WEBGLDebugRendererInfo.webidl
+new file mode 100644
+index 0000000..f1d1ff9
+--- /dev/null
++++ b/components/script_bindings/webidls/WEBGLDebugRendererInfo.webidl
+@@ -0,0 +1,15 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
++// skip-unless CARGO_FEATURE_WEBGL
++
++/*
++ * WebGL IDL definitions from the Khronos specification:
++ * https://www.khronos.org/registry/webgl/extensions/WEBGL_debug_renderer_info/
++ */
++
++[LegacyNoInterfaceObject, Exposed=Window]
++interface WEBGLDebugRendererInfo {
++  const GLenum UNMASKED_VENDOR_WEBGL = 0x9245;
++  const GLenum UNMASKED_RENDERER_WEBGL = 0x9246;
++};
+diff --git a/components/shared/canvas/webgl.rs b/components/shared/canvas/webgl.rs
+index c5c6d65..758a308 100644
+--- a/components/shared/canvas/webgl.rs
++++ b/components/shared/canvas/webgl.rs
+@@ -320,6 +320,8 @@ pub enum WebGLCommand {
+     FramebufferRenderbuffer(u32, u32, u32, Option<WebGLRenderbufferId>),
+     FramebufferTexture2D(u32, u32, u32, Option<WebGLTextureId>, i32),
+     GetExtensions(GenericSender<String>),
++    /// A GL string parameter (VENDOR, RENDERER, ...) read on the WebGL thread.
++    GetParameterString(u32, GenericSender<String>),
+     GetShaderPrecisionFormat(u32, u32, GenericSender<(i32, i32, i32)>),
+     GetFragDataLocation(WebGLProgramId, String, GenericSender<i32>),
+     GetUniformLocation(WebGLProgramId, String, GenericSender<i32>),
+diff --git a/components/webgl/webgl_thread.rs b/components/webgl/webgl_thread.rs
+index d8328c7..623b078 100644
+--- a/components/webgl/webgl_thread.rs
++++ b/components/webgl/webgl_thread.rs
+@@ -1414,6 +1414,9 @@ impl WebGLImpl {
+                 Self::shader_precision_format(gl, shader_type, precision_type, chan)
+             },
+             WebGLCommand::GetExtensions(ref chan) => Self::get_extensions(gl, chan),
++            WebGLCommand::GetParameterString(param, ref chan) => {
++                let _ = chan.send(unsafe { gl.get_parameter_string(param) });
++            },
+             WebGLCommand::GetFragDataLocation(program_id, ref name, ref sender) => {
+                 let location = unsafe {
+                     gl.get_frag_data_location(program_id.glow(), &to_name_in_compiled_shader(name))
