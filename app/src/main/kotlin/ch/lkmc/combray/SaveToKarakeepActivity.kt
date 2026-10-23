@@ -51,13 +51,14 @@ class SaveToKarakeepActivity : Activity() {
         }
 
         // A subject that only holds the link is no title: Karakeep then uses the page's own. The
-        // sharing app chooses the subject, so it is one bounded line, below the real site.
+        // sharing app chooses the subject, so it is one bounded line, quoted below the real site:
+        // "accounts.google.com" must not read as a second site name.
         val title = IncomingIntents.textExtra(intent, Intent.EXTRA_SUBJECT)
             ?.takeIf { IncomingIntents.firstWebAddress(it) == null }
             ?.let(::shareTitle)
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.share_save_confirm)
-            .setMessage(listOfNotNull(displayHost(url), title).joinToString("\n"))
+            .setMessage(listOfNotNull(displayHost(url), title?.let { "\u201C$it\u201D" }).joinToString("\n"))
             // Its click is set below, where the button exists.
             .setPositiveButton(R.string.action_save, null)
             .setNegativeButton(R.string.action_cancel) { _, _ -> finish() }
@@ -85,6 +86,9 @@ class SaveToKarakeepActivity : Activity() {
     }
 
     // The end of the enter animation counts like focus, for a dialog whose focus is not reported.
+    // Focus can also come first, while the sending app's own enter animation still keeps the
+    // dialog almost transparent: this gate does not cover that, on Android versions that do not
+    // drop touches on a window still animating in.
     override fun onEnterAnimationComplete() {
         super.onEnterAnimationComplete()
         holdSave(enableLater = true)

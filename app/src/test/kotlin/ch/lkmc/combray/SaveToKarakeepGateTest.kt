@@ -90,6 +90,13 @@ class SaveToKarakeepGateTest {
     }
 
     @Test
+    fun theSharedSubjectIsQuotedBelowTheSite() {
+        val (_, dialog) = ask(share().putExtra(Intent.EXTRA_SUBJECT, "accounts.google.com"))
+        // The sending app picks the subject: quoted, it cannot pass for the site above it.
+        assertEquals("example.org\n\u201Caccounts.google.com\u201D", shadowOf(dialog).message.toString())
+    }
+
+    @Test
     fun saveWaitsAgainEachTimeTheDialogComesBackToFront() {
         val (_, dialog) = ask()
         val save = dialog.getButton(AlertDialog.BUTTON_POSITIVE)

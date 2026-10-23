@@ -209,6 +209,8 @@ class AddressPolicyTest {
             "admin:123456/x@nas",
             // Any word of a text with spaces.
             "Router: https://admin:hunter2@192.168.1.1", "see https://u:p@h", "(https://u:p@h)", "login admin:hunter2@nas please",
+            // Extra slashes after the scheme, and a link inside another link's query.
+            "see https:///admin:pw@nas", "see https:////admin:pw@192.168.1.1", "see https://a.example/r?u=https://admin:pw@nas",
         )
         for (input in withCredentials) {
             val interpretation = AddressPolicy.interpret(input)
@@ -220,6 +222,9 @@ class AddressPolicyTest {
         searches("follow https://mastodon.social/@proust")
         searches("write to alice@example.com today")
         searches("write mailto:alice@example.com today")
+        // What follows the "@" is no host and port: an image digest, not a password.
+        searches("docker pull nginx:1.25@sha256:4c0fdaa8b6341bfdeca5f18f7837462c80cff90527ee35ef185571e1c327beac")
+        searches("nginx:1.25@sha256:4c0fdaa8")
         // A five-digit port before a path with an "@" stays an address.
         assertEquals(AddressDecision.Navigate("https://nas:12345/@me"), primary("nas:12345/@me"))
     }

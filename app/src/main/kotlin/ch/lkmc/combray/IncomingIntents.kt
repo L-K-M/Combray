@@ -153,9 +153,14 @@ object IncomingIntents {
         }
     }
 
-    /** The first link in [text] if it must not leave as search text: refused, or carrying a token. */
-    private fun secretLink(text: String): String? =
-        firstWebAddress(text)?.takeIf { open(it) == null || SensitiveUrls.looksSensitive(it) }
+    /**
+     * The first link in [text] that must not leave as search text: refused, or carrying a token.
+     * Every link counts: a reset mail often has a help link before the one with the token.
+     */
+    private fun secretLink(text: String): String? = WEB_ADDRESS.findAll(text)
+        .map { it.value.substring(0, linkEnd(it.value)) }
+        .filter { it.substringAfter("://").isNotEmpty() }
+        .firstOrNull { open(it) == null || SensitiveUrls.looksSensitive(it) }
 
     private fun editNewTab(text: String): LaunchRequest.EditNewTab? = oneLine(text)?.let { LaunchRequest.EditNewTab(it) }
 

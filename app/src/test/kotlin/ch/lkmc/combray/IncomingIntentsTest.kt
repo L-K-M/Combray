@@ -151,6 +151,11 @@ class IncomingIntentsTest {
             LaunchRequest.EditNewTab("https://accounts.example/reset?token=abc123"),
             processText("Reset here https://accounts.example/reset?token=abc123 thanks"),
         )
+        // Also when a harmless link comes first, as in a reset mail with a help link.
+        assertEquals(
+            LaunchRequest.EditNewTab("https://accounts.example/reset?token=abc123"),
+            processText("See https://example.org/help or reset at https://accounts.example/reset?token=abc123"),
+        )
         // A link with nothing secret in it is searched with its text.
         assertEquals(Incoming.Open(AddressPolicy.kagiSearchUrl("what is https://example.org/a")), processText("what is https://example.org/a"))
     }

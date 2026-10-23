@@ -223,7 +223,11 @@ object AddressPolicy {
     private fun hasCredentials(word: String): Boolean {
         val colon = word.indexOf(':')
         if (colon < 0) return false
-        if (word.startsWith("//", colon + 1)) return authorityOf(word)?.contains('@') == true
+        // Every link in the word, with any number of slashes: "https:///admin:pw@nas" and
+        // "https://a.example/r?u=https://admin:pw@nas" send the password as well.
+        if (word.startsWith("//", colon + 1)) {
+            return word.split("://").drop(1).any { link -> link.trimStart('/', '\\').takeWhile { it !in URL_DELIMITERS }.contains('@') }
+        }
         if (word.substring(0, colon).lowercase() in EXTERNAL_SCHEMES) return false
         return hasSchemelessCredentials(word)
     }
@@ -234,11 +238,14 @@ object AddressPolicy {
      * "example.com/a:b@c" stays an address, and neither may a port ("localhost:3000/@me"), but
      * leading slashes ("//admin:pw@nas") do not hide it, and more digits than a port has
      * ("admin:123456/x@nas") are a password. What follows the "@" need not be a valid host:
-     * "admin:pw@nas!" would still send the password as a search.
+     * "admin:pw@nas!" would still send the password as a search. But a colon after it that starts
+     * no port ("nginx:1.25@sha256:4c0f…", an image digest) shows it is not an address at all.
      */
     private fun hasSchemelessCredentials(text: String): Boolean {
         val userInfo = text.trimStart('/', '\\').substringBeforeLast('@', missingDelimiterValue = "")
         if (':' !in userInfo || userInfo.substringBefore(':').any { it in URL_DELIMITERS }) return false
+        val host = text.substringAfterLast('@').takeWhile { it !in URL_DELIMITERS }
+        if (!host.startsWith('[') && ':' in host && !PORT.matches(host.substringAfter(':'))) return false
 
         val afterColon = userInfo.substringAfter(':')
         val port = afterColon.takeWhile { it.isDigit() }
