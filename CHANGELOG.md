@@ -188,15 +188,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- Pass swipes over empty fixed-position scroll boxes to the page. Preserve
-  script scrolling and pages that deliberately lock their viewport. Live
-  Reddit loading remains unverified: Reddit blocks the test host.
-
+- Closing the active tab returns to the next open page in Recent, skipping
+  unused Home tabs while another page remains open.
 - Servo source preparation announces the large checkout and shows Git progress.
   Rerunning a build replaces partial or edited source and removes untracked
   leftovers, reusing downloaded objects and ignored build caches.
 - Kimi's blog startup no longer rejects `:has()` in DOM selectors. Stylesheet
   `:has()` remains unsupported while Servo's style invalidation is incomplete.
+- Pass swipes over empty fixed-position scroll boxes to the page. Preserve
+  script scrolling and pages that deliberately lock their viewport. Live
+  Reddit loading remains unverified: Reddit blocks the test host.
 - A `Retry-After` header too large to convert to milliseconds now waits
   the six-hour ceiling. The conversion overflowed, so the server's delay
   was replaced by the ordinary backoff or an arbitrary one. A value beyond
