@@ -38,6 +38,8 @@ Pages
                              requests that arrived and the responses sent in full
   /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
                              (page zoom checks)
+  /fixed-scroll.html         transparent fixed scroll box over a red/green page
+                              (?loading=1 holds an image until /_admin/finish-scroll-load)
   (the five control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -92,6 +94,7 @@ def fresh_media():
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
+scroll_load_finished = threading.Event()
 
 
 def page(title, body, head=""):
@@ -204,6 +207,20 @@ ZOOM_PAGE = page(
     "function report() { document.title = 'ZOOM:' + innerWidth + ':' + devicePixelRatio; }"
     "addEventListener('load', report); addEventListener('resize', report);</script>",
 )
+
+# A fixed drawer's scroll node is beside the viewport in Servo's spatial tree. An empty drawer
+# must pass a swipe to the page, including while an unrelated image still holds its load event.
+def fixed_scroll_page(pending_image):
+    return page(
+        "FIXED-SCROLL",
+        "<div class='layer'><div class='box'></div></div>"
+        "<section class='top'></section><section class='rest'></section>"
+        + pending_image,
+        "<style>html,body{margin:0}.layer{position:fixed;inset:0}"
+        ".box{height:100%;overflow-y:auto}.top{height:60vh;background:#b03a2e}"
+        ".rest{height:300vh;background:#2e6b4f}</style>",
+    )
+
 
 # Find in page: the word appears three times, a screen and a half apart and in three cases, and
 # also where find must not count it (hidden, a script, a form field). The title reports the
@@ -460,6 +477,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_slow_media()
         if path == "/zoom.html":
             return self.send(200, ZOOM_PAGE)
+        if path == "/fixed-scroll.html":
+            pending_image = "<img hidden src='/scroll-pending-image'>" if query.get("loading") == ["1"] else ""
+            return self.send(http.HTTPStatus.OK, fixed_scroll_page(pending_image))
+        if path == "/scroll-pending-image":
+            scroll_load_finished.wait()
+            return self.send(http.HTTPStatus.NOT_FOUND)
         if path == "/find.html":
             return self.send(200, FIND_PAGE)
         if path == "/external.html":
@@ -543,6 +566,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raw = self.body()
 
         if path == "/_admin/reset":
+            scroll_load_finished.clear()
             with lock:
                 state["bookmarks"].clear()
                 state["lists"].clear()
@@ -554,6 +578,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})
+        if path == "/_admin/finish-scroll-load":
+            scroll_load_finished.set()
+            return self.send_json(http.HTTPStatus.OK, {"ok": True})
         if path == "/_admin/fault":
             service = query.get("service", [""])[0]
             kind = query.get("kind", ["none"])[0]

@@ -188,6 +188,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pass swipes over empty fixed-position scroll boxes to the page. Preserve
+  script scrolling and pages that deliberately lock their viewport. Live
+  Reddit loading remains unverified: Reddit blocks the test host.
+
 - Servo source preparation announces the large checkout and shows Git progress.
   Rerunning a build replaces partial or edited source and removes untracked
   leftovers, reusing downloaded objects and ignored build caches.
