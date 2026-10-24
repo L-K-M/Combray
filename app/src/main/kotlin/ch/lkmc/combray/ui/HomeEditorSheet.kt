@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -29,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,8 +58,11 @@ import ch.lkmc.combray.core.browser.HomePinResult
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.PinDirection
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal enum class HomeEditPage { OVERVIEW, LINK, REPLACE }
 private const val MAX_PIN_NAME = 200
@@ -75,56 +80,61 @@ internal fun HomeEditorSheet(
     initialPage: HomeEditPage,
     onDismiss: () -> Unit,
 ) {
-    val state by states.collectAsStateWithLifecycle(HomeLinksState(emptyList(), emptyList(), emptyList()))
-    val continuation by settings.homeContinue.collectAsStateWithLifecycle()
-    val frequent by settings.homeFrequentSites.collectAsStateWithLifecycle()
-    var page by rememberSaveable { mutableStateOf(initialPage) }
-    var id by rememberSaveable { mutableStateOf(initialLink?.pinId) }
-    var address by rememberSaveable { mutableStateOf(initialLink?.url.orEmpty()) }
-    var name by rememberSaveable { mutableStateOf(initialLink?.let { it.title ?: displayHost(it.url) }.orEmpty()) }
-    var error by remember { mutableStateOf<Int?>(null) }
-    var saving by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        // Observe and edit state in the composition of the window that displays it.
+        val state by states.collectAsStateWithLifecycle(HomeLinksState(emptyList(), emptyList(), emptyList()))
+        val continuation by settings.homeContinue.collectAsStateWithLifecycle()
+        val frequent by settings.homeFrequentSites.collectAsStateWithLifecycle()
+        var page by rememberSaveable { mutableStateOf(initialPage) }
+        var id by rememberSaveable { mutableStateOf(initialLink?.pinId) }
+        var address by rememberSaveable { mutableStateOf(initialLink?.url.orEmpty()) }
+        var name by rememberSaveable { mutableStateOf(initialLink?.let { it.title ?: displayHost(it.url) }.orEmpty()) }
+        var error by remember { mutableStateOf<Int?>(null) }
+        var saving by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
 
-    val change: (suspend () -> Unit) -> Unit = { action ->
-        scope.launch {
-            error = null
-            try {
-                action()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                error = R.string.home_change_failed
-            }
-        }
-    }
-    val save: (String?) -> Unit = { replace ->
-        if (!saving) {
-            saving = true
-            change {
+        val change: (suspend () -> Unit) -> Unit = { action ->
+            // An accepted local edit finishes even if its window is dismissed or recreated.
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                error = null
                 try {
-                    when (home.savePin(id, address, name, replace)) {
-                        HomePinResult.SAVED -> { page = HomeEditPage.OVERVIEW; error = null }
-                        HomePinResult.INVALID_ADDRESS -> { page = HomeEditPage.LINK; error = R.string.home_invalid_address }
-                        HomePinResult.SENSITIVE_ADDRESS -> { page = HomeEditPage.LINK; error = R.string.home_sensitive_address }
-                        HomePinResult.FULL -> page = HomeEditPage.REPLACE
-                        HomePinResult.NOT_FOUND -> { page = HomeEditPage.LINK; error = R.string.home_link_missing }
-                    }
-                } finally {
-                    saving = false
+                    withContext(NonCancellable) { action() }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    error = R.string.home_change_failed
                 }
             }
         }
-    }
-    val edit: (HomeLink?) -> Unit = { link ->
-        id = link?.pinId
-        address = link?.url.orEmpty()
-        name = link?.let { it.title ?: displayHost(it.url) }.orEmpty()
-        error = null
-        page = HomeEditPage.LINK
-    }
+        val save: (String?) -> Unit = { replace ->
+            if (!saving) {
+                saving = true
+                val requestedId = id
+                val requestedAddress = address
+                val requestedName = name
+                change {
+                    try {
+                        when (home.savePin(requestedId, requestedAddress, requestedName, replace)) {
+                            HomePinResult.SAVED -> { page = HomeEditPage.OVERVIEW; error = null }
+                            HomePinResult.INVALID_ADDRESS -> { page = HomeEditPage.LINK; error = R.string.home_invalid_address }
+                            HomePinResult.SENSITIVE_ADDRESS -> { page = HomeEditPage.LINK; error = R.string.home_sensitive_address }
+                            HomePinResult.FULL -> page = HomeEditPage.REPLACE
+                            HomePinResult.NOT_FOUND -> { page = HomeEditPage.LINK; error = R.string.home_link_missing }
+                        }
+                    } finally {
+                        saving = false
+                    }
+                }
+            }
+        }
+        val edit: (HomeLink?) -> Unit = { link ->
+            id = link?.pinId
+            address = link?.url.orEmpty()
+            name = link?.let { it.title ?: displayHost(it.url) }.orEmpty()
+            error = null
+            page = HomeEditPage.LINK
+        }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 24.dp, vertical = 8.dp)) {
             Column(
                 Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
@@ -149,14 +159,16 @@ internal fun HomeEditorSheet(
                         TextButton(onClick = { edit(null) }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) { Text(stringResource(R.string.home_add_link)) }
                         if (state.pins.isEmpty()) Text(stringResource(R.string.home_no_pins), style = MaterialTheme.typography.bodyMedium)
                         state.pins.forEachIndexed { index, pin ->
-                            HomePinRow(
-                                pin = pin,
-                                index = index,
-                                lastIndex = state.pins.lastIndex,
-                                onEdit = { edit(HomeLink(pin.id, "", pin.url, pin.title, pin.id)) },
-                                onMove = { direction -> change { home.movePin(pin.id, direction) } },
-                                onUnpin = { change { home.unpin(pin.id) } },
-                            )
+                            key(pin.id) {
+                                HomePinRow(
+                                    pin = pin,
+                                    index = index,
+                                    lastIndex = state.pins.lastIndex,
+                                    onEdit = { edit(HomeLink(pin.id, "", pin.url, pin.title, pin.id)) },
+                                    onMove = { direction -> change { home.movePin(pin.id, direction) } },
+                                    onUnpin = { change { home.unpin(pin.id) } },
+                                )
+                            }
                         }
                         val automatic = state.links.filter { it.pinId == null }
                         if (automatic.isNotEmpty()) {
@@ -200,11 +212,12 @@ internal fun HomeEditorSheet(
                         )
                         OutlinedTextField(
                             value = address,
-                            onValueChange = { address = it.take(MAX_PIN_ADDRESS) },
+                            onValueChange = { address = it.take(MAX_PIN_ADDRESS); error = null },
                             label = { Text(stringResource(R.string.home_link_address)) },
                             singleLine = true,
                             enabled = !saving,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done, autoCorrectEnabled = false),
+                            keyboardActions = KeyboardActions(onDone = { save(null) }),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

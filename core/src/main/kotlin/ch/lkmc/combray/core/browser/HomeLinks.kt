@@ -104,7 +104,8 @@ class HomeLinks(
      * The text must be an HTTP(S) address the address policy would navigate to — never a
      * search — and not a credential-bearing one. An existing pin of the exact same address is
      * updated in place (its slot and id kept); a different pin's address is refused for an
-     * edit. With the pins full, [replaceId] names the pin the new one replaces, keeping its slot.
+     * edit. With the pins full, [replaceId] names the pin the new one replaces, keeping its
+     * slot; naming an already pinned address instead moves the existing pin into that slot.
      */
     suspend fun savePin(id: String?, url: String, title: String, replaceId: String? = null): HomePinResult =
         database.withTransaction {
@@ -119,7 +120,21 @@ class HomeLinks(
 
             if (sameUrl != null && sameUrl.id != editing?.id) {
                 if (editing != null) return@withTransaction HomePinResult.INVALID_ADDRESS
-                // Pinning an already pinned page relabels it; no second tile, no slot spent.
+                val replaced = replaceId?.let { dao.pin(it) ?: return@withTransaction HomePinResult.NOT_FOUND }
+                if (replaced == null || replaced.id == sameUrl.id) {
+                    // Pinning an already pinned page relabels it; no second tile, no slot spent.
+                    dao.updatePinFields(sameUrl.id, sameUrl.url, site, label)
+                    return@withTransaction HomePinResult.SAVED
+                }
+                // An explicit different replacement merges the two pins: the chosen one goes
+                // and the existing pin keeps its id but moves into the freed relative slot.
+                dao.deletePin(replaced.id)
+                dao.closePositionGap(replaced.position)
+                val others = dao.pinsInOrder().filterTo(mutableListOf()) { it.id != sameUrl.id }
+                others.add(others.count { it.position < replaced.position }, sameUrl)
+                others.forEachIndexed { index, pin ->
+                    if (pin.position != index) dao.movePinTo(pin.id, index)
+                }
                 dao.updatePinFields(sameUrl.id, sameUrl.url, site, label)
                 return@withTransaction HomePinResult.SAVED
             }

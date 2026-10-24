@@ -35,6 +35,7 @@ Cold start restores the active logical tab rather than replacing it with Home.
 - Pins store an exact navigable HTTP(S) address and a user label, survive
   history expiry, and can be edited, unpinned or reordered. A seventh pin
   requires an explicit replacement. Credential-bearing addresses are refused.
+  Accepted edits finish even if the editor is dismissed or recreated.
 - Hide site suppresses automatic links until restored; it does not delete
   visits or remote bookmarks. Edit exposes all actions without requiring
   long-press or dragging, plus switches for Continue and frequent sites.
@@ -72,6 +73,10 @@ Compose previews in `HomeScreen.kt` cover populated, empty, dark, narrow,
 large-text, landscape and RTL layouts. Device results and limitations are
 recorded in [the engine report](../ENGINE_SPIKE.md); a preview is not device
 evidence. Service checks use synthetic fixtures, not personal data.
+
+Focused device regressions also cover short-list input anchoring,
+background/resume ordering with no background collection, and dismissal
+before a blocked SQLite write can commit.
 
 ## Design references
 

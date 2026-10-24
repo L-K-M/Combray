@@ -85,6 +85,9 @@ import kotlinx.coroutines.flow.map
 import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT }
 
@@ -239,6 +242,7 @@ fun BrowserScreen(
         surfaceView?.hideKeyboard()
         browser.newTab()
     }
+    // Cold and bounded to retained candidates; pin/hide filtering must precede the six-tile cap.
     val homeLinks = remember(graph) { graph.home.state(browser.topSites(SensitiveUrls::looksSensitive, limit = Int.MAX_VALUE)) }
     val continuation = remember(browser) { browser.continueTab(SensitiveUrls::looksSensitive) }
     var recentScope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
@@ -295,6 +299,17 @@ fun BrowserScreen(
     val snackbarReach = (snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp).coerceAtLeast(0.dp)
     val scrollButtonPadding = scrollButtonPadding(snackbarReach)
     val openSettings = { sheet = Sheet.SETTINGS }
+    val changeHome: (suspend () -> Unit) -> Unit = { change ->
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                withContext(NonCancellable) { change() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.fillMaxSize().imePadding()) {
@@ -332,28 +347,8 @@ fun BrowserScreen(
                                 sheet = Sheet.HOME_EDIT
                             },
                             onAdd = { homeEditLink = null; homeEditPage = HomeEditPage.LINK; sheet = Sheet.HOME_EDIT },
-                            onHide = { site ->
-                                scope.launch {
-                                    try {
-                                        graph.home.hideSite(site)
-                                    } catch (cancelled: CancellationException) {
-                                        throw cancelled
-                                    } catch (_: Exception) {
-                                        snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
-                                    }
-                                }
-                            },
-                            onUnpin = { id ->
-                                scope.launch {
-                                    try {
-                                        graph.home.unpin(id)
-                                    } catch (cancelled: CancellationException) {
-                                        throw cancelled
-                                    } catch (_: Exception) {
-                                        snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
-                                    }
-                                }
-                            },
+                            onHide = { site -> changeHome { graph.home.hideSite(site) } },
+                            onUnpin = { id -> changeHome { graph.home.unpin(id) } },
                             // Home's bottom destinations must stay above a notice's touch surface.
                             modifier = Modifier.padding(bottom = snackbarReach),
                         )

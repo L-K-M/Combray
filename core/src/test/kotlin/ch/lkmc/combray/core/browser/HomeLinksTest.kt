@@ -196,6 +196,72 @@ class HomeLinksTest {
     }
 
     @Test
+    fun pinningAnAlreadyPinnedAddressMovesItIntoAnEarlierReplacementsSlot() {
+        val pins = (0 until HOME_LINK_LIMIT).map { pin("https://p$it.test/", "P$it") }
+        val e = pins[4]
+
+        // The already pinned page takes the chosen slot; the replacement is gone, no duplicate.
+        assertEquals(HomePinResult.SAVED, save(url = "https://p4.test/", title = "New", replaceId = pins[1].id))
+
+        val after = state().pins
+        assertEquals(
+            listOf("https://p0.test/", "https://p4.test/", "https://p2.test/", "https://p3.test/", "https://p5.test/"),
+            after.map { it.url },
+        )
+        assertEquals(listOf(0, 1, 2, 3, 4), after.map { it.position })
+        assertEquals(e.id, after[1].id)
+        assertEquals("New", after[1].title)
+    }
+
+    @Test
+    fun pinningAnAlreadyPinnedAddressMovesItIntoALaterReplacementsSlot() {
+        val pins = (0 until HOME_LINK_LIMIT).map { pin("https://p$it.test/", "P$it") }
+        val a = pins[0]
+
+        assertEquals(HomePinResult.SAVED, save(url = "https://p0.test/", title = "New", replaceId = pins[4].id))
+
+        val after = state().pins
+        assertEquals(
+            listOf("https://p1.test/", "https://p2.test/", "https://p3.test/", "https://p0.test/", "https://p5.test/"),
+            after.map { it.url },
+        )
+        assertEquals(listOf(0, 1, 2, 3, 4), after.map { it.position })
+        assertEquals(a.id, after[3].id)
+        assertEquals("New", after[3].title)
+    }
+
+    @Test
+    fun pinningAnAlreadyPinnedAddressOverItselfRelabelsInPlace() {
+        val pins = (0 until HOME_LINK_LIMIT).map { pin("https://p$it.test/", "P$it") }
+        val e = pins[4]
+
+        assertEquals(HomePinResult.SAVED, save(url = "https://p4.test/", title = "New", replaceId = e.id))
+
+        val after = state().pins
+        assertEquals(HOME_LINK_LIMIT, after.size)
+        assertEquals(e.id, after[4].id)
+        assertEquals("New", after[4].title)
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), after.map { it.position })
+    }
+
+    @Test
+    fun aMissingReplacementNeitherRelabelsNorDeletesAnAlreadyPinnedAddress() {
+        val pins = (0 until HOME_LINK_LIMIT).map { pin("https://p$it.test/", "P$it") }
+
+        assertEquals(HomePinResult.NOT_FOUND, save(url = "https://p4.test/", title = "New", replaceId = "pin-missing"))
+
+        val after = state().pins
+        assertEquals(pins.map { it.url }, after.map { it.url })
+        assertEquals("P4", after[4].title)
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), after.map { it.position })
+
+        // Below the limit a missing reference is still refused without side effects.
+        runBlocking { links.unpin(pins[0].id) }
+        assertEquals(HomePinResult.NOT_FOUND, save(url = "https://p4.test/", title = "New", replaceId = "pin-missing"))
+        assertEquals("P4", state().pins[3].title)
+    }
+
+    @Test
     fun editingAPinChangesItInPlaceButCannotTakeAnothersAddress() {
         pin("https://a.test/", "A")
         val b = pin("https://b.test/", "B")

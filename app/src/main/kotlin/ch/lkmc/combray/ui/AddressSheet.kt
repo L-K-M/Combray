@@ -2,6 +2,7 @@ package ch.lkmc.combray.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -146,7 +147,7 @@ internal fun AddressSheetContent(
         // Only the room left above the keyboard, scrolling within it: the field row below stays
         // next to the keyboard, where the thumb is, however many rows there are.
         if (matches.isNotEmpty()) {
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Bottom) {
                 Text(
                     stringResource(R.string.address_suggestions),
                     style = MaterialTheme.typography.labelLarge,

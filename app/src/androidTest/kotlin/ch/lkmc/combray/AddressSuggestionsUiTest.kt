@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -98,6 +99,25 @@ class AddressSuggestionsUiTest {
     }
 
     @Test
+    fun aShortMatchListKeepsTheFieldAtTheSameBottomAnchor() {
+        val matches = mutableStateOf(listOf(TAB_MATCH, VISIT_MATCH))
+        show(DEFAULT_FONT) {
+            Box(Modifier.requiredSize(WINDOW_WIDTH, TALL_WINDOW_HEIGHT).testTag(WINDOW_TAG)) {
+                Editor(matches = matches.value)
+            }
+        }
+        val shortGap = compose.onNodeWithTag(WINDOW_TAG).getUnclippedBoundsInRoot().bottom -
+            compose.onNode(FIELD).getUnclippedBoundsInRoot().bottom
+
+        compose.runOnIdle {
+            matches.value = (1..8).map { RecentItem.Visit("v$it", "tab", "https://example.org/p$it", "Garden page $it", it.toLong()) }
+        }
+        val longGap = compose.onNodeWithTag(WINDOW_TAG).getUnclippedBoundsInRoot().bottom -
+            compose.onNode(FIELD).getUnclippedBoundsInRoot().bottom
+        assertEquals("typing must not move the field when more matches arrive", shortGap.value, longGap.value, 1f)
+    }
+
+    @Test
     fun tapsReachTheRowTheyWereOn() {
         val decisions = mutableListOf<AddressDecision>()
         val selected = mutableListOf<String>()
@@ -167,6 +187,7 @@ class AddressSuggestionsUiTest {
         /** 320dp wide and as short as the space above a keyboard. */
         val WINDOW_WIDTH = 320.dp
         val WINDOW_HEIGHT = 300.dp
+        val TALL_WINDOW_HEIGHT = 520.dp
 
         val TAB_MATCH = RecentItem.OpenTab("tab-garden", "https://example.net/notes", "Garden notes", 2L, active = false)
         val VISIT_MATCH = RecentItem.Visit("visit-1", "tab", "https://example.org/garden", "A garden through the seasons", 1L)

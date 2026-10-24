@@ -566,6 +566,32 @@ the overlap before the fix (`new-tab-overlap-red`); Home now reserves the
 notice's measured height, like the existing scroll control. Raw follow-up
 evidence is in `build/device-checks/new-tab-2/` and `new-tab-3/`.
 
+The first accelerated CI run on PR #123 passed 102 of 105 device checks;
+the three failures were in the editor. A count-only diagnostic showed Room
+emitting two pins while the dialog retained its initial view. Editor state
+and its collectors now belong to the dialog's own composition. The existing
+edit/reorder/unpin/hide/restore/add check then passed locally, without the
+diagnostic. Footer controls are clicked directly in tests: they are outside
+the scroll region and cannot use `performScrollTo`.
+
+Review regressions independently reproduced an input moving 160dp when its
+match list grew, automatic tiles reordering after backgrounding, and a pin
+save being cancelled by editor dismissal while SQLite's writer was held.
+The corrected viewport fills the space above the anchored field, automatic
+order is retained outside the stopped collector, and accepted local writes
+finish after their UI scope ends. Each regression was observed failing
+before its fix and passing afterwards. Core tests also cover duplicate-URL
+replacement in both ordering directions and a missing replacement reference.
+
+`build/device-checks/new-tab-5/` records the visibility and isolated automatic
+link passes. `new-tab-6/` contains the focused red/green runs, successful
+editor operations, cancellation-safe save, and draft/target preservation
+through rotation and a fresh editor session. These manual fixture runs used
+`adb shell cmd package compile -m speed -f ch.lkmc.combray.debug` before
+instrumentation to reduce software-emulator startup cost. The known 5-second
+window-focus timeout still occurred on some attempts and is not counted as
+a pass. Temporary probes and a test-dispatcher experiment were removed.
+
 [PR #123](https://github.com/L-K-M/Combray/pull/123) records the final local
 results and latest CI proof, including both native ABIs and KVM emulator
 fixtures. Read its latest commit's results rather than treating any earlier

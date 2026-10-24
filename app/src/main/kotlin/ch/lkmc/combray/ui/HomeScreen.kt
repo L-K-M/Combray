@@ -28,10 +28,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,7 +60,6 @@ import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.runningFold
 
 private val HOME_MARGIN = 24.dp
 private val HOME_MAX_WIDTH = 600.dp
@@ -82,24 +83,31 @@ internal fun HomeScreen(
     onUnpin: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Keep automatic positions steady for this visit; removals and pin edits still apply at once.
-    val stableLinks = remember(links) {
-        links.runningFold(emptyHomeLinks()) { previous, next ->
-            val order = previous.links.filter { it.pinId == null }.map { it.id }
-            val automatic = next.links.filter { it.pinId == null }.sortedBy { link ->
-                order.indexOf(link.id).takeIf { it >= 0 } ?: Int.MAX_VALUE
-            }
-            next.copy(links = next.links.filter { it.pinId != null } + automatic)
-        }
+    val state by links.collectAsStateWithLifecycle<HomeLinksState?>(null)
+    // Keep order outside the lifecycle-scoped collector: stopping it must not reset this visit.
+    var automaticOrder by rememberSaveable(links) { mutableStateOf(emptyList<String>()) }
+    val current = state
+    val automatic = current?.links.orEmpty().filter { it.pinId == null }.sortedBy { link ->
+        automaticOrder.indexOf(link.id).takeIf { it >= 0 } ?: Int.MAX_VALUE
     }
-    val state by stableLinks.collectAsStateWithLifecycle(emptyHomeLinks())
+    val displayed = current?.links.orEmpty().filter { it.pinId != null } + automatic
+    LaunchedEffect(current?.links) {
+        // Null is still loading, not an empty list that should erase a restored order.
+        if (current != null) automaticOrder = automatic.map { it.id }
+    }
     val continued by continuation.collectAsStateWithLifecycle(null)
     val showContinue by settings.homeContinue.collectAsStateWithLifecycle()
     val showFrequent by settings.homeFrequentSites.collectAsStateWithLifecycle()
     var options by remember { mutableStateOf<HomeLink?>(null) }
 
+    if (current == null) {
+        // The dock stays usable; an empty-looking body must not move its targets on first load.
+        Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { }
+        return
+    }
+
     HomeContent(
-        links = state.links.filter { showFrequent == HomeSectionVisibility.SHOWN || it.pinId != null },
+        links = displayed.filter { showFrequent == HomeSectionVisibility.SHOWN || it.pinId != null },
         continued = continued.takeIf { showContinue == HomeSectionVisibility.SHOWN },
         onOpenUrl = onOpenUrl,
         onContinue = onContinue,
@@ -110,7 +118,7 @@ internal fun HomeScreen(
     )
 
     // A removed or forgotten link cannot stay actionable in an already-open menu.
-    val selected = options?.let { old -> state.links.firstOrNull { it.id == old.id && it.url == old.url } }
+    val selected = options?.let { old -> current.links.firstOrNull { it.id == old.id && it.url == old.url } }
     if (selected != null) {
         HomeLinkOptions(
             link = selected,
@@ -282,8 +290,6 @@ private fun HomeLinkOptions(link: HomeLink, onEdit: () -> Unit, onRemove: () -> 
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
-
-private fun emptyHomeLinks() = HomeLinksState(pins = emptyList(), hiddenSites = emptyList(), links = emptyList())
 
 @Preview(name = "Populated", widthDp = 360, heightDp = 640)
 @Preview(name = "Dark", widthDp = 360, heightDp = 640, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)

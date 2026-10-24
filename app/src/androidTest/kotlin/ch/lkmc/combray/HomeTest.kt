@@ -1,6 +1,7 @@
 package ch.lkmc.combray
 
 import android.view.KeyEvent
+import androidx.room.withTransaction
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -33,6 +34,12 @@ import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.SensitiveUrls
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
@@ -67,9 +74,7 @@ class HomeTest {
         Fixtures.reset()
         device.awaitEngine()
         device.closeAllTabs()
-        clearHome()
-        device.settings.setHomeContinue(HomeSectionVisibility.SHOWN)
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        device.resetHome()
         runBlocking { device.integrations.hister.setCaptureEnabled(false) }
         // Sheets can outstay Espresso's idle window on the software emulator (docs/BUILDING.md).
         IdlingPolicies.setIdlingResourceTimeout(Device.LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -79,9 +84,7 @@ class HomeTest {
     @After
     fun tearDown() {
         // A check that stopped halfway must not leak pins, hidden sites or hidden sections.
-        device.settings.setHomeContinue(HomeSectionVisibility.SHOWN)
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
-        clearHome()
+        device.resetHome()
     }
 
     /** + takes one tap anywhere; More no longer lists it. Home opens ready, keyboard closed. */
@@ -130,9 +133,9 @@ class HomeTest {
         compose.onNodeWithText(compose.activity.getString(R.string.home_add_link)).performClick()
         compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
         compose.onNodeWithText(compose.activity.getString(R.string.home_link_address)).assertIsDisplayed()
-        sheetRow(hasText("Cancel")).performClick()
+        compose.onNodeWithText("Cancel").assertIsDisplayed().performClick()
         assertTrue(homeState().pins.isEmpty())
-        sheetRow(hasText("Done")).performClick()
+        compose.onNodeWithText("Done").assertIsDisplayed().performClick()
     }
 
     @Test
@@ -145,6 +148,59 @@ class HomeTest {
         val tile = awaitTile("Shortcut").getUnclippedBoundsInRoot()
         val notice = compose.onNodeWithText("Tab closed").getUnclippedBoundsInRoot()
         assertTrue("a close notice must not cover a Home destination", tile.bottom <= notice.top)
+    }
+
+    @Test
+    fun hidingAutomaticSectionsKeepsDeliberatePins() {
+        runBlocking { home.savePin(null, "http://127.0.0.1:8766/solid/715f2e.html", "Pin") }
+        open(Device.GREEN)
+        device.settings.setHomeContinue(HomeSectionVisibility.HIDDEN)
+        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        openHome()
+        awaitTile("Pin").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Open localhost").assertDoesNotExist()
+        compose.onNodeWithText("Continue").assertDoesNotExist()
+
+        device.settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        awaitTile("localhost").assertIsDisplayed()
+        awaitTile("Pin").assertIsDisplayed()
+    }
+
+    @Test
+    fun anAcceptedSaveFinishesAfterTheEditorIsDismissed() {
+        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        openHome()
+        awaitText("Add link")
+        compose.onNodeWithText("Add link").performClick()
+        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        val url = Fixtures.solid(PINNED)
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("Survives dismissal")
+        compose.onAllNodes(hasSetTextAction())[1].performTextInput(url)
+
+        // Hold the writer so dismissing the sheet definitely precedes the accepted save's commit.
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val blockerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val blocker = blockerScope.launch {
+            device.app.graph.database.withTransaction { entered.complete(Unit); release.await() }
+        }
+        try {
+            runBlocking { entered.await() }
+            compose.onNodeWithText("Save link").performClick()
+            compose.onNodeWithContentDescription("Close sheet").performClick()
+            compose.waitUntilDoesNotExist(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+            release.complete(Unit)
+            runBlocking {
+                blocker.join()
+                // Queued after the save: returning proves the earlier writer had its turn.
+                device.app.graph.database.withTransaction { }
+            }
+            assertTrue("an accepted pin must outlive its editor", homeState().pins.any { it.url == url && it.title == "Survives dismissal" })
+        } finally {
+            release.complete(Unit)
+            runBlocking { blocker.join() }
+            blockerScope.cancel()
+        }
     }
 
     @Test
@@ -161,6 +217,11 @@ class HomeTest {
         sheetRow(hasContentDescription("Edit First")).performClick()
         compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
         compose.onAllNodes(hasSetTextAction())[0].performTextReplacement("Discarded draft")
+        compose.activityRule.scenario.recreate()
+        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        compose.onNodeWithText(compose.activity.getString(R.string.home_edit_link)).assertIsDisplayed()
+        assertEquals("Discarded draft", compose.onAllNodes(hasSetTextAction())[0].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        assertEquals(first, compose.onAllNodes(hasSetTextAction())[1].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         compose.onNodeWithContentDescription("Close sheet").performClick()
         compose.waitUntilDoesNotExist(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
 
@@ -172,8 +233,8 @@ class HomeTest {
         assertEquals("Second", fields[0].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         assertEquals(second, fields[1].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         assertEquals(listOf("First", "Second"), homeState().pins.map { it.title })
-        sheetRow(hasText("Cancel")).performClick()
-        sheetRow(hasText("Done")).performClick()
+        compose.onNodeWithText("Cancel").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Done").assertIsDisplayed().performClick()
     }
 
     /**
@@ -284,7 +345,7 @@ class HomeTest {
         compose.onNodeWithText(compose.activity.getString(R.string.home_save_link)).performClick()
         awaitText("Added")
         assertTrue(homeState().pins.any { it.url == Fixtures.solid(ADDED) })
-        sheetRow(hasText("Done")).performClick()
+        compose.onNodeWithText("Done").assertIsDisplayed().performClick()
     }
 
     /**
@@ -309,6 +370,8 @@ class HomeTest {
 
         dock("Hister").performClick()
         awaitText(compose.activity.getString(R.string.search_all_hint))
+        device.idle()
+        compose.waitForIdle()
         assertTrue("opening the Hister scope searched already", serviceCalls().none { it.getString("service") == "hister" })
         back()
         compose.waitUntilDoesNotExist(hasText(compose.activity.getString(R.string.search_all_hint)), Device.LOAD_TIMEOUT_MS)
@@ -374,12 +437,6 @@ class HomeTest {
 
     private fun homeState() = runBlocking {
         home.state(device.browser.topSites(SensitiveUrls::looksSensitive, limit = Int.MAX_VALUE)).first()
-    }
-
-    private fun clearHome() = runBlocking {
-        val state = homeState()
-        state.pins.forEach { home.unpin(it.id) }
-        state.hiddenSites.forEach { home.restoreSite(it) }
     }
 
     /** What the fake services recorded, newest last. */
