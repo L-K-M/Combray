@@ -1,0 +1,256 @@
+# Engine: native gate for changes that can break the Servo engine or its device
+# checks. ci.yml stays Kotlin-only; this workflow pays for Servo only when
+# engine-relevant paths change (plus workflow_dispatch for manual proof).
+#
+#   host   — cargo fmt --check and cargo test --lib for native/ on the host
+#            target. The test still resolves the Android-only path dependencies,
+#            so it fetches the pinned Servo tree first — a plain git checkout of
+#            the pinned SHA, no SDK/NDK required. The Rust toolchain comes from
+#            native/rust-toolchain.toml (cargo +<channel>), not env.sh, which
+#            would demand the NDK.
+#   engine — matrix over x86_64 and arm64: scripts/m0/fetch-servo.sh, then
+#            scripts/build-native.sh (cargo build --locked --release), then the
+#            debug app and test APKs packaging the staged library.
+#   device — the x86_64 APKs on the API 30 reference emulator (KVM on hosted
+#            runners): the real fixture checks of scripts/check-app.sh, with its
+#            evidence uploaded whether it passes or fails. It runs whenever the
+#            x86_64 APK exists; a build that never produced it fails here rather
+#            than silently "passing" as skipped.
+#
+# Hardening (family contract): least-privilege token, cancel superseded PR runs
+# but never an in-progress run on a non-PR ref, a timeout on every job, actions
+# pinned by SHA, no secrets. servo/servo is pull-only: this workflow fetches
+# source and nothing more — no issues, PRs, comments, pushes or API calls there.
+
+name: Engine
+
+on:
+  pull_request:
+    paths:
+      - native/**
+      - engine/**
+      - scripts/m0/**
+      - scripts/build-native.sh
+      - scripts/check-app.sh
+      - scripts/summarize-instrumentation.py
+      - scripts/verify-apk.py
+      - testing/**
+      - app/src/androidTest/**
+      - app/build.gradle.kts
+      - build.gradle.kts
+      - settings.gradle.kts
+      - gradle/**
+      - gradlew
+      - gradle.properties
+      - .github/workflows/engine.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Hosted images export an older NDK. Let env.sh select and install our pin.
+env:
+  ANDROID_NDK_ROOT: ""
+  ANDROID_NDK_HOME: ""
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  host:
+    name: Host fmt and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # fetch-servo.sh drives mach, which wants uv. A venv keeps the pin exact
+      # regardless of what the runner image happens to carry.
+      - name: Install uv 0.12.5
+        run: |
+          python3 -m venv "$RUNNER_TEMP/uv"
+          "$RUNNER_TEMP/uv/bin/pip" install --disable-pip-version-check --quiet "uv==0.12.5"
+          echo "$RUNNER_TEMP/uv/bin" >> "$GITHUB_PATH"
+
+      - name: Install the pinned Rust toolchain
+        id: rust
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' native/rust-toolchain.toml)"
+          [ -n "$toolchain" ] || { echo "::error::could not read channel from native/rust-toolchain.toml"; exit 1; }
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt --no-self-update
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+
+      - name: cargo fmt
+        working-directory: native
+        run: cargo "+${{ steps.rust.outputs.toolchain }}" fmt --check
+
+      # cargo test resolves the Android-only path dependencies into
+      # servo-checkout/, so the pinned tree must exist even though nothing in it
+      # is compiled for the host.
+      - name: Fetch pinned Servo source
+        run: scripts/m0/fetch-servo.sh
+
+      - name: cargo test --lib
+        working-directory: native
+        run: cargo "+${{ steps.rust.outputs.toolchain }}" test --lib --locked
+
+  engine:
+    name: Native engine (${{ matrix.abi }})
+    runs-on: ubuntu-latest
+    # Compiling Servo on 4 cores is slow; the job gets the hosted maximum.
+    timeout-minutes: 360
+    strategy:
+      # A failure on one ABI must not hide the other's result.
+      fail-fast: false
+      matrix:
+        abi: [x86_64, arm64]
+    env:
+      COMBRAY_ABI: ${{ matrix.abi }}
+      # Bounded parallelism: rustc on Servo's crates peaks at several GB each,
+      # and the hosted runner has 4 vCPUs and 16 GB.
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A Servo build wants ~25 GB; hosted runners offer ~14 GB free. Drop the
+      # image's bulky toolchains this job never uses, and the SDK's other NDKs
+      # and system images (env.sh installs the pinned NDK r29 itself).
+      - name: Reclaim runner disk space
+        run: |
+          sudo docker system prune -a -f --volumes || true
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /usr/local/share/powershell /usr/local/julia* /usr/local/graalvm* /usr/lib/mono \
+            /usr/share/swift /opt/az /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf "$ANDROID_HOME"/ndk/* "$ANDROID_HOME"/system-images/* || true
+          sudo apt-get clean
+          df -h /
+
+      # docs/BUILDING.md host prerequisites: a host clang for build scripts,
+      # cmake/make for aws-lc-sys and mozjs. curl, git, python3 are on the image.
+      - name: Host prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang cmake make pkg-config
+
+      - name: Install uv 0.12.5
+        run: |
+          python3 -m venv "$RUNNER_TEMP/uv"
+          "$RUNNER_TEMP/uv/bin/pip" install --disable-pip-version-check --quiet "uv==0.12.5"
+          echo "$RUNNER_TEMP/uv/bin" >> "$GITHUB_PATH"
+
+      # Supply-chain gate: reject a tampered gradle-wrapper.jar.
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # No SDK install step: the ubuntu runner image ships the Android SDK.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Fetch pinned Servo source
+        run: scripts/m0/fetch-servo.sh
+
+      # build-native.sh installs the pinned Rust toolchain and Android target
+      # itself; cargo build runs --locked --release.
+      - name: Build native engine
+        run: scripts/build-native.sh
+
+      - name: Assemble app and test APK
+        run: ./gradlew assembleDebug assembleDebugAndroidTest
+
+      # Proves the APK carries libcombray_engine.so + libc++_shared.so for
+      # exactly this matrix ABI (ELF headers, not just file names).
+      - name: Verify packaged ABI
+        run: python3 -I scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk --expected-arch "${{ matrix.abi }}"
+
+      - if: matrix.abi == 'x86_64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: combray-apks-x86_64-${{ github.sha }}
+          path: app/build/outputs/apk/
+          if-no-files-found: error
+          retention-days: 14
+
+      - if: matrix.abi == 'arm64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: combray-apk-arm64-${{ github.sha }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  device:
+    name: Emulator fixture checks (x86_64)
+    needs: engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    # An arm64 failure must not forfeit the x86_64 device evidence.
+    # The artifact download below is the real gate — when the x86_64 leg did not
+    # produce APKs the job fails honestly instead of skipping as "passed".
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # sdkmanager and avdmanager need a JDK.
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download the x86_64 APKs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: combray-apks-x86_64-${{ github.sha }}
+          path: app/build/outputs/apk
+
+      # Software emulation (-accel off) would need hours and flake on a 4-core
+      # runner; fail clearly when hardware acceleration is unavailable.
+      - name: Require KVM
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::no /dev/kvm on this runner; cannot run the emulator at usable speed"
+            exit 1
+          fi
+          [ -w /dev/kvm ] || sudo chmod 666 /dev/kvm
+
+      - name: Emulator libraries and disk space
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-6 libxcb1 libxext6 libxi6 libxrender1 libxtst6 \
+            libgl1 libegl1 libpulse0 libglib2.0-0 libnss3 libnspr4 \
+            libdbus-1-3 libxkbcommon0
+          sudo docker system prune -a -f --volumes || true
+          df -h /
+
+      # Keep Java's avdmanager and the emulator on one fresh profile home.
+      # Run the full fixture suite, including the process-death checks.
+      - name: Boot the reference emulator and run fixtures
+        env:
+          ANDROID_USER_HOME: ${{ runner.temp }}/combray-android
+          ANDROID_EMULATOR_HOME: ${{ runner.temp }}/combray-android
+          ANDROID_AVD_HOME: ${{ runner.temp }}/combray-android/avd
+        run: |
+          mkdir -p "$ANDROID_AVD_HOME"
+          scripts/m0/emulator.sh
+          scripts/check-app.sh emulator-5560
+
+      - name: Upload device-check evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: combray-device-checks-${{ github.sha }}
+          path: |
+            build/device-checks/
+            servo-checkout/logs/
+          if-no-files-found: warn
+          retention-days: 14

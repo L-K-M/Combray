@@ -119,6 +119,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
+  history and keeping all changes and review downstream. Retire the local
+  patch stack; refuse source edits instead of overwriting them. Add native
+  host, Android ABI and emulator fixture validation for engine-related PRs.
 - Paint heartbeats and other engine events that cannot change anything
   stop running three database reads on the command queue, and the open
   tab count is a COUNT query instead of loading every open row; taps

@@ -3,7 +3,7 @@
 This builds the Combray app (pinned, patched Servo, Combray's native bridge, the Kotlin app) and the M0 engine harness used for engine-level checks. Results and the reasoning behind engine choices are in [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
 
 ```text
-servo-checkout/servo-v0.6.0   pinned release source + native/servo/patches  (ignored by Git)
+servo-checkout/servo           exact downstream Git checkout (ignored by Git)
 native/                       Rust cdylib libcombray_engine.so: JNI bridge, engine thread
 engine/  core/  app/          Gradle modules: engine port, logical state and integrations, Compose UI
 engine/jniLibs/<abi>/         native libraries staged by scripts/build-native.sh (ignored by Git)
@@ -18,9 +18,9 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Servo | v0.6.0 release (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `scripts/m0/env.sh` |
-| Servo source tarball | `servo-v0.6.0-src-vendored.tar.gz`, SHA-256 `1d828f9956fcb0fccfd5af02e4c75bfb948344f04ba7af1765faff78d4aec0e6` | GitHub release asset; checked by `fetch-servo.sh` |
-| Servo patches | `0001` build fix, `0002` document identity, `0003` render-error logging, `0004` cookie persistence on request, `0007` relational DOM selectors | `native/servo/patches/` |
+| Downstream Servo | `L-K-M/servo`, git `97be6cb1fb50b6fe82f677dd30c901102a3fa94a` | `scripts/m0/servo-pin.sh`; `combray/0.6` is the maintenance branch, not a moving build input |
+| Upstream base | v0.6.0 (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
+| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |
@@ -53,10 +53,10 @@ COMBRAY_ABI=x86_64 scripts/build.sh --debug    # for the emulator
 scripts/build.sh --debug --install             # then install and launch on the connected device
 ```
 
-`scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and fetches, verifies and patches Servo (`scripts/m0/fetch-servo.sh`) whenever the tree is missing or was prepared with other patches. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes (Servo source, crates and, when missing, the NDK) and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
+`scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and checks out the exact downstream commit with `scripts/m0/fetch-servo.sh`. Every build verifies the actual commit and refuses local source edits. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
 
 ```sh
-scripts/m0/fetch-servo.sh             # download, verify, extract, apply the patches
+scripts/m0/fetch-servo.sh             # fetch the exact downstream SHA; no Android SDK needed
 scripts/build-native.sh               # cargo build + strip → engine/jniLibs/x86_64 (COMBRAY_ABI=arm64 for phones)
 ./gradlew assembleDebug               # → app/build/outputs/apk/debug/app-debug.apk (ch.lkmc.combray.debug)
 ```
@@ -81,7 +81,7 @@ To regenerate the launcher icon after changing `media-sources/icon.png`: `python
 
 ### Third-party notices
 
-Settings › About lists every third-party component in the APK with its license texts and links to this repository for the source, including the Servo patches.
+Settings › About lists every third-party component in the APK with its license texts and links to this repository. [Third-party notices](../THIRD_PARTY_NOTICES.md) links the exact downstream engine source.
 
 | Part | Source | When it updates |
 | --- | --- | --- |
@@ -125,23 +125,25 @@ Before publishing: supply the personal signing key, and wire native compilation 
 ## Build the M0 engine harness
 
 ```sh
-scripts/m0/fetch-servo.sh             # download, verify, extract, apply the patches
+scripts/m0/fetch-servo.sh             # prepare the exact downstream commit
 scripts/m0/build-harness.sh           # cargo build + strip + Gradle → app-debug.apk
 ```
 
 Output: `spike/android/app/build/outputs/apk/debug/app-debug.apk` (x86_64, about 142 MB; the stripped native library is about 131 MB). The Rust code is built with Cargo's `release` profile; only the Android packaging is a debug variant, so `run-as` works for collecting reports. Use `COMBRAY_ABI=arm64` for devices.
 
-Upstream baseline (Servo's own shell, unmodified apart from the build fix):
+Upstream baseline (Servo's own shell at the pinned base, fetched from our repository):
 
 ```sh
 scripts/m0/fetch-servo.sh upstream
-scripts/m0/build-upstream.sh          # servo-checkout/servo-v0.6.0/target/<triple>/release/servoapp.apk
+scripts/m0/build-upstream.sh          # servo-checkout/servo/target/<triple>/release/servoapp.apk
 scripts/m0/smoke-upstream.sh emulator-5560
 ```
 
 `smoke-upstream.sh` repeats mach's Android `smoketest`: it installs `servoapp.apk`, opens a `data:` URL whose script logs `SERVO_ANDROID_SMOKETEST_OK`, and passes when that marker reaches logcat before a crash marker. mach waits 30 seconds; the script waits up to `COMBRAY_SMOKE_TIMEOUT` (900 s default) for software emulation.
 
-`fetch-servo.sh` recreates the source tree from the tarball on every run (keeping `target/`), so switching between `upstream` and the default patch set is explicit. It records what it prepared in `servo-checkout/servo-v0.6.0/.combray-prepared` (mode, revision, hashes of the patches and of the scripts applying them); `build-native.sh` prepares the tree again whenever that record differs.
+`fetch-servo.sh` switches between exact commits without deleting the checkout or its ignored `target/`. It refuses tracked or untracked source edits and preserves detached local commits until you put them on a branch. Successful Python preparation is recorded inside `.git/combray-prepared`; a cached commit, matching stamp and existing Python environment need no network. A deleted environment is prepared again. Both build scripts prepare their required mode, so a baseline build cannot silently become the app's engine.
+
+The old `servo-checkout/servo-v0.6.0` release extraction is untouched. It is no longer used; inspect it before removing it. To reuse its compilation cache, set `CARGO_TARGET_DIR` explicitly to its `target/` directory.
 
 Host unit tests for the engine's pure modules (no Servo build needed):
 
@@ -149,7 +151,30 @@ Host unit tests for the engine's pure modules (no Servo build needed):
 cd native && cargo test --lib
 ```
 
-They still need the fetched tree, because Cargo reads the Android-only path dependencies into it, so CI does not run them. CI checks what needs no tree: `cargo fmt --check` in `native/`, and that every page script in `native/src/` and `native/src/vendor/` compiles as a classic script.
+They still need the fetched tree because Cargo reads the Android-only path dependencies. The Engine workflow runs these tests, builds and verifies both Android ABIs, and runs the x86_64 app fixture checks on an API 30 emulator. It is path-filtered to engine-relevant PRs and can also run manually. Routine CI remains Kotlin-only; release publishing still needs its native/signing path. A green host test is not a native build or device result.
+
+## Updating Servo
+
+**Owner rule: source pulls only from `servo/servo`.** No issues, PRs, comments, reviews, reactions, pushes, GitHub fork API calls or outreach. All AI-assisted work and review stays in `L-K-M/servo` and `L-K-M/Combray`. The downstream repository preserves upstream history without a GitHub fork relationship, and has no copied upstream workflows, reviewer assignments or dependency bot configuration.
+
+Check upstream source weekly during active development; take security fixes promptly. Keep this app on reviewed 0.6.x maintenance updates. A move to upstream `main` is a separate tested upgrade, never an automatic merge.
+
+In a clean downstream clone, choose a reviewed maintenance tag or commit:
+
+```sh
+git switch combray/0.6
+git pull --ff-only origin combray/0.6
+git switch -c engine/update-0.6
+git fetch --no-tags https://github.com/servo/servo.git <reviewed-0.6.x-tag-or-SHA>
+git merge --no-ff FETCH_HEAD
+git diff --name-status combray/0.6 -- .github/
+```
+
+Resolve engine/API conflicts and inspect any reintroduced `.github` automation before pushing downstream. Keep original licenses. Open the engine PR against `combray/0.6`; never rewrite its published history. If an equivalent fix arrives through a source pull, reconcile our version downstream.
+
+In a Combray PR, set the full candidate SHA and its upstream base in `scripts/m0/servo-pin.sh`. Update this table and `ENGINE_SPIKE.md`; reconcile `native/Cargo.lock`, resources, toolchains and notices if they changed. Require host tests, both native ABI builds, packaging checks and x86_64 fixture/device evidence on that candidate. Run critical regressions in the M0 harness as needed. Merge the downstream engine PR preserving its commits, then land the Combray pin only after its CI and review pass. The Engine workflow records build/device evidence; an arm64 build does not prove arm64 runtime support.
+
+Rollback: revert the Combray pin change to the previous tested SHA and rebuild. Keep the downstream commits available; no force-push or source deletion is needed.
 
 ## Emulator and checks
 

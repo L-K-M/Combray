@@ -2,6 +2,8 @@
 
 **Date:** 18 October 2026. **Scope:** milestone M0 of the [implementation plan](IMPLEMENTATION_PLAN.md#m0--prove-servo-on-android). This report records what was built, how, and what ran on Android. Build commands are in [BUILDING.md](BUILDING.md).
 
+The numbered M0 sections retain their original release-and-patch evidence. Current source maintenance is recorded in [Downstream engine maintenance](#downstream-engine-maintenance-23-october-2026).
+
 ## Summary
 
 | Capability (M0) | Verdict | Evidence |
@@ -32,7 +34,7 @@ Software emulation is slow and timing-sensitive: Android's own framework timed o
 
 ## 2. Servo selection and integration decision
 
-**Pinned:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from the release's source tarball (SHA-256 `1d828f99…e0c6`, full value in [BUILDING.md](BUILDING.md#pinned-inputs)) with three small patches.
+**M0 input:** Servo **v0.6.0** (git `c78d2c206f80a1c8b67eefa97f773bba513205d3`, release of 29 September 2026), built from `servo-v0.6.0-src-vendored.tar.gz` (SHA-256 `1d828f9956fcb0fccfd5af02e4c75bfb948344f04ba7af1765faff78d4aec0e6`) with three small patches. The current downstream pin is in [BUILDING.md](BUILDING.md#pinned-inputs).
 
 - **Why v0.6.0:** it is the base of Servo's current long-term-support line (SpiderMonkey ESR 153); the LTS policy covers the `servo` library crate, which is what Combray embeds, and not servoshell. v0.7.0 (5 October) is newer but will be superseded monthly. Moving to a later 0.6.x LTS update means re-applying those patches.
 - **Why not upstream's Android shell:** servoshell's JNI layer drives one active WebView at a time, reports no tab or document identity, and has no JavaScript evaluation entry point (source inspection, confirmed by the research verification). Extending it would mean carrying a fork of a demo shell outside LTS scope.
@@ -82,7 +84,7 @@ Patch 0002 (131 added and 19 removed lines in 12 files; additive for existing em
 | `WebView::evaluate_javascript_in_document(document, …)`: constellation refuses with `DocumentNotFound` unless `document` is active | A result can only come from the named document |
 | `evaluate_js_on_global` returns `DocumentNotFound` instead of asserting when script cannot run | Removes the crash for every caller: embedder evaluation, WebDriver `ExecuteScript`, user scripts |
 
-Patch 0003 logs WebRender render errors, which `Painter::render` discarded (an upstream TODO); it was added to diagnose a stale-frame problem (section 6). The changes look suitable for upstream discussion; they have not been proposed upstream yet.
+Patch 0003 logs WebRender render errors, which `Painter::render` discarded (an upstream TODO); it was added to diagnose a stale-frame problem (section 6). These changes stay downstream. The owner prohibits upstream contributions and contact.
 
 ## 5. Checks and results
 
@@ -171,7 +173,7 @@ What the checks establish, beyond pass or fail:
 - The problem needs the large page; the same operations with small pages are fine.
 - It was seen only with SwiftShader under software emulation. No GPU device was available.
 
-**Next steps.** Run the reproduction on an arm64 phone. Test whether a resize alone clears it, since rotation does and a same-size surface rebind does not; that would also be a cheap workaround. If it persists, capture WebRender state (`WebView::capture_webrender`, debug flags) and report upstream with the harness reproduction. Candidate workarounds to evaluate, not yet tested: one `OffscreenRenderingContext` per tab composited into the window context, or rebuilding the shared painter after view churn.
+**Next steps.** Run the reproduction on an arm64 phone. Test whether a resize alone clears it, since rotation does and a same-size surface rebind does not; that would also be a cheap workaround. If it persists, capture WebRender state (`WebView::capture_webrender`, debug flags) and keep the reproduction downstream. Candidate workarounds to evaluate, not yet tested: one `OffscreenRenderingContext` per tab composited into the window context, or rebuilding the shared painter after view churn.
 
 ## 7. Navigation event taxonomy
 
@@ -239,11 +241,11 @@ scripts/m0/run-checks.sh emulator-5560
 ## 12. Next steps
 
 1. Run the harness on an arm64 phone (the owner's device if possible) and record the same checks there.
-2. Narrow the stale-frame defect on a real GPU; report it upstream with the reproduction.
-3. Report cookie persistence and embedder-script interruption upstream; decide whether Combray carries a cookie-flush patch.
-4. Offer patch 0002 (document identity and the crash fix) and patch 0003 upstream.
+2. Narrow the stale-frame defect on a real GPU; keep the reproduction downstream.
+3. Investigate embedder-script interruption downstream. Cookie persistence is addressed by the change formerly carried as patch 0004.
+4. Maintain document identity, the crash fix and render diagnostics downstream. Never offer them upstream.
 5. Done: M1 started from `native/` and kept the engine thread, identity model and capture path ([section 13](#13-after-m0-engine-changes-for-the-app)).
-6. Offer patch 0004 upstream with the cookie-loss reproduction.
+6. Keep the profile-persistence change and cookie-loss reproduction downstream.
 
 ## 13. After M0: engine changes for the app
 
@@ -351,6 +353,58 @@ scripts/check-app.sh emulator-5560 ch.lkmc.combray.ScrollTest ch.lkmc.combray.Re
 ```
 
 `ScrollTest` uses only `testing/fixtures/server.py`'s long page: real touch input selects each action, then screen-color checks establish that Servo painted the corresponding viewport-high endpoint section. Position titles corroborate touch scrolling, not programmatic jumps. It also checks same-address reload reset. `ReaderScrollTest` checks both ends and left placement in an RTL article. The accessibility check verifies labels and uncrowded 48dp targets at large font scale. Physical-device and live-site checks are not run.
+
+## Downstream engine maintenance, 23 October 2026
+
+Owner-approved migration to [L-K-M/servo](https://github.com/L-K-M/servo/tree/combray/0.6), an independent downstream repository preserving upstream Git history. `servo/servo` is source pulls only. No contributions, reports, comments, fork API calls or outreach are permitted. The rule is in both repositories' `AGENTS.md` and global agent instructions.
+
+Base: `c78d2c206f80a1c8b67eefa97f773bba513205d3` (v0.6.0). Downstream pin: `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. Engine changes are imported unchanged as separate commits:
+
+| Former patch | Downstream commit | Scope |
+| --- | --- | --- |
+| 0001, crates.io workaround | Not needed | Git source already uses crates.io; only the release tarball added vendor redirection |
+| 0002, document identity | `f860cdf98ec` | 12 files: constellation, identified embedder messages, script document/global handling, guarded JavaScript evaluation and WebView delegates |
+| 0003, render diagnostics | `70b288de85e` | `components/paint/painter.rs` |
+| 0004, profile persistence | `718bb542539` | `components/net/resource_thread.rs`, `components/servo/site_data_manager.rs`, `components/shared/base/lib.rs`, `components/shared/net/lib.rs` |
+| 0007, DOM relational queries | `97be6cb1fb5` | Four files in `components/script/`; all 15 Parser hooks preserved, only `parse_has` overridden. Stylesheet `:has()` and `CSS.supports` remain disabled. Imported unchanged in [downstream PR #1](https://github.com/L-K-M/servo/pull/1), from the candidate in [Combray PR #119](https://github.com/L-K-M/Combray/pull/119) |
+
+Copied upstream workflows, `CODEOWNERS` and Dependabot configuration were removed before the first downstream push. The source checkout is now `servo-checkout/servo`, selected by a full SHA in `scripts/m0/servo-pin.sh`. No patch files are applied. The old release extraction and its build cache are preserved. The checkout is verified on every build; dirty source is refused instead of overwritten. The baseline mode fetches the original upstream SHA from our downstream repository.
+
+Migration checks: all 14 source-preparation regressions pass, including exact SHA despite a moving branch, no SDK, offline reuse, mode switching with cache preserved, local edits and detached commits, pin updates, deleted Python environments, failed preparation retry, unavailable commits and inherited Git state. Review found the detached-commit and stale-environment cases; regression tests failed before their fixes and passed afterward. The complete script suite passes 44 tests. Documentation, shellcheck, Rust formatting and all 22 Rust host tests pass. `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease` passed locally (JDK 21); this first Gradle run had no staged engine.
+
+The x86_64 native build of the candidate passed in 6m31s, reusing the previous target cache, with Rust 1.97.1, NDK r29 and four Cargo jobs. Host compiler wrappers call the reference Zig C/C++ wrappers with `-fno-sanitize=undefined`. The downstream `components/` tree is byte-identical to the tested release extraction with patches 0002, 0003, 0004 and final 0007 (`git diff --no-index --stat` returned no differences).
+
+```sh
+ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_HOST_CC="$PWD/build/host-cc" COMBRAY_HOST_CXX="$PWD/build/host-cxx" \
+CARGO_TARGET_DIR=/home/paseo/workspace/Combray/servo-checkout/servo-v0.6.0/target \
+CARGO_BUILD_JOBS=4 scripts/build-native.sh
+```
+
+Staged x86_64 `libcombray_engine.so`: 131,035,584 bytes, SHA-256 `5fe65a66532b33211ed7e2ff30428ae014fc9b728fd93515b3b4e3925ea0ef26`.
+
+The ARM64 native build passed in 7m12s with the same source and tools, `COMBRAY_ABI=arm64` and `CARGO_TARGET_DIR=/home/paseo/workspace/Combray/servo-checkout/target-arm64`. Its staged engine is 121,892,944 bytes, SHA-256 `443c56cde7ee12c7a85957645b3b20cbe5830712e387ab727eb79330597fe257`. After merging Combray #119, the complete Gradle test/lint/debug/test-APK/release command passed again with this ARM64 engine staged. `verify-apk.py --expected-arch` passed for both ABIs. The ARM64 debug APK is `548721dc689b99200fe787cade7d942c70f435219bd698538794c17b6fe85aed`.
+
+The migrated x86_64 APK (`f4decaabe15ae39ddaf58b078a97f86e038fb884cc7b2ce7ef42887a4031444b`) passed 11 selected checks on Android 11/API 30 `emulator-5580`, SwiftShader without KVM: all five Reader and three Hister cases, navigation with Recent, same-address independent tabs and surface rotation. This run preceded the merge of #119's extra fixture case; it used the final imported engine code. The new selector regression's evidence remains in section 16. Local output is in `build/device-checks/servo-downstream/` (ignored).
+
+```sh
+ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+COMBRAY_RESULTS="$PWD/build/device-checks/servo-downstream" \
+scripts/check-app.sh emulator-5580 ch.lkmc.combray.ReaderTest ch.lkmc.combray.HisterTest \
+  'ch.lkmc.combray.BrowsingTest#navigatingShowsTheNewPageAndKeepsTheOldOneInRecent' \
+  'ch.lkmc.combray.BrowsingTest#twoTabsAtTheSameAddressStayIndependent' \
+  'ch.lkmc.combray.BrowsingTest#rotationRecreatesTheSurfaceButKeepsTabsAndThePage'
+```
+
+Hosted [Engine CI](https://github.com/L-K-M/Combray/actions/runs/40028430170) passed at Combray `e956163`: host tests, both native ABI builds, both APK architecture checks and all **57 device checks**, including selector queries, external intents, Reader, saves, Hister and both process-death phases. [Migration PR #120](https://github.com/L-K-M/Combray/pull/120) records CI and review; the stopping condition was reached with no confirmed important review findings, and remaining minor suggestions were deferred. [Downstream PR #1](https://github.com/L-K-M/servo/pull/1) merged the unchanged adapter, preserving the pinned commit. ARM64 runtime, physical devices and macOS builds were not run. Maintenance and rollback: [BUILDING.md](BUILDING.md#updating-servo).
+
+The first Engine CI attempt passed host tests but both Android builds stopped before compilation: the hosted image exported `ANDROID_NDK_ROOT` pointing at r27. The workflow now clears that inherited override, allowing `env.sh` to select and install pinned r29. This does not change explicit local NDK overrides.
+
+The next attempt passed host tests, both native builds and both APK architecture checks, but fresh emulator creation failed because avdmanager and the emulator selected different Android preference homes. The workflow now aligns `ANDROID_USER_HOME`, `ANDROID_EMULATOR_HOME` and `ANDROID_AVD_HOME`. A real SDK probe created the expected `.ini` and `config.ini` under an isolated home, then deleted that test AVD before retrying CI.
+
+That retry booted the hosted KVM emulator and ran all 57 device checks: 54 passed, including the selector regression and both process-death phases. The three external-intent cases failed as in section 16. Logcat explicitly said lifecycle callbacks were ignored because the current intent did not match the launch intent. AndroidX `ActivityScenario` 1.7.0 checks that match on every callback; `MainActivity.onNewIntent` legitimately changes the activity intent. Its observer therefore missed resume, stop and destroy, leaving stale `PAUSED` state.
+
+`BrowsingTest.deliverIncomingPage` now sends the real Android intent, waits for its page, then restores the scenario launch intent on the main thread, including on assertion failure. This makes Back and teardown observable without skipping the functional assertions. The three previously failing checks pass locally in `build/device-checks/intent-harness-fixed/`. The product APK remains byte-identical (`f4decaab…`); this correction is in the test driver. JVM tests, lint and both debug APK assemblies passed after the correction, followed by the successful full hosted run linked above.
 
 ## 16. Kimi article compatibility (23 October 2026)
 

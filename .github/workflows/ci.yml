@@ -43,15 +43,15 @@ jobs:
 
       - name: Syntax and shellcheck
         run: |
-          for f in scripts/*.sh; do bash -n "$f"; done
-          shellcheck scripts/*.sh
+          for f in scripts/*.sh scripts/m0/*.sh; do bash -n "$f"; done
+          shellcheck scripts/*.sh scripts/m0/servo-pin.sh scripts/m0/env.sh scripts/m0/fetch-servo.sh
 
       - name: APK build-script regressions
         run: python3 -I -m unittest discover -s scripts/tests
 
       # Formatting needs no Servo tree. The host unit tests (cargo test --lib)
       # do: Cargo reads the Android-only path dependencies into servo-checkout/,
-      # so they stay a local check (README.md). The explicit toolchain skips the
+      # so the Engine workflow runs them after fetching. The explicit toolchain skips the
       # Android targets rust-toolchain.toml lists.
       - name: Rust formatting
         working-directory: native

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build Servo's own Android shell (servoshell) from the prepared tree with mach.
-# Run `scripts/m0/fetch-servo.sh upstream` first for an unmodified baseline.
+# Prepares the pinned upstream baseline from our downstream repository.
 #
-# Output: servo-checkout/servo-v<version>/target/<triple>/release/servoapp.apk
+# Output: servo-checkout/servo/target/<triple>/release/servoapp.apk
 set -euo pipefail
 
+"$(dirname "${BASH_SOURCE[0]}")/fetch-servo.sh" upstream
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 cd "$COMBRAY_SERVO_SRC"

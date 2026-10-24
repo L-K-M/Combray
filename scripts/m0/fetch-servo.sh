@@ -1,84 +1,90 @@
 #!/usr/bin/env bash
-# Download, verify, extract and patch the pinned Servo release into servo-checkout/.
+# Prepare an exact downstream Servo commit in a dedicated Git checkout.
 #
-#   scripts/m0/fetch-servo.sh            # all patches in native/servo/patches (harness)
-#   scripts/m0/fetch-servo.sh upstream   # build fix only (baseline servoshell build)
-#
-# The tree is recreated from the verified tarball on every run, so its state always matches
-# the requested patch set. Patches live in native/servo/patches/.
+#   scripts/m0/fetch-servo.sh            # Combray's pinned downstream commit
+#   scripts/m0/fetch-servo.sh upstream   # pinned upstream baseline, from our repository
 set -euo pipefail
 
-. "$(dirname "${BASH_SOURCE[0]}")/env.sh"
-
-combray_require python3 "install Python 3.11+ (macOS: xcode-select --install)"
-combray_require curl "install curl"
-combray_require git "install git (patches are applied with git apply)"
-combray_require uv "Servo's mach needs it: https://docs.astral.sh/uv/ (macOS: brew install uv)"
+# shellcheck source=servo-pin.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/servo-pin.sh"
 
 MODE="${1:-harness}"
 case "$MODE" in
-    harness) PATCHES=("$COMBRAY_ROOT"/native/servo/patches/*.patch) ;;
-    upstream) PATCHES=("$COMBRAY_ROOT"/native/servo/patches/0001-*.patch) ;;
+    harness) REVISION="$COMBRAY_SERVO_GIT_REVISION" ;;
+    upstream) REVISION="$COMBRAY_SERVO_UPSTREAM_REVISION" ;;
     *) echo "usage: $0 [harness|upstream]" >&2; exit 2 ;;
 esac
-
-TARBALL_NAME="servo-v$COMBRAY_SERVO_VERSION-src-vendored.tar.gz"
-TARBALL_URL="https://github.com/servo/servo/releases/download/v$COMBRAY_SERVO_VERSION/$TARBALL_NAME"
-DOWNLOADS="$COMBRAY_WORK/downloads/v$COMBRAY_SERVO_VERSION"
-TARBALL="$DOWNLOADS/$TARBALL_NAME"
-
-mkdir -p "$DOWNLOADS"
-if [ ! -f "$TARBALL" ]; then
-    echo "==> downloading $TARBALL_URL (about 390 MB)"
-    curl -fL --retry 3 -o "$TARBALL.partial" "$TARBALL_URL"
-    mv "$TARBALL.partial" "$TARBALL"
+if [ "$#" -gt 1 ] || [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "!! expected one mode and a full pinned Git commit SHA" >&2
+    exit 2
 fi
 
-echo "==> verifying $TARBALL_NAME"
-# Python rather than sha256sum, which macOS lacks.
-python3 -I - "$TARBALL" "$COMBRAY_SERVO_TARBALL_SHA256" <<'PY'
-import hashlib
-import sys
-
-path, expected = sys.argv[1:]
-digest = hashlib.sha256()
-with open(path, "rb") as stream:
-    for chunk in iter(lambda: stream.read(1 << 20), b""):
-        digest.update(chunk)
-if digest.hexdigest() != expected:
-    sys.exit(f"!! {path}: SHA-256 {digest.hexdigest()}, expected {expected}")
-PY
-
-# Keep the build cache (target/) across re-extractions; it is large and still valid.
-if [ -d "$COMBRAY_SERVO_SRC/target" ]; then
-    # A cache left by an interrupted run is older; moving onto it would nest this one inside.
-    rm -rf "$COMBRAY_WORK/target.keep"
-    mv "$COMBRAY_SERVO_SRC/target" "$COMBRAY_WORK/target.keep"
+# Never let an enclosing/inherited repository turn a checkout into edits to Combray.
+local_environment="$(git rev-parse --local-env-vars)"
+while IFS= read -r variable; do
+    unset "$variable"
+done <<< "$local_environment"
+unset GIT_NAMESPACE
+if [ ! -e "$COMBRAY_SERVO_SRC" ]; then
+    mkdir -p "$COMBRAY_WORK"
+    git init --quiet "$COMBRAY_SERVO_SRC"
 fi
-rm -rf "$COMBRAY_SERVO_SRC"
-mkdir -p "$COMBRAY_SERVO_SRC"
-echo "==> extracting into $COMBRAY_SERVO_SRC"
-tar -xzf "$TARBALL" -C "$COMBRAY_SERVO_SRC"
-if [ -d "$COMBRAY_WORK/target.keep" ]; then
-    mv "$COMBRAY_WORK/target.keep" "$COMBRAY_SERVO_SRC/target"
+if [ ! -d "$COMBRAY_SERVO_SRC/.git" ]; then
+    echo "!! $COMBRAY_SERVO_SRC is not a dedicated Git checkout; move it aside before retrying" >&2
+    exit 1
 fi
-
-revision="$(cat "$COMBRAY_SERVO_SRC/GIT_REVISION")"
-if [ "$revision" != "$COMBRAY_SERVO_GIT_REVISION" ]; then
-    echo "!! tarball revision $revision, expected $COMBRAY_SERVO_GIT_REVISION" >&2
+changes="$(git -C "$COMBRAY_SERVO_SRC" status --porcelain --untracked-files=normal)"
+if [ -n "$changes" ]; then
+    echo "!! Servo has local changes; commit or move them aside before building the pinned source" >&2
     exit 1
 fi
 
-# Patch 0001 replaces vendor/ with crates.io downloads (see its message); drop 1.5 GB.
-rm -rf "$COMBRAY_SERVO_SRC/vendor"
+# A local detached commit needs a branch before moving HEAD away from it.
+STAMP="$COMBRAY_SERVO_SRC/.git/combray-prepared"
+prepared_revision=""
+if [ -f "$STAMP" ]; then
+    IFS= read -r prepared_revision < "$STAMP" || true
+fi
+current="$(git -C "$COMBRAY_SERVO_SRC" rev-parse --verify HEAD 2> /dev/null || true)"
+case "$current" in
+    ""|"$COMBRAY_SERVO_GIT_REVISION"|"$COMBRAY_SERVO_UPSTREAM_REVISION"|"$prepared_revision") ;;
+    *)
+        branches="$(git -C "$COMBRAY_SERVO_SRC" for-each-ref --contains "$current" --format='%(refname)' refs/heads/)"
+        if [ -z "$branches" ]; then
+            echo "!! Save Servo's detached commit $current on a branch before switching pins" >&2
+            exit 1
+        fi
+        ;;
+esac
 
-cd "$COMBRAY_SERVO_SRC"
-"$COMBRAY_ROOT/scripts/m0/apply-patches.sh" "$COMBRAY_SERVO_SRC" "${PATCHES[@]}"
+# Fetch only a missing commit. A prepared checkout also works offline.
+if ! git -C "$COMBRAY_SERVO_SRC" cat-file -e "$REVISION^{commit}" 2> /dev/null; then
+    git -C "$COMBRAY_SERVO_SRC" fetch --no-tags --depth=1 "$COMBRAY_SERVO_REPOSITORY" "$REVISION"
+fi
+if [ "$current" != "$REVISION" ]; then
+    git -C "$COMBRAY_SERVO_SRC" checkout --detach "$REVISION"
+fi
+if [ "$(git -C "$COMBRAY_SERVO_SRC" rev-parse HEAD)" != "$REVISION" ]; then
+    echo "!! Servo checkout does not match the pinned commit $REVISION" >&2
+    exit 1
+fi
 
-echo "==> preparing mach's Python environment"
-./mach --help > /dev/null
+# Keep the stamp outside the source tree; only successful Python preparation is reusable.
+expected="$(python3 -I - "$REVISION" "$COMBRAY_ROOT/scripts/m0/servo-pin.sh" "$0" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
 
-# Last, so an interrupted run is prepared again next time.
-combray_servo_stamp "$MODE" "${PATCHES[@]}" > "$COMBRAY_SERVO_STAMP"
+print(sys.argv[1])
+for path in sys.argv[2:]:
+    print(hashlib.sha256(Path(path).read_bytes()).hexdigest())
+PY
+)"
+if [ "$(cat "$STAMP" 2> /dev/null)" != "$expected" ] || [ ! -x "$COMBRAY_SERVO_SRC/.venv/bin/python" ]; then
+    echo "==> preparing mach's Python environment"
+    (cd "$COMBRAY_SERVO_SRC" && ./mach --help > /dev/null)
+    printf '%s\n' "$expected" > "$STAMP.partial"
+    mv "$STAMP.partial" "$STAMP"
+fi
 
-echo "Servo v$COMBRAY_SERVO_VERSION ($revision) ready at $COMBRAY_SERVO_SRC ($MODE patches)"
+echo "Servo $REVISION ready at $COMBRAY_SERVO_SRC ($MODE)"
