@@ -27,7 +27,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
@@ -376,8 +375,8 @@ fun BrowserScreen(
                             onAdd = { homeEditLink = null; homeEditPage = HomeEditPage.LINK; sheet = Sheet.HOME_EDIT },
                             onHide = { site -> changeHome { graph.home.hideSite(site) } },
                             onUnpin = { id -> changeHome { graph.home.unpin(id) } },
-                            // Home's bottom destinations must stay above a notice's touch surface.
-                            modifier = Modifier.padding(bottom = snackbarReach),
+                            // Paint the reserved notice space too, covering the native surface.
+                            modifier = Modifier.background(MaterialTheme.colorScheme.background).padding(bottom = snackbarReach),
                         )
                     },
                 )
@@ -483,7 +482,7 @@ fun BrowserScreen(
         // separate window over this one and shows the snackbars itself while it is open. The
         // bar's height includes the navigation bar, and the keyboard's padding is the column's.
         if (sheet != Sheet.RECENT) {
-            SnackbarHost(
+            NoticeHost(
                 snackbar,
                 Modifier
                     .align(Alignment.BottomCenter)

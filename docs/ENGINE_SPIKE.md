@@ -295,6 +295,92 @@ Limitations found while building the app:
 - **Pages behind an HTTP sign-in can be captured.** Before the address lost its credentials, Combray skipped such pages for Hister and refused a Karakeep save as sensitive. Now they are treated like a page signed in with a cookie: captured only when Hister capture is on and the host is not excluded.
 - **Emulator compositor.** After about 2.5 hours of headless running, the reference emulator's screenshots turned all black, the launcher included, while the app kept working. This was an emulator problem, not an engine one; `check-app.sh` now detects it before running checks.
 
+### Reddit loading and fixed-layer scrolling (24 October 2026)
+
+The owner reported a partially rendered Reddit feed that kept loading and
+would not scroll. The screenshot's directional button shows that Combray
+received the swipe. Loading does not disable input in `EngineSurfaceView`.
+Reddit answered HTTP 403 from this host, including a mobile User-Agent;
+the live feed and the cause of its unfinished load remain unverified.
+
+A native regression confirmed a separate relevant defect: fixed
+descendants are siblings of the viewport scroll node. When an empty fixed
+scroll box cannot consume a swipe, following spatial parents never reaches
+the viewport. The recovered proposal in Combray PR #116 identified this
+case but had no native or device proof. The smaller downstream fix in
+[Servo PR #5](https://github.com/L-K-M/servo/pull/5) chains only input scrolls
+to the same document's viewport, retaining its input sensitivity. Script
+scrolling stays unchanged. No site-specific script or timeout marks a
+stalled page as loaded.
+
+Candidate engine: `1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c`, based on
+`38633e6cfd3e5d78651ba81698b6e8e30644231f`. The base also contains reviewed
+downstream PR #3's loopback-only WebDriver listener; Combray does not enable
+that listener. No dependency, toolchain or license changed. Modified
+engine files: `components/shared/paint/display_list.rs` and
+`components/shared/paint/tests/compositor.rs`.
+
+Host evidence (Linux x86_64, Rust 1.97.1):
+
+- The new compositor regression failed before the fix: expected viewport
+  offset `(0, 40)`, got `None`. All six compositor tests pass afterward,
+  covering empty/scrollable fixed boxes, page edges, script scrolling,
+  locked viewports and document isolation.
+- GLM review found that touch pans and flings use `ScrollType::Touch`,
+  separately from wheel input. Its regression also failed before correction;
+  both paths now run the same assertions.
+- The initial broad paint test lacked `libwayland-client.so`. With the
+  existing host graphics libraries and `xvfb-run -a`, the full paint API
+  suite passed: two rendering tests and six compositor tests.
+- The original pinned engine built for x86_64 in 7m30s with
+  `scripts/build-native.sh`. Baseline APK SHA-256:
+  `31397733dc16b76debd3abdb492fb507b49f903d9b87896f8459675475e2d8ac`.
+- Kotlin unit tests, lint and debug/test APK assembly passed. The bridge's
+  88 host tests, all 48 script tests, docs and whitespace checks passed.
+- The candidate x86_64 Android engine built in 8m25s (NDK r29, two build
+  jobs). Debug/test APK assembly and ELF packaging checks passed. APK:
+  `0a9f663c07ee8be48a0146dccaa750ad48a0f340ff1268084d5931896dda2678`;
+  engine library:
+  `8a7becb842bcc91b0cfca4ab95b44e69544b83957684700628adb25641607f9b`.
+
+`FixedLayerScrollTest` uses a synthetic transparent fixed drawer over red
+and green page sections. It checks the painted viewport after a real swipe,
+both after load and while an image response is held by the fixture server.
+The latter must keep reporting loading until the test explicitly releases
+the response.
+
+Android baseline (`emulator-5560`, Android 11/API 30, x86_64, software
+emulation/SwiftShader): the saved pre-fix APK failed at the expected pixel
+assertion after the swipe, `b03a2e` instead of `2e6b4f` (164.213 s).
+`build/device-checks/reddit-red/` holds the failure and a screenshot showing
+the direction button over the unmoved page. A copy of `check-app.sh` used
+the saved baseline APK paths; its fixture, install and check logic were
+unchanged.
+
+The candidate passed all six selected checks in
+`build/device-checks/reddit-fixed/`: both fixed-layer checks (68.603 s),
+all three `ScrollTest` checks (139.028 s), and the existing cancelled-media
+check. Thus the page scrolls before an image finishes, loading remains
+truthful, and releasing that response finishes the load. Root jumps,
+same-address reload reset and the overlaid snackbar still work.
+
+```sh
+# Host engine checkout, with the existing host graphics libraries on LD_LIBRARY_PATH:
+xvfb-run -a cargo +1.97.1 test --locked -p servo-paint-api
+
+# Combray, with the host compiler wrappers documented in BUILDING.md:
+CARGO_BUILD_JOBS=2 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+COMBRAY_RESULTS=build/device-checks/reddit-fixed scripts/check-app.sh emulator-5560 \
+  ch.lkmc.combray.FixedLayerScrollTest ch.lkmc.combray.ScrollTest \
+  'ch.lkmc.combray.BrowsingTest#mediaIsCancelledBeforeDownloadingAndThePageIsTold'
+```
+
+Next Reddit evidence requires a network that serves its feed. Its unfinished
+load remains open; these fixture results do not establish live-site support.
+ARM64 runtime was not tested. The companion PR supplies the CI ABI builds
+and full emulator suite before merge.
+
 ## 14. Sol review validation, 21 October 2026
 
 Source baseline: `e5cf8ed`, Servo v0.6.0 at the revision in section 2, patches 0001–0004. The Sol fixes change logical browser/outbox behavior, not the native pin or patch set. Host: Linux x86_64, JDK 21.0.12.1, Rust 1.97.1, NDK 29.0.14206865, SDK platform 37. The existing Zig 0.17 host wrappers described in [BUILDING.md](BUILDING.md) were used.
@@ -651,8 +737,8 @@ Close regression independently failed before its change; all five
 (`build/new-tab-close-green.txt`, 105.886 seconds), including dismissal,
 48dp targets and the narrow, large-font layout.
 
-The native x86_64 build passed at the unchanged downstream pin
-`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. This host needs the existing
+The initial native x86_64 build and focused device checks used downstream
+pin `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. This host needs the existing
 `build/tab-counter-host-cc` and `build/tab-counter-host-c++` Zig wrappers
 with `-fno-sanitize=undefined`; default clang failed on missing host headers.
 The successful log is `build/inline-search-native.log` (4m44s).
@@ -696,6 +782,14 @@ focused checks. Evidence: `build/device-checks/inline-search-reviewed/` and
 removed in favor of Material's hint/text semantics; spoken TalkBack output
 was not checked.
 
+Final integration includes the merged notice styling and fixed-layer scroll
+changes (#128 and #129). The current Servo pin is
+`1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c`; its local x86_64 rebuild passed
+(3m31s), followed by JVM tests, lint and debug/test assembly (30 seconds).
+Logs: `build/inline-search-current-native.log` and
+`build/inline-search-current-build.log`. The focused device runs above used
+the earlier pin; current-pin runtime proof comes from the final Engine CI.
+
 Final CI/review results are tracked in [PR #127](https://github.com/L-K-M/Combray/pull/127).
 Physical-phone and live-service checks remain unperformed.
 
@@ -737,3 +831,45 @@ then verify the red page's tab identity and painted pixels. The test APK
 compiled; local execution was deferred because the shared emulator was
 reserved. The Engine PR checks run this regression before merge. No physical
 device or live services were used.
+
+## 21. Close-notice appearance (24 October 2026)
+
+The owner's dark-mode screenshot showed a light "Tab closed" card on a
+white strip. Material's default snackbar uses inverse colors. Home's outer
+notice padding also left the native engine surface uncovered.
+
+Browser and Recent now share `NoticeHost`, using `surfaceContainerHigh`,
+`onSurface` and `primary` for the card, text and action. Home paints its
+background before reserving notice space. Existing contrast tests cover
+these color pairs in both schemes. No engine source or pin changed.
+
+`NoticeThemeTest` closes a synthetic page in forced Dark and Light, samples
+the painted notice and Home backdrop, then checks Undo's exact tab identity.
+The archived pre-fix APK failed both checks on `emulator-5560` (API 30,
+x86_64): a `29302c` notice in Light, `e7e2d9` in Dark, and a white
+(`ffffff`) backdrop in both. The fixed APK passed both pixel/Undo checks
+and the existing Home-spacing regression. [PR #128](https://github.com/L-K-M/Combray/pull/128)
+records latest device, CI and review results.
+
+Initial attempts on a separate fresh AVD (port 5582) failed before app
+installation: black screenshots and repeated Android `system_server`
+restarts (`Lost network stack`). These were infrastructure failures.
+
+The supplied engine library came from the concurrent successful same-pin
+build in the shared checkout: Rust 1.97.1, NDK r29, downstream Servo
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`, using local Zig host wrappers
+(`build/inline-search-native.log`, 4m44s). Plain host `clang` lacked C
+headers; the notice task's corrected build was interrupted when leaving
+the shared checkout. Initial PR CI also built both native ABIs.
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.NoticeThemeTest 'ch.lkmc.combray.HomeTest#aCloseNoticeDoesNotCoverHomeLinks'
+python3 scripts/check_docs.py
+git diff --check
+```
+
+JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
+checks passed locally. Evidence: `build/device-checks/notice-theme-*`
+and `build/notice-theme/`. The PR records latest CI and review results.
+Physical-phone validation remains unverified.
