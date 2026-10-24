@@ -3,11 +3,17 @@
 //! Every event that concerns a tab carries a [`ViewKey`]: the logical tab ID chosen by the
 //! application plus the engine generation of the native view. Document-related events also carry
 //! the document ID (Servo's pipeline ID for the top-level document). Events cross the JNI
-//! boundary as one JSON object each, so the Kotlin side never sees a native handle.
+//! boundary as one JSON object each, so the Kotlin side never sees a native handle. Every URL
+//! is serialized without `user:password@` (see [`crate::userinfo`]), except a link for another
+//! app (`external_link`). That is never `http(s)`, the only URLs Servo writes sign-in
+//! credentials into, so its userinfo is the page's own and part of the address the user is
+//! asked to open: Android turns `intent://git@host/#Intent;scheme=ssh;end` into `ssh://git@host/`.
 
 use serde_json::{Value, json};
 
 use crate::controls::ControlDescription;
+use crate::find::FindCounts;
+use crate::userinfo::strip_userinfo;
 
 /// One native incarnation of a logical tab.
 ///
@@ -126,6 +132,30 @@ impl CaptureStatus {
     }
 }
 
+/// How a find request ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FindStatus {
+    /// The script searched the document, which is still the tab's current one.
+    Found(FindCounts),
+    /// Another document became current before the result arrived; the result is dropped.
+    StaleDocument,
+    /// The tab, or its native view generation, closed before the result arrived.
+    TabClosed,
+    /// No such tab, no document yet, or the script failed or returned something else.
+    Failed,
+}
+
+impl FindStatus {
+    fn name(self) -> &'static str {
+        match self {
+            FindStatus::Found(_) => "found",
+            FindStatus::StaleDocument => "stale_document",
+            FindStatus::TabClosed => "tab_closed",
+            FindStatus::Failed => "failed",
+        }
+    }
+}
+
 /// Content returned by a successful capture script, after native bounds were enforced.
 #[derive(Clone, Debug)]
 pub struct CapturedContent {
@@ -140,6 +170,8 @@ pub struct CapturedContent {
     pub truncated_natively: bool,
     pub nodes_visited: u64,
     pub node_budget_exhausted: bool,
+    /// The page script stopped at its time budget; the text is what it read until then.
+    pub time_budget_exhausted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +223,15 @@ pub enum EngineEvent {
         view: ViewKey,
         url: String,
     },
+    /// The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed.
+    ExternalLink {
+        view: ViewKey,
+        url: String,
+    },
+    /// The page asked for a window without the user's tap; it was not opened.
+    PopupBlocked {
+        view: ViewKey,
+    },
     History {
         view: ViewKey,
         change: HistoryChange,
@@ -228,15 +269,28 @@ pub enum EngineEvent {
         current_document_at_completion: Option<u64>,
         result: Result<Value, String>,
     },
+    /// The answer to a find request, for the document it ran in (none if it never ran).
+    FindResult {
+        view: ViewKey,
+        document: Option<u64>,
+        request: i64,
+        status: FindStatus,
+    },
     Painted {
         view: ViewKey,
         frames: u64,
     },
     ImeShown {
         view: ViewKey,
+        /// The field's document: Servo's pipeline ID of its frame (the top-level document's ID
+        /// unless the field is in a frame).
+        document: u64,
         multiline: bool,
         /// Field type: "text", "password", "email", "url", "number", "tel" or "search".
         kind: &'static str,
+        /// Whether to open the keyboard. Before the user has used the page, Servo asks for the
+        /// field without it (`InputMethodControl::allow_virtual_keyboard`).
+        show_keyboard: bool,
     },
     ImeHidden {
         view: ViewKey,
@@ -248,6 +302,12 @@ pub enum EngineEvent {
     Crashed {
         view: ViewKey,
         reason: String,
+    },
+    /// The engine cancelled the document's audio, video or text-track loads: Combray cannot play
+    /// media. Reported once per document, for the tab's committed document.
+    MediaBlocked {
+        view: ViewKey,
+        document: u64,
     },
     /// A page control waits for an answer; `control` names it in `respondToControl`.
     ControlShown {
@@ -299,12 +359,22 @@ impl EngineEvent {
             ),
             EngineEvent::NavigationRequested { view, request, url } => with_view(
                 view,
-                json!({ "type": "navigation_requested", "request": request, "url": url }),
+                json!({
+                    "type": "navigation_requested",
+                    "request": request,
+                    "url": strip_userinfo(url),
+                }),
             ),
             EngineEvent::PageNavigationRequested { view, url } => with_view(
                 view,
-                json!({ "type": "page_navigation_requested", "url": url }),
+                json!({ "type": "page_navigation_requested", "url": strip_userinfo(url) }),
             ),
+            EngineEvent::ExternalLink { view, url } => {
+                with_view(view, json!({ "type": "external_link", "url": url }))
+            },
+            EngineEvent::PopupBlocked { view } => {
+                with_view(view, json!({ "type": "popup_blocked" }))
+            },
             EngineEvent::History {
                 view,
                 change,
@@ -319,7 +389,7 @@ impl EngineEvent {
                     "type": change.name(),
                     "document": document,
                     "sequence": sequence,
-                    "url": url,
+                    "url": strip_userinfo(url),
                     "index": index,
                     "length": length,
                 }),
@@ -382,16 +452,51 @@ impl EngineEvent {
                     }),
                 )
             },
+            EngineEvent::FindResult {
+                view,
+                document,
+                request,
+                status,
+            } => {
+                let counts = match status {
+                    FindStatus::Found(counts) => *counts,
+                    _ => FindCounts {
+                        count: 0,
+                        index: None,
+                        capped: false,
+                    },
+                };
+                with_view(
+                    view,
+                    json!({
+                        "type": "find_result",
+                        "document": document,
+                        "request": request,
+                        "status": status.name(),
+                        "count": counts.count,
+                        "index": counts.index,
+                        "capped": counts.capped,
+                    }),
+                )
+            },
             EngineEvent::Painted { view, frames } => {
                 with_view(view, json!({ "type": "painted", "frames": frames }))
             },
             EngineEvent::ImeShown {
                 view,
+                document,
                 multiline,
                 kind,
+                show_keyboard,
             } => with_view(
                 view,
-                json!({ "type": "ime_shown", "multiline": multiline, "kind": kind }),
+                json!({
+                    "type": "ime_shown",
+                    "document": document,
+                    "multiline": multiline,
+                    "kind": kind,
+                    "show_keyboard": show_keyboard,
+                }),
             ),
             EngineEvent::ImeHidden { view } => with_view(view, json!({ "type": "ime_hidden" })),
             EngineEvent::DefaultHandled { view, request } => with_view(
@@ -401,6 +506,10 @@ impl EngineEvent {
             EngineEvent::Crashed { view, reason } => {
                 with_view(view, json!({ "type": "crashed", "reason": reason }))
             },
+            EngineEvent::MediaBlocked { view, document } => with_view(
+                view,
+                json!({ "type": "media_blocked", "document": document }),
+            ),
             EngineEvent::ControlShown {
                 view,
                 control,
@@ -443,7 +552,7 @@ fn with_view(view: &ViewKey, mut value: Value) -> Value {
 fn capture_json(report: &CaptureReport) -> Value {
     let content = report.content.as_ref().map(|content| {
         json!({
-            "url": content.url,
+            "url": strip_userinfo(&content.url),
             "title": content.title,
             "text": content.text,
             "text_bytes": content.text_bytes,
@@ -452,6 +561,7 @@ fn capture_json(report: &CaptureReport) -> Value {
             "truncated_natively": content.truncated_natively,
             "nodes_visited": content.nodes_visited,
             "node_budget_exhausted": content.node_budget_exhausted,
+            "time_budget_exhausted": content.time_budget_exhausted,
         })
     });
 
@@ -464,7 +574,7 @@ fn capture_json(report: &CaptureReport) -> Value {
             "status": report.status.name(),
             "elapsed_ms": report.elapsed_ms as u64,
             "content": content,
-            "observed_url": report.observed_url,
+            "observed_url": report.observed_url.as_deref().map(strip_userinfo),
             "detail": report.detail,
         }),
     )
@@ -473,6 +583,61 @@ fn capture_json(report: &CaptureReport) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_result_carries_view_document_and_bounded_counts() {
+        let view = ViewKey {
+            tab: 2,
+            generation: 5,
+        };
+        let found = EngineEvent::FindResult {
+            view,
+            document: Some(4294967331),
+            request: 17,
+            status: FindStatus::Found(FindCounts {
+                count: 12,
+                index: Some(2),
+                capped: false,
+            }),
+        };
+        let failed = EngineEvent::FindResult {
+            view,
+            document: None,
+            request: 18,
+            status: FindStatus::Failed,
+        };
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&found.to_json()).unwrap(),
+            json!({
+                "schema": 1,
+                "type": "find_result",
+                "document": 4294967331u64,
+                "request": 17,
+                "status": "found",
+                "count": 12,
+                "index": 2,
+                "capped": false,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&failed.to_json()).unwrap(),
+            json!({
+                "schema": 1,
+                "type": "find_result",
+                "document": null,
+                "request": 18,
+                "status": "failed",
+                "count": 0,
+                "index": null,
+                "capped": false,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
+    }
 
     #[test]
     fn control_shown_carries_view_id_and_description() {
@@ -500,5 +665,141 @@ mod tests {
                 "generation": 9,
             })
         );
+    }
+
+    #[test]
+    fn media_blocked_names_its_document() {
+        let event = EngineEvent::MediaBlocked {
+            view: ViewKey {
+                tab: 2,
+                generation: 5,
+            },
+            document: 4294967331,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "media_blocked",
+                "document": 4294967331u64,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
+    }
+
+    #[test]
+    fn ime_shown_says_whether_to_open_the_keyboard() {
+        let event = EngineEvent::ImeShown {
+            view: ViewKey {
+                tab: 3,
+                generation: 9,
+            },
+            document: 42,
+            multiline: false,
+            kind: "search",
+            show_keyboard: false,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "ime_shown",
+                "document": 42,
+                "multiline": false,
+                "kind": "search",
+                "show_keyboard": false,
+                "tab": 3,
+                "generation": 9,
+            })
+        );
+    }
+
+    #[test]
+    fn links_for_other_apps_are_reported_as_the_page_wrote_them() {
+        let url = "intent://ada@example.org/#Intent;scheme=ssh;end";
+        let event = EngineEvent::ExternalLink {
+            view: ViewKey {
+                tab: 1,
+                generation: 2,
+            },
+            url: url.into(),
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+        assert_eq!(json["url"], url);
+    }
+
+    /// After an HTTP sign-in, Servo 0.6.0 reports the page (and every relative link on it)
+    /// with the credentials in its URL; none of them may reach the application.
+    #[test]
+    fn reported_urls_leave_out_sign_in_credentials() {
+        let view = ViewKey {
+            tab: 1,
+            generation: 2,
+        };
+        let signed_in = "http://ada:lovelace@localhost:8766/auth.html?q=a@b#c";
+        let content = CapturedContent {
+            url: signed_in.into(),
+            title: "AUTH:ada".into(),
+            text: "signed in".into(),
+            text_bytes: 9,
+            sha256: String::new(),
+            truncated_in_page: false,
+            truncated_natively: false,
+            nodes_visited: 3,
+            node_budget_exhausted: false,
+            time_budget_exhausted: false,
+        };
+        let capture = |content: Option<CapturedContent>, observed_url: Option<String>| {
+            EngineEvent::Capture(CaptureReport {
+                capture: 4,
+                view,
+                document: 5,
+                status: CaptureStatus::Captured,
+                elapsed_ms: 0,
+                content,
+                observed_url,
+                detail: None,
+            })
+        };
+        let events = [
+            EngineEvent::History {
+                view,
+                change: HistoryChange::NewDocument,
+                document: 5,
+                sequence: 1,
+                url: signed_in.into(),
+                index: 0,
+                length: 1,
+            },
+            EngineEvent::NavigationRequested {
+                view,
+                request: 6,
+                url: signed_in.into(),
+            },
+            EngineEvent::PageNavigationRequested {
+                view,
+                url: signed_in.into(),
+            },
+            capture(Some(content), None),
+            capture(None, Some(signed_in.into())),
+        ];
+
+        let expected = "http://localhost:8766/auth.html?q=a@b#c";
+        for event in events {
+            let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+            let url = json
+                .get("url")
+                .or_else(|| json["content"].get("url"))
+                .or_else(|| json.get("observed_url"))
+                .filter(|url| !url.is_null())
+                .unwrap_or_else(|| panic!("no URL in {json}"));
+            assert_eq!(url, expected, "in {json}");
+            assert!(!json.to_string().contains("lovelace"), "{json}");
+        }
     }
 }

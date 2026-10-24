@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -30,6 +32,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -58,6 +68,7 @@ import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,6 +77,9 @@ import ch.lkmc.combray.core.browser.Article
 import ch.lkmc.combray.core.browser.ArticleBlock
 import ch.lkmc.combray.core.browser.BlockKind
 import ch.lkmc.combray.core.browser.ReaderState
+import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.engine.ScrollEdge
+import kotlinx.coroutines.launch
 
 /** Readable line length for body text. */
 private val MAX_TEXT_WIDTH = 680.dp
@@ -107,7 +121,14 @@ internal object ReaderType {
  * Page content is never rendered as markup here; links go through [onOpenLink].
  */
 @Composable
-fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
+fun ReaderView(
+    state: ReaderState,
+    textSize: TextSize,
+    onOpenLink: (String) -> Unit,
+    onClose: () -> Unit,
+    /** Where the scroll button sits; BrowserScreen moves it above a shown snackbar. */
+    scrollButtonPadding: PaddingValues = scrollButtonPadding(),
+) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
             is ReaderState.Loading -> ReaderMessage(stringResource(R.string.reader_loading)) { CircularProgressIndicator() }
@@ -116,8 +137,14 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
             }
             is ReaderState.Ready -> {
                 val direction = if (state.article.rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr
-                CompositionLocalProvider(LocalLayoutDirection provides direction) {
-                    ArticleText(state.article, onOpenLink, onClose)
+                // More › Text size scales the article's type too, on top of the system font size:
+                // one text control (proposed default, 22 October 2026).
+                val density = LocalDensity.current
+                CompositionLocalProvider(
+                    LocalLayoutDirection provides direction,
+                    LocalDensity provides Density(density.density, density.fontScale * textSize.zoom),
+                ) {
+                    ArticleText(state.article, onOpenLink, onClose, scrollButtonPadding)
                 }
             }
         }
@@ -125,21 +152,51 @@ fun ReaderView(state: ReaderState, onOpenLink: (String) -> Unit, onClose: () -> 
 }
 
 @Composable
-private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
-    // Selectable, so a passage can be copied; links stay tappable inside the selection.
-    SelectionContainer {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item { ShowPageBar(onClose) }
-            item { ArticleHeader(article) }
-            items(article.blocks) { block -> Block(block, onOpenLink) }
-            if (article.truncated) {
-                item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
+private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose: () -> Unit, scrollButtonPadding: PaddingValues) {
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var edge by remember(article) { mutableStateOf<ScrollEdge?>(null) }
+    LaunchedEffect(list, article) {
+        var previous = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
+        snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { position ->
+            if (list.isScrollInProgress && position != previous) {
+                edge = if (position.first > previous.first || position.first == previous.first && position.second > previous.second) {
+                    ScrollEdge.BOTTOM
+                } else {
+                    ScrollEdge.TOP
+                }
             }
-            item { Box(Modifier.padding(bottom = 24.dp)) }
+            previous = position
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        // Selectable, so a passage can be copied; links stay tappable inside the selection.
+        SelectionContainer {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                state = list,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item { ShowPageBar(onClose) }
+                item { ArticleHeader(article) }
+                items(article.blocks) { block -> Block(block, onOpenLink) }
+                if (article.truncated) {
+                    item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
+                }
+                item { Box(Modifier.padding(bottom = 24.dp)) }
+            }
+        }
+        edge?.takeIf { if (it == ScrollEdge.TOP) list.canScrollBackward else list.canScrollForward }?.let { target ->
+            ScrollEdgeButton(
+                edge = target,
+                onClick = {
+                    edge = null
+                    scope.launch { list.scrollToItem(if (target == ScrollEdge.TOP) 0 else list.layoutInfo.totalItemsCount - 1) }
+                },
+                modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(scrollButtonPadding),
+            )
         }
     }
 }

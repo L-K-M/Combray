@@ -1,9 +1,12 @@
 package ch.lkmc.combray.core.browser
 
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
+import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 
 /** Behaves like the native bridge: one generation per created view, events via the listener. */
@@ -30,6 +33,9 @@ class FakeEngine : EnginePort {
     /** Addresses the engine cannot parse: creating their view is refused with an error event. */
     val refusedUrls = mutableSetOf<String>()
     var persisted = 0
+
+    /** Each appearance sent, with how many views existed then. */
+    val appearances = mutableListOf<Pair<Appearance, Int>>()
 
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
         this.listener = listener
@@ -62,6 +68,10 @@ class FakeEngine : EnginePort {
         persisted++
     }
 
+    override fun setAppearance(appearance: Appearance) {
+        appearances += appearance to created.size
+    }
+
     /** What the native bridge does for `window.open`: a view with an engine-chosen ID. */
     fun openWindow(opener: Long, tab: Long) {
         generations[tab] = nextGeneration++
@@ -82,8 +92,21 @@ class FakeEngine : EnginePort {
 
     override fun reload(tab: Long) = Unit
 
+    val scrolled = mutableListOf<Pair<PageRef, ScrollEdge>>()
+
+    override fun scrollToEdge(page: PageRef, edge: ScrollEdge) {
+        scrolled += page to edge
+    }
+
     override fun setThrottled(tab: Long, throttled: Boolean) {
         throttling += tab to throttled
+    }
+
+    /** Each page zoom requested, in order, with the number of views created before it. */
+    val pageZooms = mutableListOf<Pair<Float, Int>>()
+
+    override fun setPageZoom(zoom: Float) {
+        pageZooms += zoom to created.size
     }
 
     val responses = mutableListOf<Pair<Long, ControlResponse>>()
@@ -101,5 +124,23 @@ class FakeEngine : EnginePort {
 
     override fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int) {
         articleCaptures += document to capture
+    }
+
+    /** One find request: the document it searches, request ID, query and match index. */
+    data class Find(val page: PageRef, val request: Long, val query: String, val index: Int) {
+        val tab: Long get() = page.view.tab
+    }
+
+    val finds = mutableListOf<Find>()
+
+    /** Documents whose find selection was cleared. */
+    val findClears = mutableListOf<PageRef>()
+
+    override fun find(page: PageRef, request: Long, query: String, index: Int) {
+        finds += Find(page, request, query, index)
+    }
+
+    override fun clearFind(page: PageRef) {
+        findClears += page
     }
 }

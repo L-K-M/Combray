@@ -6,6 +6,8 @@
     <string name="action_back">Back</string>
     <string name="action_forward">Forward</string>
     <string name="action_reload">Reload</string>
+    <string name="action_scroll_top">Scroll to top</string>
+    <string name="action_scroll_bottom">Scroll to bottom</string>
     <string name="action_new_tab">New tab</string>
     <string name="action_close_tab">Close tab</string>
     <string name="action_share">Share</string>
@@ -16,6 +18,23 @@
     <string name="reader_loading">Preparing reader view…</string>
     <string name="reader_unavailable">Reader view found no article on this page.</string>
     <string name="reader_truncated">The article continues on the page: reader view shows only its first part.</string>
+    <string name="action_text_size">Text size</string>
+    <string name="text_size_smaller">Smaller text</string>
+    <string name="text_size_larger">Larger text</string>
+    <string name="text_size_percent">%1$d%%</string>
+    <string name="text_size_reset">Reset</string>
+    <string name="text_size_explanation">Pages are zoomed, so their pictures and layout grow with the text. Reader view uses the same size.</string>
+    <string name="action_find_in_page">Find in page</string>
+    <string name="action_find_previous">Previous match</string>
+    <string name="action_find_next">Next match</string>
+    <string name="action_close_find">Close find in page</string>
+    <!-- Position of the selected match: "3 of 12". The count can be find_count_at_least. -->
+    <string name="find_position">%1$d of %2$s</string>
+    <!-- A count that is only a lower bound: the page has at least this many matches. -->
+    <string name="find_count_at_least">%1$d+</string>
+    <string name="find_none">No matches</string>
+    <string name="find_none_in_part">No matches in the part searched</string>
+    <string name="find_failed">This page cannot be searched</string>
     <string name="action_settings">Settings</string>
     <string name="action_save">Save</string>
     <string name="action_recent">Recent</string>
@@ -28,6 +47,7 @@
     <string name="action_close">Close</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_ok">OK</string>
+    <string name="action_done">Done</string>
     <!-- Script dialogs show page text; the title names the page so it cannot pass for the browser. -->
     <string name="page_dialog_title">%1$s says</string>
     <string name="page_dialog_title_unknown">This page says</string>
@@ -40,6 +60,12 @@
     <string name="sign_in_username">Username</string>
     <string name="sign_in_password">Password</string>
     <string name="sign_in_action">Sign in</string>
+    <!-- A page's beforeunload question; the page cannot choose this text. -->
+    <string name="leave_page_title">Leave this page?</string>
+    <string name="leave_page_message">Changes you made may not be saved.</string>
+    <string name="leave_page_site">Asked by %1$s</string>
+    <string name="leave_page_leave">Leave</string>
+    <string name="leave_page_stay">Stay</string>
     <string name="link_open_new_tab">Open in new tab</string>
     <string name="link_open_background">Open in background</string>
     <string name="link_save">Save link to Karakeep</string>
@@ -74,6 +100,8 @@
     <string name="address_suggestions">On this device</string>
     <string name="address_load_failed">Page did not load</string>
     <string name="no_app_for_link">No app on this device can open this link.</string>
+    <string name="app_link_question">Open this link in another app?</string>
+    <string name="action_open_app_link">Open</string>
     <string name="save_not_set_up">Saving needs Karakeep. Set it up in Settings.</string>
     <string name="save_not_saveable">This page cannot be saved.</string>
     <string name="save_sensitive">Not saved: this address looks like it contains a login or session token.</string>
@@ -125,6 +153,8 @@
     <string name="notice_address_not_opened">Combray could not open this address.</string>
     <string name="notice_opened_in_background">Opened in background</string>
     <string name="action_show">Show</string>
+    <string name="notice_media_unsupported">This page’s audio or video can’t play in Combray.</string>
+    <string name="notice_popup_blocked">Pop-up blocked: a page can open one window per tap.</string>
     <string name="engine_missing">This build has no browser engine. Build it with scripts/build-native.sh, then rebuild the app.</string>
     <string name="engine_failed">The browser engine could not start.</string>
     <string name="session_restoring">Restoring your tabs…</string>

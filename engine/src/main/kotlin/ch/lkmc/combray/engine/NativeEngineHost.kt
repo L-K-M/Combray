@@ -49,6 +49,8 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun persistProfile() = NativeEngine.persistProfile()
 
+    override fun setAppearance(appearance: Appearance) = NativeEngine.setDarkAppearance(appearance == Appearance.DARK)
+
     override fun closeView(tab: Long) = NativeEngine.closeTab(tab)
 
     override fun navigate(tab: Long, request: Long, url: String) = NativeEngine.navigate(tab, request, url)
@@ -59,7 +61,12 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun reload(tab: Long) = NativeEngine.reload(tab)
 
+    override fun scrollToEdge(page: PageRef, edge: ScrollEdge) =
+        NativeEngine.scrollToEdge(page.view.tab, page.view.generation, page.document, edge.nativeCode)
+
     override fun setThrottled(tab: Long, throttled: Boolean) = NativeEngine.setThrottled(tab, throttled)
+
+    override fun setPageZoom(zoom: Float) = NativeEngine.setPageZoom(zoom)
 
     override fun respondToControl(control: Long, response: ControlResponse) =
         NativeEngine.respondToControl(control, response.toJson())
@@ -69,6 +76,11 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int) =
         NativeEngine.captureArticle(tab, document, capture, maxBytes, timeoutMs)
+
+    override fun find(page: PageRef, request: Long, query: String, index: Int) =
+        NativeEngine.find(page.view.tab, page.view.generation, page.document, request, query, index)
+
+    override fun clearFind(page: PageRef) = NativeEngine.clearFind(page.view.tab, page.view.generation, page.document)
 
     private companion object {
         const val LOG_TAG = "CombrayEngine"

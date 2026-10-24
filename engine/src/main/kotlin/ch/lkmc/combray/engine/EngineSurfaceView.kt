@@ -10,6 +10,8 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.ViewConfiguration
+import android.view.ViewTreeObserver
+import android.view.WindowInsets
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -38,6 +40,9 @@ class EngineSurfaceView(
     private var pressPointer = 0
     private var pressX = 0f
     private var pressY = 0f
+    private val scrollGesture = ScrollGestureTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    private var scrollPage: PageRef? = null
+    private var onScroll: (ScrollEdge) -> Unit = {}
     private val longPressCheck = Runnable {
         // The engine may have stopped since the press.
         if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
@@ -77,9 +82,27 @@ class EngineSurfaceView(
         Log.i(LOG_TAG, "surfaceDestroyed released=$released")
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnGlobalLayoutListener(keyboardWatch)
+    }
+
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressCheck)
+        scrollGesture.release()
+        onScroll = {}
+        viewTreeObserver.removeOnGlobalLayoutListener(keyboardWatch)
+        // The keyboard goes with the window (rotation recreates the Activity): the page must not
+        // keep a field that thinks it has one, or a tap on that field could not reopen it.
+        if (pageKeyboard.reset()) reportDismissal(Dismissal.WINDOW_GONE)
         super.onDetachedFromWindow()
+    }
+
+    /** Rebinding a document cancels an old gesture, so it cannot reveal the new page's button. */
+    fun observeScroll(page: PageRef?, onScroll: (ScrollEdge) -> Unit) {
+        if (page != scrollPage) scrollGesture.release()
+        scrollPage = page
+        this.onScroll = onScroll
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -87,6 +110,7 @@ class EngineSurfaceView(
         requestFocus()
         trackLongPress(event)
         if (longPressed) return true
+        trackScroll(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
                 sendPointer(event, event.actionIndex, NativeEngine.TOUCH_DOWN)
@@ -99,6 +123,15 @@ class EngineSurfaceView(
                 for (index in 0 until event.pointerCount) sendPointer(event, index, NativeEngine.TOUCH_MOVE)
         }
         return true
+    }
+
+    private fun trackScroll(event: MotionEvent) {
+        if (scrollPage == null) return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> scrollGesture.press(event.x, event.y)
+            MotionEvent.ACTION_MOVE -> if (event.pointerCount == 1) scrollGesture.move(event.x, event.y)?.let(onScroll)
+            else -> scrollGesture.release()
+        }
     }
 
     private fun trackLongPress(event: MotionEvent) {
@@ -137,6 +170,30 @@ class EngineSurfaceView(
     /** Type of the focused page field ("password", "email", ...), from the engine's ime_shown. */
     private var fieldKind = TEXT
 
+    /** Whether the keyboard is a page field's, so that its closing can be told apart. */
+    private val pageKeyboard = PageKeyboardTracker()
+
+    /** An inset change lays the window out; insets dispatched to this view are a second cue. */
+    private val keyboardWatch = ViewTreeObserver.OnGlobalLayoutListener { checkKeyboardOnScreen() }
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        checkKeyboardOnScreen()
+        return super.onApplyWindowInsets(insets)
+    }
+
+    /**
+     * Reads whether the window shows the keyboard. Not from Compose's insets: a recomposition
+     * reads those only on its next frame, and a keyboard that came and went in between left the
+     * page's field thinking it still had one.
+     */
+    private fun checkKeyboardOnScreen() {
+        val onScreen = rootWindowInsets?.isVisible(WindowInsets.Type.ime()) ?: return
+        val change = pageKeyboard.observed(onScreen)
+        if (change == PageKeyboardTracker.KeyboardChange.NONE) return
+        Log.i(LOG_TAG, "keyboard $change, $pageKeyboard")
+        if (change == PageKeyboardTracker.KeyboardChange.DISMISSED) reportDismissal(Dismissal.CLOSED_BY_USER)
+    }
+
     override fun onCheckIsTextEditor(): Boolean = engineRunning()
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
@@ -161,15 +218,51 @@ class EngineSurfaceView(
     fun showKeyboard(kind: String = TEXT) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
-        if (kind != fieldKind) {
-            fieldKind = kind
-            keyboard.restartInput(this)
-        }
-        keyboard.showSoftInput(this, 0)
+        useFieldKind(kind, keyboard)
+        pageKeyboard.showRequested()
+        val shown = keyboard.showSoftInput(this, 0)
+        Log.i(LOG_TAG, "keyboard show for $kind: accepted=$shown, $pageKeyboard")
+        // Refused (this view is not the one the keyboard serves): no keyboard comes, so the field
+        // must give up focus for a tap on it to ask again.
+        if (!shown && pageKeyboard.reset()) reportDismissal(Dismissal.SHOW_REFUSED)
+    }
+
+    /**
+     * A page field of [kind] has focus but the keyboard stays closed (the page focused it before
+     * the user used the page); the engine asks for [showKeyboard] when the user taps the field.
+     * Focus is not taken: a sheet the user is typing in keeps it.
+     */
+    fun prepareKeyboard(kind: String) {
+        useFieldKind(kind, context.getSystemService(InputMethodManager::class.java))
     }
 
     fun hideKeyboard() {
+        pageKeyboard.hideRequested()
         context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+        Log.i(LOG_TAG, "keyboard hide, $pageKeyboard")
+    }
+
+    /**
+     * The page's field no longer has the keyboard, other than through [hideKeyboard]. Servo asks
+     * for a keyboard only when a field gains focus, so the engine makes the field give up focus:
+     * a tap on it then opens the keyboard again.
+     */
+    private fun reportDismissal(cause: Dismissal) {
+        Log.i(LOG_TAG, "keyboard dismissal sent to the page: $cause")
+        if (engineRunning()) NativeEngine.imeDismissed()
+    }
+
+    private fun useFieldKind(kind: String, keyboard: InputMethodManager) {
+        if (kind == fieldKind) return
+        fieldKind = kind
+        keyboard.restartInput(this)
+    }
+
+    private enum class Dismissal {
+        /** Back, or the keyboard's own key. */
+        CLOSED_BY_USER,
+        SHOW_REFUSED,
+        WINDOW_GONE,
     }
 
     private companion object {

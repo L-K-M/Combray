@@ -8,14 +8,16 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
+use servo::AllowOrDenyRequest;
 use servo::{
-    AuthenticationRequest, CreateNewWebViewRequest, EmbedderControl, EmbedderControlId,
-    InputMethodType, LoadStatus, NavigationRequest, PermissionRequest, PipelineId, WebView,
-    WebViewDelegate,
+    AuthenticationRequest, CreateNewWebViewRequest, DeviceIntRect, EmbedderControl,
+    EmbedderControlId, InputMethodType, LoadStatus, NavigationRequest, PermissionRequest,
+    PipelineId, ScreenGeometry, WebResourceLoad, WebResourceResponse, WebView, WebViewDelegate,
 };
 use url::Url;
 
 use crate::events::{LoadPhase, ViewKey};
+use crate::media;
 
 pub enum DelegateEvent {
     /// Kept whole: the engine builds the new view after the spin, outside this callback.
@@ -43,9 +45,11 @@ pub enum DelegateEvent {
         view: ViewKey,
         title: Option<String>,
     },
-    PageNavigationRequested {
+    /// A link, form or script leaving the page. Kept whole: the engine allows or denies it after
+    /// the spin (dropping the request would allow it).
+    PageNavigation {
         view: ViewKey,
-        url: Url,
+        request: NavigationRequest,
     },
     FrameReady {
         view: ViewKey,
@@ -55,6 +59,9 @@ pub enum DelegateEvent {
         control: EmbedderControlId,
         multiline: bool,
         kind: &'static str,
+        /// False until the user has used the page: a field focused by script on load must not
+        /// cover the page with the keyboard.
+        allow_keyboard: bool,
     },
     /// A `<select>` picker, script dialog or file picker; kept whole until answered.
     PageControl {
@@ -65,6 +72,12 @@ pub enum DelegateEvent {
     SignIn {
         view: ViewKey,
         request: AuthenticationRequest,
+    },
+    /// The page asks to confirm leaving it (`beforeunload`); its script thread waits for the
+    /// answer. Dropping the request lets the page go.
+    LeavePage {
+        view: ViewKey,
+        request: AllowOrDenyRequest,
     },
     /// The page closed its own window (`window.close()`); Servo has discarded the view.
     ClosedByPage {
@@ -78,6 +91,10 @@ pub enum DelegateEvent {
     DefaultHandled {
         view: ViewKey,
         request: &'static str,
+    },
+    /// The delegate cancelled an audio, video or text-track load (see `media`).
+    MediaBlocked {
+        view: ViewKey,
     },
     Crashed {
         view: ViewKey,
@@ -103,6 +120,20 @@ impl TabDelegate {
 }
 
 impl WebViewDelegate for TabDelegate {
+    /// Answers `screen.width`/`availWidth` and `outerWidth`, which Servo 0.6.0 reports as 0 when
+    /// this returns `None`. As in servoshell's Android port, the screen is the page area (the
+    /// shared rendering context), with the window filling it at the origin. Servo asks
+    /// synchronously, so this reads the size instead of queueing; a shared borrow of the view is
+    /// safe even inside `WebViewBuilder::build`, which holds one while asking.
+    fn screen_geometry(&self, webview: WebView) -> Option<ScreenGeometry> {
+        let size = webview.size().round().to_i32();
+        Some(ScreenGeometry {
+            size,
+            available_size: size,
+            window_rect: DeviceIntRect::from_size(size),
+        })
+    }
+
     fn notify_history_changed(&self, webview: WebView, entries: Vec<Url>, current: usize) {
         // `active_document_id` is updated before this notification (Combray Servo patch).
         self.push(DelegateEvent::History {
@@ -163,11 +194,9 @@ impl WebViewDelegate for TabDelegate {
     }
 
     fn request_navigation(&self, _webview: WebView, navigation_request: NavigationRequest) {
-        // M0 allows every page-initiated navigation (dropping the request allows it) but reports
-        // it, so tests can tell page navigations from embedder requests.
-        self.push(DelegateEvent::PageNavigationRequested {
+        self.push(DelegateEvent::PageNavigation {
             view: self.view,
-            url: navigation_request.url.clone(),
+            request: navigation_request,
         });
     }
 
@@ -183,6 +212,13 @@ impl WebViewDelegate for TabDelegate {
         self.push(DelegateEvent::SignIn {
             view: self.view,
             request,
+        });
+    }
+
+    fn request_unload(&self, _webview: WebView, unload_request: AllowOrDenyRequest) {
+        self.push(DelegateEvent::LeavePage {
+            view: self.view,
+            request: unload_request,
         });
     }
 
@@ -232,6 +268,7 @@ impl WebViewDelegate for TabDelegate {
             control: input_method.id(),
             multiline: input_method.multiline(),
             kind,
+            allow_keyboard: input_method.allow_virtual_keyboard(),
         });
     }
 
@@ -244,5 +281,17 @@ impl WebViewDelegate for TabDelegate {
             view: self.view,
             control: control_id,
         });
+    }
+
+    fn load_web_resource(&self, _webview: WebView, load: WebResourceLoad) {
+        // Servo's fetch waits for this answer, so it is given here; answering only sends on the
+        // fetch's channel and does not re-enter the WebView. Dropping `load` lets it continue.
+        if !media::is_unplayable_media(load.request().destination.as_str()) {
+            return;
+        }
+        // A cancelled load is a network error: the element fires `error` without any download.
+        let url = load.request().url.clone();
+        load.intercept(WebResourceResponse::new(url)).cancel();
+        self.push(DelegateEvent::MediaBlocked { view: self.view });
     }
 }

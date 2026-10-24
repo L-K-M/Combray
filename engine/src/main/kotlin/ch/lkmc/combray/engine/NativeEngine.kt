@@ -61,6 +61,9 @@ object NativeEngine {
      */
     @JvmStatic external fun persistProfile()
 
+    /** Pages match `prefers-color-scheme: dark` when [dark], in every view and in views created later. */
+    @JvmStatic external fun setDarkAppearance(dark: Boolean)
+
     @JvmStatic external fun closeTab(tab: Long)
 
     @JvmStatic external fun navigate(tab: Long, request: Long, url: String)
@@ -71,7 +74,13 @@ object NativeEngine {
 
     @JvmStatic external fun reload(tab: Long)
 
+    /** Root-page jump, guarded by view generation and document identity. */
+    @JvmStatic external fun scrollToEdge(tab: Long, generation: Long, document: Long, edge: Int)
+
     @JvmStatic external fun setThrottled(tab: Long, throttled: Boolean)
+
+    /** Page zoom of every view, now and for views created later (1.0 is 100%). */
+    @JvmStatic external fun setPageZoom(zoom: Float)
 
     /** Touch input for the selected tab, in surface pixels. */
     @JvmStatic external fun touch(phase: Int, pointer: Int, x: Float, y: Float)
@@ -79,6 +88,9 @@ object NativeEngine {
     @JvmStatic external fun key(action: Int, keyCode: Int, unicode: Int)
 
     @JvmStatic external fun imeCommit(text: String)
+
+    /** The user hid the keyboard a page field had: the field gives up focus, so a tap on it reopens it. */
+    @JvmStatic external fun imeDismissed()
 
     /** Long-press at a surface point of the selected tab: Servo's context menu. */
     @JvmStatic external fun contextClick(x: Float, y: Float)
@@ -101,6 +113,16 @@ object NativeEngine {
 
     /** Reader view: [document]'s main article as JSON in the result's text (native/src/reader.js). */
     @JvmStatic external fun captureArticle(tab: Long, document: Long, capture: Long, maxBytes: Int, timeoutMs: Int)
+
+    /**
+     * Find in page in [document] of the view ([tab], [generation]) while it is still shown: select
+     * match [index] of [query] (wrapping; negative counts from the end). Reported as
+     * `find_result` for [request] (native/src/find.js).
+     */
+    @JvmStatic external fun find(tab: Long, generation: Long, document: Long, request: Long, query: String, index: Int)
+
+    /** Removes the selection [find] made in [document], if the view still shows it. */
+    @JvmStatic external fun clearFind(tab: Long, generation: Long, document: Long)
 
     /** Test support: evaluate [script] in the tab's current document, without a document guard. */
     @JvmStatic external fun evaluate(tab: Long, request: Long, script: String)

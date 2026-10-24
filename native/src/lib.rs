@@ -9,17 +9,29 @@
 //!                         ├─ controls: select pickers, script dialogs, file pickers
 //!                         ├─ capture: bounded in-page text snapshot
 //!                         ├─ animations: Element.animate() for every page
+//!                         ├─ page_zoom: the layout zoom of every view
+//!                         ├─ find: find in page (bounded in-page search)
+//!                         ├─ keyboard: taps that open the keyboard for a focused field
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
-//! `animations`, `events`, `panic_policy` and the pure parts of `capture` build on any host so
-//! their tests run without Servo.
+//! `activation`, `animations`, `events`, `keyboard`, `media`, `navigation`, `page_zoom`,
+//! `panic_policy`, `profile`, `userinfo` and the pure parts of `capture` and `find` build on any
+//! host so their tests run without Servo.
 
+pub mod activation;
 mod animations;
 pub mod capture;
 pub mod controls;
 pub mod events;
+pub mod find;
+pub mod keyboard;
+mod media;
+pub mod navigation;
+mod page_zoom;
 mod panic_policy;
+mod profile;
+mod userinfo;
 
 #[cfg(target_os = "android")]
 mod commands;

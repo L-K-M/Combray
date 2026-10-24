@@ -2,18 +2,27 @@ package ch.lkmc.combray
 
 import android.app.UiAutomation
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.ReopenFocus
+import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.Appearance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -26,7 +35,8 @@ import org.junit.runner.RunWith
 /**
  * M1 gate on the real engine (docs/IMPLEMENTATION_PLAN.md section 9): navigation, same-URL tabs,
  * close and reopen, failed loads, ten-tab switching, rotation, page-opened windows, external
- * links and query encoding. Screens are checked with real screenshots of solid-color pages.
+ * links, query encoding and cancelled media. Screens are checked with real screenshots of
+ * solid-color pages.
  */
 @RunWith(AndroidJUnit4::class)
 class BrowsingTest {
@@ -281,6 +291,178 @@ class BrowsingTest {
     }
 
     @Test
+    fun pagesSeeAScreenAtLeastAsWideAsTheirWindow() {
+        device.browser.openUrl(Fixtures.SCREEN, Placement.CURRENT_TAB)
+        val state = device.awaitState { it.activeTab?.title?.startsWith(SCREEN_PREFIX) == true }
+        val title = state.activeTab?.title.orEmpty()
+        val widths = title.removePrefix(SCREEN_PREFIX).split(":").map { it.toIntOrNull() ?: 0 }
+        assertEquals("four widths in $title", SCREEN_WIDTHS, widths.size)
+
+        val (screenWidth, availWidth, outerWidth, innerWidth) = widths
+        assertTrue("every width is positive: $title", widths.all { it > 0 })
+        assertTrue("screen.width >= innerWidth: $title", screenWidth >= innerWidth)
+        assertTrue("screen.availWidth >= innerWidth: $title", availWidth >= innerWidth)
+        assertTrue("outerWidth >= innerWidth: $title", outerWidth >= innerWidth)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun mediaIsCancelledBeforeDownloadingAndThePageIsTold() {
+        Fixtures.reset()
+        device.browser.openUrl(Fixtures.MEDIA, Placement.CURRENT_TAB)
+        compose.waitUntilAtLeastOneExists(hasText(MEDIA_NOTICE), Device.LOAD_TIMEOUT_MS)
+
+        // Both elements fired `error`, and they no longer hold back the page's load event.
+        device.awaitState { it.activeTab?.title == MEDIA_FAILED }
+        device.awaitPage(Fixtures.MEDIA)
+        val media = Fixtures.state().getJSONObject("media")
+        assertEquals("media requests that reached the server", 0, media.getInt("requests"))
+        assertEquals("media responses sent in full", 0, media.getInt("completed"))
+    }
+
+    @Test
+    fun aLinkForAnotherAppKeepsThePageAndSaysWhenNoAppTakesIt() {
+        openExternal(Fixtures.external("market"))
+
+        // No app takes market: links on the emulator. Combray says so; the page stays as it was.
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("market"), state.activeTab?.url)
+        assertFalse(state.activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun anAppLinkForANewWindowKeepsOneTabAndSaysWhenNoAppTakesIt() {
+        val url = Fixtures.external("market", target = LinkTarget.NEW_WINDOW)
+        val tab = openExternal(url)
+
+        // The window the link opened closes again; the notice is for the page the user tapped.
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.openTabCount == 1 && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(tab, state.activeTab?.id)
+        assertEquals(url, state.activeTab?.url)
+        assertFalse(state.activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun anAppLinkWhoseFallbackIsNoPageSaysNoAppTakesIt() {
+        openExternal(Fixtures.external("badfallback"))
+
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        tapLinkUntil { compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("badfallback"), state.activeTab?.url)
+    }
+
+    @Test
+    fun anAppLinkWithoutItsAppOpensItsFallbackPageInTheSameTab() {
+        val tab = openExternal(Fixtures.external("intent"))
+        tapLinkUntil { device.browser.browserState.value.activeTab?.url == Fixtures.solid(Device.GREEN) }
+
+        val state = device.awaitPage(Fixtures.solid(Device.GREEN))
+        assertEquals(tab, state.activeTab?.id)
+        assertScreen(Device.GREEN)
+    }
+
+    @Test
+    fun pagesCannotOpenFilesOrHandLinksToAppsByThemselves() {
+        openExternal(Fixtures.external("file"))
+        // The title changes only after the page's own click handler ran and the page stayed.
+        tapLinkUntil { device.browser.browserState.value.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        var state = device.awaitState { it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertEquals(Fixtures.external("file"), state.activeTab?.url)
+
+        // Nor by the page's own script: the page stays, without an error page.
+        val scriptedFile = Fixtures.external("file", LinkTrigger.SCRIPT)
+        device.browser.openUrl(scriptedFile, Placement.CURRENT_TAB)
+        state = device.awaitState { it.activeTab?.url == scriptedFile && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertFalse(state.activeTab!!.loadFailed)
+
+        // Without a tap, the page's own script cannot send the user to another app.
+        val scripted = Fixtures.external("market", LinkTrigger.SCRIPT)
+        device.browser.openUrl(scripted, Placement.CURRENT_TAB)
+        state = device.awaitState { it.activeTab?.url == scripted && it.activeTab?.title == Fixtures.EXTERNAL_STILL_HERE }
+        assertFalse(state.activeTab!!.loadFailed)
+        val noApp = compose.activity.getString(R.string.no_app_for_link)
+        assertTrue(compose.onAllNodesWithText(noApp).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun aPageCannotOpenWindowsWithoutATap() {
+        val popup = "${Fixtures.BASE}/popup.html"
+        device.browser.openUrl(popup, Placement.CURRENT_TAB)
+        // The notice comes at load, before the title's 3 s: look for it first, while it shows.
+        val blocked = compose.activity.getString(R.string.notice_popup_blocked)
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithText(blocked).fetchSemanticsNodes().isNotEmpty() }
+        val state = device.awaitState { it.activeTab?.url == popup && it.activeTab?.title == "POPUP:still-here" }
+
+        assertEquals(1, state.openTabCount)
+    }
+
+    /**
+     * Taps the page-filling fixture link until [done]. Under software emulation a tap right after
+     * the first paint can arrive before the page can hit-test it, and is then lost.
+     */
+    private fun tapLinkUntil(done: () -> Boolean) {
+        val question = compose.activity.getString(R.string.app_link_question)
+        val asked = { compose.onAllNodesWithText(question).fetchSemanticsNodes().isNotEmpty() }
+        val deadline = SystemClock.uptimeMillis() + Device.LOAD_TIMEOUT_MS
+        while (SystemClock.uptimeMillis() < deadline) {
+            tapPageCenter()
+            // Not waitForIdle: it fast-forwards the clock past a snackbar's display time.
+            try {
+                compose.waitUntil(TAP_OUTCOME_MS) { done() || asked() }
+                // A link for another app asks first (owner decision); these checks open it.
+                if (!done()) compose.onNodeWithText(compose.activity.getString(R.string.action_open_app_link)).performClick()
+                compose.waitUntil(TAP_OUTCOME_MS) { done() }
+                return
+            } catch (noEffect: ComposeTimeoutException) {
+                continue
+            }
+        }
+        throw AssertionError("tapping the link had no effect")
+    }
+
+    /** Opens an external-link fixture ([Fixtures.external]) and waits until it is painted; returns its tab. */
+    private fun openExternal(url: String): String {
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        val state = device.awaitPage(url)
+        assertScreen(Device.OCHRE)
+        return state.activeTab!!.id
+    }
+
+    @Test
+    fun pagesFollowTheDarkAppearanceAndItsChanges() {
+        try {
+            device.browser.setAppearance(Appearance.DARK)
+            device.browser.openUrl(Fixtures.SCHEME, Placement.CURRENT_TAB)
+            device.awaitPage(Fixtures.SCHEME)
+            assertScreen(Device.BLUE)
+
+            // A change reaches the page already shown, without a reload.
+            device.browser.setAppearance(Appearance.LIGHT)
+            assertScreen(Device.GREEN)
+        } finally {
+            // Back to what BrowserScreen told the engine: the app's theme as it resolved it.
+            device.browser.setAppearance(appTheme())
+        }
+    }
+
+    /** The app's theme: the in-app choice, or the system's night mode when it follows the system. */
+    private fun appTheme(): Appearance {
+        val night = compose.activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+            Configuration.UI_MODE_NIGHT_YES
+        val dark = when (device.settings.themeMode.value) {
+            ThemeMode.SYSTEM -> night
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+        }
+        return if (dark) Appearance.DARK else Appearance.LIGHT
+    }
+
+    @Test
     fun pagesCanUseRelationalSelectors() {
         device.browser.openUrl(Fixtures.HAS_SELECTOR, Placement.CURRENT_TAB)
         val state = device.awaitState {
@@ -315,11 +497,17 @@ class BrowsingTest {
         /** Under the fixture's SLOW_PAGE_SECONDS, so the check runs before the answer. */
         const val SLOW_ANSWER_MS = 5_000L
         const val STOP_TIMEOUT_MS = 10_000L
+        /** How long one tap may take to show its effect before the next try. */
+        const val TAP_OUTCOME_MS = 15_000L
         const val INTERSECTION_VISIBLE = "IO:visible"
         const val INTERSECTION_MISSING = "IO:missing"
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val SCREEN_PREFIX = "SCREEN:"
+        const val SCREEN_WIDTHS = 4
+        const val MEDIA_FAILED = "MEDIA:errors:2"
+        const val MEDIA_NOTICE = "This page’s audio or video can’t play in Combray."
         const val HAS_PREFIX = "HAS:"
         const val HAS_WAITING = "HAS:waiting"
         const val HAS_OK = "HAS:ok"

@@ -16,12 +16,29 @@ Pages
                              (a reload that fails like a lost connection)
   /private.html              page for exclusion checks
   /slow.html                 answers after SLOW_PAGE_SECONDS; title SLOW
+  /screen.html               title SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth> (CSS px)
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /leave.html[?auto]         link to /solid/2e6b4f.html above a <textarea>; its beforeunload handler
+                             always asks to stay (title LEAVE:<times asked>); ?auto follows the link
+                             by script a second after load, without any user input
+  /external.html?to=market|intent|badfallback|file[&auto=1][&blank=1]
+                             page-filling #8a5a2b link (or, with auto, a script on load) to another
+                             app's link or a file, with blank in a new window (target=_blank); the
+                             title turns EXTERNAL:still-here 3 s later if the page is still shown
+  /popup.html                calls window.open on load, without a tap; the title turns
+                             POPUP:still-here 3 s later
+  /scheme.html               page in #2e6b4f, or #3b4f8a when it matches prefers-color-scheme: dark
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
-  (the three control pages have a #1f6f78 margin on the left for paint checks)
+  /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
+                             error events
+  /media/slow.bin            512 KiB served over about eight seconds; /_admin/state "media" counts the
+                             requests that arrived and the responses sent in full
+  /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
+                             (page zoom checks)
+  (the five control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
   POST /keep/api/v1/bookmarks, GET /keep/api/v1/bookmarks (newest first), GET .../bookmarks/search?q=,
@@ -30,7 +47,7 @@ service's own host is never captured for Hister)
 Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
   POST /hister/api/add (needs Origin: hister://), GET /hister/search?q=&format=json; token "fixture-token"
 Admin (for the checks)
-  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log
+  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log, media
   POST /_admin/reset                    forget everything
   POST /_admin/fault?service=karakeep|hister&kind=<fault>&count=<n>
        faults: none, store_then_hang, too_many_requests, server_error, unauthorized
@@ -56,6 +73,10 @@ COOKIE_NAME = "combray"
 COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60
 MAX_BODY_BYTES = 2 * 1024 * 1024
 FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unauthorized"}
+# Slow enough that a media download in progress is still running when a check looks.
+MEDIA_CHUNK_BYTES = 16 * 1024
+MEDIA_CHUNKS = 32
+MEDIA_CHUNK_DELAY_SECONDS = 0.25
 
 lock = threading.Lock()
 def fresh_lists():
@@ -63,7 +84,12 @@ def fresh_lists():
     return {"reading": []}
 
 
-state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": []}
+def fresh_media():
+    """Requests for /media/slow.bin that arrived, and responses sent to the end."""
+    return {"requests": 0, "completed": 0}
+
+
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 
@@ -155,6 +181,88 @@ ANIMATE_PAGE = page(
     "} catch (e) { fail(e.message); }</script>",
 )
 
+# Reports in its title the widths a page reads for its screen and window. Servo answers 0 for the
+# screen and outer window unless the engine provides them.
+SCREEN_PAGE = page(
+    "SCREEN",
+    "<script>document.title = ['SCREEN', screen.width, screen.availWidth, outerWidth, innerWidth]"
+    ".join(':');</script>",
+)
+
+# Combray cannot play media: both elements must fail, without downloading, so their handlers run.
+MEDIA_PAGE = page(
+    "MEDIA",
+    "<video src='/media/slow.bin?element=video' autoplay muted onerror='failed()'></video>"
+    "<audio src='/media/slow.bin?element=audio' autoplay onerror='failed()'></audio>",
+    "<script>var errors = 0; function failed() { errors++; document.title = 'MEDIA:errors:' + errors; }</script>",
+)
+
+# Reports its layout viewport: page zoom changes both the CSS width and the device pixel ratio.
+ZOOM_PAGE = page(
+    "ZOOM-WAITING",
+    "<p>zoom</p><script>"
+    "function report() { document.title = 'ZOOM:' + innerWidth + ':' + devicePixelRatio; }"
+    "addEventListener('load', report); addEventListener('resize', report);</script>",
+)
+
+# Find in page: the word appears three times, a screen and a half apart and in three cases, and
+# also where find must not count it (hidden, a script, a form field). The title reports the
+# scroll offset and the selected text: "FIND:<scrollY>:<selection>".
+FIND_GAP = "<div style='height:150vh'></div>"
+FIND_PAGE = page(
+    "FIND",
+    "<p>Find fixture: the word is further down.</p>"
+    f"{FIND_GAP}<p>First combraneedle here.</p>"
+    f"{FIND_GAP}<p>Second CombraNeedle here.</p>"
+    f"{FIND_GAP}<p>Third COMBRANEEDLE here.</p>{FIND_GAP}"
+    "<div hidden>combraneedle hidden</div><div style='display:none'>combraneedle not shown</div>"
+    "<textarea>combraneedle in a field</textarea><script>var unused = 'combraneedle in a script';</script>"
+    "<script>function report() { var t = 'FIND:' + Math.round(window.scrollY) + ':' + String(window.getSelection());"
+    " if (document.title !== t) document.title = t; }"
+    " addEventListener('scroll', report); document.addEventListener('selectionchange', report);"
+    " setInterval(report, 250); report();</script>",
+    "<style>body{margin:0 16px;font-size:20px}</style>",
+)
+
+# Links a page may not follow inside Combray: no app on the emulator takes the market: link, the
+# intent: link names a fallback page (/solid/2e6b4f.html), badfallback one that is no address
+# ("http://"), and file: is refused.
+EXTERNAL_LINKS = {
+    "market": "market://details?id=ch.lkmc.combray.fixture",
+    "intent": "intent://fixture#Intent;scheme=combray-fixture;"
+              "S.browser_fallback_url=http%3A%2F%2Flocalhost%3A8766%2Fsolid%2F2e6b4f.html;end",
+    "badfallback": "intent://fixture#Intent;scheme=combray-fixture;S.browser_fallback_url=http%3A%2F%2F;end",
+    "file": "file:///system/etc/hosts",
+}
+STILL_HERE = "setTimeout(function(){document.title='EXTERNAL:still-here';},3000);"
+
+
+def external_page(to, automatic, blank):
+    href = json.dumps(EXTERNAL_LINKS[to])
+    target = " target='_blank'" if blank else ""
+    if automatic:
+        body = f"<p>external</p><script>addEventListener('load',function(){{location.href={href};{STILL_HERE}}});</script>"
+    else:
+        body = (f"<a id='l' href='{html.escape(EXTERNAL_LINKS[to])}'{target} onclick=\"{STILL_HERE}\" "
+                "style='display:block;height:100vh;font-size:48px;color:#fff'>other app</a>")
+    return page("EXTERNAL", body, "<style>html,body{margin:0;background:#8a5a2b}</style>")
+
+
+# Asks for a window as soon as it loads, which no user tapped for.
+POPUP_PAGE = page(
+    "POPUP",
+    "<p>popup</p><script>addEventListener('load',function(){window.open('/solid/3b4f8a.html');"
+    "setTimeout(function(){document.title='POPUP:still-here';},3000);});</script>",
+)
+
+# The page's color says which theme it was told: light #2e6b4f, dark #3b4f8a.
+SCHEME_PAGE = page(
+    "SCHEME",
+    "<p>scheme</p>",
+    "<style>html,body{margin:0;min-height:100%;background:#2e6b4f}"
+    "@media (prefers-color-scheme: dark){html,body{background:#3b4f8a}}</style>",
+)
+
 # Kimi queries this selector list during startup. DOM matching can support :has() independently
 # of stylesheet invalidation, which remains disabled until Servo implements it.
 HAS_SELECTOR_PAGE = page(
@@ -228,6 +336,24 @@ CONTROL_PAGES = {
         "<script>addEventListener('load',function(){var f=document.getElementById('f');"
         "f.onchange=function(){var file=f.files[0];var r=new FileReader();"
         "r.onload=function(){document.title='FILE:'+file.name+':'+r.result};r.readAsText(file)}})</script>",
+    ),
+    # The link fills most of the page, so a tap in the middle follows it.
+    "/leave.html": (
+        "LEAVE",
+        "<a class='c' id='away' href='/solid/2e6b4f.html' style='height:60vh'>leave</a>"
+        "<textarea style='margin:2vh 0 0 12vw;width:80vw;height:20vh;font-size:24px'>draft</textarea>",
+        "<script>var asked=0;addEventListener('beforeunload',function(e){asked++;"
+        "document.title='LEAVE:'+asked;e.preventDefault();e.returnValue='unsaved'});"
+        "if(location.search=='?auto')addEventListener('load',function(){"
+        "setTimeout(function(){document.getElementById('away').click()},1000)})</script>",
+    ),
+    # A search field the page focuses on load, as search pages do; Enter sends it to /echo.
+    "/autofocus.html": (
+        "AUTOFOCUS",
+        "<form action='/echo'><input class='c' type='search' name='q' id='q'></form>",
+        "<script>addEventListener('load',function(){var q=document.getElementById('q');"
+        "q.onfocus=function(){document.title='AUTOFOCUS:focused'};"
+        "q.onblur=function(){document.title='AUTOFOCUS:blurred'};q.focus()})</script>",
     ),
 }
 
@@ -306,6 +432,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/article.html":
             # Reader view keeps the article and drops the navigation, aside and footer around it.
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
+        if path == "/scroll.html":
+            # Distinct endpoints and a live title prove root-page jumps, not just button state.
+            return self.send(200, page("SCROLL-TOP",
+                "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
+                "<section style='height:500vh;background:#8a5a2b'>MIDDLE</section>"
+                "<section style='height:100vh;background:#3b4f8a'>BOTTOM</section>",
+                "<style>html,body{margin:0;scroll-behavior:smooth}</style>"
+                "<script>const update=()=>{const s=document.scrollingElement;"
+                "const edge=s.scrollTop<=1?'SCROLL-TOP':"
+                "s.scrollTop+innerHeight>=s.scrollHeight-1?'SCROLL-BOTTOM':'SCROLL-MIDDLE';"
+                "const title=edge+':'+s.scrollTop+','+innerHeight+','+s.scrollHeight;"
+                "if(document.title!==title)document.title=title;};"
+                "addEventListener('scroll',update);</script>"))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":
@@ -313,6 +452,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/slow.html":
             time.sleep(SLOW_PAGE_SECONDS)
             return self.send(200, page("SLOW", "<p>SLOW</p>"))
+        if path == "/screen.html":
+            return self.send(200, SCREEN_PAGE)
+        if path == "/media.html":
+            return self.send(200, MEDIA_PAGE)
+        if path == "/media/slow.bin":
+            return self.send_slow_media()
+        if path == "/zoom.html":
+            return self.send(200, ZOOM_PAGE)
+        if path == "/find.html":
+            return self.send(200, FIND_PAGE)
+        if path == "/external.html":
+            to = query.get("to", [""])[0]
+            if to not in EXTERNAL_LINKS:
+                return self.send(400, page("bad link", ""))
+            auto, blank = (query.get(name, [""])[0] == "1" for name in ("auto", "blank"))
+            return self.send(200, external_page(to, auto, blank))
+        if path == "/popup.html":
+            return self.send(200, POPUP_PAGE)
+        if path == "/scheme.html":
+            return self.send(200, SCHEME_PAGE)
         if path == "/has-selector.html":
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
         if path == "/empty.html":
@@ -391,6 +550,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state["hister"].clear()
                 state["log"].clear()
                 once_served.clear()
+                state["media"] = fresh_media()
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})
@@ -455,6 +615,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if fault == "store_then_hang":
             time.sleep(HANG_SECONDS)
         return self.send_json(status, existing)
+
+    def send_slow_media(self):
+        with lock:
+            state["media"]["requests"] += 1
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(MEDIA_CHUNK_BYTES * MEDIA_CHUNKS))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            for _ in range(MEDIA_CHUNKS):
+                self.wfile.write(bytes(MEDIA_CHUNK_BYTES))
+                self.wfile.flush()
+                time.sleep(MEDIA_CHUNK_DELAY_SECONDS)
+        except ConnectionError:
+            # The client stopped the download.
+            self.close_connection = True
+            return
+        with lock:
+            state["media"]["completed"] += 1
 
     def hister_authorized(self):
         token = self.headers.get("X-Access-Token") or self.headers.get("Authorization", "").removeprefix("Bearer ")

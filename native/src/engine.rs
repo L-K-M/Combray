@@ -23,31 +23,40 @@ use dpi::PhysicalSize;
 use euclid::Scale;
 use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
+use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
 use servo::{
     AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
     EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
-    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, Opts,
-    PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
-    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, TouchEvent, TouchEventType,
-    TouchId, TouchPointerType, UserContentManager, UserScript, WebView, WebViewBuilder,
-    WebViewPoint, WindowRenderingContext,
+    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
+    NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
+    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme,
+    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
+    WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
+use crate::activation::{OpeningTap, TapRecognizer};
 use crate::animations;
-use crate::capture::{self, ScriptOutcome};
+use crate::capture::{self, CaptureKind, ScriptOutcome, Visibility};
 use crate::commands::{
-    CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH, Throttling,
-    TouchPhase,
+    Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
+    ScrollEdge, Throttling, TouchPhase,
 };
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
+use crate::controls::{LeavePageAnswer, LeavePageDecision, PageActivation, TabVisibility};
 use crate::delegate::{DelegateEvent, DelegateQueue, TabDelegate};
 use crate::events::{
-    Attribution, CaptureReport, CaptureStatus, EngineEvent, HistoryChange, LoadPhase, ViewKey,
+    Attribution, CaptureReport, CaptureStatus, EngineEvent, FindStatus, HistoryChange, LoadPhase,
+    ViewKey,
 };
+use crate::find::{self, FindAction};
+use crate::keyboard::{self, TapTracker};
 use crate::native_window::NativeWindow;
+use crate::navigation::{self, PageNavigation, Shown};
+use crate::page_zoom;
 use crate::panic_policy;
+use crate::profile;
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -71,6 +80,9 @@ const PAINT_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_COMMANDS_PER_ITERATION: usize = 64;
 /// Nesting limit when converting test evaluation results to JSON.
 const MAX_JSON_DEPTH: usize = 64;
+/// How long a tap or key press lets the page hand one link to another app (as Chromium's
+/// transient user activation).
+const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// First tab ID for views that pages open (`window.open`). Applications number their own tabs
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
@@ -173,8 +185,24 @@ struct Tab {
     retired: HashSet<PipelineId>,
     /// Reports from documents that have not committed yet (they can overtake the commit).
     held: VecDeque<HeldReport>,
+    /// Documents already reported in `media_blocked`, so each is reported once.
+    media_blocked: HashSet<PipelineId>,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
+    /// The document the user last touched or typed into. A page may ask to confirm leaving only
+    /// while this is still its current document (browsers' sticky activation).
+    interacted_document: Option<PipelineId>,
+    /// The view whose page opened this one (`target=_blank`, `window.open`); None for the
+    /// application's tabs.
+    opener: Option<ViewKey>,
+    /// Whether a document other than the initial `about:blank` committed: a window opened just
+    /// for an app link has none and closes (`navigation::refusal`).
+    shown: Shown,
+    /// The tap that let the opener open this window, for the window's first navigation.
+    opening_tap: OpeningTap,
+    /// The field that has Servo's input method. Servo keeps focus per document, so a hidden
+    /// tab keeps its field; only the selected tab's field gets the keyboard.
+    ime_field: Option<ImeField>,
 }
 
 impl Tab {
@@ -196,26 +224,69 @@ impl Tab {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Keyboard {
+    Open,
+    /// Not open: the page was not used yet, the user hid the keyboard, or the tab was hidden.
+    /// A tap on the field opens it (see `keyboard`).
+    Withheld,
+}
+
+#[derive(Clone, Copy)]
+struct ImeField {
+    control: EmbedderControlId,
+    multiline: bool,
+    kind: &'static str,
+    keyboard: Keyboard,
+}
+
+impl ImeField {
+    fn shown_event(&self, view: ViewKey) -> EngineEvent {
+        EngineEvent::ImeShown {
+            view,
+            document: u64::from(self.control.pipeline_id),
+            multiline: self.multiline,
+            kind: self.kind,
+            show_keyboard: self.keyboard == Keyboard::Open,
+        }
+    }
+}
+
 /// A page control waiting for the application's answer. Dropping it answers with Servo's default.
 struct PendingControl {
     view: ViewKey,
     control: ControlHandle,
 }
 
-/// Servo's handle for a control: an embedder control, or a sign-in request, which Servo models
-/// separately. Dropping a sign-in request loads the server's 401 (or the proxy's 407) response.
+/// Servo's handle for a control: an embedder control, or a sign-in or leave-page request, which
+/// Servo models separately. Dropping a sign-in request loads the server's 401 (or the proxy's
+/// 407) response; dropping a leave-page request lets the page go.
 enum ControlHandle {
     Embedder(EmbedderControl),
     SignIn(AuthenticationRequest),
+    /// `beforeunload`: the page's script thread waits for the answer, so it is let go at
+    /// `deadline` if the user has not answered.
+    LeavePage {
+        request: AllowOrDenyRequest,
+        deadline: Instant,
+    },
 }
 
 impl ControlHandle {
-    /// None for sign-ins: Servo never hides them, so they end only when answered or when their
-    /// view closes.
+    /// None for sign-ins and leave-page questions: Servo never hides them, so they end when
+    /// answered, when their view closes, or (leave-page) at their deadline.
     fn embedder_id(&self) -> Option<EmbedderControlId> {
         match self {
             ControlHandle::Embedder(control) => Some(control.id()),
-            ControlHandle::SignIn(_) => None,
+            ControlHandle::SignIn(_) | ControlHandle::LeavePage { .. } => None,
+        }
+    }
+
+    /// When an unanswered control is let go; only leave-page questions have one.
+    fn deadline(&self) -> Option<Instant> {
+        match self {
+            ControlHandle::LeavePage { deadline, .. } => Some(*deadline),
+            ControlHandle::Embedder(_) | ControlHandle::SignIn(_) => None,
         }
     }
 }
@@ -238,6 +309,22 @@ type CaptureResult = (
 type CaptureResults = Rc<RefCell<Vec<CaptureResult>>>;
 type EvaluationResults =
     Rc<RefCell<Vec<(ViewKey, i64, Result<JSValue, JavaScriptEvaluationError>)>>>;
+/// A finished find script: the view, request ID and document it ran in, and its result.
+type FinishedFind = (
+    ViewKey,
+    i64,
+    u64,
+    Result<JSValue, JavaScriptEvaluationError>,
+);
+type FindResults = Rc<RefCell<Vec<FinishedFind>>>;
+
+/// A tap checked against a view's focused field: the view, the field and the page's answer.
+type TapCheck = (
+    ViewKey,
+    EmbedderControlId,
+    Result<JSValue, JavaScriptEvaluationError>,
+);
+type TapChecks = Rc<RefCell<Vec<TapCheck>>>;
 
 struct Engine {
     config: EngineConfig,
@@ -252,17 +339,35 @@ struct Engine {
     next_page_tab: i64,
     next_sequence: u64,
     needs_paint: bool,
-    ime_owner: Option<(ViewKey, EmbedderControlId)>,
+    field_taps: TapTracker,
+    tap_checks: TapChecks,
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
     evaluation_results: EvaluationResults,
+    find_results: FindResults,
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// Page zoom of every view (`SetPageZoom`); kept here so views created later start at it.
+    page_zoom: f32,
+    /// The user's last tap or key press: in which tab, on which of its documents, and when.
+    last_activation: Option<(i64, Option<PipelineId>, Instant)>,
+    taps: TapRecognizer,
+    /// Given to every view, so pages match the app's light or dark theme.
+    appearance: Appearance,
+    /// Fingers on the page now, and when the last touch event came: captures of the page on
+    /// screen wait while the user scrolls or taps.
+    touches: capture::Touches,
+    /// Page-text captures of the page on screen waiting for a quiet moment, with when each
+    /// first had to wait.
+    deferred_captures: Vec<(CaptureRequest, Instant)>,
 }
 
 impl Engine {
     fn new(config: EngineConfig, wake: Sender<Command>, sink: Box<dyn EventSink + Send>) -> Self {
+        // Touches arrive in the view's device pixels.
+        let taps = TapRecognizer::new(config.density);
+        let density = config.density;
         Self {
             config,
             wake,
@@ -276,13 +381,21 @@ impl Engine {
             next_page_tab: PAGE_TAB_BASE,
             next_sequence: 1,
             needs_paint: false,
-            ime_owner: None,
+            field_taps: TapTracker::new(density),
+            tap_checks: Default::default(),
             delegate_queue: Default::default(),
             capture_results: Default::default(),
             evaluation_results: Default::default(),
+            find_results: Default::default(),
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            page_zoom: page_zoom::DEFAULT_ZOOM,
+            last_activation: None,
+            taps,
+            appearance: Appearance::Light,
+            touches: Default::default(),
+            deferred_captures: Vec::new(),
         }
     }
 
@@ -307,9 +420,29 @@ impl Engine {
 
     fn next_timeout(&self) -> Duration {
         let now = Instant::now();
+        let controls = self
+            .page_controls
+            .values()
+            .filter_map(|pending| pending.control.deadline());
+        // A capture waiting for the user to stop touching the page wakes the engine itself.
+        let deferred = self
+            .deferred_captures
+            .iter()
+            .map(|(_, since)| now.saturating_duration_since(*since))
+            .max()
+            .map(|longest| {
+                capture::next_deferred_attempt(
+                    self.touches.touching(now),
+                    self.touches.since_last(now),
+                    longest,
+                )
+            });
         self.pending_captures
             .values()
-            .map(|pending| pending.deadline.saturating_duration_since(now))
+            .map(|pending| pending.deadline)
+            .chain(controls)
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .chain(deferred)
             .min()
             .map_or(IDLE_TICK, |until_deadline| until_deadline.min(IDLE_TICK))
     }
@@ -334,6 +467,7 @@ impl Engine {
             Command::SelectTab { tab } => self.select_tab(tab),
             Command::SelectNone => self.select_none(),
             Command::PersistProfile => self.persist_profile(),
+            Command::SetAppearance { appearance } => self.set_appearance(appearance),
             Command::CloseTab { tab } => self.close_tab(tab),
             Command::Navigate { tab, request, url } => self.navigate(tab, request, &url),
             Command::GoBack { tab } => {
@@ -351,12 +485,18 @@ impl Engine {
                     tab.webview.reload();
                 }
             },
+            Command::ScrollToEdge {
+                view,
+                document,
+                edge,
+            } => self.scroll_to_edge(view, document, edge),
             Command::SetThrottling { tab, throttling } => {
                 if let Some(tab) = self.tab(tab) {
                     tab.webview
                         .set_throttled(throttling == Throttling::Throttled);
                 }
             },
+            Command::SetPageZoom { zoom } => self.set_page_zoom(zoom),
             Command::Touch {
                 phase,
                 pointer,
@@ -365,11 +505,20 @@ impl Engine {
             } => self.touch(phase, pointer, x, y),
             Command::Key { action, key } => self.key(action, key),
             Command::ImeCommit { text } => self.ime_commit(text),
+            Command::ImeDismissed => self.ime_dismissed(),
             Command::ContextClick { x, y } => self.context_click(x, y),
             Command::RespondToControl { control, response } => {
                 self.respond_to_control(control, &response)
             },
             Command::Capture(request) => self.start_capture(request),
+            Command::Find {
+                view,
+                document,
+                request,
+                query,
+                index,
+            } => self.find(view, document, request, &query, index),
+            Command::FindClear { view, document } => self.clear_find(view, document),
             Command::Evaluate {
                 tab,
                 request,
@@ -390,9 +539,13 @@ impl Engine {
             runtime.servo.spin_event_loop();
         }
         self.drain_delegate_events();
+        self.start_deferred_captures();
         self.drain_capture_results();
         self.drain_evaluations();
+        self.drain_find_results();
+        self.drain_tap_checks();
         self.expire_captures();
+        self.expire_leave_page_questions();
         self.paint();
     }
 
@@ -408,6 +561,28 @@ impl Engine {
         self.active
             .and_then(|tab| self.tabs.get(&tab))
             .map(|tab| &tab.webview)
+    }
+
+    fn scroll_to_edge(&self, view: ViewKey, document_id: u64, edge: ScrollEdge) {
+        if self.active != Some(view.tab) {
+            return;
+        }
+        let Some(tab) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
+            return;
+        };
+        let Some(&document) = tab.documents.get(&document_id) else {
+            return;
+        };
+        if tab.current_document != Some(document) {
+            return;
+        }
+        // Servo checks again at execution: a queued tap cannot jump the next document.
+        tab.webview
+            .evaluate_javascript_in_document(document, edge.script(), |result| {
+                if result.is_err() {
+                    warn!("scroll-to-edge failed");
+                }
+            });
     }
 
     // --- Surface lifecycle -------------------------------------------------------------------
@@ -469,6 +644,16 @@ impl Engine {
         if let Err(error) = std::fs::create_dir_all(&self.config.profile_dir) {
             self.error(format!("creating the profile directory failed: {error}"));
         }
+        // Before Servo reads them back: saved sign-ins last one run (see `profile`).
+        match profile::forget_saved_sign_ins(&self.config.profile_dir) {
+            Ok(0) => {},
+            Ok(_) => info!("deleted the sign-ins saved by an earlier run"),
+            // Not an engine failure: the browser starts anyway, and an error while starting would
+            // read as one (#65).
+            Err(error) => warn!(
+                "deleting saved sign-ins failed, so a proxy sign-in saved by an earlier run may be sent again: {error}"
+            ),
+        }
         let mut opts = Opts::default();
         opts.config_dir = Some(self.config.profile_dir.clone());
         let mut preferences = Preferences::default();
@@ -501,6 +686,8 @@ impl Engine {
     }
 
     fn surface_destroyed(&mut self) {
+        // The gesture on this surface ends without its up events.
+        self.touches.forget_pointers();
         let Surface::Bound { .. } = self.surface else {
             return;
         };
@@ -583,16 +770,27 @@ impl Engine {
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
 
-        let webview_id = self.insert_tab(view, webview);
+        let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
         });
     }
 
-    /// Registers a new view, hidden until selected so two shown views never overlap.
-    fn insert_tab(&mut self, view: ViewKey, webview: WebView) -> String {
+    /// Registers a new view, hidden until selected so two shown views never overlap, at the
+    /// page zoom every view uses. Servo builds a view at 100%, so its first document may lay out
+    /// once more when the zoom arrives (as a resize).
+    fn insert_tab(
+        &mut self,
+        view: ViewKey,
+        webview: WebView,
+        opener: Option<ViewKey>,
+        opening_tap: OpeningTap,
+    ) -> String {
         webview.hide();
+        webview.set_page_zoom(self.page_zoom);
+        // Servo starts every view light; documents it loads later inherit the view's theme.
+        webview.notify_theme_change(servo_theme(self.appearance));
         let webview_id = format!("{:?}", webview.id());
         self.tabs.insert(
             view.tab,
@@ -604,8 +802,14 @@ impl Engine {
                 documents: HashMap::new(),
                 retired: HashSet::new(),
                 held: VecDeque::new(),
+                media_blocked: HashSet::new(),
                 frames_painted: 0,
                 last_paint_report: None,
+                interacted_document: None,
+                opener,
+                shown: Shown::InitialBlank,
+                opening_tap,
+                ime_field: None,
             },
         );
         webview_id
@@ -615,10 +819,18 @@ impl Engine {
     /// the application adopts it (`tab_opened`). Dropping the request refuses the window.
     fn open_page_tab(&mut self, opener: ViewKey, request: CreateNewWebViewRequest) {
         // Only the tab the user sees may open windows: hidden or throttled tabs cannot take
-        // over the screen (Servo 0.6.0 reports no user activation to check instead).
+        // over the screen.
         if self.live_tab(opener).is_none() || self.active != Some(opener.tab) {
             return;
         }
+        // And only right after the user's own tap or key press there, on the page it shows now:
+        // Servo 0.6.0 opens every window.open() and target=_blank window, with or without one,
+        // and each new tab could open the next. One tap opens at most one window.
+        let Some(tapped_at) = self.take_document_activation(opener.tab) else {
+            info!("window without the user's tap in the visible tab: refused");
+            self.emit(EngineEvent::PopupBlocked { view: opener });
+            return;
+        };
         let Some(runtime) = &self.runtime else {
             return;
         };
@@ -636,7 +848,8 @@ impl Engine {
             .user_content_manager(runtime.user_content.clone())
             .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
-        self.insert_tab(view, webview);
+        // The window's first navigation is still the tap's: a target=_blank app link opens its app.
+        self.insert_tab(view, webview, Some(opener), OpeningTap::at(tapped_at));
         self.emit(EngineEvent::TabOpened { view, opener });
     }
 
@@ -645,8 +858,38 @@ impl Engine {
         for tab in self.tabs.values() {
             tab.webview.hide();
         }
+        self.withhold_keyboard();
         self.active = None;
+        self.release_leave_page_questions_off_screen();
+        self.touches.forget_pointers();
         self.needs_paint = true;
+    }
+
+    /// Applies `requested` to every view and keeps it for views created later. Servo lays each
+    /// page out again and keeps a view's zoom across its navigations.
+    fn set_page_zoom(&mut self, requested: f32) {
+        let Some(zoom) = page_zoom::accepted(requested) else {
+            self.error(format!("page zoom {requested} is not a zoom factor"));
+            return;
+        };
+        self.page_zoom = zoom;
+        for tab in self.tabs.values() {
+            tab.webview.set_page_zoom(zoom);
+        }
+        // Servo's tap/pan threshold grows with the zoom: the taps that count as the user's must
+        // stay the touches Servo turns into clicks.
+        let scale = self.config.density * zoom;
+        self.taps.set_scale(scale);
+        self.field_taps.set_scale(scale);
+        // The shown page lays out again; paint it, as the other visual changes here do.
+        self.needs_paint = true;
+    }
+
+    fn set_appearance(&mut self, appearance: Appearance) {
+        self.appearance = appearance;
+        for tab in self.tabs.values() {
+            tab.webview.notify_theme_change(servo_theme(appearance));
+        }
     }
 
     fn persist_profile(&mut self) {
@@ -675,9 +918,23 @@ impl Engine {
         selected.webview.show();
         selected.webview.focus();
 
+        if self.active != Some(tab) {
+            self.withhold_keyboard();
+        }
         self.active = Some(tab);
+        self.release_leave_page_questions_off_screen();
+        self.touches.forget_pointers();
         self.needs_paint = true;
         self.emit(EngineEvent::TabSelected { view });
+    }
+
+    /// The selected tab leaves the screen and the application hides its keyboard. Its field
+    /// keeps focus in the page, so a tap on it must open the keyboard again.
+    fn withhold_keyboard(&mut self) {
+        let active = self.active.and_then(|tab| self.tabs.get_mut(&tab));
+        if let Some(field) = active.and_then(|tab| tab.ime_field.as_mut()) {
+            field.keyboard = Keyboard::Withheld;
+        }
     }
 
     fn close_tab(&mut self, tab: i64) {
@@ -685,13 +942,15 @@ impl Engine {
             self.error(format!("no tab {tab} to close"));
             return;
         };
+        // Only the selected tab's field can have the keyboard.
+        let had_keyboard = self.active == Some(tab) && closed.ime_field.is_some();
         if self.active == Some(tab) {
             // The application picks the successor; until then the surface shows no page.
             self.active = None;
+            self.touches.forget_pointers();
             self.needs_paint = true;
         }
-        if self.ime_owner.is_some_and(|(view, _)| view == closed.view) {
-            self.ime_owner = None;
+        if had_keyboard {
             self.emit(EngineEvent::ImeHidden { view: closed.view });
         }
         // Their answers could never reach the page; dropping sends Servo's defaults.
@@ -756,6 +1015,52 @@ impl Engine {
     // --- Input (always to the active view) ---------------------------------------------------
 
     fn touch(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) {
+        // A scroll ends with Up too, so it counts, where browsers cancel the pointer once
+        // scrolling starts: asking a little more often is the safe side for unsaved text.
+        if phase == TouchPhase::Up {
+            self.note_interaction();
+        }
+        // Followed even without a view to deliver to, so no gesture is left half seen.
+        let tapped = match phase {
+            TouchPhase::Down => {
+                self.taps.down(pointer, x, y);
+                false
+            },
+            TouchPhase::Move => {
+                self.taps.moved(pointer, x, y);
+                false
+            },
+            TouchPhase::Up => self.taps.up(pointer, x, y),
+            TouchPhase::Cancel => {
+                self.taps.cancel(pointer);
+                false
+            },
+        };
+        let now = Instant::now();
+        match phase {
+            TouchPhase::Down => self.touches.press(pointer, now),
+            TouchPhase::Move => self.touches.moved(now),
+            TouchPhase::Up => self.touches.lift(pointer, now),
+            TouchPhase::Cancel => self.touches.cancel(now),
+        }
+        // Every touch counts for the gesture, with or without a page shown: a lift the tracker
+        // missed would leave its finger down, and no later touch would be a tap.
+        let field_tap = match phase {
+            TouchPhase::Down => {
+                self.field_taps.down(pointer, x, y);
+                None
+            },
+            TouchPhase::Move => {
+                self.field_taps.moved(pointer, x, y);
+                None
+            },
+            TouchPhase::Up => self.field_taps.up(pointer, x, y),
+            TouchPhase::Cancel => {
+                self.field_taps.cancel();
+                None
+            },
+        };
+
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -771,9 +1076,114 @@ impl Engine {
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        // Only a tap: the end of a scroll, fling or pinch must not let the page open an app.
+        if tapped {
+            self.note_activation();
+        }
+
+        if let Some((x, y)) = field_tap {
+            self.check_tap_on_field(x, y);
+        }
+    }
+
+    fn note_activation(&mut self) {
+        let activation = self.active.map(|tab| {
+            let document = self.tabs.get(&tab).and_then(|found| found.current_document);
+            (tab, document, Instant::now())
+        });
+        self.last_activation = activation;
+    }
+
+    /// When the user tapped or pressed a key, if that was moments ago in one of `tabs` and one of
+    /// them is still the visible tab. Using it up means one tap hands at most one link to another
+    /// app.
+    fn take_activation(&mut self, tabs: &[i64]) -> Option<Instant> {
+        let (activated, _, at) = self.last_activation?;
+        let recent = self.shows_one_of(tabs)
+            && tabs.contains(&activated)
+            && at.elapsed() <= USER_ACTIVATION_WINDOW;
+        if !recent {
+            return None;
+        }
+        self.last_activation = None;
+        Some(at)
+    }
+
+    /// Like `take_activation`, for a page opening a window: the tap must also have been on the
+    /// document `tab` shows now, as browsers tie activation to the document. Otherwise a tapped
+    /// link's destination could open a pop-up as it loads.
+    fn take_document_activation(&mut self, tab: i64) -> Option<Instant> {
+        let (_, document, _) = self.last_activation?;
+        let current = self.tabs.get(&tab).and_then(|found| found.current_document);
+        if document.is_none() || document != current {
+            return None;
+        }
+        self.take_activation(&[tab])
+    }
+
+    fn shows_one_of(&self, tabs: &[i64]) -> bool {
+        self.active.is_some_and(|shown| tabs.contains(&shown))
+    }
+
+    /// A tap while the selected tab's field has focus but no keyboard: if the tap landed on the
+    /// field, open the keyboard (see `keyboard`). Servo handles the tap at the same time; the
+    /// answer is checked against the field when it arrives, and a tap elsewhere moves focus.
+    fn check_tap_on_field(&mut self, x: f32, y: f32) {
+        let Some(tab) = self.active.and_then(|tab| self.tabs.get(&tab)) else {
+            return;
+        };
+        let Some(field) = tab
+            .ime_field
+            .filter(|field| field.keyboard == Keyboard::Withheld)
+        else {
+            return;
+        };
+        let Some(document) = tab.current_document else {
+            return;
+        };
+        // Device to CSS pixels: density, page zoom, the page's viewport scale and pinch zoom.
+        // Servo exposes no pinch-zoom offset, so a tap on a zoomed page can miss the field.
+        let scale = tab.webview.device_pixels_per_css_pixel().get();
+        let Some(script) = keyboard::tap_hits_focus_script(x / scale, y / scale) else {
+            return;
+        };
+        let view = tab.view;
+        let control = field.control;
+        let checks = self.tap_checks.clone();
+        tab.webview
+            .evaluate_javascript_in_document(document, script, move |result| {
+                checks.borrow_mut().push((view, control, result))
+            });
+    }
+
+    fn drain_tap_checks(&mut self) {
+        let checks: Vec<_> = self.tap_checks.borrow_mut().drain(..).collect();
+        for (view, control, result) in checks {
+            // Anything but a plain yes (a script error, a replaced document) opens nothing.
+            if !matches!(result, Ok(JSValue::Boolean(true))) || self.active != Some(view.tab) {
+                continue;
+            }
+            let Some(tab) = self.live_tab(view) else {
+                continue;
+            };
+            // Still the field the tap was checked against: focus may have moved meanwhile.
+            let Some(field) = tab
+                .ime_field
+                .as_mut()
+                .filter(|field| field.control == control && field.keyboard == Keyboard::Withheld)
+            else {
+                continue;
+            };
+            field.keyboard = Keyboard::Open;
+            let event = field.shown_event(view);
+            self.emit(event);
+        }
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
+        if action == KeyAction::Press {
+            self.note_interaction();
+        }
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -787,6 +1197,9 @@ impl Engine {
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             state, key,
         )));
+        if action == KeyAction::Press {
+            self.note_activation();
+        }
     }
 
     /// A long-press: a secondary-button click, which makes Servo fire `contextmenu` and, unless
@@ -805,10 +1218,20 @@ impl Engine {
         }
     }
 
+    /// The user touched or typed into the selected page: its current document may now ask to
+    /// confirm leaving.
+    fn note_interaction(&mut self) {
+        if let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) {
+            tab.interacted_document = tab.current_document;
+        }
+    }
+
     fn ime_commit(&mut self, text: String) {
         if text.is_empty() {
             return;
         }
+        // Typing: the page sees a key press (`Process`) with the text.
+        self.note_interaction();
         let Some(webview) = self.active_webview() else {
             return;
         };
@@ -827,9 +1250,67 @@ impl Engine {
         )));
     }
 
+    /// The user hid the keyboard (Back, or the keyboard's own key). Servo asks for it again
+    /// only when a field gains focus, so the field gives up focus, as in Servo's own shell
+    /// (`ImeEvent::Dismissed`): a tap on it focuses it again and asks for the keyboard.
+    fn ime_dismissed(&mut self) {
+        let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) else {
+            return;
+        };
+        // No page field has the keyboard: leave the page's focus alone. A withheld field (focused
+        // by the page, never opened) had no keyboard to dismiss, so the page keeps its focus.
+        let Some(field) = tab
+            .ime_field
+            .as_mut()
+            .filter(|field| field.keyboard == Keyboard::Open)
+        else {
+            return;
+        };
+        // Should the page keep the focus anyway, a tap on the field still opens the keyboard.
+        field.keyboard = Keyboard::Withheld;
+        tab.webview
+            .notify_input_event(InputEvent::Ime(ImeEvent::Dismissed));
+    }
+
     // --- Capture -------------------------------------------------------------------------------
 
+    /// Captures of page text for the page on screen wait while the user touches it: the
+    /// script holds the page's script thread, so the page would stop responding under the
+    /// finger. Other captures (hidden tabs, reader view) start at once.
     fn start_capture(&mut self, request: CaptureRequest) {
+        if self.waits_for_quiet(&request, Duration::ZERO) {
+            self.deferred_captures.push((request, Instant::now()));
+            return;
+        }
+        self.run_capture(request);
+    }
+
+    fn waits_for_quiet(&self, request: &CaptureRequest, waited: Duration) -> bool {
+        let now = Instant::now();
+        request.kind == CaptureKind::PageText
+            && self.active == Some(request.tab)
+            && capture::defer_while_touched(
+                self.touches.touching(now),
+                self.touches.since_last(now),
+                waited,
+            )
+    }
+
+    fn start_deferred_captures(&mut self) {
+        if self.deferred_captures.is_empty() {
+            return;
+        }
+        let deferred = std::mem::take(&mut self.deferred_captures);
+        for (request, since) in deferred {
+            if self.waits_for_quiet(&request, since.elapsed()) {
+                self.deferred_captures.push((request, since));
+            } else {
+                self.run_capture(request);
+            }
+        }
+    }
+
+    fn run_capture(&mut self, request: CaptureRequest) {
         let started = Instant::now();
         let refuse = |view: ViewKey, status: CaptureStatus, detail: &str| {
             EngineEvent::Capture(CaptureReport {
@@ -880,11 +1361,17 @@ impl Engine {
             return;
         }
 
+        let visibility = if self.active == Some(request.tab) {
+            Visibility::Shown
+        } else {
+            Visibility::Hidden
+        };
+        let time_budget = capture::time_budget(visibility, request.timeout);
         let results = self.capture_results.clone();
         let (capture_id, expected_document) = (request.capture, request.document);
         tab.webview.evaluate_javascript_in_document(
             document,
-            capture::script(request.kind, request.max_text_bytes),
+            capture::script(request.kind, request.max_text_bytes, time_budget),
             move |result| {
                 results
                     .borrow_mut()
@@ -1041,6 +1528,96 @@ impl Engine {
         }
     }
 
+    // --- Find in page -------------------------------------------------------------------------
+
+    /// Runs the find script in `document_id`, the document the app saw, and only while the view
+    /// still shows it: a document that committed before the app heard of it is neither selected
+    /// nor scrolled. Servo checks again when the script runs; the result names that document.
+    fn find(&mut self, view: ViewKey, document_id: u64, request: i64, query: &str, index: i32) {
+        let Some(found) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
+            self.emit(EngineEvent::FindResult {
+                view,
+                document: None,
+                request,
+                status: FindStatus::TabClosed,
+            });
+            return;
+        };
+        let Some(document) = found
+            .documents
+            .get(&document_id)
+            .copied()
+            .filter(|&document| found.current_document == Some(document))
+        else {
+            self.emit(EngineEvent::FindResult {
+                view,
+                document: Some(document_id),
+                request,
+                status: FindStatus::StaleDocument,
+            });
+            return;
+        };
+
+        let results = self.find_results.clone();
+        let ran_in = u64::from(document);
+        found.webview.evaluate_javascript_in_document(
+            document,
+            find::script(query, FindAction::Find { index }),
+            move |result| results.borrow_mut().push((view, request, ran_in, result)),
+        );
+    }
+
+    /// Removes find's selection from `document_id` if the view still shows it; nothing to report.
+    /// A replaced document took its selection with it.
+    fn clear_find(&mut self, view: ViewKey, document_id: u64) {
+        let Some(found) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
+            return;
+        };
+        let Some(document) = found
+            .documents
+            .get(&document_id)
+            .copied()
+            .filter(|&document| found.current_document == Some(document))
+        else {
+            return;
+        };
+        found.webview.evaluate_javascript_in_document(
+            document,
+            find::script("", FindAction::Clear),
+            |_| {},
+        );
+    }
+
+    fn drain_find_results(&mut self) {
+        let results: Vec<_> = self.find_results.borrow_mut().drain(..).collect();
+        for (view, request, document, result) in results {
+            // Re-check after the asynchronous hop, like captures: a replaced document's matches
+            // must not reach the page now shown.
+            let current = self
+                .tabs
+                .get(&view.tab)
+                .filter(|tab| tab.view == view)
+                .map(|tab| tab.current_document.map(u64::from));
+            let status = match current {
+                None => FindStatus::TabClosed,
+                Some(current) if current != Some(document) => FindStatus::StaleDocument,
+                Some(_) => match find::interpret_result(result) {
+                    Ok(counts) => FindStatus::Found(counts),
+                    Err(reason) => {
+                        warn!("find request {request} failed: {reason}");
+                        FindStatus::Failed
+                    },
+                },
+            };
+            self.emit(EngineEvent::FindResult {
+                view,
+                document: Some(document),
+                request,
+                status,
+            });
+        }
+    }
+
     // --- Delegate notifications ----------------------------------------------------------------
 
     fn drain_delegate_events(&mut self) {
@@ -1082,14 +1659,7 @@ impl Engine {
                     self.emit(EngineEvent::UnattributedTitle { view, title });
                 }
             },
-            DelegateEvent::PageNavigationRequested { view, url } => {
-                if self.live_tab(view).is_some() {
-                    self.emit(EngineEvent::PageNavigationRequested {
-                        view,
-                        url: url.into(),
-                    });
-                }
-            },
+            DelegateEvent::PageNavigation { view, request } => self.page_navigation(view, request),
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
@@ -1100,14 +1670,27 @@ impl Engine {
                 control,
                 multiline,
                 kind,
+                allow_keyboard,
             } => {
-                if self.live_tab(view).is_some() {
-                    self.ime_owner = Some((view, control));
-                    self.emit(EngineEvent::ImeShown {
-                        view,
-                        multiline,
-                        kind,
-                    });
+                // A hidden tab's field must not take the keyboard from the selected tab; it is
+                // kept for a tap once its tab is selected.
+                let shown = self.active == Some(view.tab);
+                let keyboard = if shown && allow_keyboard {
+                    Keyboard::Open
+                } else {
+                    Keyboard::Withheld
+                };
+                let field = ImeField {
+                    control,
+                    multiline,
+                    kind,
+                    keyboard,
+                };
+                if let Some(tab) = self.live_tab(view) {
+                    tab.ime_field = Some(field);
+                    if shown {
+                        self.emit(field.shown_event(view));
+                    }
                 }
             },
             DelegateEvent::ClosedByPage { view } => {
@@ -1123,10 +1706,16 @@ impl Engine {
             DelegateEvent::SignIn { view, request } => {
                 self.show_page_control(view, ControlHandle::SignIn(request))
             },
+            DelegateEvent::LeavePage { view, request } => self.ask_to_leave_page(view, request),
             DelegateEvent::ControlHidden { view, control } => {
-                if self.ime_owner == Some((view, control)) {
-                    self.ime_owner = None;
-                    self.emit(EngineEvent::ImeHidden { view });
+                let shown = self.active == Some(view.tab);
+                if let Some(tab) = self.live_tab(view)
+                    && tab.ime_field.is_some_and(|field| field.control == control)
+                {
+                    tab.ime_field = None;
+                    if shown {
+                        self.emit(EngineEvent::ImeHidden { view });
+                    }
                 }
                 self.hide_controls(|pending| {
                     pending.view == view && pending.control.embedder_id() == Some(control)
@@ -1135,9 +1724,105 @@ impl Engine {
             DelegateEvent::DefaultHandled { view, request } => {
                 self.emit(EngineEvent::DefaultHandled { view, request })
             },
+            DelegateEvent::MediaBlocked { view } => self.media_blocked(view),
             DelegateEvent::Crashed { view, reason } => {
                 error!("view {view:?} crashed: {reason}");
                 self.emit(EngineEvent::Crashed { view, reason });
+            },
+        }
+    }
+
+    /// Reports cancelled media once per document, so a page with many media elements, or one
+    /// that keeps retrying, yields one notice.
+    ///
+    /// A load names its view but not its document, so it is attributed to the tab's committed
+    /// document. A load that overtook its document's commit would count for the previous one;
+    /// Servo announces a document before parsing it and media loads start during parsing, so that
+    /// is unlikely. Before the tab's first commit there is no document to name: nothing is
+    /// reported (the load is still cancelled).
+    fn media_blocked(&mut self, view: ViewKey) {
+        let Some(tab) = self.live_tab(view) else {
+            return;
+        };
+        let Some(document) = tab.current_document else {
+            return;
+        };
+        if !tab.media_blocked.insert(document) {
+            return;
+        }
+        self.emit(EngineEvent::MediaBlocked {
+            view,
+            document: u64::from(document),
+        });
+    }
+
+    /// Web addresses load. A link for another app goes to the application only right after the
+    /// user's own tap or key press in the visible tab, so a page or an embedded ad cannot open
+    /// apps by itself; the page stays on screen either way. Anything else (`file:` ...) is
+    /// refused. A window a page opened just for such a link closes instead of staying blank.
+    fn page_navigation(&mut self, view: ViewKey, request: NavigationRequest) {
+        let url = request.url.clone();
+        // Used up by the window's first navigation, whatever it is.
+        let opened_by_tap = self
+            .live_tab(view)
+            .is_some_and(|tab| tab.opening_tap.take(Instant::now(), USER_ACTIVATION_WINDOW));
+        match navigation::classify(url.scheme()) {
+            PageNavigation::Allow => {
+                request.allow();
+                if self.live_tab(view).is_some() {
+                    self.emit(EngineEvent::PageNavigationRequested {
+                        view,
+                        url: url.into(),
+                    });
+                }
+            },
+            PageNavigation::Deny => {
+                request.deny();
+                // No address: it is the page's. The scheme says what it tried to open.
+                info!("{} navigation refused", url.scheme());
+                let Some(tab) = self.live_tab(view) else {
+                    return;
+                };
+                if navigation::refusal(view, tab.opener, tab.shown).close {
+                    self.close_tab(view.tab);
+                }
+            },
+            PageNavigation::External => {
+                request.deny();
+                let bounded = url.as_str().chars().count() <= controls::MAX_URL_CHARS;
+                let Some(tab) = self.live_tab(view) else {
+                    return;
+                };
+                let refusal = navigation::refusal(view, tab.opener, tab.shown);
+                // Only a link that can be handed over may use up the user's tap.
+                let deliverable = bounded && self.live_tab(refusal.owner).is_some();
+                // Before closing the window, which may be the visible tab: the user tapped in
+                // the opener, or in the window itself. The tap that opened the window is spent
+                // in the opener, so the window's first navigation brings it along.
+                let owners = [refusal.owner.tab, view.tab];
+                let tapped = deliverable
+                    && ((opened_by_tap && self.shows_one_of(&owners))
+                        || self.take_activation(&owners).is_some());
+                if refusal.close {
+                    // Reported like a page closing its own window, and before the link: the
+                    // application drops the tab and shows the opener again, which then takes it.
+                    self.close_tab(view.tab);
+                }
+                if !deliverable {
+                    return;
+                }
+                if !tapped {
+                    // No address: it is the page's. The scheme says what kind of app it wanted.
+                    info!(
+                        "{} link without the user's tap in the visible tab: refused",
+                        url.scheme()
+                    );
+                    return;
+                }
+                self.emit(EngineEvent::ExternalLink {
+                    view: refusal.owner,
+                    url: url.into(),
+                });
             },
         }
     }
@@ -1152,6 +1837,7 @@ impl Engine {
                 origin: request.url().origin().ascii_serialization(),
                 proxy: request.for_proxy(),
             }),
+            ControlHandle::LeavePage { .. } => Some(ControlDescription::LeavePage),
         };
         let Some(description) = description else {
             warn!("answering an unsupported page control with Servo's default");
@@ -1166,6 +1852,72 @@ impl Engine {
             control: id,
             description,
         });
+    }
+
+    /// A page's `beforeunload` asks to confirm leaving it, and its script thread waits for the
+    /// answer. Servo 0.6.0 asks for page-initiated navigations, reloads and `window.close()`
+    /// only; the request names the view, not which of its documents (an iframe's) asks.
+    fn ask_to_leave_page(&mut self, view: ViewKey, request: AllowOrDenyRequest) {
+        let Some(tab) = self.live_tab(view) else {
+            // Dropping the request lets the page go.
+            return;
+        };
+        let activation = PageActivation::of(tab.interacted_document, tab.current_document);
+        let visibility = if self.active == Some(view.tab) {
+            TabVisibility::Selected
+        } else {
+            TabVisibility::Hidden
+        };
+        if controls::leave_page_decision(visibility, activation) == LeavePageDecision::Leave {
+            request.allow();
+            return;
+        }
+
+        let deadline = Instant::now() + controls::LEAVE_PAGE_TIMEOUT;
+        self.show_page_control(view, ControlHandle::LeavePage { request, deadline });
+    }
+
+    /// An unanswered leave-page question keeps its page: its script thread cannot wait longer,
+    /// and staying lets it go on as well as leaving does.
+    fn expire_leave_page_questions(&mut self) {
+        let now = Instant::now();
+        self.keep_pages_of_questions(|pending| {
+            pending
+                .control
+                .deadline()
+                .is_some_and(|deadline| deadline <= now)
+        });
+    }
+
+    /// Only the tab on screen can ask the user: a question from a tab that left it keeps its page.
+    fn release_leave_page_questions_off_screen(&mut self) {
+        let active = self.active;
+        self.keep_pages_of_questions(|pending| Some(pending.view.tab) != active);
+    }
+
+    /// Answers the matching leave-page questions with Stay and tells the app they are gone. A
+    /// navigation the user did not confirm can be repeated; unsaved text cannot be brought back.
+    fn keep_pages_of_questions(&mut self, matches: impl Fn(&PendingControl) -> bool) {
+        let settled: Vec<u64> = self
+            .page_controls
+            .iter()
+            .filter(|(_, pending)| {
+                matches!(pending.control, ControlHandle::LeavePage { .. }) && matches(pending)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in settled {
+            let Some(pending) = self.page_controls.remove(&id) else {
+                continue;
+            };
+            if let ControlHandle::LeavePage { request, .. } = pending.control {
+                request.deny();
+            }
+            self.emit(EngineEvent::ControlHidden {
+                view: pending.view,
+                control: id,
+            });
+        }
     }
 
     /// Drops the matching controls (Servo answers them with its defaults) and tells the app.
@@ -1194,6 +1946,12 @@ impl Engine {
         let response = match controls::parse_response(response) {
             Ok(response) => response,
             Err(error) => {
+                if let ControlHandle::LeavePage { request, .. } = pending.control {
+                    // Stay: a navigation can be repeated, unsaved text cannot be brought back.
+                    request.deny();
+                    self.error(format!("{error}; leave-page question {id} kept its page"));
+                    return;
+                }
                 self.error(format!(
                     "{error}; control {id} answered with Servo's default"
                 ));
@@ -1212,6 +1970,27 @@ impl Engine {
                     response => self.error(format!(
                         "response {response:?} does not fit sign-in {id}; the sign-in was cancelled"
                     )),
+                }
+                return;
+            },
+            ControlHandle::LeavePage { request, .. } => {
+                match controls::leave_page_answer(&response) {
+                    Some(LeavePageAnswer::Leave) => {
+                        request.allow();
+                        // The answer stands in for the tap that started the navigation, which
+                        // may be older than the activation window by now: a link for another
+                        // app still goes through (#80).
+                        if self.active == Some(pending.view.tab) {
+                            self.note_activation();
+                        }
+                    },
+                    Some(LeavePageAnswer::Stay) => request.deny(),
+                    None => {
+                        request.deny();
+                        self.error(format!(
+                            "response {response:?} does not fit leave-page question {id}; the page was kept"
+                        ));
+                    },
                 }
                 return;
             },
@@ -1277,6 +2056,7 @@ impl Engine {
         };
         let sequence = self.next_sequence;
         self.next_sequence += 1;
+        let shown = self.active == Some(view.tab);
         let Some(tab) = self.live_tab(view) else {
             return;
         };
@@ -1290,6 +2070,7 @@ impl Engine {
             }
             // A traversal can make an older document current again.
             tab.retired.remove(&document);
+            tab.shown = tab.shown.after_commit(url.as_ref().map_or("", Url::as_str));
             HistoryChange::NewDocument
         } else if tab.current_url != url {
             HistoryChange::SameDocumentUrl
@@ -1297,6 +2078,16 @@ impl Engine {
             HistoryChange::ListOnly
         };
         tab.current_url = url.clone();
+
+        // Servo hides no input method when a navigation replaces the field's document (a form
+        // sent with Enter). A field of the new document can be reported before its commit.
+        let field_replaced = change == HistoryChange::NewDocument
+            && tab
+                .ime_field
+                .is_some_and(|field| field.control.pipeline_id != document);
+        if field_replaced {
+            tab.ime_field = None;
+        }
 
         // Release reports that overtook this commit; discard those of replaced documents.
         let mut released = Vec::new();
@@ -1314,6 +2105,17 @@ impl Engine {
             }
         }
 
+        if change == HistoryChange::NewDocument {
+            // Another document replaced the one asking (a load the application started): its
+            // question is moot.
+            self.hide_controls(|pending| {
+                pending.view == view && matches!(pending.control, ControlHandle::LeavePage { .. })
+            });
+        }
+
+        if field_replaced && shown {
+            self.emit(EngineEvent::ImeHidden { view });
+        }
         self.emit(EngineEvent::History {
             view,
             change,
@@ -1506,6 +2308,13 @@ fn select_options(entries: &[SelectElementOptionOrOptgroup]) -> Vec<SelectOption
         }
     }
     options
+}
+
+fn servo_theme(appearance: Appearance) -> Theme {
+    match appearance {
+        Appearance::Light => Theme::Light,
+        Appearance::Dark => Theme::Dark,
+    }
 }
 
 /// Maps an Android key (character plus key code) to a DOM key.

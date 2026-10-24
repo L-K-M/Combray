@@ -52,6 +52,7 @@ import ch.lkmc.combray.UploadStaging
 import ch.lkmc.combray.core.browser.DialogBlocking
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.engine.ControlResponse
+import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
 import kotlinx.coroutines.CoroutineScope
@@ -90,6 +91,7 @@ fun PageControlDialog(
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
+        PageControlContent.LeavePage -> LeavePageDialog(control.site) { answer(it.response) }
         else -> ScriptDialog(control, content, onAnswer)
     }
 }
@@ -227,9 +229,35 @@ private fun ScriptDialog(
 }
 
 /**
+ * The page asks before it is left (`beforeunload`), usually over unsaved form text. Back answers
+ * Stay: leaving is the choice that loses the text, so only its own button leaves.
+ */
+@Composable
+private fun LeavePageDialog(site: String?, onAnswer: (LeavePageChoice) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { onAnswer(LeavePageChoice.STAY) },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text(stringResource(R.string.leave_page_title), Modifier.semantics { heading() }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                site?.let { Text(stringResource(R.string.leave_page_site, it)) }
+                Text(stringResource(R.string.leave_page_message))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onAnswer(LeavePageChoice.LEAVE) }) { Text(stringResource(R.string.leave_page_leave)) }
+        },
+        dismissButton = {
+            TextButton(onClick = { onAnswer(LeavePageChoice.STAY) }) { Text(stringResource(R.string.leave_page_stay)) }
+        },
+    )
+}
+
+/**
  * HTTP sign-in. Names the server asking, not the page that linked there, and warns when the
- * password would travel unencrypted. Nothing is stored: the fields use plain [remember], so a
- * password never reaches saved instance state, and a rotation clears them.
+ * password would travel unencrypted. The dialog keeps nothing: the fields use plain [remember],
+ * so a password never reaches saved instance state, and a rotation clears them. What Servo
+ * keeps of an answer is in docs/ENGINE_SPIKE.md section 13.
  */
 @Composable
 private fun SignInDialog(id: Long, content: PageControlContent.SignIn, onAnswer: (ControlResponse) -> Unit) {

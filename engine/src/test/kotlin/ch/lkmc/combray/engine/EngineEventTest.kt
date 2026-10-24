@@ -24,6 +24,15 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesAnExternalLink() {
+        val event = EngineEvent.parse(
+            """{"type":"external_link","url":"mailto:ada@example.org","tab":3,"generation":4,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.ExternalLink(ViewRef(3, 4), "mailto:ada@example.org"), event)
+    }
+
+    @Test
     fun parsesStaleTitleWithNullTitle() {
         val event = EngineEvent.parse(
             """{"type":"title","document":7,"title":null,"attribution":"stale","tab":3,"generation":4,"schema":1}""",
@@ -52,6 +61,43 @@ class EngineEventTest {
         assertEquals("M0-B NONCE", captured.content?.text)
         assertEquals(CaptureStatus.STALE_DOCUMENT, stale.status)
         assertNull(stale.content)
+    }
+
+    @Test
+    fun parsesMediaBlockedWithItsDocument() {
+        val event = EngineEvent.parse("""{"type":"media_blocked","document":4294967331,"tab":2,"generation":5,"schema":1}""")
+
+        assertEquals(EngineEvent.MediaBlocked(ViewRef(2, 5), 4294967331L), event)
+    }
+
+    @Test
+    fun parsesFindResultsWithAndWithoutAMatch() {
+        val found = EngineEvent.parse(
+            """{"type":"find_result","document":4294967331,"request":17,"status":"found","count":12,"index":2,""" +
+                """"capped":false,"tab":2,"generation":5,"schema":1}""",
+        )
+        val failed = EngineEvent.parse(
+            """{"type":"find_result","document":null,"request":18,"status":"failed","count":0,"index":null,""" +
+                """"capped":false,"tab":2,"generation":5,"schema":1}""",
+        )
+        val unknown = EngineEvent.parse(
+            """{"type":"find_result","document":7,"request":19,"status":"later","count":1,"index":0,""" +
+                """"capped":false,"tab":2,"generation":5,"schema":1}""",
+        ) as EngineEvent.FindResult
+
+        assertEquals(EngineEvent.FindResult(ViewRef(2, 5), 4294967331L, 17, FindStatus.FOUND, 12, 2, false), found)
+        assertEquals(EngineEvent.FindResult(ViewRef(2, 5), null, 18, FindStatus.FAILED, 0, null, false), failed)
+        assertEquals(FindStatus.FAILED, unknown.status)
+    }
+
+    @Test
+    fun parsesAFieldThatGetsNoKeyboardBeforeThePageIsUsed() {
+        val event = EngineEvent.parse(
+            """{"type":"ime_shown","document":4294967331,"multiline":false,"kind":"search","show_keyboard":false,""" +
+                """"tab":1,"generation":2,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.ImeShown(ViewRef(1, 2), 4294967331L, multiline = false, kind = "search", showKeyboard = false), event)
     }
 
     @Test
@@ -96,6 +142,21 @@ class EngineEventTest {
             EngineEvent.ControlHidden(ViewRef(1, 2), 7),
             EngineEvent.parse("""{"type":"control_hidden","control":7,"tab":1,"generation":2}"""),
         )
+    }
+
+    @Test
+    fun parsesLeavePageQuestion() {
+        val leave = EngineEvent.parse(
+            """{"type":"control_shown","control":10,"kind":"leave_page","tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+        assertEquals(PageControlContent.LeavePage, leave.content)
+    }
+
+    /** Back and Cancel must keep the page: Servo's own default would leave it. */
+    @Test
+    fun leavePageChoicesAnswerAsNativeExpects() {
+        assertEquals("""{"type":"accept"}""", LeavePageChoice.LEAVE.response.toJson())
+        assertEquals("""{"type":"dismiss"}""", LeavePageChoice.STAY.response.toJson())
     }
 
     @Test

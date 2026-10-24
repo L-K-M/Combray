@@ -35,6 +35,18 @@ All notable changes to this project are documented here. The format follows
   confirming tap, without opening the browser. A shared link longer than
   32,768 characters is refused.
 - Launcher shortcuts for New tab and Search history (Recent on Hister).
+- Text size: More › Text size zooms every page from 80% to 150% with
+  Servo's page zoom, so text rewraps to the screen. The choice is kept and
+  applies to new tabs and to reader view.
+- A bottom-left button jumps to the top when scrolling up or the bottom
+  when scrolling down, on pages and in reader view. It moves above a
+  snackbar instead of hiding under it.
+- Find in page: More › Find in page opens a bar at the bottom that counts
+  the page's matches, selects and scrolls to each in turn, and removes the
+  selection when it closes.
+- Pages follow the phone's dark theme: sites with dark styles, such as
+  Kagi, render dark when the system is in dark mode, and switch when it
+  changes.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.
@@ -47,7 +59,13 @@ All notable changes to this project are documented here. The format follows
   switch to it, or save it to Karakeep without leaving the page. Android 11
   and 12 now confirm a copied address.
 - HTTP sign-in: a dialog naming the server asks for a username and
-  password, warns on unencrypted connections and stores nothing.
+  password and warns on unencrypted connections. Combray stores no
+  credentials; what Servo keeps is in `docs/ENGINE_SPIKE.md`.
+- "Leave this page?" when a page you touched or typed into asks before it
+  is left (`beforeunload`), so unsaved form text is not lost silently;
+  pressing Back on the question stays. Servo 0.6.0 asks only when the page
+  itself navigates (links, forms), on reload and on `window.close()`, not
+  for a typed address, Back/Forward or closing the tab.
 - Device check that the bottom bar, More menu and page dialogs keep 48dp,
   labeled touch targets at the narrowest width and largest font size.
 - Local release signing through environment variables, with explicit validation
@@ -223,6 +241,45 @@ All notable changes to this project are documented here. The format follows
 - A typed address, a reload, or a new or restored tab showed no loading line
   until the server answered, so a slow server looked like a tap that did
   nothing. The line now shows from the request.
+- Pages with `<video>` or `<audio>` downloaded every media file in full,
+  although Combray cannot play audio or video (its Servo build has no media
+  backend), and by Servo's source never finished loading. Combray now
+  cancels these loads before they start, so the page's error handling and
+  fallback run, and says once per page that its audio or video can't play.
+- Pages could open new tabs by themselves, on load or from a timer, and
+  each new tab could open the next. A page now opens a window only right
+  after your tap, one per tap; Combray says when it blocked one.
+- Tapping a `mailto:`, `tel:`, map or app link on a page replaced the page
+  with an error. Combray now asks whether to open such a link in another
+  app; Open hands it to the app that handles it, or says that none can,
+  and an `intent:` link's fallback page opens instead. A link that opens a
+  new window for another app no longer leaves a blank tab or a "Tab
+  closed" notice, and a malformed `intent:` link is refused instead of
+  closing Combray.
+  Pages can no longer open apps without a tap (the end of a scroll does
+  not count), nor `file:` addresses at all, and `intent:` links may not aim
+  another app at device data (`file:`, `content:`). The page stays on screen, but
+  Servo still stops what it was loading: a link tapped before the page
+  finished loading leaves it unfinished.
+- After an HTTP sign-in, the page's address carried the username and
+  password (Servo 0.6.0 puts them in the URL), so the address bar,
+  Recent, Share and restore after a restart showed or kept them. The
+  engine and the app now leave them out of every address; opening the
+  page again from Recent or after a restart asks you to sign in again.
+  Like other signed-in pages, such pages can now be saved to Karakeep
+  and captured for Hister.
+- Proxy sign-ins Servo saved in its profile are deleted when the engine
+  starts instead of being sent again after a restart. They still reach
+  the disk while the app runs until a Servo patch change.
+- With Hister capture on, a large page could stop responding for seconds
+  after it loaded while Combray read its text. Reading now stops in time
+  and keeps what it has, and waits while you scroll or tap.
+- The page keyboard: a field a page focuses on load (as search pages do) no
+  longer covers the page with the keyboard before you touch it; tapping the
+  field opens it. A keyboard you closed with Back reopens when you tap the
+  field again. The keyboard now closes when a form sent with Enter loads its
+  results, when you switch tabs or go home, and when the tab closes, and a
+  background tab's field can no longer take it.
 - Sites built on Next.js, such as anthropic.com, replaced their page with
   "This page couldn't load": Servo 0.6.0 leaves IntersectionObserver off by
   default, and their start-up code needs it. Combray now enables it.
@@ -264,6 +321,10 @@ All notable changes to this project are documented here. The format follows
 - On a screen narrower than 400dp the address sits on its own row above
   the actions, so the site name stays readable. Wider screens keep the
   single row, and snackbars stay clear of the bar either way.
+- Pages read a real screen and window size: `screen.width`,
+  `screen.availWidth` and `outerWidth` (and their heights) were 0, which
+  broke sites that size images or layouts from them. The screen is the
+  page area.
 - `scripts/m0/fetch-servo.sh` applied none of Combray's Servo patches in a
   clone of this repository: `git apply` skipped their files and still
   succeeded, so the engine failed to compile (`no PipelineId in the root`).

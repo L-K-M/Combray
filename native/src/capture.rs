@@ -21,8 +21,10 @@
 //! engine, not from the script result. A page can still make the script slow or never finish:
 //! Servo v0.6.0 has no interrupt for embedder scripts, so the deadline only abandons the result.
 
+use std::collections::BTreeSet;
 #[cfg(target_os = "android")]
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "android")]
 use servo::{JSValue, JavaScriptEvaluationError};
@@ -46,25 +48,143 @@ pub const MAX_TITLE_BYTES: usize = 4 * 1024;
 pub const MAX_URL_BYTES: usize = 8 * 1024;
 /// Element and text nodes the script may visit before it stops.
 pub const MAX_NODES: u32 = 50_000;
+/// How long a capture of the page on screen may hold the page's script thread. The walk stops
+/// there and returns the text it has: a page that froze for seconds after loading felt broken.
+pub const VISIBLE_SCRIPT_BUDGET: Duration = Duration::from_millis(400);
+/// For hidden pages, room left before the result deadline for the result to come back.
+pub const DEADLINE_MARGIN: Duration = Duration::from_millis(500);
+/// No hidden page holds its script thread longer, whatever the deadline (it can be shared
+/// with a page of the same site on screen).
+pub const MAX_SCRIPT_BUDGET: Duration = Duration::from_millis(2_500);
+/// The page on screen is not captured while touched, nor this long after the last touch.
+pub const QUIET_AFTER_TOUCH: Duration = Duration::from_millis(1_500);
+/// A capture waits for a quiet moment at most this long, then runs anyway.
+pub const MAX_DEFERRAL: Duration = Duration::from_secs(10);
 
 const SCRIPT_TEMPLATE: &str = include_str!("capture.js");
 const READER_TEMPLATE: &str = include_str!("reader.js");
 /// Mozilla Readability 0.6.0 (Apache-2.0), from the npm package `@mozilla/readability`.
 const READABILITY: &str = include_str!("vendor/Readability.js");
 
-/// The script for [`CaptureKind`] with its budgets filled in.
-pub fn script(kind: CaptureKind, max_text_bytes: usize) -> String {
+/// Whether the page a capture reads is the one on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Visibility {
+    Shown,
+    Hidden,
+}
+
+/// The script for [`CaptureKind`] with its budgets filled in. Reader view, which the user asked
+/// for and waits on, reads the whole article; page text for Hister stops after `time_budget`.
+pub fn script(kind: CaptureKind, max_text_bytes: usize, time_budget: Duration) -> String {
     match kind {
-        CaptureKind::PageText => capture_script(max_text_bytes),
+        CaptureKind::PageText => capture_script(max_text_bytes, time_budget),
         CaptureKind::Article => article_script(max_text_bytes),
     }
 }
 
 /// The capture script with its budgets filled in.
-pub fn capture_script(max_text_bytes: usize) -> String {
+pub fn capture_script(max_text_bytes: usize, time_budget: Duration) -> String {
     SCRIPT_TEMPLATE
         .replace("__MAX_TEXT_BYTES__", &max_text_bytes.to_string())
         .replace("__MAX_NODES__", &MAX_NODES.to_string())
+        .replace("__MAX_MILLIS__", &time_budget.as_millis().to_string())
+}
+
+/// How long a capture may run in the page: briefly for the page on screen, which the user may
+/// be about to use; for a hidden page up to its result deadline, less a margin. A deadline that
+/// leaves no time gives zero: the script then reads nothing and reports a truncated capture.
+pub fn time_budget(visibility: Visibility, deadline: Duration) -> Duration {
+    match visibility {
+        Visibility::Shown => VISIBLE_SCRIPT_BUDGET,
+        Visibility::Hidden => deadline
+            .saturating_sub(DEADLINE_MARGIN)
+            .clamp(Duration::ZERO, MAX_SCRIPT_BUDGET),
+    }
+}
+
+/// Whether a capture of the page on screen waits: while a finger is down or right after the
+/// last touch, the user is scrolling or tapping, and a capture would freeze the page under
+/// them. A capture that already waited [`MAX_DEFERRAL`] runs anyway.
+pub fn defer_while_touched(
+    touching: bool,
+    since_last_touch: Option<Duration>,
+    waited: Duration,
+) -> bool {
+    if waited >= MAX_DEFERRAL {
+        return false;
+    }
+    touching || since_last_touch.is_some_and(|since| since < QUIET_AFTER_TOUCH)
+}
+
+/// How long until a deferred capture of the page on screen may run: once the quiet period after
+/// the last touch ends (a finger still down wakes the engine with its own events), and at the
+/// latest when the longest-waiting capture has waited [`MAX_DEFERRAL`]. The engine wakes for it,
+/// so deferral does not depend on an idle tick.
+pub fn next_deferred_attempt(
+    touching: bool,
+    since_last_touch: Option<Duration>,
+    longest_wait: Duration,
+) -> Duration {
+    let forced = MAX_DEFERRAL.saturating_sub(longest_wait);
+    if touching {
+        return forced;
+    }
+    let quiet = since_last_touch.map_or(Duration::ZERO, |since| {
+        QUIET_AFTER_TOUCH.saturating_sub(since)
+    });
+    quiet.min(forced)
+}
+
+/// Fingers on the page on screen, and when the last touch event came.
+///
+/// The pointer ids down, not a count: a count leaks when an up never comes. The long-press
+/// path sends one cancel, for the pointer that started the press, and keeps the rest of the
+/// gesture from the engine; with two fingers down a count stayed above zero, and every later
+/// capture of the page on screen waited the full [`MAX_DEFERRAL`].
+#[derive(Debug, Default)]
+pub struct Touches {
+    down: BTreeSet<i32>,
+    last: Option<Instant>,
+}
+
+impl Touches {
+    pub fn press(&mut self, pointer: i32, at: Instant) {
+        self.down.insert(pointer);
+        self.last = Some(at);
+    }
+
+    pub fn moved(&mut self, at: Instant) {
+        self.last = Some(at);
+    }
+
+    pub fn lift(&mut self, pointer: i32, at: Instant) {
+        self.down.remove(&pointer);
+        self.last = Some(at);
+    }
+
+    /// An Android cancel ends the whole gesture, whichever pointer it names.
+    pub fn cancel(&mut self, at: Instant) {
+        self.down.clear();
+        self.last = Some(at);
+    }
+
+    /// The surface or the view under the fingers went away: their up events will not come.
+    pub fn forget_pointers(&mut self) {
+        self.down.clear();
+    }
+
+    pub fn since_last(&self, now: Instant) -> Option<Duration> {
+        self.last.map(|at| now.saturating_duration_since(at))
+    }
+
+    /// Whether a finger is down. One silent for [`MAX_DEFERRAL`] counts as lifted, so a lost up
+    /// event cannot hold later captures back.
+    pub fn touching(&self, now: Instant) -> bool {
+        !self.down.is_empty()
+            && self
+                .since_last(now)
+                .is_some_and(|since| since < MAX_DEFERRAL)
+    }
 }
 
 /// The reader script: budgets first, then Readability, so its source is never rewritten.
@@ -131,6 +251,7 @@ pub fn interpret_result(
         truncated_natively,
         nodes_visited: number_field(&fields, "nodes"),
         node_budget_exhausted: bool_field(&fields, "nodeBudgetExhausted"),
+        time_budget_exhausted: bool_field(&fields, "timeBudgetExhausted"),
     })
 }
 
@@ -195,6 +316,33 @@ pub fn js_value_kind(value: &JSValue) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_deferred_capture_wakes_the_engine_when_it_may_run() {
+        // Quiet for a second: half a second of the quiet period is left.
+        assert_eq!(
+            next_deferred_attempt(false, Some(Duration::from_secs(1)), Duration::from_secs(1)),
+            QUIET_AFTER_TOUCH - Duration::from_secs(1)
+        );
+        // Quiet long enough, or never touched: now.
+        assert_eq!(
+            next_deferred_attempt(false, Some(QUIET_AFTER_TOUCH), Duration::ZERO),
+            Duration::ZERO
+        );
+        assert_eq!(
+            next_deferred_attempt(false, None, Duration::ZERO),
+            Duration::ZERO
+        );
+        // A finger down: only the forced run, which no capture waits past.
+        assert_eq!(
+            next_deferred_attempt(true, Some(Duration::ZERO), Duration::from_secs(4)),
+            MAX_DEFERRAL - Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_deferred_attempt(true, Some(Duration::ZERO), MAX_DEFERRAL * 2),
+            Duration::ZERO
+        );
+    }
     use super::*;
 
     #[test]
@@ -219,14 +367,100 @@ mod tests {
 
     #[test]
     fn script_has_no_unfilled_placeholders() {
-        let script = capture_script(DEFAULT_MAX_TEXT_BYTES);
+        let script = capture_script(DEFAULT_MAX_TEXT_BYTES, VISIBLE_SCRIPT_BUDGET);
         assert!(!script.contains("__MAX_"));
-        assert!(script.contains("262144"));
+        assert!(script.trim_end().ends_with("})(262144, 50000, 400)"));
+    }
+
+    #[test]
+    fn the_page_on_screen_gets_a_short_budget_and_hidden_pages_their_deadline() {
+        let deadline = Duration::from_secs(3);
+        assert_eq!(
+            time_budget(Visibility::Shown, deadline),
+            VISIBLE_SCRIPT_BUDGET
+        );
+        assert_eq!(
+            time_budget(Visibility::Hidden, deadline),
+            Duration::from_millis(2_500)
+        );
+        // Never more than the cap, nor past the deadline less its margin.
+        assert_eq!(
+            time_budget(Visibility::Hidden, Duration::from_secs(60)),
+            MAX_SCRIPT_BUDGET
+        );
+        assert_eq!(
+            time_budget(Visibility::Hidden, Duration::from_millis(700)),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            time_budget(Visibility::Hidden, Duration::from_millis(100)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn a_zero_budget_is_filled_in_as_zero() {
+        let script = capture_script(DEFAULT_MAX_TEXT_BYTES, Duration::ZERO);
+        assert!(script.trim_end().ends_with("})(262144, 50000, 0)"));
+    }
+
+    #[test]
+    fn a_cancel_ends_the_whole_gesture() {
+        let at = Instant::now();
+        let mut touches = Touches::default();
+        touches.press(0, at);
+        touches.press(1, at);
+        // Lifting one of two fingers leaves the page touched.
+        touches.lift(1, at);
+        assert!(touches.touching(at));
+        touches.press(1, at);
+        // The long-press path cancels only the pointer that started the press.
+        touches.cancel(at);
+        assert!(!touches.touching(at));
+        assert_eq!(touches.since_last(at), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn fingers_whose_page_went_away_are_forgotten() {
+        let at = Instant::now();
+        let mut touches = Touches::default();
+        touches.press(0, at);
+        touches.forget_pointers();
+        assert!(!touches.touching(at));
+    }
+
+    #[test]
+    fn a_finger_silent_for_the_longest_deferral_counts_as_lifted() {
+        let at = Instant::now();
+        let mut touches = Touches::default();
+        touches.press(0, at);
+        assert!(touches.touching(at + Duration::from_secs(1)));
+        assert!(!touches.touching(at + MAX_DEFERRAL));
+        touches.moved(at + MAX_DEFERRAL);
+        assert!(touches.touching(at + MAX_DEFERRAL));
+    }
+
+    #[test]
+    fn a_touched_page_waits_for_a_quiet_moment_but_not_forever() {
+        let none = Duration::ZERO;
+        assert!(defer_while_touched(true, None, none));
+        assert!(defer_while_touched(
+            false,
+            Some(Duration::from_millis(200)),
+            none
+        ));
+        assert!(!defer_while_touched(false, Some(QUIET_AFTER_TOUCH), none));
+        assert!(!defer_while_touched(false, None, none));
+        assert!(!defer_while_touched(true, None, MAX_DEFERRAL));
     }
 
     #[test]
     fn article_script_embeds_readability_inside_its_function() {
-        let script = script(CaptureKind::Article, DEFAULT_MAX_TEXT_BYTES);
+        let script = script(
+            CaptureKind::Article,
+            DEFAULT_MAX_TEXT_BYTES,
+            VISIBLE_SCRIPT_BUDGET,
+        );
         assert!(!script.contains("__MAX_"));
         assert!(!script.contains("__READABILITY__"));
         assert!(script.contains("function Readability(doc, options)"));

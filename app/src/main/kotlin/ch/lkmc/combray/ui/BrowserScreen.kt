@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,9 +34,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,7 +46,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -52,11 +58,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.AppGraph
+import ch.lkmc.combray.ExternalLinks
+import ch.lkmc.combray.ExternalOutcome
 import ch.lkmc.combray.LaunchRequest
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
@@ -71,12 +80,14 @@ import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.launch
 
-private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO }
+private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -93,6 +104,7 @@ fun BrowserScreen(
 ) {
     val browser = graph.browser
     val state by browser.browserState.collectAsStateWithLifecycle()
+    val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -100,6 +112,8 @@ fun BrowserScreen(
     val context = LocalContext.current
     val resources = LocalResources.current
     val tab = state.activeTab
+    val page = tab?.page
+    var scrollEdge by remember(tab?.id, page, state.reader) { mutableStateOf<ScrollEdge?>(null) }
     // Tagged with its address: until the new page's status arrives, the bar keeps the last one.
     val saveStatus by remember(tab?.url) {
         val url = tab?.url
@@ -110,6 +124,8 @@ fun BrowserScreen(
 
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
+    val mediaUnsupported = stringResource(R.string.notice_media_unsupported)
+    val popupBlocked = stringResource(R.string.notice_popup_blocked)
     val undo = stringResource(R.string.action_undo)
     val openedInBackground = stringResource(R.string.notice_opened_in_background)
     val show = stringResource(R.string.action_show)
@@ -133,6 +149,8 @@ fun BrowserScreen(
                     val result = snackbar.showSnackbar(openedInBackground, actionLabel = show, duration = SnackbarDuration.Short)
                     if (result == SnackbarResult.ActionPerformed) browser.selectTab(notice.tabId)
                 }
+                Notice.MediaUnsupported -> snackbar.showSnackbar(mediaUnsupported)
+                Notice.PopupBlocked -> snackbar.showSnackbar(popupBlocked)
             }
         }
     }
@@ -154,10 +172,49 @@ fun BrowserScreen(
         val view = surfaceView ?: return@LaunchedEffect
         when (request) {
             is KeyboardRequest.Show -> view.showKeyboard(request.kind)
-            KeyboardRequest.Hide -> view.hideKeyboard()
+            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind)
+            // While find is open the keyboard may be the find field's: find's selection can blur a
+            // page field, and that must not close the keyboard the user is typing the query with.
+            KeyboardRequest.Hide -> if (state.find == null) view.hideKeyboard()
         }
         browser.keyboardHandled(request)
     }
+
+    // A page link for another app asks first (owner decision, 22 October 2026). Open hands it to
+    // Android, or the link's own fallback page loads in the tab. Taken from the state before the
+    // question, so the engine's next link is a new request. Saved, as the state no longer holds
+    // the link: recreating the activity (rotation, dark mode) must not drop the question.
+    var appLink by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.externalLink) {
+        val link = state.externalLink ?: return@LaunchedEffect
+        appLink = link.url
+        browser.externalLinkHandled(link)
+    }
+    appLink?.let { url ->
+        AppLinkDialog(
+            url = url,
+            onOpen = {
+                appLink = null
+                val noApp = { scope.launch { snackbar.showSnackbar(resources.getString(R.string.no_app_for_link)) } }
+                when (val outcome = ExternalLinks.open(context, url)) {
+                    ExternalOutcome.Opened -> Unit
+                    is ExternalOutcome.Fallback -> {
+                        val page = AddressPolicy.interpret(outcome.url).primary as? AddressDecision.Navigate
+                        val shown = tab?.id
+                        // A fallback that is no web page, or no tab to show it in: say so, as without one.
+                        if (page != null && shown != null) browser.openUrlInTab(shown, page.url) else noApp()
+                    }
+                    ExternalOutcome.NoApp -> noApp()
+                }
+            },
+            onDismiss = { appLink = null },
+        )
+    }
+
+    // Pages follow the app's light or dark theme, the in-app Appearance choice included, like
+    // the chrome around them.
+    val dark = LocalDarkTheme.current
+    LaunchedEffect(dark) { browser.setAppearance(if (dark) Appearance.DARK else Appearance.LIGHT) }
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
     var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
@@ -215,11 +272,19 @@ fun BrowserScreen(
     }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && backInPage != null) { backInPage?.invoke() }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
+    // Registered last, so it runs before going back in the page.
+    BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
 
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
     // The bar is one row or two (BottomBar), so snackbars clear its measured height.
     val density = LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
+    // A shown snackbar covers the page's bottom-left corner, where the scroll button sits, and
+    // takes the taps there: the button moves above it. Measured from both edges, as snackbars
+    // clear the bottom bar's last height, which is not the find bar's.
+    var pageBottom by remember { mutableFloatStateOf(0f) }
+    var snackbarTop by remember { mutableStateOf<Float?>(null) }
+    val scrollButtonPadding = scrollButtonPadding(snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp)
     val openSettings = { sheet = Sheet.SETTINGS }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -228,13 +293,15 @@ fun BrowserScreen(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .onGloballyPositioned { pageBottom = it.boundsInRoot().bottom },
             ) {
                 AndroidView(
                     factory = { viewContext ->
                         EngineSurfaceView(viewContext) { graph.engineRunning() }.also { surfaceView = it }
                     },
                     modifier = Modifier.fillMaxSize(),
+                    update = { view -> view.observeScroll(page) { scrollEdge = it } },
                 )
                 PageOverlay(
                     state = state,
@@ -242,9 +309,23 @@ fun BrowserScreen(
                     onOpenRecent = { openRecent(RecentScope.OPEN) },
                     onReload = browser::reload,
                 )
+                if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed) {
+                    scrollEdge?.let { edge ->
+                        ScrollEdgeButton(
+                            edge = edge,
+                            onClick = {
+                                scrollEdge = null
+                                browser.scrollToEdge(page, edge)
+                            },
+                            modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(scrollButtonPadding),
+                        )
+                    }
+                }
                 state.reader?.let { reader ->
                     ReaderView(
                         state = reader,
+                        textSize = textSize,
+                        scrollButtonPadding = scrollButtonPadding,
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
                             browser.closeReader()
@@ -254,7 +335,16 @@ fun BrowserScreen(
                     )
                 }
             }
-            BottomBar(
+            // Find in page takes the bottom bar's place, above the keyboard like it.
+            state.find?.let { find ->
+                FindBar(
+                    state = find,
+                    onFind = browser::find,
+                    onClose = browser::closeFind,
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
+                )
+            }
+            if (state.find == null) BottomBar(
                 tab = tab,
                 openTabs = state.openTabCount,
                 saveStatus = saveStatus,
@@ -296,7 +386,15 @@ fun BrowserScreen(
         // separate window over this one and shows the snackbars itself while it is open. The
         // bar's height includes the navigation bar, and the keyboard's padding is the column's.
         if (sheet != Sheet.RECENT) {
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = barHeight + SNACKBAR_GAP))
+            SnackbarHost(
+                snackbar,
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .imePadding()
+                    .padding(bottom = barHeight + SNACKBAR_GAP)
+                    // The host itself, without its offset: empty while no snackbar shows.
+                    .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
+            )
         }
     }
 
@@ -356,6 +454,11 @@ fun BrowserScreen(
                 dismiss()
                 if (state.reader != null) browser.closeReader() else browser.openReader()
             },
+            onTextSize = { sheet = Sheet.TEXT_SIZE },
+            onFind = {
+                dismiss()
+                browser.openFind()
+            },
             onDismiss = dismiss,
         )
         Sheet.SETTINGS -> SettingsSheet(
@@ -378,6 +481,16 @@ fun BrowserScreen(
                 // composition and the pending dismissal is cancelled with it.
                 LaunchedEffect(Unit) { dismiss() }
             }
+        }
+        Sheet.TEXT_SIZE -> {
+            TextSizeDialog(
+                size = textSize,
+                onChange = { size ->
+                    graph.settings.setTextSize(size)
+                    browser.applyTextSize()
+                },
+                onDismiss = dismiss,
+            )
         }
     }
 
@@ -552,3 +665,22 @@ internal fun copyAddressToClipboard(context: Context, label: String, url: String
 
 /** Space between a snackbar and the bottom bar under it. */
 private val SNACKBAR_GAP = 8.dp
+
+/**
+ * "Open this link in another app?" over the page. The page wrote the link, so it is shown as is,
+ * scheme first and cut short, and nothing leaves Combray without the user's Open.
+ */
+@Composable
+private fun AppLinkDialog(url: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.app_link_question)) },
+        text = { Text(url.take(APP_LINK_SHOWN_CHARS), maxLines = APP_LINK_SHOWN_LINES, overflow = TextOverflow.Ellipsis) },
+        confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.action_open_app_link)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+/** Enough of a link to tell a phone number, an address or an app apart; the rest is the page's. */
+private const val APP_LINK_SHOWN_CHARS = 200
+private const val APP_LINK_SHOWN_LINES = 3

@@ -9,15 +9,19 @@ import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
 import ch.lkmc.combray.core.policy.HostNames
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.CaptureStatus
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
+import ch.lkmc.combray.engine.FindStatus
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -76,6 +80,8 @@ class BrowserCoordinator(
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
     /** How long a request may wait for its page before the tab stops showing it as loading. */
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
+    /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
+    private val textSize: () -> TextSize = { TextSize.DEFAULT },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -102,6 +108,9 @@ class BrowserCoordinator(
     /** The article request reader view waits for; an older one's late result is ignored. */
     private var readerRequest: Long? = null
 
+    /** Find in page while its bar is open: over one tab, in one view of it. */
+    private var findSession: FindSession? = null
+
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
@@ -111,6 +120,12 @@ class BrowserCoordinator(
 
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
+
+    /** What pages see as `prefers-color-scheme`; the engine gets it as soon as it runs. */
+    private var appearance = Appearance.LIGHT
+
+    /** The page field the keyboard was last requested for, while its page is the one shown. */
+    private var keyboardOwner: KeyboardOwner? = null
 
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
@@ -402,6 +417,13 @@ class BrowserCoordinator(
 
     fun goForward() = withActiveView { engine.goForward(it.nativeTab) }
 
+    /** A late tap must not scroll a different tab, a reloaded document or the page under reader view. */
+    fun scrollToEdge(page: PageRef, edge: ScrollEdge) = submit {
+        val view = view(page.view) ?: return@submit
+        if (view.nativeTab != selectedNative || view.currentDocument != page.document || view.crashed || reader != null) return@submit
+        engine.scrollToEdge(page, edge)
+    }
+
     /** Reloads the page; a crashed renderer is replaced by a new one at the tab's address. */
     fun reload() = submit {
         val tab = activeTab() ?: return@submit
@@ -461,6 +483,11 @@ class BrowserCoordinator(
         if (engineReady) engine.persistProfile()
     }
 
+    /** The text size setting changed: every page, open or opened later, lays out at it. */
+    fun applyTextSize() = submit {
+        if (engineReady) engine.setPageZoom(textSize().zoom)
+    }
+
     /**
      * Process visibility from the lifecycle owner: while backgrounded the shown renderer is
      * throttled too (hidden ones already are). Purely a hint; no logical state changes. Servo
@@ -473,12 +500,21 @@ class BrowserCoordinator(
         selectedNative?.let { engine.setThrottled(it, visibility == AppVisibility.BACKGROUND) }
     }
 
+    /** Pages follow the app's light or dark theme, like the chrome around them. */
+    fun setAppearance(appearance: Appearance) = submit {
+        if (appearance == this.appearance) return@submit
+        this.appearance = appearance
+        if (engineReady) engine.setAppearance(appearance)
+    }
+
     /**
      * Opens reader view for the focused tab: the engine reads the main article of the document
      * shown now, in that document only.
      */
     fun openReader() = submit {
         val tab = activeTab() ?: return@submit
+        // Reader view covers the page find searches.
+        closeFindSession()
         val view = liveByTab[tab.id]
         val document = view?.currentDocument
         val generation = view?.generation
@@ -502,6 +538,57 @@ class BrowserCoordinator(
         publish()
     }
 
+    /** Opens find in page over the focused tab's page; not while reader view covers it. */
+    fun openFind() = submit {
+        if (reader != null) return@submit
+        val tab = activeTab() ?: return@submit
+        val view = liveByTab[tab.id]?.takeIf { !it.crashed && it.currentDocument != null } ?: return@submit
+        val open = findSession
+        if (open != null && open.tabId == tab.id && open.nativeTab == view.nativeTab) return@submit
+        closeFindSession()
+        findSession = FindSession(tab.id, view.nativeTab)
+        publish()
+    }
+
+    /**
+     * Searches the page find was opened on for [query]. A new query starts at its first match (or,
+     * with [FindStep.PREVIOUS], its last); [FindStep.NEXT] and [FindStep.PREVIOUS] step through the
+     * current one, wrapping around. Only the newest request's answer counts, and only while the
+     * document it searched is still shown.
+     */
+    fun find(query: String, step: FindStep) = submit {
+        val session = findSession ?: return@submit
+        val view = liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return@submit
+        val generation = view.generation ?: return@submit
+        val document = view.currentDocument ?: return@submit
+        val text = boundedFindQuery(query)
+        if (text.isBlank()) {
+            // Nothing to look for: the page's find selection goes.
+            session.searched?.let(engine::clearFind)
+            session.reset(text)
+            publish()
+            return@submit
+        }
+
+        val current = (session.outcome as? FindOutcome.Found)?.takeIf { text == session.query }
+        val index = findIndex(step, current)
+        val request = nextRequest++
+        val page = PageRef(ViewRef(view.nativeTab, generation), document)
+        session.pending = PendingFind(request, page.view, document)
+        // A new query shows nothing until the page answers; stepping keeps the last answer meanwhile.
+        if (text != session.query) session.outcome = null
+        session.query = text
+        session.searched = page
+        engine.find(page, request, text, index)
+        publish()
+    }
+
+    /** Closes find in page and removes its selection from the page. */
+    fun closeFind() = submit {
+        closeFindSession()
+        publish()
+    }
+
     /** Answers [control]; ignored if the page withdrew it or its tab closed meanwhile. */
     fun answerPageControl(control: Long, response: ControlResponse, blocking: DialogBlocking = DialogBlocking.KEEP_SHOWING) = submit {
         val view = liveByTab.values.firstOrNull { live -> live.controls.any { it.id == control } } ?: return@submit
@@ -509,6 +596,8 @@ class BrowserCoordinator(
         view.controls.remove(answered)
         // Only where the dialog offered it: a stray request must not silence the page's dialogs.
         if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
+        // Stay cancels the navigation or reload the page asked about: nothing will commit (#92).
+        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) view.awaitingCommit = false
         engine.respondToControl(control, response)
         publish()
     }
@@ -519,13 +608,20 @@ class BrowserCoordinator(
     /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
+    /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
+    fun externalLinkHandled(link: ExternalLink) = state.update { if (it.externalLink == link) it.copy(externalLink = null) else it }
+
     // --- Engine events ----------------------------------------------------------------------------
 
     private fun onEngineEvent(event: EngineEvent) = submit {
         when (event) {
             is EngineEvent.EngineReady -> {
                 engineReady = true
+                // Before any view exists, so the first page lays out at the chosen size.
+                engine.setPageZoom(textSize().zoom)
                 state.update { it.copy(engine = EngineStatus.READY) }
+                // Before reconcile creates views: a dark page must not start light.
+                engine.setAppearance(appearance)
                 reconcile()
             }
             is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { it.generation = event.view.generation }
@@ -539,11 +635,29 @@ class BrowserCoordinator(
                 }
             }
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
+            is EngineEvent.FindResult -> onFindResult(event)
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
-            is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
-                state.update { it.copy(keyboard = KeyboardRequest.Show(event.kind)) }
+            // Said once per document: a page that keeps trying must not keep a notice up.
+            is EngineEvent.PopupBlocked -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                if (it.popupNoticeDocument != it.currentDocument) {
+                    it.popupNoticeDocument = it.currentDocument
+                    state.update { s -> s.copy(notice = Notice.PopupBlocked) }
+                }
+            }
+            // The engine sends these only right after the user's tap; still, only the shown page's.
+            is EngineEvent.ExternalLink -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                val link = ExternalLink(nextRequest++, event.url)
+                state.update { it.copy(externalLink = link) }
+            }
+            is EngineEvent.ImeShown -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let { view ->
+                // Only a field that opens the keyboard owns it: one the next document focuses on
+                // load must not keep the previous document's keyboard through the navigation.
+                if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
+                val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
+                state.update { it.copy(keyboard = request) }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                keyboardOwner = null
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
             is EngineEvent.Crashed -> view(event.view)?.let {
@@ -556,8 +670,15 @@ class BrowserCoordinator(
                 it.dialogCount = 0
                 it.dialogsBlocked = false
             }
+            is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
-            is EngineEvent.ControlHidden -> view(event.view)?.let { live -> live.controls.removeAll { it.id == event.control } }
+            is EngineEvent.ControlHidden -> view(event.view)?.let { live ->
+                val hidden = live.controls.filter { it.id == event.control }
+                live.controls.removeAll(hidden)
+                // The engine answers an unanswered leave-page question Stay (its deadline, or the
+                // tab left the screen), or drops it as the page commits; either way stop waiting.
+                if (hidden.any { it.content is PageControlContent.LeavePage }) live.awaitingCommit = false
+            }
             is EngineEvent.EngineError -> onEngineError(event)
             // Heartbeats, echoes, navigation confirmations and diagnostics cannot change what
             // publish() reads, so they skip its three Room reads on this serialized queue
@@ -603,9 +724,23 @@ class BrowserCoordinator(
         view.controls.addLast(ShownControl(event.control, event.content, offerBlocking = dialog && view.dialogCount > 1))
     }
 
-    private suspend fun onHistory(view: LiveView, event: EngineEvent.HistoryChanged) {
+    /** The engine reports each document once. Only the page on screen gets a notice: for a hidden tab or a replaced page it would name the wrong page. */
+    private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
+        if (view.nativeTab != selectedNative || view.currentDocument != event.document) return
+        state.update { it.copy(notice = Notice.MediaUnsupported) }
+    }
+
+    private suspend fun onHistory(view: LiveView, reported: EngineEvent.HistoryChanged) {
+        // A tab's and a visit's URL are shown, shared, searched and reopened: never store sign-in credentials in them.
+        val event = reported.copy(url = HostNames.withoutCredentials(reported.url))
         view.canGoBack = event.canGoBack
         view.canGoForward = event.canGoForward
+        // Servo hides nothing when a navigation replaces the field's document (a form sent with
+        // Enter). A field of the new document may have asked for the keyboard before its commit.
+        val owner = keyboardOwner
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED && owner?.nativeTab == view.nativeTab && owner.document != event.document) {
+            releaseKeyboard(view.nativeTab)
+        }
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
         val now = clock.now()
 
@@ -630,6 +765,8 @@ class BrowserCoordinator(
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.awaitingCommit = false
                     view.currentDocument = event.document
+                    // Find searched the replaced document, and its selection went with it.
+                    if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
@@ -862,6 +999,35 @@ class BrowserCoordinator(
         reader = article?.let { ReaderState.Ready(pending.tabId, pending.url, it) } ?: ReaderState.Unavailable(pending.tabId)
     }
 
+    /** Shows the page's answer if it is for the newest request and its document is still shown. */
+    private fun onFindResult(event: EngineEvent.FindResult) {
+        val session = findSession ?: return
+        val pending = session.pending?.takeIf { it.request == event.request } ?: return
+        if (event.view != pending.view || event.document != pending.document) return
+        if (view(event.view)?.currentDocument != pending.document) return
+        session.pending = null
+        val index = event.index
+        session.outcome = when (event.status) {
+            FindStatus.FOUND -> when {
+                event.count == 0 -> FindOutcome.NotFound(event.capped)
+                index != null && index in 0 until event.count -> FindOutcome.Found(event.count, index, event.capped)
+                else -> FindOutcome.Failed
+            }
+            FindStatus.FAILED -> FindOutcome.Failed
+            // The document or view changed meanwhile; whatever changed it ends find.
+            FindStatus.STALE_DOCUMENT, FindStatus.TAB_CLOSED -> return
+        }
+    }
+
+    /** Ends find in page; its selection is removed where the view still shows that page. */
+    private fun closeFindSession() {
+        val session = findSession ?: return
+        findSession = null
+        val searched = session.searched ?: return
+        liveByNative[session.nativeTab]?.takeIf { it.tabId == session.tabId && !it.crashed } ?: return
+        engine.clearFind(searched)
+    }
+
     /** Whether [reported], a same-document change, is [awaited]: the same address up to a fragment. */
     private fun isSameDocumentTarget(awaited: String, reported: String): Boolean =
         '#' in awaited && awaited.substringBefore('#') == reported.substringBefore('#')
@@ -1021,15 +1187,29 @@ class BrowserCoordinator(
         view.captureTimer?.cancel()
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
+        releaseKeyboard(view.nativeTab)
         if (selectedNative == view.nativeTab) selectedNative = null
+    }
+
+    /**
+     * Hides the keyboard if a field of [nativeTab]'s page has it: that page is no longer shown
+     * or no longer exists. Servo itself hides it only when the field loses focus.
+     */
+    private fun releaseKeyboard(nativeTab: Long) {
+        if (keyboardOwner?.nativeTab != nativeTab) return
+        keyboardOwner = null
+        state.update { it.copy(keyboard = KeyboardRequest.Hide) }
     }
 
     /** The page closed its own window: the tab closes as if the user had closed it. */
     private suspend fun onClosedByPage(view: LiveView) {
+        // A window that never showed a page (one a page opened for an app link, say) closes
+        // without a "Tab closed" notice: there is nothing the user saw to bring back.
+        val shownAPage = view.currentDocument != null
         forgetView(view)
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN } ?: return
         val wasActive = closeLogically(tab)
-        state.update { it.copy(notice = Notice.TabClosed(tab.id, tab.title, wasActive)) }
+        if (shownAPage) state.update { it.copy(notice = Notice.TabClosed(tab.id, tab.title, wasActive)) }
         reconcile()
     }
 
@@ -1090,6 +1270,7 @@ class BrowserCoordinator(
         if (view == null) {
             // Internal home: no page may stay painted under it.
             selectedNative?.let {
+                releaseKeyboard(it)
                 engine.setThrottled(it, true)
                 engine.showNone()
             }
@@ -1097,7 +1278,10 @@ class BrowserCoordinator(
             return
         }
         if (selectedNative != view.nativeTab) {
-            selectedNative?.let { engine.setThrottled(it, true) }
+            selectedNative?.let {
+                releaseKeyboard(it)
+                engine.setThrottled(it, true)
+            }
             engine.setThrottled(view.nativeTab, visibility == AppVisibility.BACKGROUND)
             engine.selectView(view.nativeTab)
             selectedNative = view.nativeTab
@@ -1158,6 +1342,11 @@ class BrowserCoordinator(
         val tab = activeTab()
         // Reader view belongs to the tab it was opened for: moving to another tab leaves it.
         if (reader != null && reader?.tabId != tab?.id) reader = null
+        // Find belongs to the page it was opened on: another tab, or a released or crashed view, ends it.
+        findSession?.let { session ->
+            val live = liveByTab[session.tabId]
+            if (session.tabId != tab?.id || live == null || live.nativeTab != session.nativeTab || live.crashed) closeFindSession()
+        }
         val view = tab?.let { liveByTab[it.id] }
         val openCount = dao.openTabCount()
         val returnsToOpener = tab?.let { openers[it.id] }?.let { dao.tab(it)?.state == TabState.OPEN } ?: false
@@ -1181,6 +1370,10 @@ class BrowserCoordinator(
                         loadFailed = loadFailed,
                         openedByOtherApp = active.id == otherAppTab,
                         returnsToOpener = returnsToOpener,
+                        page = view?.takeIf { !it.crashed }?.let { live ->
+                            val generation = live.generation ?: return@let null
+                            live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
+                        },
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->
@@ -1190,6 +1383,7 @@ class BrowserCoordinator(
                 reader = reader,
                 // Every publish reads the stored session, so the first one ends restoring.
                 session = SessionState.RESTORED,
+                find = findSession?.state(),
             )
         }
     }
@@ -1231,12 +1425,42 @@ class BrowserCoordinator(
         var dialogDocument: Long? = null
         var dialogCount = 0
         var dialogsBlocked = false
+
+        /** The document a blocked window was last reported for. */
+        var popupNoticeDocument: Long? = null
     }
 
     private class ShownControl(val id: Long, val content: PageControlContent, val offerBlocking: Boolean)
 
     /** A reused visit's title and failure before a same-URL reload's title reports changed it. */
     private data class ReloadBaseline(val title: String?, val failed: Boolean)
+
+    /** Find in page over [tabId], in its view [nativeTab]; another view of the tab ends it. */
+    private class FindSession(val tabId: String, val nativeTab: Long) {
+        var query = ""
+        var outcome: FindOutcome? = null
+
+        /** The newest request; an older one's answer is ignored. */
+        var pending: PendingFind? = null
+
+        /** The document find last searched: it may hold find's selection, so closing clears it. */
+        var searched: PageRef? = null
+
+        fun reset(query: String) {
+            this.query = query
+            outcome = null
+            pending = null
+            searched = null
+        }
+
+        fun state() = FindState(query, outcome)
+    }
+
+    /** A find request and what its answer must still match. */
+    private data class PendingFind(val request: Long, val view: ViewRef, val document: Long)
+
+    /** A page field with the keyboard: its view and its document (its frame's, in a frame). */
+    private class KeyboardOwner(val nativeTab: Long, val document: Long)
 
     /** A reader-view request and what its result must still match. */
     private data class PendingArticle(val tabId: String, val view: ViewRef, val document: Long, val url: String)

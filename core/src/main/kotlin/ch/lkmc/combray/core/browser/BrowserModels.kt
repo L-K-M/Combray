@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.browser
 
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.PageRef
 
 /** Wall-clock time in UTC milliseconds; injectable for retention tests. */
 fun interface Clock {
@@ -41,6 +42,9 @@ data class ActiveTab(
     val openedByOtherApp: Boolean = false,
     /** A page in another tab opened this one, and Back on its first page returns there ([BrowserCoordinator.returnToOpener]). */
     val returnsToOpener: Boolean = false,
+
+    /** Ephemeral identity for actions on the document shown now; never persisted. */
+    val page: PageRef? = null,
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView
@@ -61,6 +65,12 @@ sealed interface Notice {
 
     /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
     data class OpenedInBackground(val tabId: String) : Notice
+
+    /** The shown page has audio or video, which Combray cannot play; its media was not downloaded. */
+    data object MediaUnsupported : Notice
+
+    /** The shown page asked for a window without the user's tap, and it was not opened. */
+    data object PopupBlocked : Notice
 }
 
 /** Whether Undo of a tab close moves focus to the reopened tab. */
@@ -74,6 +84,12 @@ enum class ReopenFocus {
 sealed interface KeyboardRequest {
     /** A page field took focus; [kind] is its type ("text", "password", "email", ...). */
     data class Show(val kind: String) : KeyboardRequest
+
+    /**
+     * A page field took focus before the user used the page (a field focused on load): set the
+     * keyboard up for [kind] without opening it. A tap on the field brings a [Show].
+     */
+    data class Prepare(val kind: String) : KeyboardRequest
 
     data object Hide : KeyboardRequest
 }
@@ -121,6 +137,12 @@ enum class SessionState {
     RESTORED,
 }
 
+/**
+ * A link the user tapped on the shown page that another app opens (mail, phone, maps, app
+ * links). [id] tells two taps on the same address apart.
+ */
+data class ExternalLink(val id: Long, val url: String)
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
     val session: SessionState = SessionState.RESTORING,
@@ -129,10 +151,14 @@ data class BrowserState(
     val openTabCount: Int = 0,
     /** The page focused (or left) an editable element: show or hide the keyboard. */
     val keyboard: KeyboardRequest? = null,
+    /** A link for another app, until the UI hands it to Android. */
+    val externalLink: ExternalLink? = null,
     /** The focused page's oldest unanswered control. */
     val pageControl: PageControl? = null,
     /** Reader view over the focused tab, while it is open. */
     val reader: ReaderState? = null,
+    /** Find in page over the focused tab's page, while the find bar is open. */
+    val find: FindState? = null,
     val notice: Notice? = null,
 )
 

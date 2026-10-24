@@ -22,8 +22,8 @@ use log::{LevelFilter, error, info};
 
 use crate::capture::CaptureKind;
 use crate::commands::{
-    ACK_TIMEOUT, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
-    Throttling, TouchPhase,
+    ACK_TIMEOUT, Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck,
+    SURFACE_EPOCH, ScrollEdge, Throttling, TouchPhase,
 };
 use crate::engine::{self, EngineConfig, EventSink};
 use crate::events::EngineEvent;
@@ -325,6 +325,34 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_reload<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_scrollToEdge<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    document: jlong,
+    edge: jint,
+) {
+    // Codes shared with engine/PageScroll.kt.
+    const TOP: jint = 0;
+    const BOTTOM: jint = 1;
+    let edge = match edge {
+        TOP => ScrollEdge::Top,
+        BOTTOM => ScrollEdge::Bottom,
+        _ => return,
+    };
+    let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+    else {
+        return;
+    };
+    send(Command::ScrollToEdge {
+        view: crate::events::ViewKey { tab, generation },
+        document,
+        edge,
+    });
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_selectNone<'local>(
     _env: EnvUnowned<'local>,
     _class: JClass<'local>,
@@ -341,6 +369,21 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_persistProfile<'local
     send(Command::PersistProfile);
 }
 
+/// Queued; applies to every view now and to views created later.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setDarkAppearance<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    dark: jboolean,
+) {
+    let appearance = if dark {
+        Appearance::Dark
+    } else {
+        Appearance::Light
+    };
+    send(Command::SetAppearance { appearance });
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setThrottled<'local>(
     _env: EnvUnowned<'local>,
@@ -354,6 +397,17 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setThrottled<'local>(
         Throttling::Normal
     };
     send(Command::SetThrottling { tab, throttling });
+}
+
+/// Page zoom of every view, now and for views created later (1.0 is 100%). Values that are not a
+/// zoom factor are refused with an `error` event; the engine clamps the rest to Servo's 10%–1000%.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setPageZoom<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    zoom: jfloat,
+) {
+    send(Command::SetPageZoom { zoom });
 }
 
 #[unsafe(no_mangle)]
@@ -418,6 +472,15 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommit<'local>(
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// The user hid the keyboard; the selected tab's field gives up focus so a tap reopens it.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeDismissed<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) {
+    send(Command::ImeDismissed);
 }
 
 #[unsafe(no_mangle)]
@@ -497,6 +560,55 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_captureArticle<'local
         timeout: Duration::from_millis(timeout_ms.max(0) as u64),
         local_check: LocalDocumentCheck::Enabled,
     }));
+}
+
+/// Find in page in `document` of the view (`tab`, `generation`), only while it is still shown;
+/// the engine reports `find_result` for `request`.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_find<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    document: jlong,
+    request: jlong,
+    query: JString<'local>,
+    index: jint,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let query = java_string(env, query)?;
+        let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+        else {
+            return Ok(());
+        };
+        send(Command::Find {
+            view: crate::events::ViewKey { tab, generation },
+            document,
+            request,
+            query,
+            index,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_clearFind<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    document: jlong,
+) {
+    let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+    else {
+        return;
+    };
+    send(Command::FindClear {
+        view: crate::events::ViewKey { tab, generation },
+        document,
+    });
 }
 
 #[unsafe(no_mangle)]

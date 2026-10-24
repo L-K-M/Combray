@@ -17,6 +17,12 @@ import kotlin.math.abs
 
 enum class Orientation { PORTRAIT, LANDSCAPE }
 
+/** Who follows a fixture's link: the user's tap or the page's script. */
+enum class LinkTrigger { TAP, SCRIPT }
+
+/** Where a fixture's link opens: in its own page or in a new window (`target=_blank`). */
+enum class LinkTarget { SAME_WINDOW, NEW_WINDOW }
+
 /** Synthetic pages and fake services from testing/fixtures/server.py, through `adb reverse`. */
 object Fixtures {
     /** Pages (through `adb reverse`). */
@@ -48,6 +54,24 @@ object Fixtures {
 
     const val ONCE_TITLE = "ONCE"
 
+    /** Titled `SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth>` as the page reads them. */
+    const val SCREEN = "$BASE/screen.html"
+
+    /**
+     * A page-filling [Device.OCHRE] link to another app's link or a file ([to]: market, intent,
+     * badfallback or file), followed on a tap or, with [LinkTrigger.SCRIPT], by the page's own
+     * script, into [target]. Titled [EXTERNAL_STILL_HERE] 3 s later if the page is still shown.
+     */
+    fun external(to: String, trigger: LinkTrigger = LinkTrigger.TAP, target: LinkTarget = LinkTarget.SAME_WINDOW) =
+        "$BASE/external.html?to=$to" +
+            (if (trigger == LinkTrigger.SCRIPT) "&auto=1" else "") +
+            (if (target == LinkTarget.NEW_WINDOW) "&blank=1" else "")
+
+    const val EXTERNAL_STILL_HERE = "EXTERNAL:still-here"
+
+    /** [Device.GREEN] in a light appearance, [Device.BLUE] when the page is told the theme is dark. */
+    const val SCHEME = "$BASE/scheme.html"
+
     /** Kimi's :has() DOM queries; stylesheet support stays disabled. */
     const val HAS_SELECTOR = "$BASE/has-selector.html"
 
@@ -56,6 +80,15 @@ object Fixtures {
 
     /** A page the server answers only after several seconds. */
     const val SLOW = "$BASE/slow.html"
+
+    /** A `<video>` and an `<audio>` element; titled `MEDIA:errors:2` once both failed. */
+    const val MEDIA = "$BASE/media.html"
+
+    /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
+    const val ZOOM = "$BASE/zoom.html"
+
+    /** "combraneedle" three times far apart; titled `FIND:<scrollY>:<selected text>`. */
+    const val FIND = "$BASE/find.html"
 
     /** The title the fixture gives a solid page; only the engine reports it, once loaded. */
     fun title(color: Int) = "SOLID-%06x".format(color and 0xFFFFFF)
@@ -87,6 +120,7 @@ class Device(private val frame: () -> Unit = {}) {
     val app: CombrayApplication = ApplicationProvider.getApplicationContext()
     val browser get() = app.graph.browser
     val integrations get() = app.graph.integrations
+    val settings get() = app.graph.settings
 
     fun awaitState(timeoutMs: Long = LOAD_TIMEOUT_MS, predicate: (BrowserState) -> Boolean): BrowserState =
         runBlocking { withTimeout(timeoutMs) { browser.browserState.first(predicate) } }

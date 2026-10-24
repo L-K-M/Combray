@@ -9,6 +9,7 @@ use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
 use crate::capture::CaptureKind;
+use crate::events::ViewKey;
 use crate::native_window::NativeWindow;
 
 /// Acknowledgement channel for requests the caller must wait for.
@@ -32,6 +33,33 @@ pub enum KeyAction {
 pub enum Throttling {
     Normal,
     Throttled,
+}
+
+#[derive(Clone, Copy)]
+pub enum ScrollEdge {
+    Top,
+    Bottom,
+}
+
+impl ScrollEdge {
+    pub fn script(self) -> &'static str {
+        // The root scroller, not an iframe or nested panel under the last touch point.
+        match self {
+            Self::Top => {
+                "(()=>{const s=document.scrollingElement;if(s)s.scrollTo({top:0,left:s.scrollLeft,behavior:'instant'});})()"
+            },
+            Self::Bottom => {
+                "(()=>{const s=document.scrollingElement;if(s)s.scrollTo({top:s.scrollHeight,left:s.scrollLeft,behavior:'instant'});})()"
+            },
+        }
+    }
+}
+
+/// The system's light or dark theme, which pages see as `prefers-color-scheme`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appearance {
+    Light,
+    Dark,
 }
 
 /// Whether the engine may refuse a capture locally when it already knows the expected
@@ -103,13 +131,26 @@ pub enum Command {
     Reload {
         tab: i64,
     },
+    ScrollToEdge {
+        view: ViewKey,
+        document: u64,
+        edge: ScrollEdge,
+    },
     /// Show no view: the application covers the page area with its own home screen.
     SelectNone,
     /// Write cookies and other profile state now; Android can kill the process at any time.
     PersistProfile,
+    /// For every view now and every view created later.
+    SetAppearance {
+        appearance: Appearance,
+    },
     SetThrottling {
         tab: i64,
         throttling: Throttling,
+    },
+    /// Page zoom of every view, now and for views created later (1.0 is 100%).
+    SetPageZoom {
+        zoom: f32,
     },
     Touch {
         phase: TouchPhase,
@@ -124,6 +165,8 @@ pub enum Command {
     ImeCommit {
         text: String,
     },
+    /// The user hid the keyboard while a page field had it.
+    ImeDismissed,
     /// Long-press at a surface point on the active view.
     ContextClick {
         x: f32,
@@ -135,6 +178,21 @@ pub enum Command {
         response: String,
     },
     Capture(CaptureRequest),
+    /// Find in page: search `document`, which must still be the view's current one, for `query`
+    /// and select match `index` (wrapping around; negative counts from the end). Outcome:
+    /// `find_result`.
+    Find {
+        view: ViewKey,
+        document: u64,
+        request: i64,
+        query: String,
+        index: i32,
+    },
+    /// Remove the selection find made in `document`, if the view still shows it. No outcome event.
+    FindClear {
+        view: ViewKey,
+        document: u64,
+    },
     /// Test support: run `script` in the tab's current document without a document guard.
     Evaluate {
         tab: i64,

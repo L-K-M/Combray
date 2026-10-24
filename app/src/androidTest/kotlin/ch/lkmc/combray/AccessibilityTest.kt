@@ -32,15 +32,22 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.FindOutcome
+import ch.lkmc.combray.core.browser.FindState
 import ch.lkmc.combray.core.browser.PageControl
+import ch.lkmc.combray.core.browser.TextSize
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
+import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
+import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
+import ch.lkmc.combray.ui.TextSizeDialog
+import ch.lkmc.combray.ui.ScrollEdgeButton
 import kotlinx.coroutines.MainScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -184,7 +191,7 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, readerOpen = false, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {})
             }
         }
 
@@ -197,6 +204,44 @@ class AccessibilityTest {
     }
 
     @Test
+    fun theTextSizeDialogIsAccessible() {
+        // A middle step, so smaller, larger and reset are all enabled.
+        show(LARGE_FONT) { TextSizeDialog(TextSize.PERCENT_110, {}, {}) }
+
+        assertTargetsAreAccessible()
+        for (label in listOf("Smaller text", "Larger text")) {
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        }
+        compose.onNodeWithText("110%").assertIsDisplayed()
+    }
+
+    @Test
+    fun scrollButtonsHaveLabeledUncrowdedTouchTargets() {
+        show(LARGE_FONT) {
+            Column {
+                ScrollEdgeButton(ScrollEdge.TOP, {})
+                ScrollEdgeButton(ScrollEdge.BOTTOM, {})
+            }
+        }
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Scroll to top").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Scroll to bottom").assertIsDisplayed()
+    }
+
+    @Test
+    fun theFindBarIsAccessible() {
+        show(LARGE_FONT) {
+            FindBar(FindState("rate limit", FindOutcome.Found(999, 2, capped = true)), { _, _ -> }, {}, Modifier.width(NARROW_WIDTH))
+        }
+
+        assertTargetsAreAccessible()
+        for (label in listOf("Previous match", "Next match", "Close find in page")) {
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        }
+        compose.onNodeWithText("3 of 999+").assertIsDisplayed()
+    }
+
+    @Test
     fun aRepeatedConfirmIsAccessible() = assertControlIsAccessible(PageControlContent.Confirm("Leave this page?"), offerBlocking = true)
 
     @Test
@@ -204,6 +249,9 @@ class AccessibilityTest {
 
     @Test
     fun aSignInIsAccessible() = assertControlIsAccessible(PageControlContent.SignIn("http://intranet.test", proxy = false))
+
+    @Test
+    fun aLeavePageQuestionIsAccessible() = assertControlIsAccessible(PageControlContent.LeavePage)
 
     @Test
     fun aSelectIsAccessible() = assertControlIsAccessible(

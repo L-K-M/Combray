@@ -48,6 +48,21 @@ enum class CaptureStatus {
     UNRECOGNIZED,
 }
 
+/** How a find request ended (native/src/events.rs). */
+enum class FindStatus {
+    /** The document was searched and is still the tab's current one. */
+    FOUND,
+
+    /** Another document became current before the answer arrived. */
+    STALE_DOCUMENT,
+
+    /** The view closed before the answer arrived. */
+    TAB_CLOSED,
+
+    /** No such tab, no document yet, or the page's script failed or answered something else. */
+    FAILED,
+}
+
 data class CapturedContent(
     val url: String,
     val title: String,
@@ -77,6 +92,12 @@ sealed interface EngineEvent {
     data class NavigationRequested(val view: ViewRef, val request: Long, val url: String) : EngineEvent
 
     data class PageNavigationRequested(val view: ViewRef, val url: String) : EngineEvent
+
+    /** The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed. */
+    data class ExternalLink(val view: ViewRef, val url: String) : EngineEvent
+
+    /** The page asked for a window without the user's tap; the engine did not open it. */
+    data class PopupBlocked(val view: ViewRef) : EngineEvent
 
     /** [index] and [length] describe the view's session history after the change. */
     data class HistoryChanged(
@@ -124,14 +145,43 @@ sealed interface EngineEvent {
         val error: String?,
     ) : EngineEvent
 
+    /**
+     * The answer to [EnginePort.find] [request], from [document] (null if it never ran). With
+     * [FindStatus.FOUND]: [count] matches (at most 999; a lower bound when [capped]) and the
+     * selected match [index], null when nothing matched.
+     */
+    data class FindResult(
+        val view: ViewRef,
+        val document: Long?,
+        val request: Long,
+        val status: FindStatus,
+        val count: Int,
+        val index: Int?,
+        val capped: Boolean,
+    ) : EngineEvent
+
     data class Painted(val view: ViewRef, val frames: Long) : EngineEvent
 
-    /** A page field wants the keyboard; [kind] is "text", "password", "email", "url", "number", "tel" or "search". */
-    data class ImeShown(val view: ViewRef, val multiline: Boolean, val kind: String) : EngineEvent
+    /**
+     * A page field has focus; [kind] is "text", "password", "email", "url", "number", "tel" or
+     * "search". [document] is the field's document (its frame's, for a field in a frame). Before
+     * the user has used the page, Servo asks for no keyboard ([showKeyboard] false): a field the
+     * page focused on load must not cover it; a tap on the field opens the keyboard.
+     */
+    data class ImeShown(
+        val view: ViewRef,
+        val document: Long,
+        val multiline: Boolean,
+        val kind: String,
+        val showKeyboard: Boolean,
+    ) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
 
     data class Crashed(val view: ViewRef, val reason: String) : EngineEvent
+
+    /** The engine cancelled [document]'s audio, video or text-track loads (it cannot play media); once per document. */
+    data class MediaBlocked(val view: ViewRef, val document: Long) : EngineEvent
 
     /** A page control waits for [EnginePort.respondToControl] with [control]. */
     data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
@@ -173,6 +223,8 @@ sealed interface EngineEvent {
                 "tab_opened" -> TabOpened(event.view(), ViewRef(event.long("opener_tab"), event.long("opener_generation")))
                 "navigation_requested" -> NavigationRequested(event.view(), event.long("request"), event.string("url"))
                 "page_navigation_requested" -> PageNavigationRequested(event.view(), event.string("url"))
+                "external_link" -> ExternalLink(event.view(), event.string("url"))
+                "popup_blocked" -> PopupBlocked(event.view())
                 "document_committed" -> event.history(HistoryKind.DOCUMENT_COMMITTED)
                 "same_document_navigation" -> event.history(HistoryKind.SAME_DOCUMENT)
                 "history_updated" -> event.history(HistoryKind.LIST_UPDATED)
@@ -197,10 +249,26 @@ sealed interface EngineEvent {
                     event["value"]?.takeUnless { it is JsonNull },
                     event.optionalString("error"),
                 )
+                "find_result" -> FindResult(
+                    event.view(),
+                    event.optionalLong("document"),
+                    event.long("request"),
+                    findStatus(event.string("status")),
+                    event.int("count"),
+                    (event["index"] as? JsonPrimitive)?.intOrNull,
+                    event.boolean("capped"),
+                )
                 "painted" -> Painted(event.view(), event.long("frames"))
-                "ime_shown" -> ImeShown(event.view(), event.boolean("multiline"), event.optionalString("kind") ?: "text")
+                "ime_shown" -> ImeShown(
+                    event.view(),
+                    event.long("document"),
+                    event.boolean("multiline"),
+                    event.optionalString("kind") ?: "text",
+                    event.boolean("show_keyboard"),
+                )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
+                "media_blocked" -> MediaBlocked(event.view(), event.long("document"))
                 "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
                 "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))
@@ -226,6 +294,10 @@ sealed interface EngineEvent {
 
         private fun captureStatus(name: String) =
             CaptureStatus.entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: CaptureStatus.UNRECOGNIZED
+
+        /** An unknown status is a failure: its result must not be shown as matches. */
+        private fun findStatus(name: String) =
+            FindStatus.entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: FindStatus.FAILED
 
         private fun JsonObject.history(kind: HistoryKind) = HistoryChanged(
             view(),
@@ -275,6 +347,7 @@ sealed interface EngineEvent {
             )
             "link_menu" -> PageControlContent.LinkMenu(optionalString("link"), optionalString("image"))
             "sign_in" -> PageControlContent.SignIn(string("origin"), boolean("proxy"))
+            "leave_page" -> PageControlContent.LeavePage
             else -> throw IllegalArgumentException("unknown control kind $kind")
         }
 

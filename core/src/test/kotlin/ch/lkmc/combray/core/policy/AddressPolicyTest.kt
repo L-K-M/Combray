@@ -256,6 +256,25 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun credentialsAreRemovedFromWebAddressesAndNothingElseChanges() {
+        assertEquals("http://localhost:8766/auth.html", HostNames.withoutCredentials("http://ada:lovelace@localhost:8766/auth.html"))
+        assertEquals("https://example.org/", HostNames.withoutCredentials("https://ada@example.org/"))
+        assertEquals("http://[::1]:8080/x", HostNames.withoutCredentials("http://ada:lovelace@[::1]:8080/x"))
+        assertEquals("HTTPS://example.org/a", HostNames.withoutCredentials("HTTPS://a%40b:p%3A%40ss@example.org/a"))
+        assertEquals("https://example.org/@ada?to=ada@example.org#x@y", HostNames.withoutCredentials("https://ada:pw@example.org/@ada?to=ada@example.org#x@y"))
+        for (unchanged in listOf(
+            "https://example.org/@ada?to=ada@example.org#x@y",
+            "http://[2001:db8::1]:8080/",
+            "mailto:ada@example.org",
+            "http:ada@example.org",
+            "about:blank",
+            "",
+        )) {
+            assertEquals(unchanged, HostNames.withoutCredentials(unchanged))
+        }
+    }
+
+    @Test
     fun hostMatchingIsByLabelNotBySuffixString() {
         assertTrue(HostNames.matches("a.example.com", "example.com", includeSubdomains = true))
         assertFalse(HostNames.matches("badexample.com", "example.com", includeSubdomains = true))

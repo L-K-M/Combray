@@ -9,12 +9,15 @@ import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
+import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
+import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +54,7 @@ class BrowserCoordinatorTest {
     private var now = START
     private var ids = 0
     private var unusedTabs = UnusedTabs.KEEP
+    private var textSize = TextSize.DEFAULT
 
     @Before
     fun setUp() {
@@ -69,6 +73,7 @@ class BrowserCoordinatorTest {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
+            textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
         ).also { it.start() }
     }
@@ -131,6 +136,106 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ImeHidden(engine.view(1)))
         idle()
         assertTrue(reads.get() > 0)
+    }
+
+    @Test
+    fun aLinkForAnotherAppFromTheShownPageIsHandedOnOnce() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+        val link = state().externalLink!!
+        assertEquals("mailto:ada@example.org", link.url)
+        assertEquals("https://a.test/", state().activeTab?.url)
+
+        browser.externalLinkHandled(link)
+        assertNull(state().externalLink)
+
+        // The same address again is a new request, not the one already handled.
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+        assertEquals(link.url, state().externalLink?.url)
+        assertNotEquals(link, state().externalLink)
+    }
+
+    @Test
+    fun aWindowOpenedForAnAppLinkClosesAndItsOpenerTakesTheLink() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val opener = state().activeTab!!.id
+
+        // What the engine sends for <a target=_blank href=mailto:...>: the window, its close,
+        // then the link for the opener.
+        engine.openWindow(opener = 1, tab = PAGE_TAB)
+        idle()
+        engine.emit(EngineEvent.TabClosed(engine.view(PAGE_TAB)))
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "mailto:ada@example.org"))
+        idle()
+
+        assertEquals(1, state().openTabCount)
+        assertEquals(opener, state().activeTab?.id)
+        assertEquals(1L, engine.selected.last())
+        assertEquals("mailto:ada@example.org", state().externalLink?.url)
+        // The window never showed a page: nothing to announce or undo.
+        assertNull(state().notice)
+    }
+
+    @Test
+    fun aBlockedWindowIsReportedOncePerDocumentOfTheShownPage() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1)))
+        idle()
+        assertEquals(Notice.PopupBlocked, state().notice)
+        browser.noticeShown(Notice.PopupBlocked)
+
+        // The same page trying again says nothing more; its next document may say it once.
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1)))
+        idle()
+        assertNull(state().notice)
+        commit(1, 11, "https://a.test/next")
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1)))
+        idle()
+        assertEquals(Notice.PopupBlocked, state().notice)
+    }
+
+    @Test
+    fun aHiddenTabCannotHandALinkToAnotherApp() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB)
+        idle()
+
+        engine.emit(EngineEvent.ExternalLink(engine.view(1), "tel:+41000000000"))
+        idle()
+        assertNull(state().externalLink)
+    }
+
+    @Test
+    fun pagesGetTheAppearanceBeforeTheFirstViewAndOnEveryChange() {
+        browser.setAppearance(Appearance.DARK)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertTrue(engine.appearances.isEmpty())
+
+        // Sent once the engine runs, before the restored tab gets its view.
+        ready()
+        assertEquals(listOf(Appearance.DARK to 0), engine.appearances)
+        assertEquals(1, engine.created.size)
+
+        browser.setAppearance(Appearance.DARK)
+        browser.setAppearance(Appearance.LIGHT)
+        idle()
+        assertEquals(listOf(Appearance.DARK to 0, Appearance.LIGHT to 1), engine.appearances)
     }
 
     @Test
@@ -307,6 +412,65 @@ class BrowserCoordinatorTest {
 
         browser.setAppVisibility(AppVisibility.FOREGROUND); idle()
         assertEquals(1L to false, engine.throttling.last())
+    }
+
+    @Test
+    fun edgeJumpsKeepTheirOriginalDocumentAndView() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        assertNull(state().activeTab!!.page)
+        commit(1, 10, "https://a.test/")
+        val page = state().activeTab!!.page!!
+        browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        browser.scrollToEdge(page, ScrollEdge.TOP)
+        idle()
+        assertEquals(listOf(page to ScrollEdge.BOTTOM, page to ScrollEdge.TOP), engine.scrolled)
+
+        // Same address, different document: a button from before the reload is stale.
+        commit(1, 11, "https://a.test/")
+        browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        val replacement = state().activeTab!!.page!!
+        browser.scrollToEdge(replacement.copy(view = replacement.view.copy(generation = -1)), ScrollEdge.BOTTOM)
+        idle()
+        assertEquals(2, engine.scrolled.size)
+    }
+
+    @Test
+    fun edgeJumpsCannotReachHiddenClosedOrCrashedPages() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val firstTab = state().activeTab!!.id
+        val first = state().activeTab!!.page!!
+        browser.openUrl("https://a.test/", Placement.NEW_TAB)
+        idle()
+        commit(2, 20, "https://a.test/")
+        val secondTab = state().activeTab!!.id
+        val second = state().activeTab!!.page!!
+        browser.scrollToEdge(first, ScrollEdge.BOTTOM)
+        browser.closeTab(firstTab)
+        browser.scrollToEdge(first, ScrollEdge.TOP)
+        engine.emit(EngineEvent.Crashed(engine.view(2), "fixture"))
+        browser.scrollToEdge(second, ScrollEdge.BOTTOM)
+        idle()
+        assertTrue(engine.scrolled.isEmpty())
+        assertEquals(secondTab, state().activeTab!!.id)
+        assertNull(state().activeTab!!.page)
+    }
+
+    @Test
+    fun readerViewPreventsJumpsOfThePageUnderIt() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        val page = state().activeTab!!.page!!
+        browser.openReader()
+        browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        idle()
+        assertTrue(engine.scrolled.isEmpty())
     }
 
     @Test
@@ -983,6 +1147,24 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun theTextSizeReachesTheEngineBeforeTheFirstViewAndOnEveryChange() {
+        textSize = TextSize.PERCENT_125
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        browser.applyTextSize(); idle()
+        // Nothing to zoom before the engine runs; readiness applies the setting.
+        assertTrue(engine.pageZooms.isEmpty())
+
+        ready()
+        // Before the first view, so its first page lays out at the chosen size.
+        assertEquals(listOf(1.25f to 0), engine.pageZooms)
+        assertEquals(1, engine.created.size)
+
+        textSize = TextSize.PERCENT_80
+        browser.applyTextSize(); idle()
+        assertEquals(listOf(1.25f to 0, 0.8f to 1), engine.pageZooms)
+    }
+
+    @Test
     fun unusedTabsCloseOnlyWhenChosenAndNeverTheFocusedOne() {
         ready()
         browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()
@@ -1534,6 +1716,34 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun mediaBlockedOnTheShownPageGivesANotice() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.MediaBlocked(engine.view(1), 10)); idle()
+        assertEquals(Notice.MediaUnsupported, state().notice)
+    }
+
+    @Test
+    fun mediaBlockedInAHiddenTabOrAReplacedPageGivesNoNotice() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        // The first tab is hidden behind the second.
+        engine.emit(EngineEvent.MediaBlocked(engine.view(1), 10)); idle()
+        assertNull(state().notice)
+
+        // The report arrives after the shown tab moved on to another page.
+        commit(2, 21, "https://c.test/", index = 1, length = 2)
+        engine.emit(EngineEvent.MediaBlocked(engine.view(2), 20)); idle()
+        assertNull(state().notice)
+    }
+
+    @Test
     fun aPageClosingItsOwnTabClosesItLikeAUserClose() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
@@ -1668,7 +1878,7 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://a.test/")
 
-        engine.emit(EngineEvent.ImeShown(engine.view(1), multiline = false, kind = "password")); idle()
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         assertEquals(KeyboardRequest.Show("password"), state().keyboard)
         browser.keyboardHandled(state().keyboard!!)
         assertNull(state().keyboard)
@@ -1685,9 +1895,87 @@ class BrowserCoordinatorTest {
         // Focus moves between fields: hide, then show for the next one, before the UI is done.
         engine.emit(EngineEvent.ImeHidden(engine.view(1))); idle()
         val handling = state().keyboard!!
-        engine.emit(EngineEvent.ImeShown(engine.view(1), multiline = false, kind = "password")); idle()
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         browser.keyboardHandled(handling)
         assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+    }
+
+    /** Opens a page in tab 1 and gives one of its fields the keyboard; the UI has shown it. */
+    private fun keyboardOnFirstPage() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = true)); idle()
+        browser.keyboardHandled(state().keyboard!!)
+    }
+
+    @Test
+    fun aFieldFocusedBeforeThePageIsUsedGetsTheKeyboardSetUpButNotOpened() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false)); idle()
+        assertEquals(KeyboardRequest.Prepare("search"), state().keyboard)
+    }
+
+    @Test
+    fun aHiddenTabsFieldDoesNotTakeTheKeyboard() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = true)); idle()
+        assertNull(state().keyboard)
+    }
+
+    @Test
+    fun aFieldOfTheNextDocumentKeepsTheKeyboardItAskedForBeforeItsCommit() {
+        keyboardOnFirstPage()
+        // Servo can report the new document's focused field before the document's commit.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "text", showKeyboard = true)); idle()
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Show("text"), state().keyboard)
+    }
+
+    @Test
+    fun aFieldTheNextDocumentFocusesOnLoadDoesNotKeepTheOldKeyboard() {
+        keyboardOnFirstPage()
+        // A results page refocuses its search field on load, before its commit and without a tap.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "search", showKeyboard = false)); idle()
+        commit(1, 11, "https://a.test/results", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWhenANavigationReplacesTheFieldsDocument() {
+        keyboardOnFirstPage()
+        // A form sent with Enter: Servo reports no hidden field, only the next document.
+        commit(1, 11, "https://a.test/results", index = 1, length = 2)
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWhenAnotherTabIsShown() {
+        keyboardOnFirstPage()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWhenTheInternalHomeIsShown() {
+        keyboardOnFirstPage()
+        browser.newTab(); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun theKeyboardClosesWithItsTab() {
+        keyboardOnFirstPage()
+        browser.closeTab(state().activeTab!!.id); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
     }
 
     @Test
@@ -1843,6 +2131,91 @@ class BrowserCoordinatorTest {
         assertEquals(2L, state().pageControl?.id)
         assertFalse(state().pageControl!!.offerBlocking)
         assertEquals(1L to ControlResponse.Credentials("ada", "wrong"), engine.responses.last())
+    }
+
+    /**
+     * A blocked page's dialogs are answered Cancel unseen; for a leave-page question that would
+     * keep the user on the page with no way to follow its links, so it is always asked.
+     */
+    @Test
+    fun aLeavePageQuestionIsAskedEvenAfterThePageWasBlocked() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        showControl(1, 1, PageControlContent.Alert("one"))
+        browser.answerPageControl(1, ControlResponse.Accept); idle()
+        showControl(1, 2, PageControlContent.Alert("two"))
+        browser.answerPageControl(2, ControlResponse.Dismiss, DialogBlocking.BLOCK_FOR_PAGE); idle()
+
+        showControl(1, 3, PageControlContent.LeavePage)
+        val shown = state().pageControl!!
+        assertEquals(3L, shown.id)
+        assertEquals("a.test", shown.site)
+        assertFalse(shown.offerBlocking)
+        browser.answerPageControl(3, LeavePageChoice.STAY.response); idle()
+        assertEquals(3L to ControlResponse.Dismiss, engine.responses.last())
+        assertNull(state().pageControl)
+
+        showControl(1, 4, PageControlContent.LeavePage)
+        assertEquals(4L, state().pageControl?.id)
+        browser.answerPageControl(4, LeavePageChoice.LEAVE.response); idle()
+        assertEquals(4L to ControlResponse.Accept, engine.responses.last())
+    }
+
+    @Test
+    fun stayingOnAPageEndsTheReloadsLoadingLine() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.reload(); idle()
+        assertTrue(state().activeTab!!.loading)
+        showControl(1, 1, PageControlContent.LeavePage)
+        browser.answerPageControl(1, LeavePageChoice.STAY.response); idle()
+        // Nothing will commit: the line must not wait for #92's timeout.
+        assertFalse(state().activeTab!!.loading)
+
+        browser.reload(); idle()
+        showControl(1, 2, PageControlContent.LeavePage)
+        browser.answerPageControl(2, LeavePageChoice.LEAVE.response); idle()
+        assertTrue(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aLeavePageQuestionTheEngineAnswersEndsTheLoadingLine() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+
+        browser.reload(); idle()
+        showControl(1, 1, PageControlContent.LeavePage)
+        // Unanswered past its deadline: the engine answers Stay and withdraws the question.
+        engine.emit(EngineEvent.ControlHidden(engine.view(1), 1)); idle()
+        assertNull(state().pageControl)
+        assertFalse(state().activeTab!!.loading)
+    }
+
+    /** Servo 0.6.0 commits a page signed in to over HTTP with the credentials in its URL. */
+    @Test
+    fun signInCredentialsInACommittedAddressAreNeverStored() {
+        ready()
+        browser.openUrl("http://localhost:8766/auth.html", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "http://ada:lovelace@localhost:8766/auth.html")
+        commit(1, 11, "http://ada:lovelace@localhost:8766/next.html#a@b", index = 1, length = 2)
+        commit(1, 11, "http://ada@localhost:8766/next.html?to=ada@example.org", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
+
+        assertEquals("http://localhost:8766/next.html?to=ada@example.org", state().activeTab?.url)
+        assertEquals(
+            setOf("http://localhost:8766/next.html?to=ada@example.org", "http://localhost:8766/next.html#a@b", "http://localhost:8766/auth.html"),
+            recent().map { it.url }.toSet(),
+        )
+        val stored = database.openHelper.readableDatabase.query("SELECT url FROM tabs UNION ALL SELECT url FROM visits").use { rows ->
+            generateSequence { if (rows.moveToNext()) rows.getString(0) else null }.toList()
+        }
+        assertEquals(4, stored.size)
+        assertTrue(stored.toString(), stored.none { "ada:" in it || "lovelace" in it || "ada@localhost" in it })
     }
 
     @Test

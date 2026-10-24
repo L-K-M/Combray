@@ -15,23 +15,33 @@ class MoreActionsTest {
                 MoreAction.CLOSE_TAB,
                 MoreAction.PAGE_INFO,
                 MoreAction.READER,
+                MoreAction.FIND,
+                MoreAction.TEXT_SIZE,
                 MoreAction.SETTINGS,
             ),
-            moreActions(PAGE.copy(canGoForward = true)),
+            moreActions(PAGE.copy(canGoForward = true), readerOpen = false),
         )
+    }
+
+    /** Find searches the page, which reader view covers. */
+    @Test
+    fun readerViewHasNoFind() {
+        val rows = moreActions(PAGE, readerOpen = true)
+        assertEquals(false, MoreAction.FIND in rows)
+        assertEquals(true, MoreAction.READER in rows)
     }
 
     @Test
     fun aNewTabHomeCanBeClosedButHasNoPageRows() {
         assertEquals(
-            listOf(MoreAction.NEW_TAB, MoreAction.CLOSE_TAB, MoreAction.SETTINGS),
-            moreActions(PAGE.copy(url = null, title = null, hasView = false)),
+            listOf(MoreAction.NEW_TAB, MoreAction.CLOSE_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
+            moreActions(PAGE.copy(url = null, title = null, hasView = false), readerOpen = false),
         )
     }
 
     @Test
     fun withoutATabThereIsNothingToClose() {
-        assertEquals(listOf(MoreAction.NEW_TAB, MoreAction.SETTINGS), moreActions(null))
+        assertEquals(listOf(MoreAction.NEW_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerOpen = false))
     }
 
     private companion object {

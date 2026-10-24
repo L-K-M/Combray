@@ -1,11 +1,17 @@
 // Combray capture script. Returns one snapshot of the current document:
-// { url, title, text, truncated, nodes, nodeBudgetExhausted }.
+// { url, title, text, truncated, nodes, nodeBudgetExhausted, timeBudgetExhausted }.
 //
-// Budgets: at most __MAX_TEXT_BYTES__ bytes of UTF-8 text and __MAX_NODES__ visited nodes.
+// Budgets: at most __MAX_TEXT_BYTES__ bytes of UTF-8 text, __MAX_NODES__ visited nodes and
+// __MAX_MILLIS__ milliseconds. The page's own scripts wait while this runs (Servo cannot
+// interrupt it), so the walk stops in time and returns what it has.
 // Skips scripts, styles, form controls, editable content and hidden subtrees. Follows open
 // shadow roots and slot assignments; closed shadow roots are not reachable from script.
-(function (maxTextBytes, maxNodes) {
+(function (maxTextBytes, maxNodes, maxMillis) {
   "use strict";
+
+  // How often the clock is read: reading it costs more than visiting a node. Work within one
+  // node (a huge text node, a page-defined getter) is not clocked; only the node budget bounds it.
+  var CLOCK_EVERY_NODES = 128;
 
   var SKIPPED = {
     SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, HEAD: 1, TITLE: 1, META: 1, LINK: 1,
@@ -24,6 +30,14 @@
   var nodes = 0;
   var truncated = false;
   var nodeBudgetExhausted = false;
+  var timeBudgetExhausted = false;
+  // The page can replace the clock. One that returns NaN or a non-number stops the walk (the
+  // comparison below fails closed); one that fakes a slow clock removes the time guarantee and
+  // leaves only the node budget. Only interruption in Servo would close that.
+  var now = typeof performance === "object" && performance && typeof performance.now === "function"
+    ? function () { return performance.now(); }
+    : function () { return Date.now(); };
+  var started = now();
 
   // UTF-8 width of one UTF-16 position; lone surrogates become U+FFFD (3 bytes).
   function widthAt(text, index) {
@@ -64,14 +78,24 @@
       element.hasAttribute("inert") || element.isContentEditable) {
       return true;
     }
+    // In Servo every computed-style read is a layout query: read each property once, and
+    // stop at the first that hides the element.
     var style = window.getComputedStyle(element);
-    return style.display === "none" || style.visibility === "hidden" ||
-      style.visibility === "collapse" || style.contentVisibility === "hidden";
+    if (style.display === "none") return true;
+    var visibility = style.visibility;
+    if (visibility === "hidden" || visibility === "collapse") return true;
+    return style.contentVisibility === "hidden";
   }
 
   var root = document.body || document.documentElement;
   // Explicit stack: [node, closing] where closing marks the end of a block element.
   var stack = root ? [[root, false]] : [];
+  // No time at all (a hidden page whose deadline leaves none): read nothing.
+  if (!(maxMillis > 0)) {
+    stack = [];
+    timeBudgetExhausted = true;
+    truncated = true;
+  }
   while (stack.length) {
     var entry = stack.pop();
     var node = entry[0];
@@ -81,6 +105,11 @@
     }
     if (++nodes > maxNodes) {
       nodeBudgetExhausted = true;
+      break;
+    }
+    if (nodes % CLOCK_EVERY_NODES === 0 && !(now() - started <= maxMillis)) {
+      timeBudgetExhausted = true;
+      truncated = true;
       break;
     }
     if (node.nodeType === 3) {
@@ -119,6 +148,7 @@
     text: text,
     truncated: truncated,
     nodes: nodes,
-    nodeBudgetExhausted: nodeBudgetExhausted
+    nodeBudgetExhausted: nodeBudgetExhausted,
+    timeBudgetExhausted: timeBudgetExhausted
   };
-})(__MAX_TEXT_BYTES__, __MAX_NODES__)
+})(__MAX_TEXT_BYTES__, __MAX_NODES__, __MAX_MILLIS__)
