@@ -115,6 +115,30 @@ class HomeTest {
     }
 
     @Test
+    fun newTabFocusesTheHomeFieldWithoutASheet() {
+        open(Device.GREEN)
+        compose.onNodeWithContentDescription("New tab").performClick()
+        val blank = device.awaitState { it.activeTab?.isHome == true }.activeTab!!.id
+        awaitText(compose.activity.getString(R.string.home_heading))
+
+        val field = compose.onNode(hasSetTextAction() and isFocused())
+        field.assertIsDisplayed()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.home_search_hint)).assertIsDisplayed()
+        val url = Fixtures.solid(PINNED)
+        field.performTextInput(url)
+
+        // Rotation keeps the draft in the same Home field, without creating another blank.
+        compose.activityRule.scenario.recreate()
+        compose.onNode(hasSetTextAction()).assertIsDisplayed()
+        assertEquals(url, compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithText("Go to", substring = true).performClick()
+        device.awaitPage(url)
+        assertEquals(blank, device.browser.browserState.value.activeTab?.id)
+    }
+
+    @Test
     fun newTabIsAvailableWhileFindingInAPage() {
         open(Device.GREEN)
         device.browser.openFind()
