@@ -633,3 +633,46 @@ git diff --check
 
 Shell syntax, shellcheck, documentation and whitespace checks passed.
 No macOS native build or device installation was run for this change.
+
+## 20. Close-notice appearance (24 October 2026)
+
+The owner's dark-mode screenshot showed a light "Tab closed" card on a
+white strip. Material's default snackbar uses inverse colors. Home's outer
+notice padding also left the native engine surface uncovered.
+
+Browser and Recent now share `NoticeHost`, using `surfaceContainerHigh`,
+`onSurface` and `primary` for the card, text and action. Home paints its
+background before reserving notice space, so the native surface stays
+covered. Existing contrast tests cover these color pairs in both schemes.
+No engine source or pin changed.
+
+`NoticeThemeTest` closes a synthetic page in forced Dark and Light, samples
+the painted notice and its Home backdrop, then checks that Undo restores
+the same tab. Its APK compiled before the fix. Initial device attempts on
+the separate API-30 x86_64 AVD `combray-dark-notice-20261024` (port 5582)
+failed before app installation: black screenshots, then repeated Android
+`system_server` restarts with `Lost network stack` and unavailable input
+services. These failures do not establish a product regression result.
+
+The engine library came from the concurrent successful same-pin build in
+the shared checkout: Rust 1.97.1, NDK r29, downstream Servo
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. That build used the local Zig
+host wrappers through `COMBRAY_HOST_CC` and `COMBRAY_HOST_CXX` and completed
+in 4m44s (`build/inline-search-native.log`). Plain host `clang` lacked C
+headers; the notice task's corrected build was interrupted when leaving
+the shared checkout. The supplied library was copied into the isolated
+notice worktree before rebuilding the APKs.
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+scripts/check-app.sh emulator-5582 ch.lkmc.combray.NoticeThemeTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
+checks passed locally after the fix.
+
+Local device evidence is under `build/device-checks/notice-theme-red*`;
+build and emulator logs are under `build/notice-theme/`. Device assertions
+and physical-phone validation remain unverified.

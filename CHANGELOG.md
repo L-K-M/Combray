@@ -188,6 +188,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Notices such as "Tab closed" follow the app's light or dark appearance.
+  Home also covers the white native surface behind the notice.
 - Servo source preparation announces the large checkout and shows Git progress.
   Rerunning a build replaces partial or edited source and removes untracked
   leftovers, reusing downloaded objects and ignored build caches.
