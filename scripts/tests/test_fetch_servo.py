@@ -1,4 +1,4 @@
-"""Exact engine commits, offline reuse and local work survive source preparation."""
+"""Disposable engine sources recover to the pin while build caches stay reusable."""
 
 import os
 from pathlib import Path
@@ -80,11 +80,48 @@ class FetchServoTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD", directory=self.source), self.pinned)
         self.assertEqual((self.source / "identity").read_text(), "downstream")
 
+    def test_checkout_is_announced_before_git_finishes(self):
+        template = self.root / "git-template"
+        hooks = template / "hooks"
+        hooks.mkdir(parents=True)
+        hook = hooks / "post-checkout"
+        hook.write_text('#!/bin/sh\nprintf "fixture checkout finished\\n"\n')
+        hook.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(self.scripts / "fetch-servo.sh")], cwd=self.app,
+            env=self.environment | {"GIT_TEMPLATE_DIR": str(template)},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        announcement = f"==> checking out Servo {self.pinned}"
+        self.assertIn(announcement, result.stdout)
+        self.assertLess(result.stdout.index(announcement), result.stdout.index("fixture checkout finished"))
+
+    def test_partial_first_checkout_recovers_without_fetching_again(self):
+        self.source.mkdir(parents=True)
+        self.git("init", "-q", str(self.source))
+        self.git("fetch", "--no-tags", "--depth=1", str(self.repo), self.pinned, directory=self.source)
+        partial = self.source / "identity"
+        partial.write_text("partial checkout")
+        leftover = self.source / "leftover.rs"
+        leftover.write_text("incomplete source")
+        self.repo.rename(self.root / "remote-offline")
+
+        result = self.fetch()
+        self.assert_success(result)
+        self.assertEqual(partial.read_text(), "downstream")
+        self.assertFalse(leftover.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD", directory=self.source), self.pinned)
+        self.assertTrue((self.source / ".git/combray-prepared").exists())
+
     def test_prepared_sources_are_reusable_offline(self):
         self.assert_success(self.fetch())
+        source_mtime = (self.source / "identity").stat().st_mtime_ns
         self.repo.rename(self.root / "remote-offline")
         self.assert_success(self.fetch())
         self.assertEqual((self.source / ".servo/preparations").read_text(), "prepared\n")
+        self.assertEqual((self.source / "identity").stat().st_mtime_ns, source_mtime)
 
     def test_mode_switches_preserve_the_build_cache(self):
         self.assert_success(self.fetch())
@@ -97,39 +134,38 @@ class FetchServoTest(unittest.TestCase):
         self.assertEqual((self.source / "identity").read_text(), "downstream")
         self.assertEqual((target / "keep").read_text(), "compiled")
 
-    def test_tracked_edits_are_refused_and_preserved(self):
+    def test_tracked_edits_are_replaced_with_the_pinned_source(self):
         self.assert_success(self.fetch())
         (self.source / "identity").write_text("local work")
-        result = self.fetch("upstream")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("local changes", result.stderr)
-        self.assertEqual((self.source / "identity").read_text(), "local work")
+        self.assert_success(self.fetch())
+        self.assertEqual((self.source / "identity").read_text(), "downstream")
 
-    def test_untracked_sources_are_refused_and_preserved(self):
+    def test_untracked_sources_are_removed_but_build_caches_are_reused(self):
         self.assert_success(self.fetch())
         new_source = self.source / "unfinished.rs"
         new_source.write_text("local work")
-        result = self.fetch()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("local changes", result.stderr)
-        self.assertEqual(new_source.read_text(), "local work")
-
-    def test_detached_local_commits_are_refused_and_preserved(self):
+        target = self.source / "target"
+        target.mkdir()
+        (target / "keep").write_text("compiled")
         self.assert_success(self.fetch())
-        self.git("commit", "--allow-empty", "-qm", "local work", directory=self.source)
-        local_commit = self.git("rev-parse", "HEAD", directory=self.source)
-        result = self.fetch("upstream")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("branch", result.stderr)
-        self.assertEqual(self.git("rev-parse", "HEAD", directory=self.source), local_commit)
+        self.assertFalse(new_source.exists())
+        self.assertEqual((target / "keep").read_text(), "compiled")
+        self.assertEqual((self.source / ".servo/preparations").read_text(), "prepared\n")
 
-    def test_local_commits_on_a_branch_are_preserved(self):
+    def test_detached_local_commits_are_replaced_with_the_pin(self):
+        self.assert_success(self.fetch())
+        (self.source / "identity").write_text("local commit")
+        self.git("commit", "-am", "local work", directory=self.source)
+        self.assert_success(self.fetch())
+        self.assertEqual(self.git("rev-parse", "HEAD", directory=self.source), self.pinned)
+        self.assertEqual((self.source / "identity").read_text(), "downstream")
+
+    def test_local_branch_does_not_change_the_build_input(self):
         self.assert_success(self.fetch())
         self.git("switch", "-qc", "local-work", directory=self.source)
         self.git("commit", "--allow-empty", "-qm", "local work", directory=self.source)
-        local_commit = self.git("rev-parse", "HEAD", directory=self.source)
         self.assert_success(self.fetch("upstream"))
-        self.assertEqual(self.git("rev-parse", "refs/heads/local-work", directory=self.source), local_commit)
+        self.assertEqual(self.git("rev-parse", "HEAD", directory=self.source), self.upstream)
 
     def test_pin_updates_accept_the_previous_prepared_commit(self):
         self.assert_success(self.fetch())
@@ -173,6 +209,21 @@ class FetchServoTest(unittest.TestCase):
             "GIT_INDEX_FILE": str(self.repo / ".git/index"),
         }))
         self.assertEqual((self.source / "identity").read_text(), "downstream")
+        self.assertEqual((self.repo / "identity").read_text(), "moving branch")
+
+    def test_git_worktree_setting_cannot_retarget_source_cleanup(self):
+        self.assert_success(self.fetch())
+        self.git("config", "core.worktree", str(self.repo), directory=self.source)
+        self.assert_success(self.fetch())
+        self.assertEqual((self.source / "identity").read_text(), "downstream")
+        self.assertEqual((self.repo / "identity").read_text(), "moving branch")
+
+    def test_a_linked_checkout_is_not_reset(self):
+        self.source.parent.mkdir(parents=True)
+        self.source.symlink_to(self.repo, target_is_directory=True)
+        result = self.fetch()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("dedicated Git checkout", result.stderr)
         self.assertEqual((self.repo / "identity").read_text(), "moving branch")
 
     def test_unknown_mode_does_not_create_a_checkout(self):
