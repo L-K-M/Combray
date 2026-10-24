@@ -54,7 +54,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -179,7 +178,6 @@ internal fun AddressSheetContent(
     val query = field.text.trim()
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val label = stringResource(R.string.address_edit)
     val inset = Modifier.padding(horizontal = 16.dp)
 
     Column(modifier.fillMaxWidth().padding(bottom = if (mode == AddressEditorMode.EDITING) 16.dp else 0.dp)) {
@@ -233,8 +231,7 @@ internal fun AddressSheetContent(
                     if (interpretation.primary !is AddressDecision.Rejected) onDecision(interpretation.primary)
                 }),
                 modifier = Modifier.weight(1f).focusRequester(focus)
-                    .onFocusChanged { if (it.isFocused) onFocused() }
-                    .semantics { contentDescription = label },
+                    .onFocusChanged { if (it.isFocused) onFocused() },
             )
         }
         if (mode == AddressEditorMode.IDLE) return@Column

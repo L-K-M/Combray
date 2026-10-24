@@ -104,6 +104,32 @@ class HomeSearchTest {
     }
 
     @Test
+    fun aClosedSharedSearchDoesNotPrefillTheNextHome() {
+        val activity = compose.activity
+        val originalIntent = activity.intent
+        val query = "one-time shared search"
+        try {
+            activity.startActivity(
+                Intent(Intent.ACTION_WEB_SEARCH).setClass(activity, MainActivity::class.java)
+                    .putExtra(SearchManager.QUERY, query),
+            )
+            compose.waitUntil(Device.LOAD_TIMEOUT_MS) {
+                compose.onAllNodes(hasSetTextAction() and isFocused()).fetchSemanticsNodes().singleOrNull()
+                    ?.config?.get(SemanticsProperties.EditableText)?.text == query
+            }
+            val blank = device.awaitState { it.activeTab?.isHome == true }.activeTab!!.id
+            compose.onNodeWithContentDescription("Close").performClick()
+            compose.onNode(hasSetTextAction()).assertTextEquals(query)
+
+            device.browser.closeTab(blank)
+            device.awaitState { it.activeTab == null }
+            assertEquals("", compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync { activity.intent = originalIntent }
+        }
+    }
+
+    @Test
     fun recentNewTabReturnsToTheHomeField() {
         compose.onNodeWithText("Recent").performClick()
         compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodes(isDialog()).fetchSemanticsNodes().isNotEmpty() }

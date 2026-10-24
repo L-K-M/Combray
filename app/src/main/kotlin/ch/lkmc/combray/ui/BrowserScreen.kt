@@ -128,6 +128,8 @@ fun BrowserScreen(
     val home = tab?.url == null
     val stopHomeInput: () -> Unit = {
         homeMode = AddressEditorMode.IDLE
+        // The field keeps its own draft; its launch prefill must not seed a later Home.
+        homeText = ""
         focus.clearFocus(force = true)
         keyboard?.hide()
     }
@@ -361,10 +363,11 @@ fun BrowserScreen(
                             settings = graph.settings,
                             onOpenUrl = { url ->
                                 (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let {
+                                    stopHomeInput()
                                     browser.openUrl(it.url, Placement.CURRENT_TAB)
                                 }
                             },
-                            onContinue = browser::selectTab,
+                            onContinue = { id -> stopHomeInput(); browser.selectTab(id) },
                             onEdit = { link ->
                                 homeEditLink = link
                                 homeEditPage = if (link == null) HomeEditPage.OVERVIEW else HomeEditPage.LINK

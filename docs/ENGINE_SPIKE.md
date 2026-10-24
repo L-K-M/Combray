@@ -683,6 +683,19 @@ APK. Raw evidence: `build/device-checks/inline-search-green/` and
 `build/inline-search-home-green.txt`. JVM tests, lint and debug/test assembly
 passed again after that correction; documentation and whitespace checks pass.
 
+Review found a consumed shared-text prefill could seed a later Home after its
+blank tab closed. The new fixture-free regression failed with the old shared
+text instead of an empty field (`build/inline-search-review-red.txt`, 88.826
+seconds). Ending editing now clears that launch seed, keeping the current
+field's separate draft; Continue and quick-link navigation do the same.
+All five Home search checks and the three real-Servo checks passed afterward.
+One layout row-tap callback assertion failed once; the unchanged full layout
+class then passed all five checks (93.271 seconds). Together these verify 13
+focused checks. Evidence: `build/device-checks/inline-search-reviewed/` and
+`build/inline-search-layout-rerun.txt`. The static text-field description was
+removed in favor of Material's hint/text semantics; spoken TalkBack output
+was not checked.
+
 Final CI/review results are tracked in [PR #127](https://github.com/L-K-M/Combray/pull/127).
 Physical-phone and live-service checks remain unperformed.
 
