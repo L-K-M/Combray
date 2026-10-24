@@ -696,6 +696,46 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun closingTheActiveTabSkipsHomeForTheNextOpenPage() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        now += 1_000
+        browser.newTab(); idle()
+        val blank = state().activeTab!!.id
+        now += 1_000
+        browser.selectTab(c); idle()
+        assertEquals(listOf(c, blank, b, a), recent().filterIsInstance<RecentItem.OpenTab>().map { it.tabId })
+
+        browser.closeTab(c); idle()
+
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(2L, engine.selected.last())
+        assertEquals(listOf(3L), engine.closed)
+        assertEquals(b, runBlocking { database.browser().session()?.activeTabId })
+        assertTrue(recent().any { it is RecentItem.OpenTab && it.tabId == blank })
+    }
+
+    @Test
+    fun closingTheOnlyPageReturnsToTheRemainingBlankTab() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val page = state().activeTab!!.id
+        now += 1_000
+        browser.newTab(); idle()
+        val blank = state().activeTab!!.id
+        now += 1_000
+        browser.selectTab(page); idle()
+
+        browser.closeTab(page); idle()
+
+        assertEquals(blank, state().activeTab?.id)
+        assertTrue(state().activeTab!!.isHome)
+        assertEquals(1, state().openTabCount)
+        assertEquals(listOf(1L), engine.closed)
+    }
+
+    @Test
     fun undoAfterClosingABackgroundTabKeepsTheCurrentOne() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()

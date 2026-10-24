@@ -432,7 +432,7 @@ class BrowserCoordinator(
         publish()
     }
 
-    /** Closes [tabId]; its pages stay in Recent as history. Focus moves to the last used tab. */
+    /** Closes [tabId]; its pages stay in Recent as history. Focus moves to the next open page. */
     fun closeTab(tabId: String) = submit {
         val tab = dao.tab(tabId)?.takeIf { it.state == TabState.OPEN } ?: return@submit
         val wasActive = closeLogically(tab)
@@ -1222,7 +1222,9 @@ class BrowserCoordinator(
             tab.currentVisitId?.let { dao.visit(it) }?.let { retireVisit(tab, it, now) }
             dao.updateTab(tab.copy(state = TabState.CLOSED, closedAt = now))
             if (focused) {
-                val successor = dao.openTabs().firstOrNull()
+                // An unused Home tab must not hide the next page in Recent.
+                val remaining = dao.openTabs()
+                val successor = remaining.firstOrNull { it.url != null } ?: remaining.firstOrNull()
                 successor?.let { dao.updateTab(it.copy(lastFocusedAt = now)) }
                 dao.setSession(SessionEntity(activeTabId = successor?.id))
                 keepOpenersFor(successor?.id)
