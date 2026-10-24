@@ -182,7 +182,7 @@ which is not written yet.
 | PR | Before it lands | Line |
 | --- | --- | --- |
 | #88 | Stays a draft: throttling does not work yet, and #96 supersedes its Kotlin half. Fix ThrottlingTest's metric (read `window.ticks` through `NativeEngine.evaluate`) before blaming Servo; split `wakeup.rs` out later; #81's deferred captures now wake the engine themselves | Not landing |
-| #42 | Waiting on the owner: a launcher monogram and host quick links on the new-tab page, ranked by visits in the retention window | Undecided |
+| #42 | The owner chose to rework and land it (24 October 2026): Combray's icon and up to six frequent sites on the new-tab page, ranked by visits in the retention window | Landing |
 
 Notes for the open work:
 
@@ -785,8 +785,9 @@ landscape/tablet widths is an option to evaluate with the same measurements.
   domain and relative time, no extra history store or recommendation feed. It is
   distinct from the optional user-invoked Hister recall experiment above.
   A quiet wordmark/search/Recent variant is another experiment; the owner has not
-  selected a final Recent-home layout. Avoid a busy dashboard. (#42 offers the
-  monogram and host quick links on that surface; it waits on the owner.)
+  selected a final Recent-home layout. Avoid a busy dashboard. (#42 puts
+  Combray's icon and up to six frequent sites on that surface, by the owner's
+  choice on 24 October 2026.)
 - Reader text size: Proposed in the
   [owner decisions](docs/IMPLEMENTATION_PLAN.md#owner-decisions-from-the-pr-triage-22-october-2026)
   as one control, where page zoom (#87, More › Text size) also scales Reader;

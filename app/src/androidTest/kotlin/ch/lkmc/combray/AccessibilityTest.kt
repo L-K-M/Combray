@@ -36,6 +36,7 @@ import ch.lkmc.combray.core.browser.FindOutcome
 import ch.lkmc.combray.core.browser.FindState
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.core.browser.TopSite
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
@@ -46,6 +47,7 @@ import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
+import ch.lkmc.combray.ui.QuickLinks
 import ch.lkmc.combray.ui.TextSizeDialog
 import ch.lkmc.combray.ui.ScrollEdgeButton
 import kotlinx.coroutines.MainScope
@@ -239,6 +241,20 @@ class AccessibilityTest {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithText("3 of 999+").assertIsDisplayed()
+    }
+
+    @Test
+    fun theQuickLinksAreAccessible() {
+        show(LARGE_FONT) {
+            Column(Modifier.width(NARROW_WIDTH)) {
+                QuickLinks(listOf(TopSite("example.org", "https://www.example.org/a", 3), TopSite("b.test", "https://b.test/", 1)), {})
+            }
+        }
+
+        assertTargetsAreAccessible()
+        for (label in listOf("Open example.org", "Open b.test")) {
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        }
     }
 
     @Test

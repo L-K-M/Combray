@@ -196,6 +196,16 @@ fun List<RecentItem>.matching(query: String?, historyLimit: Int = RECENT_HISTORY
     return filter { it.matches(query) && (it !is RecentItem.Visit || history++ < historyLimit) }
 }
 
+/** A site the user visits often, for the new-tab page's quick links. */
+data class TopSite(
+    /** The host without "www.", so both spellings of a site rank as one. */
+    val site: String,
+    /** The site's most recently used page: what a tap opens. */
+    val url: String,
+    /** How many of the site's visits are among the newest retained ones. */
+    val visits: Int,
+)
+
 /** One row of the unified Recent list. */
 sealed interface RecentItem {
     val key: String
