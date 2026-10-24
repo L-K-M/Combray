@@ -26,6 +26,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -997,19 +999,46 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://a.test/one", Placement.NEW_TAB); idle()
         commit(1, 10, "https://a.test/one")
         now += 1_000
+        browser.openUrl("https://www.a.test/two", Placement.CURRENT_TAB); idle()
+        commit(1, 11, "https://www.a.test/two", index = 1, length = 2)
+        now += 1_000
         browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
         commit(2, 20, "https://b.test/")
-        now += 1_000
-        browser.openUrl("https://www.a.test/two", Placement.CURRENT_TAB); idle()
-        commit(2, 21, "https://www.a.test/two", index = 1, length = 2)
 
         val sites = topSites()
 
-        // Pages open tabs show right now count too, and "www." is the same site: a.test has two.
+        // More visits rank first, though b.test is newer. Pages open tabs show right now count
+        // too, and "www." is the same site: a.test has two.
         assertEquals(listOf("a.test", "b.test"), sites.map { it.site })
         assertEquals(listOf(2, 1), sites.map { it.visits })
         // A tap opens the site's newest page.
         assertEquals("https://www.a.test/two", sites[0].url)
+    }
+
+    @Test
+    fun aSiteLeavesAnOpenNewTabPageOnceItsVisitsExpire() {
+        idle() // start-up maintenance must not remove the tab before its visits exist
+        val dao = database.browser()
+        runBlocking { dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START)) }
+        fun visit(id: String, url: String) =
+            VisitEntity(id, "closed", url, HostNames.of(url), null, null, VisitKind.DOCUMENT, now, now, false)
+        runBlocking { dao.insertVisit(visit("old", "https://old.test/")) }
+
+        // One subscription, as the new-tab page holds: the next answer applies the cutoff as it is then.
+        val shown = runBlocking {
+            withTimeout(TEST_WAIT_MS) {
+                browser.topSites(SensitiveUrls::looksSensitive).map { sites -> sites.map { it.site } }
+                    .onEach { sites ->
+                        if (sites == listOf("old.test")) {
+                            now += 8 * DAY
+                            dao.insertVisit(visit("new", "https://new.test/"))
+                        }
+                    }
+                    .first { "new.test" in it }
+            }
+        }
+
+        assertEquals(listOf("new.test"), shown)
     }
 
     @Test

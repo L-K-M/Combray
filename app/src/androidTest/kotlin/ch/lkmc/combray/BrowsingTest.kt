@@ -107,16 +107,17 @@ class BrowsingTest {
         open(Device.OCHRE)
         open(Device.GREEN)
         device.browser.newTab()
-        device.awaitState { it.activeTab?.isHome == true }
+        val newTab = device.awaitState { it.activeTab?.isHome == true }.activeTab!!.id
 
         // The tile names the fixture server's site; the new-tab page reads it from history as it shows.
         val tile = compose.activity.getString(R.string.home_open_site, "localhost")
         compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithContentDescription(tile).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription(tile).performClick()
 
-        // The site's newest page, in the new tab.
-        device.awaitPage(Fixtures.solid(Device.GREEN))
-        assertEquals(2, device.browser.browserState.value.openTabCount)
+        // The site's newest page, in the new tab: the tab that already shows it stays as it was.
+        val state = device.awaitPage(Fixtures.solid(Device.GREEN))
+        assertEquals(newTab, state.activeTab?.id)
+        assertEquals(2, state.openTabCount)
         assertScreen(Device.GREEN)
     }
 

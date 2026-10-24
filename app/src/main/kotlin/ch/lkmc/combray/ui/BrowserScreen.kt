@@ -66,8 +66,10 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -621,8 +623,11 @@ private fun Home(
     onOpenUrl: (String) -> Unit,
 ) {
     // One subscription per visit to the new-tab page, which also starts its retention window.
-    val sites by remember { topSites() }.collectAsStateWithLifecycle(emptyList())
+    val sites by remember { topSites() }.collectAsStateWithLifecycle<List<TopSite>?>(null)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        // Until the first ranking arrives, only the background: drawing the page without tiles
+        // and then with them moves everything, under a finger about to tap Recent.
+        val shown = sites ?: return@Surface
         // Scrolls once the tiles outgrow the window (landscape, large text); until then the
         // content stays centred, as it is at least the window's height.
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -644,7 +649,7 @@ private fun Home(
                 OutlinedButton(onClick = onOpenRecent, modifier = Modifier.widthIn(min = 240.dp)) {
                     Text(stringResource(R.string.action_recent))
                 }
-                if (sites.isNotEmpty()) QuickLinks(sites, onOpenUrl)
+                if (shown.isNotEmpty()) QuickLinks(shown, onOpenUrl)
             }
         }
     }
@@ -686,7 +691,10 @@ private fun QuickLink(site: TopSite, onOpenUrl: (String) -> Unit, modifier: Modi
         onClick = { onOpenUrl(site.url) },
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = modifier.semantics { contentDescription = openLabel },
+        modifier = modifier.semantics {
+            contentDescription = openLabel
+            role = Role.Button
+        },
     ) {
         Column(
             Modifier.fillMaxWidth().padding(vertical = 12.dp),

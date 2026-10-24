@@ -26,6 +26,7 @@ import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -33,9 +34,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -196,17 +198,11 @@ class BrowserCoordinator(
     fun recent(depth: HistoryDepth = HistoryDepth.NEWEST): Flow<List<RecentItem>> {
         val since = clock.now() - retention.closedHistoryMillis
         val historyLimit = if (depth == HistoryDepth.NEWEST) RECENT_HISTORY_LIMIT else RETAINED_HISTORY_LIMIT
-        val ticks = flow {
-            while (true) {
-                emit(Unit)
-                delay(RECENT_CUTOFF_TICK_MS)
-            }
-        }
         return combine(
             dao.observeOpenTabs(),
             dao.observeHistory(since, historyLimit),
             dao.observeSession(),
-            ticks,
+            cutoffTicks(),
         ) { tabs, visits, session, _ ->
             val cutoff = clock.now() - retention.closedHistoryMillis
             val items = tabs.map {
@@ -218,19 +214,22 @@ class BrowserCoordinator(
 
     /**
      * The sites the user visits most, for the new-tab page: one entry per site (its host without
-     * "www."), most visits first among the newest [RECENT_HISTORY_LIMIT] in the retention window,
-     * ties by recency, each with its newest page. The window starts when the list is collected,
-     * so each new tab ranks the current one. Pages open tabs show now count, as they are what the
-     * user visits; a forgotten page has no visit, so it never ranks. Nor does a page [sensitive]
-     * says carries credentials: a tile names only the site, and opening it must not replay a
-     * sign-in or token link.
+     * "www."), most visits first over the retention window (up to [RETAINED_HISTORY_LIMIT]
+     * visits), ties by recency, each with its newest page. Like [recent], it reads from the
+     * cutoff at subscription and applies the cutoff as it is then to each answer and on a slow
+     * clock, so a site leaves an open new-tab page once its visits pass the retention period.
+     * Pages open tabs show now count, as they are what the user visits; a forgotten page has no
+     * visit, so it never ranks. Nor does a page [sensitive] says carries credentials: a tile names
+     * only the site, and opening it must not replay a sign-in or token link. Ranked off the main
+     * thread, as it parses every address.
      */
     fun topSites(sensitive: (url: String) -> Boolean, limit: Int = TOP_SITES_LIMIT): Flow<List<TopSite>> = flow {
         val since = clock.now() - retention.closedHistoryMillis
         emitAll(
-            dao.observeRecentVisits(since, RECENT_HISTORY_LIMIT).map { visits ->
+            combine(dao.observeRecentVisits(since, RETAINED_HISTORY_LIMIT), cutoffTicks()) { visits, _ ->
+                val cutoff = clock.now() - retention.closedHistoryMillis
                 visits
-                    .filterNot { sensitive(it.url) }
+                    .filter { it.lastSeenAt >= cutoff && !sensitive(it.url) }
                     .mapNotNull { visit -> visit.host?.let { it.removePrefix(WWW) to visit } }
                     // Grouping keeps the newest-first order: each site's first page is its newest,
                     // and the stable sort below leaves sites with as many visits in recency order.
@@ -240,6 +239,14 @@ class BrowserCoordinator(
                     .take(limit)
             },
         )
+    }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    /** Emits at once and then every [RECENT_CUTOFF_TICK_MS], so lists re-apply the retention cutoff. */
+    private fun cutoffTicks(): Flow<Unit> = flow {
+        while (true) {
+            emit(Unit)
+            delay(RECENT_CUTOFF_TICK_MS)
+        }
     }
 
     // --- Commands -------------------------------------------------------------------------------
@@ -1529,7 +1536,7 @@ class BrowserCoordinator(
         /** Proposed default: well past a slow home server, short of a stuck bar. */
         const val NAVIGATION_TIMEOUT_MS = 30_000L
 
-        /** How often an open Recent applies the retention cutoff when nothing else changes. */
+        /** How often an open Recent or new-tab page applies the retention cutoff when nothing else changes. */
         const val RECENT_CUTOFF_TICK_MS = 60_000L
 
         /**
