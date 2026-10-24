@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Live-check fixture: a page that works in Chromium and breaks in Servo.
+     Its article is inserted by a script that first starts a fade-in with
+     Element.animate() (Web Animations API), which servoshell 0.6.0 lacks
+     (October 2026): the call throws a TypeError, so Servo shows only the
+     "Loading" line while Chromium shows the article. Expected verdict: blank,
+     with a js-error finding. Once Servo implements Element.animate() this page
+     turns ok; replace the construct with another missing API then. -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sitecheck Servo gap fixture</title>
+<style>body { font-family: sans-serif; margin: 16px; } article p { line-height: 1.5; }</style>
+</head>
+<body>
+<p id="status">Loading</p>
+<article id="article"></article>
+<script>
+var paragraphs = [
+  "Harbour towns along the northern coast keep their fishing fleets moving through every season, trading early morning catches before the markets open.",
+  "Visitors usually arrive by ferry, wander through narrow lanes of painted houses, and climb the lighthouse path for a view across the islands.",
+  "Local bakeries sell rye bread, cinnamon buns and smoked fish sandwiches, while small museums describe shipwrecks, storms and old trading routes.",
+  "In winter the quiet harbour reflects coloured lights, and the evening concerts in the wooden church draw neighbours from distant villages."
+];
+var article = document.getElementById("article");
+article.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+paragraphs.forEach(function (text) {
+  var paragraph = document.createElement("p");
+  paragraph.textContent = text;
+  article.appendChild(paragraph);
+});
+document.getElementById("status").textContent = "";
+</script>
+</body>
+</html>

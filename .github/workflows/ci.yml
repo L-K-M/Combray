@@ -49,6 +49,11 @@ jobs:
       - name: APK build-script regressions
         run: python3 -I -m unittest discover -s scripts/tests
 
+      # The harness's pure modules and fakes need only the standard library;
+      # Playwright and Pillow are imported lazily and their tests skip here.
+      - name: Site-check harness
+        run: python3 -I -m unittest discover -s testing/sitecheck/tests -t testing/sitecheck
+
       # Formatting needs no Servo tree. The host unit tests (cargo test --lib)
       # do: Cargo reads the Android-only path dependencies into servo-checkout/,
       # so the Engine workflow runs them after fetching. The explicit toolchain skips the

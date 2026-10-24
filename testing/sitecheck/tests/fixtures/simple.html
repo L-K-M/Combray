@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Live-check fixture: a quiet page with known metrics and no errors. -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sitecheck simple fixture</title>
+<style>body { font-family: sans-serif; margin: 16px; } .tall { height: 2000px; }</style>
+</head>
+<body>
+<h1>Simple fixture</h1>
+<p>A page with <a href="#one">two</a> <a href="#two">links</a>, one form and one iframe.</p>
+<form><input name="q"></form>
+<iframe srcdoc="<p>frame</p>" width="100" height="50"></iframe>
+<div class="tall"></div>
+<p id="bottom">Bottom of the page.</p>
+</body>
+</html>
