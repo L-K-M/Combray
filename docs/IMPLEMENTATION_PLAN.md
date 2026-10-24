@@ -322,7 +322,7 @@ For a usable personal release, assess target sites including authenticated pages
 
 M0 added the engine build: `native/` (Rust bridge against pinned Servo), `spike/android/` (Gradle harness) and `scripts/m0/`. M1 added the product modules `app/`, `core/` and `engine/` ([BUILDING.md](BUILDING.md)). The design HTML remains a reference.
 
-Pin a full commit SHA from [L-K-M/servo](https://github.com/L-K-M/servo), the independent downstream repository with upstream history. Its published branch is `combray/0.6`; Combray's source of truth is `scripts/m0/servo-pin.sh`. Keep engine changes small and preserve MPL notices. Merge tested upstream maintenance revisions without rewriting published history, then update Combray's pin through native validation ([BUILDING.md](BUILDING.md#updating-servo)). `servo/servo` permits source pulls only: no issues, PRs, comments, fork API calls or outreach (owner instruction, 23 October 2026). Do not commit generated engine builds or native binaries.
+Pin a full commit SHA from [L-K-M/servo](https://github.com/L-K-M/servo), the independent downstream repository with upstream history. Its published line is the newest `combray/0.N` branch, which follows upstream releases (owner decision, 24 October 2026); Combray's source of truth is `scripts/m0/servo-pin.sh`. Keep engine changes small and preserve MPL notices. Merge upstream releases and their backports without rewriting published history, then update Combray's pin through native validation ([BUILDING.md](BUILDING.md#updating-servo)). A [nightly task](SITECHECK.md) checks the owner's sites against the engine and does this maintenance. `servo/servo` permits source pulls only: no issues, PRs, comments, fork API calls or outreach (owner instruction, 23 October 2026). Do not commit generated engine builds or native binaries.
 
 ### Engine build investigation
 
@@ -590,7 +590,7 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 
 ### Principal risks and response
 
-**Android wrapper work:** multi-tab identity and extraction required engine changes (formerly patch 0002). They now live in `L-K-M/servo`. Keep the downstream changes small and reconcile them when merging a tested 0.6.x maintenance update. Never offer them upstream.
+**Android wrapper work:** multi-tab identity and extraction required engine changes (formerly patch 0002). They now live in `L-K-M/servo`. Keep the downstream changes small and reconcile them when merging an upstream release. Never offer them upstream.
 
 **Engine defects found in M0:** a stale frame after creating views while a large page is visible (WebRender level, reproduced on SwiftShader only so far), cookies lost on process death (addressed downstream: written on request, at most five minutes of foreground changes at risk), and no interruption for embedder scripts. Keep reproductions and fixes downstream; see [ENGINE_SPIKE.md](ENGINE_SPIKE.md).
 
