@@ -486,6 +486,7 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Release ID | Confirmed: `ch.lkmc.combray`; debug retains `.debug` |
 | Local signing configuration | Passed on Linux/JDK 21 with a disposable key; `apksigner verify` confirmed the produced release certificate and v2 signature |
 | Artifact naming and native packaging | Passed: actual arm64 debug and x86_64 debug/release APKs; 13 script regressions cover architecture, missing libraries, malformed/truncated inputs, stale metadata, signing settings and interrupted staging |
+| Build-source recovery | Passed on Linux (24 October 2026): preparation restores the disposable Servo checkout after partial checkouts or source edits, removes untracked leftovers and reuses ignored caches. All 48 script checks pass; macOS build/install unverified. [Evidence](ENGINE_SPIKE.md#19-disposable-build-checkout-recovery-24-october-2026) |
 | Personal signing key, native/signing release CI | Pending; signed test output is not a distributable personal release |
 | Engine-update PR CI | Passed (23 October 2026): pinned downstream source, host tests, both native ABI builds, APK checks and all 57 x86_64 emulator checks. Evidence: [ENGINE_SPIKE.md](ENGINE_SPIKE.md#downstream-engine-maintenance-23-october-2026) |
 | Third-party notices and source link | Implemented: Settings › About lists 637 engine components (crates plus hand-checked bundled C/C++ libraries and libc++) and 113 Java/Kotlin libraries with license texts, and names the source repository. Device check `AboutTest` passed on the emulator (run `about3`). Not a legal review |
@@ -572,6 +573,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
 | Engine revision/toolchain/packaging | Updated (owner, 23 October 2026) | Exact `L-K-M/servo` commit from `combray/0.6`, based on v0.6.0; Rust 1.97.1, NDK r29. Source pulls only from `servo/servo`; all work downstream. [Maintenance](BUILDING.md#updating-servo) |
+| Disposable engine build checkout | Confirmed (owner, 24 October 2026) | `servo-checkout/servo` contains no development work: preparation discards source edits and untracked files, reusing ignored caches. Use a separate downstream checkout for engine changes |
 | Application ID | Confirmed (19 October 2026) | Owner confirmed `ch.lkmc.combray`; `.debug` suffix for debug builds |
 | API levels | Proposed (M1) | minSdk 30 (the native library links with API 30 wrappers), targetSdk 36 |
 | M4 validation device | Emulator for now (owner choice, 19 October 2026) | Physical phone acceptance remains unverified |

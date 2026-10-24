@@ -28,7 +28,7 @@ if ! rustup target list --toolchain "$COMBRAY_RUST_TOOLCHAIN" --installed 2> /de
     rustup toolchain install "$COMBRAY_RUST_TOOLCHAIN" --profile minimal --target "$COMBRAY_RUST_TARGET"
 fi
 
-# Check the actual commit and local edits on every build, even when preparation is cached.
+# Restore the pinned source on every build, even when preparation is cached.
 "$COMBRAY_ROOT/scripts/m0/fetch-servo.sh"
 # Again, for the Python environment fetch-servo.sh may have created.
 # shellcheck source=m0/env.sh disable=SC1091

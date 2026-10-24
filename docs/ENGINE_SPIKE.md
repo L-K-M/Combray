@@ -368,7 +368,7 @@ Base: `c78d2c206f80a1c8b67eefa97f773bba513205d3` (v0.6.0). Downstream pin: `97be
 | 0004, profile persistence | `718bb542539` | `components/net/resource_thread.rs`, `components/servo/site_data_manager.rs`, `components/shared/base/lib.rs`, `components/shared/net/lib.rs` |
 | 0007, DOM relational queries | `97be6cb1fb5` | Four files in `components/script/`; all 15 Parser hooks preserved, only `parse_has` overridden. Stylesheet `:has()` and `CSS.supports` remain disabled. Imported unchanged in [downstream PR #1](https://github.com/L-K-M/servo/pull/1), from the candidate in [Combray PR #119](https://github.com/L-K-M/Combray/pull/119) |
 
-Copied upstream workflows, `CODEOWNERS` and Dependabot configuration were removed before the first downstream push. The source checkout is now `servo-checkout/servo`, selected by a full SHA in `scripts/m0/servo-pin.sh`. No patch files are applied. The old release extraction and its build cache are preserved. The checkout is verified on every build; dirty source is refused instead of overwritten. The baseline mode fetches the original upstream SHA from our downstream repository.
+Copied upstream workflows, `CODEOWNERS` and Dependabot configuration were removed before the first downstream push. The source checkout is now `servo-checkout/servo`, selected by a full SHA in `scripts/m0/servo-pin.sh`. No patch files are applied. The old release extraction and its build cache are preserved. Initially, preparation refused dirty source; the owner later selected the [disposable-checkout policy](#19-disposable-build-checkout-recovery-24-october-2026). The baseline mode fetches the original upstream SHA from our downstream repository.
 
 Migration checks: all 14 source-preparation regressions pass, including exact SHA despite a moving branch, no SDK, offline reuse, mode switching with cache preserved, local edits and detached commits, pin updates, deleted Python environments, failed preparation retry, unavailable commits and inherited Git state. Review found the detached-commit and stale-environment cases; regression tests failed before their fixes and passed afterward. The complete script suite passes 44 tests. Documentation, shellcheck, Rust formatting and all 22 Rust host tests pass. `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease` passed locally (JDK 21); this first Gradle run had no staged engine.
 
@@ -597,3 +597,39 @@ results and latest CI proof, including both native ABIs and KVM emulator
 fixtures. Read its latest commit's results rather than treating any earlier
 interrupted run as complete. Physical-phone and live-service validation
 remain unperformed; the owner's data and services were not used.
+
+## 19. Disposable build-checkout recovery (24 October 2026)
+
+The owner reported `scripts/build.sh --debug --install` stopping after a
+successful Servo fetch with `^\` / `zsh: quit` (SIGQUIT). Retrying reported
+local changes. An interrupted first checkout can leave partial source, which
+the previous preparation script refused. The owner clarified that
+`servo-checkout/servo` is disposable build input, not an engine worktree.
+
+Preparation now announces the checkout, requests Git progress, force-checks
+out the exact pin and removes untracked leftovers. Downloaded objects and
+ignored compilation/Python caches remain reusable. Source edits and local
+commits are discarded as build inputs; engine development belongs in a
+separate downstream checkout. The pin remains
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`; no engine source change is retained.
+
+Linux validation fetched and prepared that exact commit. A tracked edit and
+an untracked probe were removed by a subsequent preparation, while an ignored
+`target/` probe remained; another run reused the Python environment. Fixture
+regressions cover a partial first checkout with the remote unavailable,
+discarded edits/commits, cache reuse and unchanged clean-file timestamps,
+plus cleanup remaining confined to the managed checkout. Six checks failed
+before the behavioral fix; all 18 source checks and all 48 script checks
+passed afterward.
+
+```sh
+scripts/m0/fetch-servo.sh
+scripts/build.sh --debug --install --check
+python3 -I -m unittest discover -s scripts/tests
+shellcheck scripts/*.sh scripts/m0/servo-pin.sh scripts/m0/env.sh scripts/m0/fetch-servo.sh
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Shell syntax, shellcheck, documentation and whitespace checks passed.
+No macOS native build or device installation was run for this change.
