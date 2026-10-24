@@ -50,7 +50,7 @@ class HomeSearchTest {
         // A second + starts fresh in the same blank rather than adding another tab.
         compose.onNode(hasSetTextAction()).performTextInput("garden")
         compose.onNodeWithContentDescription("New tab").performClick()
-        compose.onNode(hasSetTextAction() and isFocused()).assertTextEquals("")
+        assertEquals("", compose.onNode(hasSetTextAction() and isFocused()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         device.idle()
         assertEquals(blank, device.browser.browserState.value.activeTab?.id)
         assertEquals(1, device.browser.browserState.value.openTabCount)

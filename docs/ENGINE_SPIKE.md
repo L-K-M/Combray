@@ -670,6 +670,18 @@ git diff --check
 The focused Home checks cover inline focus, repeated +, Close, rotation,
 incoming prefill selection, Recent's New tab and navigation in the original
 blank. Pin-editor field lookups are scoped to their dialog because Home's
-field now remains composed behind it. Device-green and final CI/review
-results are tracked in [PR #127](https://github.com/L-K-M/Combray/pull/127).
+field now remains composed behind it.
+
+Local verification passed all four `HomeSearchTest` checks, five
+`AddressSuggestionsUiTest` checks and three real-Servo Home checks: draft
+rotation/submission in the blank, a local suggestion opening in that blank,
+and page-address editing retaining its original tab. The first attempt
+passed 11 of 12; its empty-field assertion also counted the placeholder.
+Reading `EditableText` corrected the assertion, and the entire four-check
+Home search class passed on rerun (162.315 seconds), against the same app
+APK. Raw evidence: `build/device-checks/inline-search-green/` and
+`build/inline-search-home-green.txt`. JVM tests, lint and debug/test assembly
+passed again after that correction; documentation and whitespace checks pass.
+
+Final CI/review results are tracked in [PR #127](https://github.com/L-K-M/Combray/pull/127).
 Physical-phone and live-service checks remain unperformed.
