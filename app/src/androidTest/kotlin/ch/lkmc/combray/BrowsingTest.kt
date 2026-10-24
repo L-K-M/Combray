@@ -123,6 +123,26 @@ class BrowsingTest {
     }
 
     @Test
+    fun closingTheActiveTabShowsTheNextPageInsteadOfAnUnusedHomeTab() {
+        open(Device.RED)
+        val next = device.browser.browserState.value.activeTab!!.id
+        open(Device.GREEN, Placement.NEW_TAB)
+        val closing = device.browser.browserState.value.activeTab!!.id
+        device.browser.newTab()
+        val blank = device.awaitState { it.activeTab?.isHome == true }.activeTab!!.id
+        device.browser.selectTab(closing)
+        device.awaitState { it.activeTab?.id == closing }
+        assertScreen(Device.GREEN)
+
+        device.browser.closeTab(closing)
+        val state = device.awaitState { it.openTabCount == 2 }
+
+        assertEquals(next, state.activeTab?.id)
+        assertScreen(Device.RED)
+        assertTrue(device.recent().any { it is RecentItem.OpenTab && it.tabId == blank })
+    }
+
+    @Test
     fun closingTheLastTabShowsHomeAndUndoReopensTheSameTab() {
         open(Device.OCHRE)
         val tab = device.browser.browserState.value.activeTab!!.id

@@ -633,3 +633,42 @@ git diff --check
 
 Shell syntax, shellcheck, documentation and whitespace checks passed.
 No macOS native build or device installation was run for this change.
+
+## 20. Close-tab successor (24 October 2026)
+
+Closing the focused tab could select an unused Home tab while another page
+remained open. Successor selection now skips blank tabs in Recent order,
+falling back to Home only when no page remains. The selection stays in the
+close transaction; background closes keep focus, and Undo keeps its existing
+behavior.
+
+The new coordinator regression failed before the fix by selecting the blank
+tab instead of the next page. Afterward all 135 coordinator tests passed,
+including the remaining-blank fallback, background close, Undo and last-tab
+checks. The full JVM tests, lint, debug/test APKs and unsigned release build
+passed on Linux x86_64 with JDK 21 and the pinned toolchains. Native formatting
+and all 88 host tests passed. The x86_64 native build and APK ABI check passed
+against unchanged Servo `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`.
+
+```sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 scripts/check_docs.py
+git diff --check
+# From native/:
+cargo fmt --check
+cargo test --lib
+# From the repository root, using this host's existing compiler wrappers:
+ANDROID_HOME=/home/paseo/android-sdk \
+  COMBRAY_HOST_CC=/home/paseo/workspace/Combray/build/tab-counter-host-cc \
+  COMBRAY_HOST_CXX=/home/paseo/workspace/Combray/build/tab-counter-host-c++ \
+  CARGO_BUILD_JOBS=4 scripts/build-native.sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew assembleDebug assembleDebugAndroidTest
+python3 -I scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk --expected-arch x86_64
+```
+
+`BrowsingTest.closingTheActiveTabShowsTheNextPageInsteadOfAnUnusedHomeTab`
+checks real Servo: close the green page with Home interposed in Recent,
+then verify the red page's tab identity and painted pixels. The test APK
+compiled; local execution was deferred because the shared emulator was
+reserved. The Engine PR checks run this regression before merge. No physical
+device or live services were used.
