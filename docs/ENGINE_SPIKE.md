@@ -634,7 +634,46 @@ git diff --check
 Shell syntax, shellcheck, documentation and whitespace checks passed.
 No macOS native build or device installation was run for this change.
 
-## 20. Close-notice appearance (24 October 2026)
+## 20. Close-tab successor (24 October 2026)
+
+Closing the focused tab could select an unused Home tab while another page
+remained open. Successor selection now skips blank tabs in Recent order,
+falling back to Home only when no page remains. The selection stays in the
+close transaction; background closes keep focus, and Undo keeps its existing
+behavior.
+
+The new coordinator regression failed before the fix by selecting the blank
+tab instead of the next page. Afterward all 135 coordinator tests passed,
+including the remaining-blank fallback, background close, Undo and last-tab
+checks. The full JVM tests, lint, debug/test APKs and unsigned release build
+passed on Linux x86_64 with JDK 21 and the pinned toolchains. Native formatting
+and all 88 host tests passed. The x86_64 native build and APK ABI check passed
+against unchanged Servo `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`.
+
+```sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 scripts/check_docs.py
+git diff --check
+# From native/:
+cargo fmt --check
+cargo test --lib
+# From the repository root, using this host's existing compiler wrappers:
+ANDROID_HOME=/home/paseo/android-sdk \
+  COMBRAY_HOST_CC=/home/paseo/workspace/Combray/build/tab-counter-host-cc \
+  COMBRAY_HOST_CXX=/home/paseo/workspace/Combray/build/tab-counter-host-c++ \
+  CARGO_BUILD_JOBS=4 scripts/build-native.sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew assembleDebug assembleDebugAndroidTest
+python3 -I scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk --expected-arch x86_64
+```
+
+`BrowsingTest.closingTheActiveTabShowsTheNextPageInsteadOfAnUnusedHomeTab`
+checks real Servo: close the green page with Home interposed in Recent,
+then verify the red page's tab identity and painted pixels. The test APK
+compiled; local execution was deferred because the shared emulator was
+reserved. The Engine PR checks run this regression before merge. No physical
+device or live services were used.
+
+## 21. Close-notice appearance (24 October 2026)
 
 The owner's dark-mode screenshot showed a light "Tab closed" card on a
 white strip. Material's default snackbar uses inverse colors. Home's outer
@@ -642,37 +681,36 @@ notice padding also left the native engine surface uncovered.
 
 Browser and Recent now share `NoticeHost`, using `surfaceContainerHigh`,
 `onSurface` and `primary` for the card, text and action. Home paints its
-background before reserving notice space, so the native surface stays
-covered. Existing contrast tests cover these color pairs in both schemes.
-No engine source or pin changed.
+background before reserving notice space. Existing contrast tests cover
+these color pairs in both schemes. No engine source or pin changed.
 
 `NoticeThemeTest` closes a synthetic page in forced Dark and Light, samples
-the painted notice and its Home backdrop, then checks that Undo restores
-the same tab. Its APK compiled before the fix. Initial device attempts on
-the separate API-30 x86_64 AVD `combray-dark-notice-20261024` (port 5582)
-failed before app installation: black screenshots, then repeated Android
-`system_server` restarts with `Lost network stack` and unavailable input
-services. These failures do not establish a product regression result.
+the painted notice and Home backdrop, then checks Undo's exact tab identity.
+The archived pre-fix APK failed both checks on `emulator-5560` (API 30,
+x86_64): a `29302c` notice in Light, `e7e2d9` in Dark, and a white
+(`ffffff`) backdrop in both. The fixed APK passed both pixel/Undo checks
+and the existing Home-spacing regression. [PR #128](https://github.com/L-K-M/Combray/pull/128)
+records latest device, CI and review results.
 
-The engine library came from the concurrent successful same-pin build in
-the shared checkout: Rust 1.97.1, NDK r29, downstream Servo
-`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. That build used the local Zig
-host wrappers through `COMBRAY_HOST_CC` and `COMBRAY_HOST_CXX` and completed
-in 4m44s (`build/inline-search-native.log`). Plain host `clang` lacked C
+Initial attempts on a separate fresh AVD (port 5582) failed before app
+installation: black screenshots and repeated Android `system_server`
+restarts (`Lost network stack`). These were infrastructure failures.
+
+The supplied engine library came from the concurrent successful same-pin
+build in the shared checkout: Rust 1.97.1, NDK r29, downstream Servo
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`, using local Zig host wrappers
+(`build/inline-search-native.log`, 4m44s). Plain host `clang` lacked C
 headers; the notice task's corrected build was interrupted when leaving
-the shared checkout. The supplied library was copied into the isolated
-notice worktree before rebuilding the APKs.
+the shared checkout. Initial PR CI also built both native ABIs.
 
 ```sh
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
-scripts/check-app.sh emulator-5582 ch.lkmc.combray.NoticeThemeTest
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.NoticeThemeTest 'ch.lkmc.combray.HomeTest#aCloseNoticeDoesNotCoverHomeLinks'
 python3 scripts/check_docs.py
 git diff --check
 ```
 
 JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
-checks passed locally after the fix.
-
-Local device evidence is under `build/device-checks/notice-theme-red*`;
-build and emulator logs are under `build/notice-theme/`. Device assertions
-and physical-phone validation remain unverified.
+checks passed locally. Evidence: `build/device-checks/notice-theme-*`
+and `build/notice-theme/`. The PR records latest CI and review results.
+Physical-phone validation remains unverified.
