@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -119,7 +120,7 @@ fun AddressSheet(
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        AddressSheetContent(field, { field = it }, matches, target, onDecision, onSelectTab, onNewTab)
+        AddressSheetContent(field, { field = it }, matches, target, onDecision, onSelectTab, onNewTab, onDismiss)
     }
 }
 
@@ -137,6 +138,7 @@ internal fun AddressSheetContent(
     onDecision: (AddressDecision) -> Unit,
     onSelectTab: (String) -> Unit,
     onNewTab: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val interpretation = AddressPolicy.interpret(field.text)
     val query = field.text.trim()
@@ -180,6 +182,11 @@ internal fun AddressSheetContent(
                 onValueChange = onFieldChange,
                 singleLine = true,
                 placeholder = { Text(stringResource(R.string.address_placeholder)) },
+                trailingIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
+                    }
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
                 keyboardActions = KeyboardActions(onGo = {
                     if (interpretation.primary !is AddressDecision.Rejected) onDecision(interpretation.primary)

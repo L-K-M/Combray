@@ -188,6 +188,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The address editor has an explicit Close button beside the field.
 - Servo source preparation announces the large checkout and shows Git progress.
   Rerunning a build replaces partial or edited source and removes untracked
   leftovers, reusing downloaded objects and ignored build caches.

@@ -598,6 +598,34 @@ fixtures. Read its latest commit's results rather than treating any earlier
 interrupted run as complete. Physical-phone and live-service validation
 remain unperformed; the owner's data and services were not used.
 
+### Address-editor Close control (24 October 2026)
+
+The editor now has a trailing × labeled Close. Its required dismiss callback
+is shared with the sheet's dismissal; it does not submit the draft.
+`AddressSuggestionsUiTest.theEditorHasAnAccessibleCloseAction` failed before
+the change because Close was not displayed. Afterward, all five class checks
+passed on API-30 x86_64 `emulator-5560`, including dismissal, a 48dp touch
+target and visibility in the narrow, large-text layout. Output:
+`build/new-tab-close-green.txt` (also preserved in the root checkout).
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug :app:assembleDebugAndroidTest
+adb -s emulator-5560 shell am instrument -w -r \
+  -e class ch.lkmc.combray.AddressSuggestionsUiTest \
+  ch.lkmc.combray.debug.test/androidx.test.runner.AndroidJUnitRunner
+python3 scripts/check_docs.py
+git diff --check
+```
+
+JVM tests, lint and debug/test assembly passed on Linux/JDK 21. The device
+checks used the editor layout on a plain Compose activity, without a native
+engine or fixture server. An initial streamed APK installation failed when
+the emulator's package manager restarted; staging the APKs on-device and
+waiting for the framework to settle succeeded. Inline Home focus, keyboard
+dismissal in Home and real-engine navigation still need verification with
+the coordinated inline-search change. No native build was repeated for this
+layout change.
+
 ## 19. Disposable build-checkout recovery (24 October 2026)
 
 The owner reported `scripts/build.sh --debug --install` stopping after a
