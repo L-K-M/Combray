@@ -89,6 +89,11 @@ object Fixtures {
     /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
     const val ZOOM = "$BASE/zoom.html"
 
+    /** A transparent fixed drawer over the page, optionally held loading by an image. */
+    const val FIXED_SCROLL = "$BASE/fixed-scroll.html"
+
+    fun finishScrollLoad() = request("POST", "/_admin/finish-scroll-load")
+
     /** "combraneedle" three times far apart; titled `FIND:<scrollY>:<selected text>`. */
     const val FIND = "$BASE/find.html"
 
