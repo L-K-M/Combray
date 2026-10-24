@@ -16,11 +16,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +40,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -75,7 +78,8 @@ private const val SUGGESTION_DELAY_MS = 150L
  * and the other reading is one tap away. [target] is the tab the editor was opened for (null: a
  * new tab); typed text survives rotation. A new [restartKey] starts over with [initialText].
  * Once you change the [initialText], matching open tabs and recent pages from [recent] (the local
- * Recent projection, read once for the sheet's life) are listed between the field and the buttons.
+ * Recent projection, read once for the sheet's life) are listed above the field; [onNewTab]'s +
+ * stays beside it, both anchored above the keyboard while only the matches scroll.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +90,7 @@ fun AddressSheet(
     recent: () -> Flow<List<RecentItem>>,
     onDecision: (AddressDecision) -> Unit,
     onSelectTab: (String) -> Unit,
+    onNewTab: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val initial = initialText.orEmpty()
@@ -94,8 +99,6 @@ fun AddressSheet(
     }
     // Text another app sent is the prefill too: suggestions wait until it is edited.
     val prefilled = rememberSaveable(target, restartKey) { initial }
-    val interpretation = AddressPolicy.interpret(field.text)
-    val focus = remember { FocusRequester() }
 
     // Matches come from this device only: typing contacts no server. One subscription for the
     // sheet's life; ranking parses every candidate's host, so it waits for a pause in typing and
@@ -104,73 +107,104 @@ fun AddressSheet(
     val query = field.text.trim()
     val edited = AddressSuggestions.shouldSuggest(field.text, prefilled)
     val matches by produceState(emptyList<RecentItem>(), items, query, edited) {
-        if (!edited) {
-            value = emptyList()
-            return@produceState
-        }
+        // The last query's rows hide at once: while this one waits out its pause and ranks,
+        // stale matches must not pass for its own.
+        value = emptyList()
+        if (!edited) return@produceState
         delay(SUGGESTION_DELAY_MS)
         value = withContext(Dispatchers.Default) {
             AddressSuggestions.rank(items.filter { it.matches(query) }, query, target)
         }
     }
-    val inset = Modifier.padding(horizontal = 16.dp)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+        AddressSheetContent(field, { field = it }, matches, target, onDecision, onSelectTab, onNewTab)
+    }
+}
+
+/**
+ * The editor's layout, apart from the sheet so a device test can check it without the sheet's
+ * window. The matches scroll in whatever room the keyboard leaves; the field, its + and the
+ * submission buttons stay anchored beside it.
+ */
+@Composable
+internal fun AddressSheetContent(
+    field: TextFieldValue,
+    onFieldChange: (TextFieldValue) -> Unit,
+    matches: List<RecentItem>,
+    target: String?,
+    onDecision: (AddressDecision) -> Unit,
+    onSelectTab: (String) -> Unit,
+    onNewTab: () -> Unit,
+) {
+    val interpretation = AddressPolicy.interpret(field.text)
+    val query = field.text.trim()
+    val focus = remember { FocusRequester() }
+    val inset = Modifier.padding(horizontal = 16.dp)
+
+    Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+        // Only the room left above the keyboard, scrolling within it: the field row below stays
+        // next to the keyboard, where the thumb is, however many rows there are.
+        if (matches.isNotEmpty()) {
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Text(
+                    stringResource(R.string.address_suggestions),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = inset.padding(vertical = 4.dp).semantics { heading() },
+                )
+                for (item in matches) {
+                    key(item.key) {
+                        SuggestionRow(item, query, opensHere = target != null) {
+                            when (item) {
+                                is RecentItem.OpenTab -> onSelectTab(item.tabId)
+                                // Like the typed address: it opens in the tab being edited.
+                                is RecentItem.Visit -> AddressSuggestions.navigation(item)?.let(onDecision)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // + as in the bottom bar, kept beside the field: a new tab is always one tap away.
+        Row(
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onNewTab) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
+            }
             OutlinedTextField(
                 value = field,
-                onValueChange = { field = it },
+                onValueChange = onFieldChange,
                 singleLine = true,
                 placeholder = { Text(stringResource(R.string.address_placeholder)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
                 keyboardActions = KeyboardActions(onGo = {
                     if (interpretation.primary !is AddressDecision.Rejected) onDecision(interpretation.primary)
                 }),
-                modifier = inset.fillMaxWidth().focusRequester(focus),
+                modifier = Modifier.weight(1f).focusRequester(focus),
             )
-            // Only the room left above the keyboard, scrolling within it: the buttons below
-            // stay next to the keyboard, where the thumb is, however many rows there are.
-            if (matches.isNotEmpty()) {
-                Column(Modifier.weight(1f, fill = false).padding(top = 8.dp).verticalScroll(rememberScrollState())) {
-                    Text(
-                        stringResource(R.string.address_suggestions),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = inset.padding(vertical = 4.dp).semantics { heading() },
-                    )
-                    for (item in matches) {
-                        key(item.key) {
-                            SuggestionRow(item, opensHere = target != null) {
-                                when (item) {
-                                    is RecentItem.OpenTab -> onSelectTab(item.tabId)
-                                    // Like the typed address: it opens in the tab being edited.
-                                    is RecentItem.Visit -> AddressSuggestions.navigation(item)?.let(onDecision)
-                                }
-                            }
-                        }
-                    }
-                }
+        }
+        val primary = interpretation.primary
+        when {
+            // Nothing typed yet is not a mistake: a new tab opens without an error.
+            primary is AddressDecision.Rejected && primary.reason == RejectReason.EMPTY -> Unit
+            primary is AddressDecision.Rejected -> Text(
+                rejectionText(primary.reason),
+                color = MaterialTheme.colorScheme.error,
+                modifier = inset.padding(top = 12.dp),
+            )
+            else -> Button(
+                onClick = { onDecision(primary) },
+                modifier = inset.fillMaxWidth().padding(top = 12.dp).heightIn(min = 48.dp),
+            ) {
+                DecisionLabel(primary, describe(primary))
             }
-            val primary = interpretation.primary
-            when {
-                // Nothing typed yet is not a mistake: a new tab opens without an error.
-                primary is AddressDecision.Rejected && primary.reason == RejectReason.EMPTY -> Unit
-                primary is AddressDecision.Rejected -> Text(
-                    rejectionText(primary.reason),
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = inset.padding(top = 12.dp),
-                )
-                else -> Button(
-                    onClick = { onDecision(primary) },
-                    modifier = inset.fillMaxWidth().padding(top = 12.dp).heightIn(min = 48.dp),
-                ) {
-                    DecisionLabel(primary, describe(primary))
-                }
-            }
-            interpretation.alternative?.let { alternative ->
-                TextButton(onClick = { onDecision(alternative) }, modifier = inset.fillMaxWidth().heightIn(min = 48.dp)) {
-                    DecisionLabel(alternative, stringResource(R.string.address_instead, describe(alternative)))
-                }
+        }
+        interpretation.alternative?.let { alternative ->
+            TextButton(onClick = { onDecision(alternative) }, modifier = inset.fillMaxWidth().heightIn(min = 48.dp)) {
+                DecisionLabel(alternative, stringResource(R.string.address_instead, describe(alternative)))
             }
         }
     }
@@ -179,17 +213,25 @@ fun AddressSheet(
 
 /**
  * A local match: an open tab to switch to, or a recent page to open where the typed address
- * would ([opensHere]: in the edited tab; otherwise in a new tab).
+ * would ([opensHere]: in the edited tab; otherwise in a new tab). The query's words are
+ * marked in the title and host.
  */
 @Composable
-private fun SuggestionRow(item: RecentItem, opensHere: Boolean, onClick: () -> Unit) {
+private fun SuggestionRow(item: RecentItem, query: String, opensHere: Boolean, onClick: () -> Unit) {
     val host = item.url?.let { displayHost(it) }
     val title = item.title?.takeIf { it.isNotBlank() } ?: host.orEmpty()
     val isTab = item is RecentItem.OpenTab
     val switchToTab = stringResource(R.string.address_switch_to_tab)
+    val highlight = matchStyle()
 
     ListItem(
-        headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        headlineContent = {
+            Text(
+                remember(title, query, highlight) { highlightMatches(title, query, highlight) },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
         supportingContent = {
             // "Switch to tab" leads the second line instead of trailing the row: a trailing label
             // would leave the title little room at large font sizes on a narrow phone. The host
@@ -199,7 +241,13 @@ private fun SuggestionRow(item: RecentItem, opensHere: Boolean, onClick: () -> U
                 if (isTab) {
                     Text(if (host != null) "$switchToTab ·" else switchToTab, maxLines = 1, modifier = Modifier.padding(end = 4.dp))
                 }
-                host?.let { Text(it, maxLines = 1, overflow = TextOverflow.StartEllipsis) }
+                host?.let {
+                    Text(
+                        remember(it, query, highlight) { highlightMatches(it, query, highlight) },
+                        maxLines = 1,
+                        overflow = TextOverflow.StartEllipsis,
+                    )
+                }
             }
         },
         leadingContent = { Icon(if (isTab) TabIcon else HistoryIcon, contentDescription = null) },

@@ -134,6 +134,7 @@ fun RecentSheet(
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     snackbar: SnackbarHostState,
+    onSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var query by rememberSaveable(restartKey) { mutableStateOf("") }
@@ -216,8 +217,8 @@ fun RecentSheet(
 
                 // The server scopes start from the local filter's text; only their own field is sent.
                 when (scope) {
-                    RecentScope.HISTER -> HisterSearchPanel(integrations.hister, initialQuery = query, onOpen = onOpenUrl)
-                    RecentScope.KARAKEEP -> KarakeepPanel(integrations, initialQuery = query, onOpen = onOpenUrl)
+                    RecentScope.HISTER -> HisterSearchPanel(integrations.hister, initialQuery = query, onOpen = onOpenUrl, onSettings = onSettings)
+                    RecentScope.KARAKEEP -> KarakeepPanel(integrations, initialQuery = query, onOpen = onOpenUrl, onSettings = onSettings)
                     RecentScope.OPEN, RecentScope.ALL -> rows?.let { answered ->
                         LocalRecent(
                             browser = browser,

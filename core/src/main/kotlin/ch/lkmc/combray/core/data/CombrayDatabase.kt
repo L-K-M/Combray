@@ -14,8 +14,9 @@ import androidx.room.RoomDatabase
     entities = [
         TabEntity::class, VisitEntity::class, SessionEntity::class,
         ServiceEntity::class, OutboxJobEntity::class, SavedItemEntity::class, ExclusionEntity::class,
+        HomePinEntity::class, HomeHiddenSiteEntity::class,
     ],
-    version = 4,
+    version = 5,
     autoMigrations = [
         // Services gained an optional alternate address.
         AutoMigration(from = 1, to = 2),
@@ -23,12 +24,16 @@ import androidx.room.RoomDatabase
         AutoMigration(from = 2, to = 3),
         // Tabs remember that their page was forgotten.
         AutoMigration(from = 3, to = 4),
+        // The new-tab page gained durable pins and hidden sites.
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class CombrayDatabase : RoomDatabase() {
     abstract fun browser(): BrowserDao
 
     abstract fun integrations(): IntegrationDao
+
+    abstract fun homeLinks(): HomeLinksDao
 
     companion object {
         const val FILE_NAME = "combray.db"

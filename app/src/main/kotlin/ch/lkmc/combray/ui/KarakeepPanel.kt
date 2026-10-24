@@ -52,7 +52,7 @@ private sealed interface BookmarksUi {
  * here. Only this field's text is sent. A newer query's answer always wins over an older one.
  */
 @Composable
-fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit) {
+fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by integrations.karakeepService.collectAsStateWithLifecycle(null)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
@@ -108,6 +108,9 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
         }
         notice?.let {
             Text(it, modifier = Modifier.padding(vertical = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        if (service == null) TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_open_settings))
         }
     }
 

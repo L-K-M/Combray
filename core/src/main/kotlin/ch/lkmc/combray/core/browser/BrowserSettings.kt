@@ -11,6 +11,9 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 /** Whether the Recent button shows the number of open tabs. */
 enum class TabCounter { HIDDEN, SHOWN }
 
+/** Whether one of the new-tab page's optional sections is on screen. */
+enum class HomeSectionVisibility { SHOWN, HIDDEN }
+
 /**
  * The browser's own preferences. Service configuration stays in the database, where it binds
  * queued work; these are plain user choices with nothing depending on them transactionally.
@@ -20,6 +23,12 @@ class BrowserSettings(private val preferences: SharedPreferences) {
     private val theme = MutableStateFlow(read(KEY_THEME_MODE, ThemeMode.entries, ThemeMode.SYSTEM))
     private val text = MutableStateFlow(read(KEY_TEXT_SIZE, TextSize.entries, TextSize.DEFAULT))
     private val counter = MutableStateFlow(read(KEY_TAB_COUNTER, TabCounter.entries, TabCounter.HIDDEN))
+    private val continueCard = MutableStateFlow(
+        read(KEY_HOME_CONTINUE, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
+    )
+    private val frequentSites = MutableStateFlow(
+        read(KEY_HOME_FREQUENT, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
+    )
 
     val unusedTabs: StateFlow<UnusedTabs> = unused.asStateFlow()
 
@@ -29,6 +38,12 @@ class BrowserSettings(private val preferences: SharedPreferences) {
 
     val tabCounter: StateFlow<TabCounter> = counter.asStateFlow()
 
+    /** The new-tab page's Continue card. */
+    val homeContinue: StateFlow<HomeSectionVisibility> = continueCard.asStateFlow()
+
+    /** The new-tab page's automatic frequent-site links. */
+    val homeFrequentSites: StateFlow<HomeSectionVisibility> = frequentSites.asStateFlow()
+
     fun setUnusedTabs(choice: UnusedTabs) = write(KEY_UNUSED_TABS, unused, choice)
 
     fun setThemeMode(choice: ThemeMode) = write(KEY_THEME_MODE, theme, choice)
@@ -37,6 +52,10 @@ class BrowserSettings(private val preferences: SharedPreferences) {
     fun setTextSize(size: TextSize) = write(KEY_TEXT_SIZE, text, size)
 
     fun setTabCounter(choice: TabCounter) = write(KEY_TAB_COUNTER, counter, choice)
+
+    fun setHomeContinue(choice: HomeSectionVisibility) = write(KEY_HOME_CONTINUE, continueCard, choice)
+
+    fun setHomeFrequentSites(choice: HomeSectionVisibility) = write(KEY_HOME_FREQUENT, frequentSites, choice)
 
     /** An unknown stored name falls back to its default: preferences never block startup. */
     private fun <T : Enum<T>> read(key: String, values: List<T>, default: T): T =
@@ -53,6 +72,8 @@ class BrowserSettings(private val preferences: SharedPreferences) {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TEXT_SIZE = "text_size"
         private const val KEY_TAB_COUNTER = "tab_counter"
+        private const val KEY_HOME_CONTINUE = "home_continue"
+        private const val KEY_HOME_FREQUENT = "home_frequent_sites"
     }
 }
 

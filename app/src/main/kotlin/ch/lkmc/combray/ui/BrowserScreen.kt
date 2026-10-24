@@ -10,33 +10,22 @@ import android.content.res.Resources
 import android.os.Build
 import android.os.PersistableBundle
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -63,14 +52,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.colorResource
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -90,7 +72,7 @@ import ch.lkmc.combray.core.browser.KeyboardRequest
 import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.SessionState
-import ch.lkmc.combray.core.browser.TopSite
+import ch.lkmc.combray.core.browser.HomeLink
 import ch.lkmc.combray.core.integration.SaveRequest
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.integration.SensitiveUrls
@@ -98,16 +80,13 @@ import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.EngineSurfaceView
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
-private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE }
-
-private val MONOGRAM_SIZE = 64.dp
-private const val QUICK_LINK_COLUMNS = 3
+private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -127,6 +106,8 @@ fun BrowserScreen(
     val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
     val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
+    var homeEditLink by remember { mutableStateOf<HomeLink?>(null) }
+    var homeEditPage by rememberSaveable { mutableStateOf(HomeEditPage.OVERVIEW) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -253,7 +234,13 @@ fun BrowserScreen(
         addressText = text
         sheet = Sheet.ADDRESS
     }
-    val editNewTab = { editNewTabWith(null) }
+    val newTab = {
+        sheet = Sheet.NONE
+        surfaceView?.hideKeyboard()
+        browser.newTab()
+    }
+    val homeLinks = remember(graph) { graph.home.state(browser.topSites(SensitiveUrls::looksSensitive, limit = Int.MAX_VALUE)) }
+    val continuation = remember(browser) { browser.continueTab(SensitiveUrls::looksSensitive) }
     var recentScope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
     val openRecent = { initial: RecentScope ->
         recentScope = initial
@@ -326,13 +313,48 @@ fun BrowserScreen(
                 )
                 PageOverlay(
                     state = state,
-                    // Read by the new-tab page only while it shows, so history writes behind a
-                    // page cost nothing here.
-                    topSites = { browser.topSites(sensitive = SensitiveUrls::looksSensitive) },
-                    onOpenAddress = editAddress,
-                    onOpenRecent = { openRecent(RecentScope.OPEN) },
-                    onOpenUrl = { url -> browser.openUrl(url, Placement.CURRENT_TAB) },
                     onReload = browser::reload,
+                    home = {
+                        HomeScreen(
+                            links = homeLinks,
+                            continuation = continuation,
+                            settings = graph.settings,
+                            onOpenUrl = { url ->
+                                (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let {
+                                    browser.openUrl(it.url, Placement.CURRENT_TAB)
+                                }
+                            },
+                            onContinue = browser::selectTab,
+                            onEdit = { link ->
+                                homeEditLink = link
+                                homeEditPage = if (link == null) HomeEditPage.OVERVIEW else HomeEditPage.LINK
+                                sheet = Sheet.HOME_EDIT
+                            },
+                            onAdd = { homeEditLink = null; homeEditPage = HomeEditPage.LINK; sheet = Sheet.HOME_EDIT },
+                            onHide = { site ->
+                                scope.launch {
+                                    try {
+                                        graph.home.hideSite(site)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
+                                    }
+                                }
+                            },
+                            onUnpin = { id ->
+                                scope.launch {
+                                    try {
+                                        graph.home.unpin(id)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
+                                    }
+                                }
+                            },
+                        )
+                    },
                 )
                 if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed) {
                     scrollEdge?.let { edge ->
@@ -366,6 +388,7 @@ fun BrowserScreen(
                     state = find,
                     onFind = browser::find,
                     onClose = browser::closeFind,
+                    onNewTab = newTab,
                     modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
                 )
             }
@@ -379,6 +402,9 @@ fun BrowserScreen(
                 // Like system Back: Reader view closes first, then Back moves through the page.
                 onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
                 onAddress = editAddress,
+                onNewTab = newTab,
+                onHister = { openRecent(RecentScope.HISTER) },
+                onKarakeep = { openRecent(RecentScope.KARAKEEP) },
                 onSave = {
                     // Snapshot now: switching tabs right after the tap must not change what is saved.
                     val url = tab?.url
@@ -450,6 +476,7 @@ fun BrowserScreen(
                 dismiss()
                 browser.selectTab(tabId)
             },
+            onNewTab = newTab,
             onDismiss = dismiss,
         )
         Sheet.RECENT -> RecentSheet(
@@ -462,15 +489,15 @@ fun BrowserScreen(
                 // Hister and Karakeep results open as new navigations, through the same address policy.
                 (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrl(it.url, Placement.NEW_TAB) }
             },
-            onNewTab = editNewTab,
+            onNewTab = newTab,
             snackbar = snackbar,
+            onSettings = openSettings,
             onDismiss = dismiss,
         )
         Sheet.MORE -> MoreSheet(
             tab = tab,
             onForward = { dismiss(); browser.goForward() },
             onReload = { dismiss(); browser.reload() },
-            onNewTab = editNewTab,
             // The sheet closes so it does not cover the Undo notice in the main window.
             onCloseTab = { dismiss(); tab?.let { browser.closeTab(it.id) } },
             onPageInfo = { sheet = Sheet.PAGE_INFO },
@@ -493,6 +520,14 @@ fun BrowserScreen(
             retention = graph.retention,
             onUnusedTabsChanged = browser::runMaintenance,
             notices = graph.notices,
+            onDismiss = dismiss,
+        )
+        Sheet.HOME_EDIT -> HomeEditorSheet(
+            home = graph.home,
+            states = homeLinks,
+            settings = graph.settings,
+            initialLink = homeEditLink,
+            initialPage = homeEditPage,
             onDismiss = dismiss,
         )
         Sheet.PAGE_INFO -> {
@@ -596,11 +631,8 @@ private suspend fun reportSave(
 @Composable
 private fun PageOverlay(
     state: BrowserState,
-    topSites: () -> Flow<List<TopSite>>,
-    onOpenAddress: () -> Unit,
-    onOpenRecent: () -> Unit,
-    onOpenUrl: (String) -> Unit,
     onReload: () -> Unit,
+    home: @Composable () -> Unit,
 ) {
     val tab: ActiveTab? = state.activeTab
     when {
@@ -609,110 +641,11 @@ private fun PageOverlay(
         // No tab yet does not mean home: a restored session must not flash "New tab" first.
         // The launch screen covers this for up to two seconds; a slower restore says what happens.
         state.session == SessionState.RESTORING -> OverlayMessage(stringResource(R.string.session_restoring))
-        tab == null || tab.isHome -> Home(topSites, onOpenAddress, onOpenRecent, onOpenUrl)
+        tab == null || tab.isHome -> home()
         tab.crashed -> OverlayMessage(stringResource(R.string.page_crashed)) {
             Button(onClick = onReload) { Text(stringResource(R.string.action_reload)) }
         }
         state.engine == EngineStatus.STARTING -> OverlayMessage(stringResource(R.string.engine_starting))
-    }
-}
-
-@Composable
-private fun Home(
-    topSites: () -> Flow<List<TopSite>>,
-    onOpenAddress: () -> Unit,
-    onOpenRecent: () -> Unit,
-    onOpenUrl: (String) -> Unit,
-) {
-    // One subscription per visit to the new-tab page, which also starts its retention window.
-    val sites by remember { topSites() }.collectAsStateWithLifecycle<List<TopSite>?>(null)
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        // Until the first ranking arrives, only the background: drawing the page without tiles
-        // and then with them moves everything, under a finger about to tap Recent.
-        val shown = sites ?: return@Surface
-        // Scrolls once the tiles outgrow the window (landscape, large text); until then the
-        // content stays centred, as it is at least the window's height.
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()).heightIn(min = maxHeight).fillMaxWidth().padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Monogram()
-                Text(
-                    stringResource(R.string.home_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Text(stringResource(R.string.home_body), textAlign = TextAlign.Center)
-                Button(onClick = onOpenAddress, modifier = Modifier.widthIn(min = 240.dp)) {
-                    Text(stringResource(R.string.address_placeholder))
-                }
-                OutlinedButton(onClick = onOpenRecent, modifier = Modifier.widthIn(min = 240.dp)) {
-                    Text(stringResource(R.string.action_recent))
-                }
-                if (shown.isNotEmpty()) QuickLinks(shown, onOpenUrl)
-            }
-        }
-    }
-}
-
-/** The launcher artwork: square and sharp like the source (media-sources/icon.png). */
-@Composable
-private fun Monogram() {
-    Box(Modifier.size(MONOGRAM_SIZE).background(colorResource(R.color.ic_launcher_background))) {
-        Image(painterResource(R.mipmap.ic_launcher_foreground), contentDescription = null, modifier = Modifier.fillMaxSize())
-    }
-}
-
-/** The sites the user visits most, in rows of icon tiles. Internal for the accessibility check. */
-@Composable
-internal fun QuickLinks(sites: List<TopSite>, onOpenUrl: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            stringResource(R.string.home_quick_links),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { heading() },
-        )
-        sites.chunked(QUICK_LINK_COLUMNS).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { site -> QuickLink(site, onOpenUrl, Modifier.weight(1f)) }
-                // A short last row keeps the tiles as wide as those of a full row.
-                repeat(QUICK_LINK_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickLink(site: TopSite, onOpenUrl: (String) -> Unit, modifier: Modifier) {
-    val host = displayHost(site.url)
-    val openLabel = stringResource(R.string.home_open_site, host)
-    Surface(
-        onClick = { onOpenUrl(site.url) },
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = modifier.semantics {
-            contentDescription = openLabel
-            role = Role.Button
-        },
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Box(
-                Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(9.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                // From the name shown below it: "E" for www.example.org, not "W" or punycode's "X".
-                Text(monogram(site.url), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge)
-            }
-            // Cut from the start, so the registrable domain stays visible.
-            Text(host, maxLines = 1, overflow = TextOverflow.StartEllipsis, style = MaterialTheme.typography.labelSmall)
-        }
     }
 }
 

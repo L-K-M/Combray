@@ -1,6 +1,7 @@
 package ch.lkmc.combray.core.data
 
 import androidx.room.ColumnInfo
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -75,3 +76,34 @@ data class SessionEntity(
         const val ROW = 0
     }
 }
+
+/**
+ * A quick link the user pinned on the new-tab page. Unlike an automatic tile, it keeps its
+ * exact address and label, survives the history-retention window, and several pins may name
+ * pages of one site. Positions stay gap-free, 0 first.
+ */
+@Entity(tableName = "home_pins", indices = [Index(value = ["url"], unique = true)])
+data class HomePinEntity(
+    @PrimaryKey val id: String,
+    val url: String,
+    /**
+     * The address' www-merged site key: how its automatic tile, hiding and site-wide Forget
+     * find it. The whole [url] when the address has no host, so a pin is never half-matched.
+     */
+    val site: String,
+    val title: String,
+    val position: Int,
+)
+
+/** A site suppressed from the new-tab page's automatic quick links until restored. */
+@Entity(tableName = "home_hidden_sites")
+data class HomeHiddenSiteEntity(
+    /** The www-merged site key, like [HomePinEntity.site] and top-site ranking use. */
+    @PrimaryKey val site: String,
+)
+
+/** An open tab, with whether its current page is a failed visit (Servo's error page). */
+data class TabWithFailure(
+    @Embedded val tab: TabEntity,
+    val failed: Boolean,
+)

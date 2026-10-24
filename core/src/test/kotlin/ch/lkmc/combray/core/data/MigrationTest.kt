@@ -77,6 +77,43 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun version5KeepsEverythingAndAddsUsableHomeLinks() {
+        helper.createDatabase(DB, 4).use {
+            it.execSQL(
+                "INSERT INTO tabs (id, state, currentVisitId, url, title, createdAt, lastFocusedAt, closedAt, pageForgotten) " +
+                    "VALUES ('t', 'OPEN', NULL, 'https://a.example/', 'A', 1, 2, NULL, 0)",
+            )
+            it.execSQL(
+                "INSERT INTO services (kind, baseUrl, fingerprint, generation, captureEnabled, updatedAt, alternateUrl, listId, listName) " +
+                    "VALUES ('KARAKEEP', 'https://keep.example', 'fp', 3, 0, 1, 'http://keep.lan', 'list', 'Later')",
+            )
+        }
+        helper.runMigrationsAndValidate(DB, 5, true).use { db ->
+            db.query("SELECT url, title FROM tabs").use { row ->
+                row.moveToFirst()
+                assertEquals("https://a.example/", row.getString(0))
+                assertEquals("A", row.getString(1))
+            }
+            db.query("SELECT listName FROM services").use { row ->
+                row.moveToFirst()
+                assertEquals("Later", row.getString(0))
+            }
+            // The new tables hold pins and hidden sites; the index rejects a second pin of an address.
+            db.execSQL("INSERT INTO home_pins (id, url, site, title, position) VALUES ('p', 'https://a.example/', 'a.example', 'A', 0)")
+            db.execSQL("INSERT INTO home_hidden_sites (site) VALUES ('b.example')")
+            db.query("SELECT url, position FROM home_pins").use { row ->
+                row.moveToFirst()
+                assertEquals("https://a.example/", row.getString(0))
+                assertEquals(0, row.getInt(1))
+            }
+            db.query("SELECT site FROM home_hidden_sites").use { row ->
+                row.moveToFirst()
+                assertEquals("b.example", row.getString(0))
+            }
+        }
+    }
+
     /**
      * Room rewrites a version's schema file whenever an entity changes, and the tests above read
      * those files, so an entity change without a version bump would pass them and then fail to open
@@ -111,6 +148,7 @@ class MigrationTest {
             2 to "1fbbc5b0e479253d149c896b338615ec",
             3 to "ca194eaf23c7010cf9ee87695093f140",
             4 to "783659b8d5966f6a926345b2bf922f59",
+            5 to "212d54a2850997a2dffd0c90a1878867",
         )
     }
 }

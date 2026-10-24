@@ -11,7 +11,6 @@ class MoreActionsTest {
             listOf(
                 MoreAction.FORWARD,
                 MoreAction.RELOAD,
-                MoreAction.NEW_TAB,
                 MoreAction.CLOSE_TAB,
                 MoreAction.PAGE_INFO,
                 MoreAction.READER,
@@ -34,14 +33,14 @@ class MoreActionsTest {
     @Test
     fun aNewTabHomeCanBeClosedButHasNoPageRows() {
         assertEquals(
-            listOf(MoreAction.NEW_TAB, MoreAction.CLOSE_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
+            listOf(MoreAction.CLOSE_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
             moreActions(PAGE.copy(url = null, title = null, hasView = false), readerOpen = false),
         )
     }
 
     @Test
     fun withoutATabThereIsNothingToClose() {
-        assertEquals(listOf(MoreAction.NEW_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerOpen = false))
+        assertEquals(listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerOpen = false))
     }
 
     private companion object {

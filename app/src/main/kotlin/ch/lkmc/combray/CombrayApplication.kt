@@ -12,6 +12,7 @@ import ch.lkmc.combray.core.browser.AppVisibility
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.EngineStatus
+import ch.lkmc.combray.core.browser.HomeLinks
 import ch.lkmc.combray.core.browser.Retention
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.integration.Integrations
@@ -113,6 +114,7 @@ class AppGraph(application: Application) {
         scheduler = WorkManagerScheduler(application),
     )
     val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
+    val home = HomeLinks(database)
     /** One retention policy for maintenance and the Settings label, so the two cannot diverge. */
     val retention = Retention()
     val browser = BrowserCoordinator(

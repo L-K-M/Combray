@@ -28,6 +28,20 @@ interface BrowserDao {
     @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC")
     fun observeOpenTabs(): Flow<List<TabEntity>>
 
+    /**
+     * Open tabs in Recent order with whether the visit each shows is a failed one, so the
+     * new-tab page's Continue card can leave out tabs on Servo's error page.
+     */
+    @Query(
+        """
+        SELECT t.*, COALESCE(v.failed, 0) AS failed FROM tabs t
+        LEFT JOIN visits v ON v.id = t.currentVisitId
+        WHERE t.state = 'OPEN'
+        ORDER BY t.lastFocusedAt DESC
+        """,
+    )
+    fun observeOpenTabsForContinue(): Flow<List<TabWithFailure>>
+
     @Insert
     suspend fun insertVisit(visit: VisitEntity)
 
@@ -98,21 +112,21 @@ interface BrowserDao {
         UPDATE tabs SET currentVisitId = NULL, pageForgotten = 1
         WHERE currentVisitId IN (
             SELECT id FROM visits
-            WHERE host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
+            WHERE host IN (:hosts) OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
         )
         """,
     )
-    suspend fun detachVisitsForHost(host: String, subdomainSuffix: String?)
+    suspend fun detachVisitsForHosts(hosts: List<String>, subdomainSuffix: String?)
 
     /**
-     * Removes history for a host, including the page an open tab is showing. Call
-     * [detachVisitsForHost] first in the same transaction, or that tab keeps a dangling
+     * Removes history for the hosts, including the page an open tab is showing. Call
+     * [detachVisitsForHosts] first in the same transaction, or that tab keeps a dangling
      * `currentVisitId`.
      */
     @Query(
         """
-        DELETE FROM visits WHERE host = :host OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
+        DELETE FROM visits WHERE host IN (:hosts) OR (:subdomainSuffix IS NOT NULL AND substr(host, -length(:subdomainSuffix)) = :subdomainSuffix)
         """,
     )
-    suspend fun deleteVisitsForHost(host: String, subdomainSuffix: String?): Int
+    suspend fun deleteVisitsForHosts(hosts: List<String>, subdomainSuffix: String?): Int
 }
