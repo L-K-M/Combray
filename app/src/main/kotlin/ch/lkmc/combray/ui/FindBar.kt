@@ -1,13 +1,14 @@
 package ch.lkmc.combray.ui
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -49,7 +50,7 @@ import kotlinx.coroutines.delay
  * the next match.
  */
 @Composable
-fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () -> Unit, onNewTab: () -> Unit, modifier: Modifier = Modifier) {
     var query by rememberSaveable { mutableStateOf(state.query) }
     // Recorded when asked, not when the answer is published: a Search or a step during the
     // typing pause must not be followed by a search that jumps back to the first match.
@@ -72,10 +73,8 @@ fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () ->
     val outcome = state.outcome.takeIf { query == state.query }
     val stepping = outcome is FindOutcome.Found
     Surface(tonalElevation = 3.dp, modifier = modifier) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        // Separate the field from the actions so New tab stays usable even at 320dp and 200% text.
+        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it.take(MAX_FIND_QUERY_LENGTH) },
@@ -83,25 +82,30 @@ fun FindBar(state: FindState, onFind: (String, FindStep) -> Unit, onClose: () ->
                 label = { Text(stringResource(R.string.action_find_in_page), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { ask(query, FindStep.NEXT) }),
-                modifier = Modifier.weight(1f).padding(horizontal = 4.dp).focusRequester(focus),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).focusRequester(focus),
             )
-            // A live region: TalkBack announces each new position or "No matches".
-            Text(
-                findLabel(outcome),
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 96.dp).padding(horizontal = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            )
-            IconButton(onClick = { ask(query, FindStep.PREVIOUS) }, enabled = stepping) {
-                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.action_find_previous))
-            }
-            IconButton(onClick = { ask(query, FindStep.NEXT) }, enabled = stepping) {
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.action_find_next))
-            }
-            IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_find))
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                // A live region: TalkBack announces each new position or "No matches".
+                Text(
+                    findLabel(outcome),
+                    style = MaterialTheme.typography.labelLarge,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                IconButton(onClick = { ask(query, FindStep.PREVIOUS) }, enabled = stepping) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.action_find_previous))
+                }
+                IconButton(onClick = { ask(query, FindStep.NEXT) }, enabled = stepping) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.action_find_next))
+                }
+                IconButton(onClick = onNewTab) {
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
+                }
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_find))
+                }
             }
         }
     }

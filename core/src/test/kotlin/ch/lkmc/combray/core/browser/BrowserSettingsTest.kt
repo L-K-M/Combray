@@ -80,6 +80,37 @@ class BrowserSettingsTest {
     }
 
     @Test
+    fun theNewTabSectionsStartShownAndKeepTheirChoice() {
+        val settings = BrowserSettings(preferences)
+
+        assertEquals(HomeSectionVisibility.SHOWN, settings.homeContinue.value)
+        assertEquals(HomeSectionVisibility.SHOWN, settings.homeFrequentSites.value)
+
+        settings.setHomeContinue(HomeSectionVisibility.HIDDEN)
+        settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        assertEquals(HomeSectionVisibility.HIDDEN, settings.homeContinue.value)
+        assertEquals(HomeSectionVisibility.HIDDEN, settings.homeFrequentSites.value)
+
+        val restarted = BrowserSettings(preferences)
+        assertEquals(HomeSectionVisibility.HIDDEN, restarted.homeContinue.value)
+        assertEquals(HomeSectionVisibility.HIDDEN, restarted.homeFrequentSites.value)
+    }
+
+    /** The sections' keys are independent: hiding one leaves the other on screen. */
+    @Test
+    fun theNewTabSectionsHideIndependently() {
+        val settings = BrowserSettings(preferences)
+        settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        assertEquals("HIDDEN", preferences.getString("home_frequent_sites", null))
+
+        assertEquals(HomeSectionVisibility.SHOWN, settings.homeContinue.value)
+        assertNull(preferences.getString("home_continue", null))
+
+        preferences.edit().putString("home_continue", "SOMETIMES").commit()
+        assertEquals(HomeSectionVisibility.SHOWN, BrowserSettings(preferences).homeContinue.value)
+    }
+
+    @Test
     fun pagesStartAtTheirOwnSize() {
         assertEquals(TextSize.PERCENT_100, BrowserSettings(preferences).textSize.value)
         assertEquals(1f, TextSize.DEFAULT.zoom)

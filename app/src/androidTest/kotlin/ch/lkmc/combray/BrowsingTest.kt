@@ -104,6 +104,7 @@ class BrowsingTest {
 
     @Test
     fun aNewTabOffersTheSiteVisitedMostAndOpensItsNewestPage() {
+        device.resetHome()
         open(Device.OCHRE)
         open(Device.GREEN)
         device.browser.newTab()

@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -29,6 +30,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.ActiveTab
@@ -37,7 +39,9 @@ import ch.lkmc.combray.core.browser.FindState
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TextSize
-import ch.lkmc.combray.core.browser.TopSite
+import ch.lkmc.combray.core.browser.HomeLink
+import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
@@ -45,6 +49,7 @@ import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.FindBar
+import ch.lkmc.combray.ui.HomeContent
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
@@ -83,7 +88,7 @@ class AccessibilityTest {
         }
 
         assertTargetsAreAccessible()
-        for (label in listOf("Back", "Saving to Karakeep", "Share", "Recent, 3 open tabs", "More")) {
+        for (label in listOf("Back", "Saving to Karakeep", "Share", "New tab", "Recent, 3 open tabs", "More")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
@@ -187,14 +192,20 @@ class AccessibilityTest {
             Bar(null, openTabs = 0, SaveStatus.NotConfigured)
         }
 
+        // The home dock: one search affordance and labeled actions, reflowed at 200% font.
         assertTargetsAreAccessible()
+        compose.onNodeWithText("Search with Kagi or enter address").assertIsDisplayed()
+        for (label in listOf("Hister", "Karakeep", "Recent", "More")) {
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+        compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
     }
 
     @Test
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {})
+                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {})
             }
         }
 
@@ -203,6 +214,8 @@ class AccessibilityTest {
         for (label in listOf("Close tab", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
+        // New tab is the bar's +, no longer a More row.
+        compose.onNodeWithText("New tab").assertDoesNotExist()
         compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
@@ -234,11 +247,11 @@ class AccessibilityTest {
     @Test
     fun theFindBarIsAccessible() {
         show(LARGE_FONT) {
-            FindBar(FindState("rate limit", FindOutcome.Found(999, 2, capped = true)), { _, _ -> }, {}, Modifier.width(NARROW_WIDTH))
+            FindBar(FindState("rate limit", FindOutcome.Found(999, 2, capped = true)), { _, _ -> }, {}, {}, Modifier.width(NARROW_WIDTH))
         }
 
         assertTargetsAreAccessible()
-        for (label in listOf("Previous match", "Next match", "Close find in page")) {
+        for (label in listOf("Previous match", "Next match", "New tab", "Close find in page")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithText("3 of 999+").assertIsDisplayed()
@@ -248,7 +261,10 @@ class AccessibilityTest {
     fun theQuickLinksAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                QuickLinks(listOf(TopSite("example.org", "https://www.example.org/a", 3), TopSite("b.test", "https://b.test/", 1)), {})
+                QuickLinks(
+                    listOf(HomeLink("example.org", "example.org", "https://www.example.org/a", null, null), HomeLink("b.test", "b.test", "https://b.test/", null, null)),
+                    {}, {},
+                )
             }
         }
 
@@ -256,6 +272,43 @@ class AccessibilityTest {
         for (label in listOf("Open example.org", "Open b.test")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
+    }
+
+    @Test
+    fun homeReflowsAtLargeTextInDarkModeAndRtl() {
+        val links = (1..6).map { HomeLink("site$it", "site$it.test", "https://site$it.test/", null, null) }
+        var selected: String? = null
+        show(LARGE_FONT) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                CombrayTheme(ThemeMode.DARK) {
+                    HomeContent(
+                        links, RecentItem.OpenTab("exact-tab", "https://example.org/", "A remembered page", System.currentTimeMillis(), false),
+                        {}, { selected = it }, {}, {}, {}, Modifier.width(NARROW_WIDTH),
+                    )
+                }
+            }
+        }
+
+        // Every destination can be brought fully into view without shrinking its touch area.
+        for (label in listOf("Continue, A remembered page") + links.map { "Open ${it.site}" }) {
+            val node = compose.onNodeWithContentDescription(label).performScrollTo().assertIsDisplayed()
+            assertNull(problem(node.fetchSemanticsNode()))
+        }
+        compose.onNodeWithText("Edit").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Continue, A remembered page").performScrollTo().performClick()
+        assertEquals("exact-tab", selected)
+    }
+
+    @Test
+    fun anEmptyHomeOffersAddWithoutInventedSites() {
+        var adds = 0
+        show(DEFAULT_FONT) {
+            HomeContent(emptyList(), null, {}, {}, {}, { adds++ }, {}, Modifier.width(NARROW_WIDTH))
+        }
+        compose.onNodeWithText("Continue").assertDoesNotExist()
+        compose.onNodeWithText("Add link").performClick()
+        assertEquals(1, adds)
+        assertTargetsAreAccessible()
     }
 
     @Test
@@ -416,6 +469,9 @@ class AccessibilityTest {
         onAddress = onAddress,
         onSave = {},
         onShare = {},
+        onHister = {},
+        onKarakeep = {},
+        onNewTab = {},
         onRecent = {},
         onRecentLongPress = {},
         onMore = {},
@@ -437,8 +493,8 @@ class AccessibilityTest {
         /** Small phones are 320dp wide. */
         val NARROW_WIDTH = 320.dp
 
-        /** Wide enough for the single-row bar. */
-        val WIDE_WIDTH = 412.dp
+        /** Wide enough for the single-row bar: six 48dp actions plus a usable address field. */
+        val WIDE_WIDTH = 440.dp
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp

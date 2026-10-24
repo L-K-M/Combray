@@ -135,7 +135,7 @@
     <string name="recent_remove">Remove from Recent</string>
     <string name="recent_forget_site">Forget %1$s</string>
     <string name="recent_forget_site_title">Forget %1$s?</string>
-    <string name="recent_forget_site_body">Removes this site’s pages from Recent on this device. Open tabs stay open on their current page. Hister and Karakeep are not changed.</string>
+    <string name="recent_forget_site_body">Removes this site’s pages and pinned links on this device, including its www. address. Open tabs stay open on their current page. Hister and Karakeep are not changed.</string>
     <string name="recent_forget_subdomains">Include subdomains</string>
     <string name="recent_forget_confirm">Forget</string>
     <string name="recent_empty">No open tabs or recent pages yet.</string>

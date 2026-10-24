@@ -6,8 +6,10 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
+import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -141,6 +143,16 @@ class Device(private val frame: () -> Unit = {}) {
         recent().filterIsInstance<RecentItem.OpenTab>().forEach { browser.closeTab(it.tabId) }
         idle()
         awaitState { it.activeTab == null }
+    }
+
+    /** Fixture isolation: a failed editor check must not hide another check's automatic links. */
+    internal fun resetHome() = runBlocking {
+        settings.setHomeContinue(HomeSectionVisibility.SHOWN)
+        settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        val home = app.graph.home
+        val state = home.state(flowOf(emptyList())).first()
+        state.pins.forEach { home.unpin(it.id) }
+        state.hiddenSites.forEach { home.restoreSite(it) }
     }
 
     /** Waits until screenshots have the [orientation]'s shape, so a pre-rotation frame never counts. */

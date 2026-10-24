@@ -7,7 +7,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -34,7 +33,6 @@ fun MoreSheet(
     tab: ActiveTab?,
     onForward: () -> Unit,
     onReload: () -> Unit,
-    onNewTab: () -> Unit,
     onCloseTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
@@ -45,7 +43,7 @@ fun MoreSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        MoreActions(tab, onForward, onReload, onNewTab, onCloseTab, onPageInfo, onSettings, readerOpen, onReader, onTextSize, onFind)
+        MoreActions(tab, onForward, onReload, onCloseTab, onPageInfo, onSettings, readerOpen, onReader, onTextSize, onFind)
     }
 }
 
@@ -55,7 +53,6 @@ internal fun MoreActions(
     tab: ActiveTab?,
     onForward: () -> Unit,
     onReload: () -> Unit,
-    onNewTab: () -> Unit,
     onCloseTab: () -> Unit,
     onPageInfo: () -> Unit,
     onSettings: () -> Unit,
@@ -71,7 +68,6 @@ internal fun MoreActions(
             when (action) {
                 MoreAction.FORWARD -> MoreRow(Icons.AutoMirrored.Filled.ArrowForward, R.string.action_forward, onForward)
                 MoreAction.RELOAD -> MoreRow(Icons.Filled.Refresh, R.string.action_reload, onReload)
-                MoreAction.NEW_TAB -> MoreRow(Icons.Filled.Add, R.string.action_new_tab, onNewTab)
                 MoreAction.CLOSE_TAB -> MoreRow(Icons.Filled.Close, R.string.action_close_tab, onCloseTab)
                 MoreAction.PAGE_INFO -> MoreRow(Icons.Outlined.Info, R.string.action_page_info, onPageInfo)
                 MoreAction.READER ->
@@ -85,14 +81,14 @@ internal fun MoreActions(
 }
 
 /** A row of the More sheet. */
-internal enum class MoreAction { FORWARD, RELOAD, NEW_TAB, CLOSE_TAB, PAGE_INFO, READER, FIND, TEXT_SIZE, SETTINGS }
+internal enum class MoreAction { FORWARD, RELOAD, CLOSE_TAB, PAGE_INFO, READER, FIND, TEXT_SIZE, SETTINGS }
 
 /** The rows More offers for [tab], in order. */
 internal fun moreActions(tab: ActiveTab?, readerOpen: Boolean): List<MoreAction> = buildList {
     val onPage = tab?.url != null
     if (tab?.canGoForward == true) add(MoreAction.FORWARD)
     if (onPage) add(MoreAction.RELOAD)
-    add(MoreAction.NEW_TAB)
+    // New tab is the bottom bar's +, not a More row (owner requirement, 24 October 2026).
     // A new-tab home is a tab too; the Undo notice brings a closed tab back.
     if (tab != null) add(MoreAction.CLOSE_TAB)
     // Share is in the bottom bar.

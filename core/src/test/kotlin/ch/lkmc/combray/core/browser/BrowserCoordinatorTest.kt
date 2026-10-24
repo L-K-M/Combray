@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
+import ch.lkmc.combray.core.data.HomePinEntity
 import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
@@ -1081,6 +1082,100 @@ class BrowserCoordinatorTest {
         assertEquals((8 downTo 3).map { "site$it.test" }, topSites().map { it.site })
     }
 
+    /** What the new-tab page's Continue card shows: the other open tab used most recently. */
+    private fun continueTab() = runBlocking { browser.continueTab(SensitiveUrls::looksSensitive).first() }
+
+    @Test
+    fun theContinueCardOffersTheOtherTabMostRecentlyUsed() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+
+        // c.test has focus; the card offers what the user left for it.
+        val card = continueTab()
+        assertEquals(b, card?.tabId)
+        assertEquals("https://b.test/", card?.url)
+        assertFalse(card!!.active)
+
+        // Focus order, not creation order: back on a.test, c.test is what to continue.
+        now += 1_000
+        browser.selectTab(a); idle()
+        assertEquals(c, continueTab()?.tabId)
+    }
+
+    @Test
+    fun theContinueCardIsEmptyWithOnlyTheFocusedTab() {
+        ready()
+        browser.openUrl("https://only.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://only.test/")
+
+        assertNull(continueTab())
+    }
+
+    @Test
+    fun theContinueCardLeavesOutBlankFailedForgottenAndSensitiveTabs() {
+        ready()
+        browser.openUrl("https://kept.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://kept.test/")
+        browser.openUrl("https://login.test/callback?access_token=abc", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://login.test/callback?access_token=abc")
+        browser.openUrl("https://down.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://down.test/")
+        runBlocking {
+            // Servo committed its error page for down.test: the visit is a failure.
+            val dao = database.browser()
+            val visit = dao.visit(dao.tab(state().activeTab!!.id)!!.currentVisitId!!)!!
+            dao.updateVisit(visit.copy(failed = true))
+        }
+        // Focus moves to an unused new tab: it has no address to continue.
+        browser.newTab(); idle()
+
+        assertEquals("https://kept.test/", continueTab()?.url)
+
+        // Forgetting the last eligible site leaves nothing to continue.
+        browser.forgetSite("kept.test", includeSubdomains = false); idle()
+        assertNull(continueTab())
+    }
+
+    /**
+     * A background tab ranks right behind the focused one in Recent without being used
+     * ([createBackgroundTab]); the card still prefers a tab the user actually read.
+     */
+    @Test
+    fun theContinueCardPrefersAUsedTabOverANewerBackgroundOne() {
+        ready()
+        browser.openUrl("https://reading.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://reading.test/")
+        val reading = state().activeTab!!.id
+        now += 1_000
+        browser.openUrl("https://current.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://current.test/")
+        now += 1_000
+        // Ranks right behind the focused tab in Recent without having been used.
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+
+        assertEquals("https://reading.test/", continueTab()?.url)
+
+        // With the used tab gone, the unseen background tab is still the card's fallback.
+        browser.closeTab(reading); idle()
+        assertEquals("https://later.test/", continueTab()?.url)
+    }
+
+    /** A stale id selects nothing: the card's tap does not resurrect a closed tab. */
+    @Test
+    fun selectingAStaleTabIdIsANoOp() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        val gone = state().activeTab!!.id
+        browser.closeTab(gone); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        val shown = state().activeTab!!.id
+
+        browser.selectTab(gone); idle()
+
+        assertEquals(shown, state().activeTab?.id)
+        assertEquals(1, state().openTabCount)
+    }
+
     @Test
     fun closedHistoryExpiresButOpenTabsDoNot() {
         ready()
@@ -1344,6 +1439,68 @@ class BrowserCoordinatorTest {
         assertTrue("https://www.example.com/2" !in urls && "https://example.com/1" !in urls)
         // The open tab still shows its page.
         assertEquals("https://example.com/4", state().activeTab?.url)
+    }
+
+    /**
+     * Forget site and the new-tab page share one site meaning: "www." is only a spelling of its
+     * bare site (the recorded #42 gap), never another site. Other subdomains stay unless asked.
+     */
+    @Test
+    fun forgettingASiteCoversBothWwwSpellingsButNotOtherSubdomains() {
+        ready()
+        browser.openUrl("https://example.com/1", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/1")
+        commit(1, 11, "https://www.example.com/2")
+        commit(1, 12, "https://sub.example.com/3")
+        commit(1, 13, "https://www.sub.example.com/4")
+        commit(1, 14, "https://other.test/5")
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        val urls = recent().map { it.url }
+        assertTrue("https://example.com/1" !in urls && "https://www.example.com/2" !in urls)
+        assertTrue("https://sub.example.com/3" in urls)
+        assertTrue("https://www.sub.example.com/4" in urls)
+        assertTrue("https://other.test/5" in urls)
+    }
+
+    /** Asked by the "www." spelling, the same site is forgotten: the bare spelling goes too. */
+    @Test
+    fun forgettingAWwwSpellingCoversTheBareSiteToo() {
+        ready()
+        browser.openUrl("https://example.com/1", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/1")
+        commit(1, 11, "https://www.example.com/2")
+        commit(1, 12, "https://sub.example.com/3")
+
+        browser.forgetSite("www.example.com", includeSubdomains = false); idle()
+
+        val urls = recent().map { it.url }
+        assertTrue("https://example.com/1" !in urls && "https://www.example.com/2" !in urls)
+        assertTrue("https://sub.example.com/3" in urls)
+    }
+
+    /** A forgotten site loses its new-tab pins of either spelling; other subdomains keep theirs. */
+    @Test
+    fun forgettingASiteRemovesItsHomePins() {
+        ready()
+        runBlocking {
+            val dao = database.homeLinks()
+            dao.insertPin(HomePinEntity("p1", "https://example.com/a", "example.com", "A", 0))
+            dao.insertPin(HomePinEntity("p2", "https://www.example.com/b", "example.com", "B", 1))
+            dao.insertPin(HomePinEntity("p3", "https://sub.example.com/c", "sub.example.com", "C", 2))
+            dao.insertPin(HomePinEntity("p4", "https://other.test/d", "other.test", "D", 3))
+        }
+
+        browser.forgetSite("www.example.com", includeSubdomains = false); idle()
+
+        var pins = runBlocking { database.homeLinks().observePins().first() }
+        assertEquals(listOf("p3", "p4"), pins.map { it.id })
+        assertEquals(listOf(0, 1), pins.map { it.position })
+
+        browser.forgetSite("sub.example.com", includeSubdomains = false); idle()
+        pins = runBlocking { database.homeLinks().observePins().first() }
+        assertEquals(listOf("p4"), pins.map { it.id })
     }
 
     @Test

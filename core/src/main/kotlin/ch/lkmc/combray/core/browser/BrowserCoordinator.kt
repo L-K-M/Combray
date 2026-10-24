@@ -230,7 +230,7 @@ class BrowserCoordinator(
                 val cutoff = clock.now() - retention.closedHistoryMillis
                 visits
                     .filter { it.lastSeenAt >= cutoff && !sensitive(it.url) }
-                    .mapNotNull { visit -> visit.host?.let { it.removePrefix(WWW) to visit } }
+                    .mapNotNull { visit -> visit.host?.let { HostNames.mergedSite(it) to visit } }
                     // Grouping keeps the newest-first order: each site's first page is its newest,
                     // and the stable sort below leaves sites with as many visits in recency order.
                     .groupBy({ it.first }, { it.second })
@@ -240,6 +240,27 @@ class BrowserCoordinator(
             },
         )
     }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    /**
+     * The new-tab page's Continue card: the other open tab most worth returning to, or none.
+     * Blank tabs (the internal home has no address), a forgotten or failed page and an address
+     * [sensitive] says carries credentials are never offered. A tab opened in the background and
+     * never used sits right behind the focused tab in Recent without deserving the card
+     * ([createBackgroundTab]), so genuinely used tabs rank first and it is only the fallback —
+     * the same rule [focusPreviousTab] applies after a restart.
+     */
+    fun continueTab(sensitive: (String) -> Boolean): Flow<RecentItem.OpenTab?> =
+        combine(dao.observeOpenTabsForContinue(), dao.observeSession()) { rows, session ->
+            val eligible = rows.filter { row ->
+                val tab = row.tab
+                tab.id != session?.activeTabId && tab.url != null &&
+                    !tab.pageForgotten && !row.failed && !sensitive(tab.url)
+            }
+            val used = eligible.filter { it.tab.lastFocusedAt >= it.tab.createdAt }
+            (used + (eligible - used)).firstOrNull()?.let {
+                RecentItem.OpenTab(it.tab.id, it.tab.url, it.tab.title, it.tab.lastFocusedAt, active = false)
+            }
+        }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     /** Emits at once and then every [RECENT_CUTOFF_TICK_MS], so lists re-apply the retention cutoff. */
     private fun cutoffTicks(): Flow<Unit> = flow {
@@ -492,14 +513,27 @@ class BrowserCoordinator(
     /**
      * Removes local history for a site and its unsent captures. Open tabs stay open on their
      * current page. What Hister and Karakeep already received is not touched (separate services).
+     *
+     * One site means its www-merged key, as on the new-tab page: forgetting "example.com" also
+     * forgets "www.example.com" and the other way around, including pins of either spelling.
+     * Other subdomains are touched only when [includeSubdomains].
      */
     fun forgetSite(host: String, includeSubdomains: Boolean) = submit {
-        val site = HostNames.normalize(host) ?: return@submit
+        val site = HostNames.normalize(host)?.let(HostNames::mergedSite) ?: return@submit
+        val spellings = HostNames.siteSpellings(site)
+        val subdomains = if (includeSubdomains) ".$site" else null
         database.withTransaction {
-            dao.detachVisitsForHost(site, if (includeSubdomains) ".$site" else null)
-            dao.deleteVisitsForHost(site, if (includeSubdomains) ".$site" else null)
+            dao.detachVisitsForHosts(spellings, subdomains)
+            dao.deleteVisitsForHosts(spellings, subdomains)
             dao.deleteEmptyClosedTabs()
-            capture?.forgetHost(site, includeSubdomains)
+            database.homeLinks().let { home ->
+                home.deletePinsForSite(site, subdomains)
+                // Renumber what is left, so pin order stays gap-free for the next reorder.
+                home.pinsInOrder().forEachIndexed { index, pin ->
+                    if (pin.position != index) home.movePinTo(pin.id, index)
+                }
+            }
+            spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
         }
     }
 
@@ -1526,8 +1560,6 @@ class BrowserCoordinator(
 
         /** Quick-link tiles on the new-tab page: two rows of three. */
         const val TOP_SITES_LIMIT = 6
-        /** The prefix many sites are also reached under; both spellings rank as one site. */
-        const val WWW = "www."
 
         /** Reader view budget: the article's JSON (native/src/reader.js); longer ones are cut. */
         const val MAX_ARTICLE_BYTES = 512 * 1024
