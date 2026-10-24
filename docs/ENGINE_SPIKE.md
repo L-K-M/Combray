@@ -672,3 +672,45 @@ then verify the red page's tab identity and painted pixels. The test APK
 compiled; local execution was deferred because the shared emulator was
 reserved. The Engine PR checks run this regression before merge. No physical
 device or live services were used.
+
+## 21. Close-notice appearance (24 October 2026)
+
+The owner's dark-mode screenshot showed a light "Tab closed" card on a
+white strip. Material's default snackbar uses inverse colors. Home's outer
+notice padding also left the native engine surface uncovered.
+
+Browser and Recent now share `NoticeHost`, using `surfaceContainerHigh`,
+`onSurface` and `primary` for the card, text and action. Home paints its
+background before reserving notice space. Existing contrast tests cover
+these color pairs in both schemes. No engine source or pin changed.
+
+`NoticeThemeTest` closes a synthetic page in forced Dark and Light, samples
+the painted notice and Home backdrop, then checks Undo's exact tab identity.
+The archived pre-fix APK failed both checks on `emulator-5560` (API 30,
+x86_64): a `29302c` notice in Light, `e7e2d9` in Dark, and a white
+(`ffffff`) backdrop in both. The fixed APK passed both pixel/Undo checks
+and the existing Home-spacing regression. [PR #128](https://github.com/L-K-M/Combray/pull/128)
+records latest device, CI and review results.
+
+Initial attempts on a separate fresh AVD (port 5582) failed before app
+installation: black screenshots and repeated Android `system_server`
+restarts (`Lost network stack`). These were infrastructure failures.
+
+The supplied engine library came from the concurrent successful same-pin
+build in the shared checkout: Rust 1.97.1, NDK r29, downstream Servo
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`, using local Zig host wrappers
+(`build/inline-search-native.log`, 4m44s). Plain host `clang` lacked C
+headers; the notice task's corrected build was interrupted when leaving
+the shared checkout. Initial PR CI also built both native ABIs.
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.NoticeThemeTest 'ch.lkmc.combray.HomeTest#aCloseNoticeDoesNotCoverHomeLinks'
+python3 scripts/check_docs.py
+git diff --check
+```
+
+JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
+checks passed locally. Evidence: `build/device-checks/notice-theme-*`
+and `build/notice-theme/`. The PR records latest CI and review results.
+Physical-phone validation remains unverified.

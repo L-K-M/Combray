@@ -84,7 +84,6 @@ class ThemeContrastTest {
             ColorScheme::onSurface to ColorScheme::surface,
             ColorScheme::onSurfaceVariant to ColorScheme::surfaceVariant,
             ColorScheme::inverseOnSurface to ColorScheme::inverseSurface,
-            // The snackbar's action label.
             ColorScheme::inversePrimary to ColorScheme::inverseSurface,
             ColorScheme::onError to ColorScheme::error,
             ColorScheme::onErrorContainer to ColorScheme::errorContainer,
