@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -120,7 +121,14 @@ internal object ReaderType {
  * Page content is never rendered as markup here; links go through [onOpenLink].
  */
 @Composable
-fun ReaderView(state: ReaderState, textSize: TextSize, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
+fun ReaderView(
+    state: ReaderState,
+    textSize: TextSize,
+    onOpenLink: (String) -> Unit,
+    onClose: () -> Unit,
+    /** Where the scroll button sits; BrowserScreen moves it above a shown snackbar. */
+    scrollButtonPadding: PaddingValues = scrollButtonPadding(),
+) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
             is ReaderState.Loading -> ReaderMessage(stringResource(R.string.reader_loading)) { CircularProgressIndicator() }
@@ -136,7 +144,7 @@ fun ReaderView(state: ReaderState, textSize: TextSize, onOpenLink: (String) -> U
                     LocalLayoutDirection provides direction,
                     LocalDensity provides Density(density.density, density.fontScale * textSize.zoom),
                 ) {
-                    ArticleText(state.article, onOpenLink, onClose)
+                    ArticleText(state.article, onOpenLink, onClose, scrollButtonPadding)
                 }
             }
         }
@@ -144,7 +152,7 @@ fun ReaderView(state: ReaderState, textSize: TextSize, onOpenLink: (String) -> U
 }
 
 @Composable
-private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose: () -> Unit) {
+private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose: () -> Unit, scrollButtonPadding: PaddingValues) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var edge by remember(article) { mutableStateOf<ScrollEdge?>(null) }
@@ -187,7 +195,7 @@ private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose:
                     edge = null
                     scope.launch { list.scrollToItem(if (target == ScrollEdge.TOP) 0 else list.layoutInfo.totalItemsCount - 1) }
                 },
-                modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(16.dp),
+                modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(scrollButtonPadding),
             )
         }
     }

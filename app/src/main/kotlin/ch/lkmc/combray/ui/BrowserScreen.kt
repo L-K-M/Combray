@@ -38,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -276,6 +279,12 @@ fun BrowserScreen(
     // The bar is one row or two (BottomBar), so snackbars clear its measured height.
     val density = LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
+    // A shown snackbar covers the page's bottom-left corner, where the scroll button sits, and
+    // takes the taps there: the button moves above it. Measured from both edges, as snackbars
+    // clear the bottom bar's last height, which is not the find bar's.
+    var pageBottom by remember { mutableFloatStateOf(0f) }
+    var snackbarTop by remember { mutableStateOf<Float?>(null) }
+    val scrollButtonPadding = scrollButtonPadding(snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp)
     val openSettings = { sheet = Sheet.SETTINGS }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -284,7 +293,8 @@ fun BrowserScreen(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .onGloballyPositioned { pageBottom = it.boundsInRoot().bottom },
             ) {
                 AndroidView(
                     factory = { viewContext ->
@@ -307,7 +317,7 @@ fun BrowserScreen(
                                 scrollEdge = null
                                 browser.scrollToEdge(page, edge)
                             },
-                            modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(16.dp),
+                            modifier = Modifier.align(AbsoluteAlignment.BottomLeft).padding(scrollButtonPadding),
                         )
                     }
                 }
@@ -315,6 +325,7 @@ fun BrowserScreen(
                     ReaderView(
                         state = reader,
                         textSize = textSize,
+                        scrollButtonPadding = scrollButtonPadding,
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
                             browser.closeReader()
@@ -375,7 +386,15 @@ fun BrowserScreen(
         // separate window over this one and shows the snackbars itself while it is open. The
         // bar's height includes the navigation bar, and the keyboard's padding is the column's.
         if (sheet != Sheet.RECENT) {
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).imePadding().padding(bottom = barHeight + SNACKBAR_GAP))
+            SnackbarHost(
+                snackbar,
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .imePadding()
+                    .padding(bottom = barHeight + SNACKBAR_GAP)
+                    // The host itself, without its offset: empty while no snackbar shows.
+                    .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
+            )
         }
     }
 

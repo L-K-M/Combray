@@ -39,7 +39,8 @@ All notable changes to this project are documented here. The format follows
   Servo's page zoom, so text rewraps to the screen. The choice is kept and
   applies to new tabs and to reader view.
 - A bottom-left button jumps to the top when scrolling up or the bottom
-  when scrolling down, on pages and in reader view.
+  when scrolling down, on pages and in reader view. It moves above a
+  snackbar instead of hiding under it.
 - Find in page: More › Find in page opens a bar at the bottom that counts
   the page's matches, selects and scrolls to each in turn, and removes the
   selection when it closes.

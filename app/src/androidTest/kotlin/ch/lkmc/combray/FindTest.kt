@@ -106,6 +106,10 @@ class FindTest {
         device.awaitState { it.activeTab?.url == earlier && it.activeTab?.title == Fixtures.title(Device.GREEN) }
         openFindPage()
         device.awaitState { it.activeTab?.canGoBack == true }
+        // The UI enables its Back handling once it has drawn the find bar, as it has long before a
+        // person presses Back. Under the Compose test rule it draws only when the test lets it;
+        // before that, Android's default Back closes the activity.
+        compose.onNodeWithContentDescription("Close find in page").assertIsDisplayed()
 
         // The first Back may only hide the keyboard.
         val instrumentation = InstrumentationRegistry.getInstrumentation()

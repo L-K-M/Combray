@@ -179,6 +179,10 @@ class PageControlsTest {
         compose.onNodeWithText("Stay").performClick()
 
         device.awaitState { it.activeTab?.title == "LEAVE:1" && it.pageControl == null }
+        // Under the Compose test rule the UI recomposes only when the test advances its clock, so
+        // the answered dialog stays on screen until then. Its window blocks the page behind it:
+        // the next tap would reach the dialog, never the link. The answer must close it, too.
+        awaitNoText("Leave this page?")
         Thread.sleep(SETTLE_MS)
         assertEquals(LEAVE_PAGE, device.browser.browserState.value.activeTab?.url)
 
@@ -219,6 +223,10 @@ class PageControlsTest {
 
     private fun awaitText(text: String) =
         compose.waitUntil(DIALOG_TIMEOUT_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+
+    /** Advances the UI until [text] is gone, so a dialog that was answered no longer covers the page. */
+    private fun awaitNoText(text: String) =
+        compose.waitUntil(DIALOG_TIMEOUT_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isEmpty() }
 
     private fun tapPage() = pressPage(TAP_MS)
 

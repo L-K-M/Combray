@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -51,6 +52,25 @@ class ScrollTest {
         compose.onNodeWithContentDescription(TOP).assertIsDisplayed().performClick()
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
         compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
+    }
+
+    @Test
+    fun aSnackbarOverThePageDoesNotTakeTheButtonsTap() {
+        // Closing another tab shows "Tab closed" with Undo over the page's bottom-left corner; the
+        // test clock keeps it up for the whole check, which does not rely on an earlier class's tabs.
+        val scrollTab = device.browser.browserState.value.activeTab!!.id
+        device.browser.openUrl(Fixtures.EMPTY, Placement.NEW_TAB)
+        device.awaitPage(Fixtures.EMPTY)
+        device.browser.closeTab(device.browser.browserState.value.activeTab!!.id)
+        device.awaitState { it.activeTab?.id == scrollTab }
+        awaitTitle("SCROLL-TOP")
+        assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+
+        swipe(0.65f, 0.35f)
+        awaitTitle("SCROLL-MIDDLE")
+        compose.onNodeWithText(compose.activity.getString(R.string.action_undo)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed().performClick()
+        assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
     }
 
     @Test
