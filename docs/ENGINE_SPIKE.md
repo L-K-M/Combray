@@ -633,3 +633,43 @@ git diff --check
 
 Shell syntax, shellcheck, documentation and whitespace checks passed.
 No macOS native build or device installation was run for this change.
+
+## Inline Home search (24 October 2026)
+
+The owner corrected New tab's entry behavior: focus Home's existing field,
+without an extra sheet. Home and page-address editing share the draft,
+local suggestions and address policy. New tab resets the field and reuses
+the unused blank. Incoming search text starts selected there and waits for
+submission. Close clears focus and hides the keyboard, keeping Home and the
+draft. A page's address editor still uses its sheet.
+
+`HomeSearchTest.newTabFocusesTheExistingHomeField` failed before the fix on
+API-30 x86_64 `emulator-5560`: no focused editable field was displayed
+(`build/inline-search-red.txt`, one failure, 29.348 seconds). The coordinated
+Close regression independently failed before its change; all five
+`AddressSuggestionsUiTest` checks then passed on the same emulator
+(`build/new-tab-close-green.txt`, 105.886 seconds), including dismissal,
+48dp targets and the narrow, large-font layout.
+
+The native x86_64 build passed at the unchanged downstream pin
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. This host needs the existing
+`build/tab-counter-host-cc` and `build/tab-counter-host-c++` Zig wrappers
+with `-fno-sanitize=undefined`; default clang failed on missing host headers.
+The successful log is `build/inline-search-native.log` (4m44s).
+
+```sh
+COMBRAY_HOST_CC="$PWD/build/tab-counter-host-cc" \
+COMBRAY_HOST_CXX="$PWD/build/tab-counter-host-c++" \
+CARGO_BUILD_JOBS=6 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.HomeSearchTest ch.lkmc.combray.HomeTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The focused Home checks cover inline focus, repeated +, Close, rotation,
+incoming prefill selection, Recent's New tab and navigation in the original
+blank. Pin-editor field lookups are scoped to their dialog because Home's
+field now remains composed behind it. Device-green and final CI/review
+results are tracked in [PR #127](https://github.com/L-K-M/Combray/pull/127).
+Physical-phone and live-service checks remain unperformed.

@@ -51,7 +51,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,8 +96,8 @@ private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEX
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
  * surface stays in place under every overlay, so sheets never release a renderer.
- * [launchRequest] carries a sheet another app or a launcher shortcut asked for; the screen
- * opens it once and hands it back through [onLaunchRequestHandled].
+ * [launchRequest] carries an entry point another app or a launcher shortcut asked for; the
+ * screen opens it once and hands it back through [onLaunchRequestHandled].
  */
 @Composable
 fun BrowserScreen(
@@ -109,6 +111,9 @@ fun BrowserScreen(
     val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
     val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
+    var homeMode by rememberSaveable { mutableStateOf(AddressEditorMode.IDLE) }
+    var homeEntry by rememberSaveable { mutableIntStateOf(0) }
+    var homeText by rememberSaveable { mutableStateOf("") }
     var homeEditLink by remember { mutableStateOf<HomeLink?>(null) }
     var homeEditPage by rememberSaveable { mutableStateOf(HomeEditPage.OVERVIEW) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
@@ -116,8 +121,20 @@ fun BrowserScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val resources = LocalResources.current
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val tab = state.activeTab
     val page = tab?.page
+    val home = tab?.url == null
+    val stopHomeInput: () -> Unit = {
+        homeMode = AddressEditorMode.IDLE
+        focus.clearFocus(force = true)
+        keyboard?.hide()
+    }
+    val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    LaunchedEffect(tab?.id, tab?.url) {
+        if (!home) homeMode = AddressEditorMode.IDLE
+    }
     var scrollEdge by remember(tab?.id, page, state.reader) { mutableStateOf<ScrollEdge?>(null) }
     // Tagged with its address: until the new page's status arrives, the bar keeps the last one.
     val saveStatus by remember(tab?.url) {
@@ -178,9 +195,8 @@ fun BrowserScreen(
         when (request) {
             is KeyboardRequest.Show -> view.showKeyboard(request.kind)
             is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind)
-            // While find is open the keyboard may be the find field's: find's selection can blur a
-            // page field, and that must not close the keyboard the user is typing the query with.
-            KeyboardRequest.Hide -> if (state.find == null) view.hideKeyboard()
+            // A page's blur must not hide the keyboard now owned by Find or Home's search field.
+            KeyboardRequest.Hide -> if (state.find == null && !(home && homeMode == AddressEditorMode.EDITING)) view.hideKeyboard()
         }
         browser.keyboardHandled(request)
     }
@@ -223,30 +239,38 @@ fun BrowserScreen(
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
     var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
-    // Text another app sent, which the editor starts with instead of an address.
-    var addressText by rememberSaveable { mutableStateOf<String?>(null) }
     val editAddress = {
         addressTab = tab?.id
-        addressText = null
         sheet = Sheet.ADDRESS
     }
-    // An unused blank tab is the new tab already; typing there makes no second one. Text from
-    // another app waits there, selected, until the user submits it.
+    // New-tab entry points all focus the existing Home field. Save its prefill before queuing
+    // the blank tab so rotation cannot drop text another app sent while creation is pending.
     val editNewTabWith = { text: String? ->
-        addressTab = tab?.takeIf { it.isHome }?.id
-        addressText = text
-        sheet = Sheet.ADDRESS
-    }
-    val newTab = {
+        homeText = text.orEmpty()
+        homeEntry++
+        homeMode = AddressEditorMode.EDITING
         sheet = Sheet.NONE
         surfaceView?.hideKeyboard()
         browser.newTab()
+    }
+    val newTab = { editNewTabWith(null) }
+    val openAddress = { target: String?, decision: AddressDecision ->
+        sheet = Sheet.NONE
+        stopHomeInput()
+        val open = { url: String -> if (target != null) browser.openUrlInTab(target, url) else browser.openUrl(url, Placement.NEW_TAB) }
+        when (decision) {
+            is AddressDecision.Navigate -> open(decision.url)
+            is AddressDecision.Search -> open(decision.url)
+            is AddressDecision.External -> openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
+            is AddressDecision.Rejected -> Unit
+        }
     }
     // Cold and bounded to retained candidates; pin/hide filtering must precede the six-tile cap.
     val homeLinks = remember(graph) { graph.home.state(browser.topSites(SensitiveUrls::looksSensitive, limit = Int.MAX_VALUE)) }
     val continuation = remember(browser) { browser.continueTab(SensitiveUrls::looksSensitive) }
     var recentScope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
     val openRecent = { initial: RecentScope ->
+        if (homeMode == AddressEditorMode.EDITING) stopHomeInput()
         recentScope = initial
         sheet = Sheet.RECENT
     }
@@ -284,10 +308,10 @@ fun BrowserScreen(
     }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && backInPage != null) { backInPage?.invoke() }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
-    // Registered last, so it runs before going back in the page.
+    // Find and Home editing take precedence over going back in the page.
     BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
+    BackHandler(enabled = sheet == Sheet.NONE && home && homeMode == AddressEditorMode.EDITING) { stopHomeInput() }
 
-    val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
     // The bar is one row or two (BottomBar), so snackbars clear its measured height.
     val density = LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
@@ -418,6 +442,26 @@ fun BrowserScreen(
                 onRecent = { openRecent(RecentScope.OPEN) },
                 onRecentLongPress = { browser.focusPreviousTab() },
                 onSwipeTab = { step -> browser.stepTab(step) },
+                homeMode = homeMode,
+                homeSearch = {
+                    AddressEditor(
+                        target = tab?.id,
+                        initialText = homeText,
+                        restartKey = homeEntry,
+                        recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
+                        onDecision = { decision -> openAddress(tab?.id, decision) },
+                        onSelectTab = { id -> stopHomeInput(); browser.selectTab(id) },
+                        onNewTab = newTab,
+                        onDismiss = stopHomeInput,
+                        mode = homeMode,
+                        focusKey = homeEntry.takeIf { homeMode == AddressEditorMode.EDITING },
+                        onFocused = { homeMode = AddressEditorMode.EDITING },
+                        placeholder = R.string.home_search_hint,
+                        modifier = if (homeMode == AddressEditorMode.EDITING) {
+                            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                        } else Modifier,
+                    )
+                },
                 modifier = Modifier.onSizeChanged { barHeight = with(density) { it.height.toDp() } },
                 onMore = { sheet = Sheet.MORE },
                 onCopyAddress = {
@@ -454,21 +498,11 @@ fun BrowserScreen(
         Sheet.ADDRESS -> AddressSheet(
             target = addressTab,
             restartKey = launches,
-            // Text another app sent, or the tab's address; on a Kagi results page, its search words.
-            initialText = addressText ?: addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
+            // On a Kagi results page, start with its search words instead of the address.
+            initialText = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
             // Suggestions search the retained history, like a Recent search.
             recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
-            onDecision = { decision ->
-                dismiss()
-                val target = addressTab
-                val open = { url: String -> if (target != null) browser.openUrlInTab(target, url) else browser.openUrl(url, Placement.NEW_TAB) }
-                when (decision) {
-                    is AddressDecision.Navigate -> open(decision.url)
-                    is AddressDecision.Search -> open(decision.url)
-                    is AddressDecision.External -> openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
-                    is AddressDecision.Rejected -> Unit
-                }
-            },
+            onDecision = { decision -> openAddress(addressTab, decision) },
             // The exact tab, as in Recent: switching never follows an equal address elsewhere.
             onSelectTab = { tabId ->
                 dismiss()

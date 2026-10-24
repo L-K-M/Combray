@@ -188,6 +188,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- New tab focuses Home's existing search field. Typing, local suggestions
+  and shared search text stay in the page instead of opening another sheet.
+- The address editor has an explicit Close button. On Home it ends typing
+  without closing the tab or discarding the draft.
 - Servo source preparation announces the large checkout and shows Git progress.
   Rerunning a build replaces partial or edited source and removes untracked
   leftovers, reusing downloaded objects and ignored build caches.

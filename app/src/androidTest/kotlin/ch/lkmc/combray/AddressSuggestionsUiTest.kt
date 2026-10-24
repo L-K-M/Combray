@@ -46,6 +46,26 @@ class AddressSuggestionsUiTest {
     val compose = createComposeRule()
 
     @Test
+    fun theEditorHasAnAccessibleCloseAction() {
+        var dismissals = 0
+        val decisions = mutableListOf<AddressDecision>()
+        show(DEFAULT_FONT) {
+            Editor(matches = emptyList(), onDecision = decisions::add, onDismiss = { dismissals++ })
+        }
+
+        val close = compose.onNodeWithContentDescription("Close")
+        close.assertIsDisplayed()
+        val touch = close.fetchSemanticsNode().touchBoundsInRoot
+        with(compose.density) {
+            assertTrue(touch.width.toDp() >= 48.dp && touch.height.toDp() >= 48.dp)
+        }
+
+        close.performClick()
+        assertEquals(1, dismissals)
+        assertTrue("closing must not submit the draft", decisions.isEmpty())
+    }
+
+    @Test
     fun matchesListAboveTheAnchoredField() {
         show(DEFAULT_FONT) {
             Editor(matches = listOf(TAB_MATCH, VISIT_MATCH))
@@ -90,6 +110,7 @@ class AddressSuggestionsUiTest {
         val bounds = field.getUnclippedBoundsInRoot()
         assertTrue(bounds.top >= window.top && bounds.bottom <= window.bottom)
         compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Close").assertIsDisplayed()
 
         // The list outgrew its region above the field: the last row is clipped below the window
         // edge instead of pushing the field or the buttons off.
@@ -155,6 +176,7 @@ class AddressSuggestionsUiTest {
         onDecision: (AddressDecision) -> Unit = {},
         onSelectTab: (String) -> Unit = {},
         onNewTab: () -> Unit = {},
+        onDismiss: () -> Unit = {},
     ) = AddressSheetContent(
         field = TextFieldValue("garden"),
         onFieldChange = {},
@@ -163,6 +185,7 @@ class AddressSuggestionsUiTest {
         onDecision = onDecision,
         onSelectTab = onSelectTab,
         onNewTab = onNewTab,
+        onDismiss = onDismiss,
     )
 
     private fun show(fontScale: Float, content: @Composable () -> Unit) {

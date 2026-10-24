@@ -73,12 +73,16 @@ The owner approved the [new-tab design](design/new-tab.md) on 24 October
 first; local frequent sites fill the rest, opening their newest retained
 page. Edit offers pin/add/edit/unpin/reorder, hide/restore, and Continue and
 frequent-site visibility. Pins persist in Room schema 5; no remote data or
-favicon service is fetched to show Home. New tab opens Home with the
-keyboard closed; explicit search entry points retain keyboard-first entry.
+favicon service is fetched to show Home. New tab focuses Home's existing
+search field with the keyboard ready, as do explicit search entry points;
+editing stays in the page instead of an extra sheet (owner correction,
+24 October 2026). Close ends typing and keeps Home and its blank tab.
 While typing, local suggestions appear above the anchored field, with +
 beside it. Hister and Karakeep open the existing explicit Recent scopes.
 Site-wide Forget also removes pins and merges the `www.`/bare spelling,
 matching automatic ranking; other subdomains remain opt-in.
+
+Inline-entry regression and build evidence: [engine report](ENGINE_SPIKE.md#inline-home-search-24-october-2026).
 
 ### Reader view
 

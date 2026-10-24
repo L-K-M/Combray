@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollTo
@@ -87,9 +88,9 @@ class HomeTest {
         device.resetHome()
     }
 
-    /** + takes one tap anywhere; More no longer lists it. Home opens ready, keyboard closed. */
+    /** + focuses Home's field and reuses the unused blank; More no longer lists New tab. */
     @Test
-    fun newTabOpensHomeWithTheKeyboardClosedAndReusesOneBlank() {
+    fun newTabFocusesHomeAndReusesOneBlank() {
         open(Device.GREEN)
 
         device.dismissSystemDialogs()
@@ -103,8 +104,8 @@ class HomeTest {
         val state = device.awaitState { it.activeTab?.isHome == true }
         assertEquals(2, state.openTabCount)
         awaitText(compose.activity.getString(R.string.home_heading))
-        // Search is a deliberate second tap: no editable field may take focus on its own.
-        compose.onNode(hasSetTextAction() and isFocused()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction() and isFocused()).assertIsDisplayed()
+        compose.onNode(isDialog()).assertDoesNotExist()
 
         // + on Home finds the already open blank instead of piling up tabs.
         compose.onNodeWithContentDescription("New tab").performClick()
@@ -139,6 +140,22 @@ class HomeTest {
     }
 
     @Test
+    fun aPagesAddressEditorStillNavigatesItsOwnTab() {
+        open(Device.GREEN)
+        val original = device.browser.browserState.value.activeTab!!.id
+        compose.onNodeWithContentDescription("Edit address", substring = true).performClick()
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD and isFocused(), Device.LOAD_TIMEOUT_MS)
+        val field = compose.onNode(EDIT_FIELD and isFocused())
+        assertEquals(Fixtures.solid(Device.GREEN), field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        val url = Fixtures.solid(Device.BLUE)
+        field.performTextReplacement(url)
+        field.performImeAction()
+        device.awaitPage(url)
+        assertEquals(original, device.browser.browserState.value.activeTab?.id)
+        compose.onNode(isDialog()).assertDoesNotExist()
+    }
+
+    @Test
     fun newTabIsAvailableWhileFindingInAPage() {
         open(Device.GREEN)
         device.browser.openFind()
@@ -155,7 +172,7 @@ class HomeTest {
         openHome()
         awaitText(compose.activity.getString(R.string.home_add_link))
         compose.onNodeWithText(compose.activity.getString(R.string.home_add_link)).performClick()
-        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
         compose.onNodeWithText(compose.activity.getString(R.string.home_link_address)).assertIsDisplayed()
         compose.onNodeWithText("Cancel").assertIsDisplayed().performClick()
         assertTrue(homeState().pins.isEmpty())
@@ -196,10 +213,10 @@ class HomeTest {
         openHome()
         awaitText("Add link")
         compose.onNodeWithText("Add link").performClick()
-        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
         val url = Fixtures.solid(PINNED)
-        compose.onAllNodes(hasSetTextAction())[0].performTextInput("Survives dismissal")
-        compose.onAllNodes(hasSetTextAction())[1].performTextInput(url)
+        compose.onAllNodes(EDIT_FIELD)[0].performTextInput("Survives dismissal")
+        compose.onAllNodes(EDIT_FIELD)[1].performTextInput(url)
 
         // Hold the writer so dismissing the sheet definitely precedes the accepted save's commit.
         val entered = CompletableDeferred<Unit>()
@@ -212,7 +229,7 @@ class HomeTest {
             runBlocking { entered.await() }
             compose.onNodeWithText("Save link").performClick()
             compose.onNodeWithContentDescription("Close sheet").performClick()
-            compose.waitUntilDoesNotExist(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+            compose.waitUntilDoesNotExist(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
             release.complete(Unit)
             runBlocking {
                 blocker.join()
@@ -239,21 +256,21 @@ class HomeTest {
         awaitText("Edit")
         compose.onNodeWithText("Edit").performClick()
         sheetRow(hasContentDescription("Edit First")).performClick()
-        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
-        compose.onAllNodes(hasSetTextAction())[0].performTextReplacement("Discarded draft")
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
+        compose.onAllNodes(EDIT_FIELD)[0].performTextReplacement("Discarded draft")
         compose.activityRule.scenario.recreate()
-        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
         compose.onNodeWithText(compose.activity.getString(R.string.home_edit_link)).assertIsDisplayed()
-        assertEquals("Discarded draft", compose.onAllNodes(hasSetTextAction())[0].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
-        assertEquals(first, compose.onAllNodes(hasSetTextAction())[1].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        assertEquals("Discarded draft", compose.onAllNodes(EDIT_FIELD)[0].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        assertEquals(first, compose.onAllNodes(EDIT_FIELD)[1].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         compose.onNodeWithContentDescription("Close sheet").performClick()
-        compose.waitUntilDoesNotExist(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        compose.waitUntilDoesNotExist(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
 
         compose.onNodeWithText("Edit").performClick()
         sheetRow(hasText("Edit new tab")).assertIsDisplayed()
         sheetRow(hasContentDescription("Edit Second")).performClick()
-        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
-        val fields = compose.onAllNodes(hasSetTextAction())
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
+        val fields = compose.onAllNodes(EDIT_FIELD)
         assertEquals("Second", fields[0].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         assertEquals(second, fields[1].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         assertEquals(listOf("First", "Second"), homeState().pins.map { it.title })
@@ -361,8 +378,8 @@ class HomeTest {
 
         // Adding a link uses the sheet's own fields, in the order the dialog lists them.
         sheetRow(hasText(compose.activity.getString(R.string.home_add_link))).performClick()
-        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
-        val fields = compose.onAllNodes(hasSetTextAction())
+        compose.waitUntilAtLeastOneExists(EDIT_FIELD, Device.LOAD_TIMEOUT_MS)
+        val fields = compose.onAllNodes(EDIT_FIELD)
         fields[0].performTextInput("Added")
         fields[1].performTextInput(Fixtures.solid(ADDED))
         awaitText(compose.activity.getString(R.string.home_save_link))
@@ -420,13 +437,14 @@ class HomeTest {
 
         compose.onNodeWithText(compose.activity.getString(R.string.home_search_hint)).performClick()
         compose.waitUntilAtLeastOneExists(hasSetTextAction() and isFocused(), Device.LOAD_TIMEOUT_MS)
-        // The editor keeps + beside it: a new tab is one tap even while searching.
-        compose.onNode(hasContentDescription("New tab") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        // The existing field and its + remain in Home, without a second window.
+        compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
+        compose.onNode(isDialog()).assertDoesNotExist()
 
         val field = compose.onNode(hasSetTextAction() and isFocused())
         field.performTextInput("%06x".format(SUGGESTED and 0xFFFFFF))
         val title = Fixtures.title(SUGGESTED)
-        val match = (hasText(title) and hasClickAction() or (hasClickAction() and hasAnyDescendant(hasText(title)))) and hasAnyAncestor(isDialog())
+        val match = hasText(title) and hasClickAction() or (hasClickAction() and hasAnyDescendant(hasText(title)))
         compose.waitUntilAtLeastOneExists(match, Device.LOAD_TIMEOUT_MS)
         val row = compose.onAllNodes(match).onFirst()
         assertTrue(
@@ -511,6 +529,7 @@ class HomeTest {
     }
 
     private companion object {
+        val EDIT_FIELD = hasSetTextAction() and hasAnyAncestor(isDialog())
         const val EDITOR_TIMEOUT_MS = 30_000L
         // Pages only these checks use, so no other check's history answers their queries.
         const val PINNED = 0x715f2e
