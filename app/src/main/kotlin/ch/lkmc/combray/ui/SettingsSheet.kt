@@ -63,6 +63,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.ThirdPartyNotices
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.Retention
+import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.browser.UnusedTabs
 import ch.lkmc.combray.core.data.JobState
@@ -168,6 +169,7 @@ fun SettingsSheet(
             UnusedTabsSetting(settings, days, onUnusedTabsChanged)
             SectionTitle(R.string.settings_display_title)
             ThemeSetting(settings)
+            TabCounterSetting(settings)
             SectionTitle(R.string.settings_about_title)
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
             Text(stringResource(R.string.settings_engine, BuildConfig.SERVO_VERSION))
@@ -211,6 +213,23 @@ private fun ThemeSetting(settings: BrowserSettings) {
         ThemeMode.entries.forEach { mode ->
             ListOption(themeModeLabel(mode), selected = mode == choice) { settings.setThemeMode(mode) }
         }
+    }
+}
+
+/** One labeled switch controls the badge; the button still opens Recent either way. */
+@Composable
+private fun TabCounterSetting(settings: BrowserSettings) {
+    val choice by settings.tabCounter.collectAsStateWithLifecycle()
+    val shown = choice == TabCounter.SHOWN
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
+            .toggleable(value = shown, role = Role.Switch) { enabled ->
+                settings.setTabCounter(if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN)
+            },
+    ) {
+        Text(stringResource(R.string.settings_tab_counter), modifier = Modifier.weight(1f))
+        Switch(checked = shown, onCheckedChange = null)
     }
 }
 

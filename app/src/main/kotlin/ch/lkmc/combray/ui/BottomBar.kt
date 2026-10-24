@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
+import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TabStep
 import ch.lkmc.combray.core.integration.SaveStatus
 
@@ -80,6 +81,7 @@ import ch.lkmc.combray.core.integration.SaveStatus
 fun BottomBar(
     tab: ActiveTab?,
     openTabs: Int,
+    tabCounter: TabCounter,
     saveStatus: PageSaveStatus,
     histerStored: Boolean,
     /** Whether Back has somewhere to go: BrowserScreen decides, for this button and system Back alike. */
@@ -153,6 +155,7 @@ fun BottomBar(
                         IconButton(onClick = onShare, enabled = tab?.url != null) {
                             Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
                         }
+                        // TalkBack keeps the count even when the visual badge is hidden.
                         val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                         val switchPrevious = stringResource(R.string.recent_switch_previous)
                         // Combined click/long-click: IconButton has no long-press overload. Same 48dp
@@ -174,7 +177,7 @@ fun BottomBar(
                             // A count, not an alert: pine rather than Material's error red.
                             BadgedBox(
                                 badge = {
-                                    if (openTabs > 0) {
+                                    if (tabCounter == TabCounter.SHOWN && openTabs > 0) {
                                         Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
                                             Text(tabCountLabel(openTabs))
                                         }

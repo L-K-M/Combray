@@ -28,11 +28,13 @@ class BrowserSettingsTest {
         val first = BrowserSettings(preferences)
         first.setThemeMode(ThemeMode.DARK)
         first.setUnusedTabs(UnusedTabs.CLOSE)
+        first.setTabCounter(TabCounter.SHOWN)
 
         val restarted = BrowserSettings(preferences)
 
         assertEquals(ThemeMode.DARK, restarted.themeMode.value)
         assertEquals(UnusedTabs.CLOSE, restarted.unusedTabs.value)
+        assertEquals(TabCounter.SHOWN, restarted.tabCounter.value)
     }
 
     @Test
@@ -41,6 +43,7 @@ class BrowserSettingsTest {
 
         assertEquals(ThemeMode.SYSTEM, settings.themeMode.value)
         assertEquals(UnusedTabs.KEEP, settings.unusedTabs.value)
+        assertEquals(TabCounter.HIDDEN, settings.tabCounter.value)
     }
 
     @Test
@@ -49,15 +52,31 @@ class BrowserSettingsTest {
         val probe = BrowserSettings(preferences)
         probe.setThemeMode(ThemeMode.LIGHT)
         probe.setUnusedTabs(UnusedTabs.CLOSE)
+        probe.setTabCounter(TabCounter.SHOWN)
         assertEquals("LIGHT", preferences.getString("theme_mode", null))
         assertEquals("CLOSE", preferences.getString("unused_tabs", null))
+        assertEquals("SHOWN", preferences.getString("tab_counter", null))
 
-        preferences.edit().putString("theme_mode", "MIDNIGHT").putString("unused_tabs", "SOMETIMES").apply()
+        preferences.edit().putString("theme_mode", "MIDNIGHT").putString("unused_tabs", "SOMETIMES")
+            .putString("tab_counter", "SOMETIMES").apply()
 
         val settings = BrowserSettings(preferences)
 
         assertEquals(ThemeMode.SYSTEM, settings.themeMode.value)
         assertEquals(UnusedTabs.KEEP, settings.unusedTabs.value)
+        assertEquals(TabCounter.HIDDEN, settings.tabCounter.value)
+    }
+
+    @Test
+    fun hidingTheCounterUpdatesTheChoiceAndSurvivesARestart() {
+        val settings = BrowserSettings(preferences)
+        settings.setTabCounter(TabCounter.SHOWN)
+        assertEquals(TabCounter.SHOWN, settings.tabCounter.value)
+
+        settings.setTabCounter(TabCounter.HIDDEN)
+
+        assertEquals(TabCounter.HIDDEN, settings.tabCounter.value)
+        assertEquals(TabCounter.HIDDEN, BrowserSettings(preferences).tabCounter.value)
     }
 
     @Test

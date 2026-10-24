@@ -125,6 +125,7 @@ fun BrowserScreen(
     val browser = graph.browser
     val state by browser.browserState.collectAsStateWithLifecycle()
     val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
+    val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle()
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -371,6 +372,7 @@ fun BrowserScreen(
             if (state.find == null) BottomBar(
                 tab = tab,
                 openTabs = state.openTabCount,
+                tabCounter = tabCounter,
                 saveStatus = saveStatus,
                 histerStored = histerStored && tab?.loading != true,
                 backEnabled = state.reader != null || backInPage != null,

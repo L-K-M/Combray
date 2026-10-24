@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Settings › Display › Show tab count: an optional counter on the tabs
+  button, off by default. The choice persists across restarts.
 - Long-press Recent to switch to the tab you used before this one (a tap
   still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
   Recent's order. Repeated swipes keep going back; after a pause they

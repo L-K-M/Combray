@@ -35,6 +35,7 @@ import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.FindOutcome
 import ch.lkmc.combray.core.browser.FindState
 import ch.lkmc.combray.core.browser.PageControl
+import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TextSize
 import ch.lkmc.combray.core.browser.TopSite
 import ch.lkmc.combray.core.integration.SaveStatus
@@ -407,6 +408,7 @@ class AccessibilityTest {
     ) = BottomBar(
         tab = tab,
         openTabs = openTabs,
+        tabCounter = TabCounter.SHOWN,
         saveStatus = PageSaveStatus(tab?.url, saveStatus),
         histerStored = histerStored,
         backEnabled = tab?.canGoBack == true,
