@@ -62,6 +62,7 @@ import kotlinx.coroutines.launch
 internal enum class HomeEditPage { OVERVIEW, LINK, REPLACE }
 private const val MAX_PIN_NAME = 200
 private const val MAX_PIN_ADDRESS = 8192
+private val HOME_EDITOR_ACTION_TARGET = 48.dp
 
 /** One editor for pins, hidden sites and visibility; changes pass through application services. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -145,7 +146,7 @@ internal fun HomeEditorSheet(
                         HomeVisibilityRow(R.string.home_show_frequent, frequent, settings::setHomeFrequentSites)
                         HorizontalDivider()
                         HomeSectionTitle(R.string.home_pinned)
-                        TextButton(onClick = { edit(null) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.home_add_link)) }
+                        TextButton(onClick = { edit(null) }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) { Text(stringResource(R.string.home_add_link)) }
                         if (state.pins.isEmpty()) Text(stringResource(R.string.home_no_pins), style = MaterialTheme.typography.bodyMedium)
                         state.pins.forEachIndexed { index, pin ->
                             HomePinRow(
@@ -165,8 +166,8 @@ internal fun HomeEditorSheet(
                                 Column {
                                     Text(displayHost(link.url), style = MaterialTheme.typography.titleMedium)
                                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        TextButton(onClick = { edit(link) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.home_pin)) }
-                                        TextButton(onClick = { change { home.hideSite(link.site) } }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                        TextButton(onClick = { edit(link) }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) { Text(stringResource(R.string.home_pin)) }
+                                        TextButton(onClick = { change { home.hideSite(link.site) } }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) {
                                             Text(stringResource(R.string.home_hide_site))
                                         }
                                     }
@@ -182,7 +183,7 @@ internal fun HomeEditorSheet(
                                     val label = stringResource(R.string.home_restore_site, site)
                                     TextButton(
                                         onClick = { change { home.restoreSite(site) } },
-                                        modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = label },
+                                        modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET).semantics { contentDescription = label },
                                     ) { Text(stringResource(R.string.home_restore)) }
                                 }
                             }
@@ -210,7 +211,7 @@ internal fun HomeEditorSheet(
                     HomeEditPage.REPLACE -> {
                         Text(stringResource(R.string.home_replace_body))
                         state.pins.forEach { pin ->
-                            TextButton(onClick = { save(pin.id) }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            TextButton(onClick = { save(pin.id) }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = HOME_EDITOR_ACTION_TARGET)) {
                                 Text(stringResource(R.string.home_replace_named, pin.title))
                             }
                         }
@@ -221,9 +222,9 @@ internal fun HomeEditorSheet(
                 TextButton(
                     onClick = { if (page == HomeEditPage.OVERVIEW) onDismiss() else { page = HomeEditPage.OVERVIEW; error = null } },
                     enabled = !saving,
-                    modifier = Modifier.heightIn(min = 48.dp),
+                    modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET),
                 ) { Text(stringResource(if (page == HomeEditPage.OVERVIEW) R.string.action_done else R.string.action_cancel)) }
-                if (page == HomeEditPage.LINK) Button(onClick = { save(null) }, enabled = !saving, modifier = Modifier.heightIn(min = 48.dp)) {
+                if (page == HomeEditPage.LINK) Button(onClick = { save(null) }, enabled = !saving, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) {
                     Text(stringResource(R.string.home_save_link))
                 }
             }
@@ -240,7 +241,7 @@ private fun HomeSectionTitle(label: Int) {
 private fun HomeVisibilityRow(label: Int, value: HomeSectionVisibility, onChange: (HomeSectionVisibility) -> Unit) {
     val checked = value == HomeSectionVisibility.SHOWN
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        Modifier.fillMaxWidth().heightIn(min = HOME_EDITOR_ACTION_TARGET)
             .toggleable(checked, role = Role.Switch, onValueChange = { onChange(if (it) HomeSectionVisibility.SHOWN else HomeSectionVisibility.HIDDEN) }),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -254,7 +255,7 @@ private fun HomeVisibilityRow(label: Int, value: HomeSectionVisibility, onChange
 private fun HomePinRow(pin: HomePin, index: Int, lastIndex: Int, onEdit: () -> Unit, onMove: (PinDirection) -> Unit, onUnpin: () -> Unit) {
     Column {
         val edit = stringResource(R.string.home_edit_named, pin.title)
-        TextButton(onClick = onEdit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = edit }) {
+        TextButton(onClick = onEdit, modifier = Modifier.fillMaxWidth().heightIn(min = HOME_EDITOR_ACTION_TARGET).semantics { contentDescription = edit }) {
             Column(Modifier.fillMaxWidth()) {
                 Text(pin.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(displayHost(pin.url), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -268,7 +269,7 @@ private fun HomePinRow(pin: HomePin, index: Int, lastIndex: Int, onEdit: () -> U
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.home_move_later, pin.title))
             }
             val unpin = stringResource(R.string.home_unpin_named, pin.title)
-            TextButton(onClick = onUnpin, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = unpin }) {
+            TextButton(onClick = onUnpin, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET).semantics { contentDescription = unpin }) {
                 Text(stringResource(R.string.home_unpin))
             }
         }

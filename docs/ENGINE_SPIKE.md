@@ -520,3 +520,54 @@ run `20261024T093930Z`, also after ahead-of-time compilation). The Settings
 switch itself and a physical phone remain unverified. The first device
 attempt used a stale local library missing `setPageZoom`; rebuilding resolved
 that prerequisite.
+
+## 18. New-tab launchpad checks (24 October 2026)
+
+The [new-tab design](design/new-tab.md) uses Compose for Home and its editor,
+with the existing Servo coordinator for navigation and exact-tab selection.
+The engine pin remains `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`; no engine
+source changed. Validation used Linux, JDK 21, Rust 1.97.1, NDK r29 and the
+API-30 x86_64 `emulator-5580`, with synthetic pages and fake services only.
+
+Commands:
+
+```sh
+COMBRAY_HOST_CC="$PWD/build/tab-counter-host-cc" \
+  COMBRAY_HOST_CXX="$PWD/build/tab-counter-host-c++" scripts/build-native.sh
+./gradlew --no-daemon --max-workers=1 testDebugUnitTest lintDebug \
+  assembleDebug assembleDebugAndroidTest assembleRelease
+ANDROID_HOME=/home/paseo/android-sdk scripts/check-app.sh emulator-5580 \
+  ch.lkmc.combray.AddressSuggestionsUiTest \
+  ch.lkmc.combray.AccessibilityTest ch.lkmc.combray.HomeTest \
+  ch.lkmc.combray.BrowsingTest ch.lkmc.combray.TabCounterTest
+```
+
+The native build, all JVM tests, lint, debug/test/release assembly and 88 Rust
+host tests passed locally. An initial lint analysis crashed while several
+Gradle invocations shared the checkout; a fresh single-use daemon with one
+worker passed without disabling any detector. The schema 4→5 migration is
+additive and tested, including existing tab, visit and outbox preservation.
+The `www.`/bare-host Forget regressions were observed failing before the fix.
+
+Initial emulator evidence is in `build/device-checks/new-tab-1/`:
+`AddressSuggestionsUiTest` passed all three layout/click checks, and
+`AccessibilityTest` passed all 24 then-current checks, including the new
+dock and Find bar. The first Home run exposed a test selector matching both
+modal and background + buttons; it now scopes the modal controls explicitly.
+The next check hit the documented software-emulator window-focus timeout,
+so an interrupted class run is not counted as a pass.
+
+Follow-up runs use separate instrumentation invocations for individual Home
+scenarios. They exposed two additional issues: a same-URL test helper could
+mistake the previously loaded tab for the newly requested one, and a close
+notice covered a Home destination. The helper now waits for the new tab's
+identity/title. `aCloseNoticeDoesNotCoverHomeLinks` independently reproduced
+the overlap before the fix (`new-tab-overlap-red`); Home now reserves the
+notice's measured height, like the existing scroll control. Raw follow-up
+evidence is in `build/device-checks/new-tab-2/` and `new-tab-3/`.
+
+[PR #123](https://github.com/L-K-M/Combray/pull/123) records the final local
+results and latest CI proof, including both native ABIs and KVM emulator
+fixtures. Read its latest commit's results rather than treating any earlier
+interrupted run as complete. Physical-phone and live-service validation
+remain unperformed; the owner's data and services were not used.

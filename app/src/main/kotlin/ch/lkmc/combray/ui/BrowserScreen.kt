@@ -292,7 +292,8 @@ fun BrowserScreen(
     // clear the bottom bar's last height, which is not the find bar's.
     var pageBottom by remember { mutableFloatStateOf(0f) }
     var snackbarTop by remember { mutableStateOf<Float?>(null) }
-    val scrollButtonPadding = scrollButtonPadding(snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp)
+    val snackbarReach = (snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp).coerceAtLeast(0.dp)
+    val scrollButtonPadding = scrollButtonPadding(snackbarReach)
     val openSettings = { sheet = Sheet.SETTINGS }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -353,6 +354,8 @@ fun BrowserScreen(
                                     }
                                 }
                             },
+                            // Home's bottom destinations must stay above a notice's touch surface.
+                            modifier = Modifier.padding(bottom = snackbarReach),
                         )
                     },
                 )

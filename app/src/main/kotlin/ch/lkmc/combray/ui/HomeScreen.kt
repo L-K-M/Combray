@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.runningFold
 private val HOME_MARGIN = 24.dp
 private val HOME_MAX_WIDTH = 600.dp
 private val HOME_ICON_SIZE = 32.dp
+private val HOME_ACTION_TARGET = 48.dp
 private val MIN_LINK_WIDTH = 96.dp
 private const val LINK_COLUMNS = 3
 private const val HOME_CLOCK_TICK_MS = 60_000L
@@ -79,6 +80,7 @@ internal fun HomeScreen(
     onAdd: () -> Unit,
     onHide: (String) -> Unit,
     onUnpin: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // Keep automatic positions steady for this visit; removals and pin edits still apply at once.
     val stableLinks = remember(links) {
@@ -104,6 +106,7 @@ internal fun HomeScreen(
         onEdit = { onEdit(null) },
         onAdd = onAdd,
         onOptions = { options = it },
+        modifier = modifier,
     )
 
     // A removed or forgotten link cannot stay actionable in an already-open menu.
@@ -166,10 +169,10 @@ internal fun HomeContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f).semantics { heading() },
                         )
-                        TextButton(onClick = onEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.home_edit)) }
+                        TextButton(onClick = onEdit, modifier = Modifier.heightIn(min = HOME_ACTION_TARGET)) { Text(stringResource(R.string.home_edit)) }
                     }
                     if (links.isEmpty()) {
-                        TextButton(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.home_add_link)) }
+                        TextButton(onClick = onAdd, modifier = Modifier.heightIn(min = HOME_ACTION_TARGET)) { Text(stringResource(R.string.home_add_link)) }
                     } else {
                         QuickLinks(links, onOpenUrl, onOptions)
                     }
@@ -268,10 +271,10 @@ private fun HomeLinkOptions(link: HomeLink, onEdit: () -> Unit, onRemove: () -> 
         title = { Text(link.title?.takeIf { link.pinId != null } ?: displayHost(link.url)) },
         text = {
             Column {
-                TextButton(onClick = onEdit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                TextButton(onClick = onEdit, modifier = Modifier.fillMaxWidth().heightIn(min = HOME_ACTION_TARGET)) {
                     Text(stringResource(if (link.pinId == null) R.string.home_pin else R.string.home_edit_link))
                 }
-                TextButton(onClick = onRemove, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                TextButton(onClick = onRemove, modifier = Modifier.fillMaxWidth().heightIn(min = HOME_ACTION_TARGET)) {
                     Text(stringResource(if (link.pinId == null) R.string.home_hide_site else R.string.home_unpin))
                 }
             }

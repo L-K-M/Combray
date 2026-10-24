@@ -373,7 +373,7 @@ object AddressPolicy {
 /** Host handling for history, exclusions and site actions. */
 object HostNames {
     /** The prefix many sites are also reached under; ranking, hiding and forgetting merge it. */
-    const val WWW_PREFIX = "www."
+    private const val WWW_PREFIX = "www."
 
     private const val BLOB_PREFIX = "blob:"
     private val AUTHORITY_PREFIX = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")

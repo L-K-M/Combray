@@ -1,6 +1,7 @@
 package ch.lkmc.combray
 
 import android.view.KeyEvent
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -19,7 +20,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.espresso.IdlingPolicies
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -34,6 +37,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -131,6 +135,47 @@ class HomeTest {
         sheetRow(hasText("Done")).performClick()
     }
 
+    @Test
+    fun aCloseNoticeDoesNotCoverHomeLinks() {
+        runBlocking { home.savePin(null, Fixtures.solid(PINNED), "Shortcut") }
+        open(Device.GREEN)
+        device.browser.closeTab(device.browser.browserState.value.activeTab!!.id)
+        device.awaitState { it.activeTab == null }
+        awaitText("Tab closed")
+        val tile = awaitTile("Shortcut").getUnclippedBoundsInRoot()
+        val notice = compose.onNodeWithText("Tab closed").getUnclippedBoundsInRoot()
+        assertTrue("a close notice must not cover a Home destination", tile.bottom <= notice.top)
+    }
+
+    @Test
+    fun reopeningTheEditorUsesTheSelectedPinInsteadOfADiscardedDraft() {
+        val first = Fixtures.solid(PIN_FIRST)
+        val second = Fixtures.solid(PIN_SECOND)
+        runBlocking {
+            home.savePin(null, first, "First")
+            home.savePin(null, second, "Second")
+        }
+        openHome()
+        awaitText("Edit")
+        compose.onNodeWithText("Edit").performClick()
+        sheetRow(hasContentDescription("Edit First")).performClick()
+        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        compose.onAllNodes(hasSetTextAction())[0].performTextReplacement("Discarded draft")
+        compose.onNodeWithContentDescription("Close sheet").performClick()
+        compose.waitUntilDoesNotExist(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+
+        compose.onNodeWithText("Edit").performClick()
+        sheetRow(hasText("Edit new tab")).assertIsDisplayed()
+        sheetRow(hasContentDescription("Edit Second")).performClick()
+        compose.waitUntilAtLeastOneExists(hasSetTextAction(), Device.LOAD_TIMEOUT_MS)
+        val fields = compose.onAllNodes(hasSetTextAction())
+        assertEquals("Second", fields[0].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        assertEquals(second, fields[1].fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        assertEquals(listOf("First", "Second"), homeState().pins.map { it.title })
+        sheetRow(hasText("Cancel")).performClick()
+        sheetRow(hasText("Done")).performClick()
+    }
+
     /**
      * Two open tabs can share one address: Continue must select the exact tab that was
      * focused most recently, not whichever tab happens to show that page first. And after
@@ -140,8 +185,10 @@ class HomeTest {
     @Test
     fun continueSelectsTheMostRecentSameUrlTabByIdAndRestoresIt() {
         val url = open(Device.BLUE)
+        val first = device.browser.browserState.value.activeTab!!.id
         open(Device.BLUE, Placement.NEW_TAB)
         val second = device.browser.browserState.value.activeTab!!.id
+        assertNotEquals(first, second)
 
         openHome()
         tapContinue(Fixtures.title(Device.BLUE))
@@ -307,9 +354,15 @@ class HomeTest {
 
     private fun open(color: Int, placement: Placement = Placement.CURRENT_TAB): String {
         val url = Fixtures.solid(color)
+        val previous = device.browser.browserState.value.activeTab?.id
         device.browser.openUrl(url, placement)
-        device.awaitPage(url)
-        device.awaitState { it.activeTab?.title != null }
+        // An equal address may already be loaded: a new tab must report its own identity/title.
+        device.awaitState { state ->
+            state.activeTab?.let { tab ->
+                tab.url == url && tab.title == Fixtures.title(color) && !tab.loading &&
+                    (placement != Placement.NEW_TAB || tab.id != previous)
+            } == true
+        }
         return url
     }
 
@@ -362,8 +415,13 @@ class HomeTest {
     }
 
     /** A row deep in the scrollable Edit sheet: waits for it, then brings it on screen. */
-    private fun sheetRow(matcher: SemanticsMatcher) = (matcher and hasAnyAncestor(isDialog())).let { row ->
-        compose.waitUntilAtLeastOneExists(row, Device.LOAD_TIMEOUT_MS)
+    private fun sheetRow(matcher: SemanticsMatcher) = matcher.let { row ->
+        try {
+            compose.waitUntilAtLeastOneExists(row, EDITOR_TIMEOUT_MS)
+        } catch (failure: ComposeTimeoutException) {
+            val targets = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().joinToString("\n") { it.config.toString() }
+            throw AssertionError("Editor control missing: $row\n$targets", failure)
+        }
         compose.onNode(row).performScrollTo()
     }
 
@@ -372,6 +430,7 @@ class HomeTest {
     }
 
     private companion object {
+        const val EDITOR_TIMEOUT_MS = 30_000L
         // Pages only these checks use, so no other check's history answers their queries.
         const val PINNED = 0x715f2e
         const val PIN_FIRST = 0x2e715f
