@@ -1,5 +1,8 @@
 # Combray design reference
 
+[New-tab design](new-tab.md) specifies the native launchpad approved on
+24 October 2026, its persistent + button and above-field history suggestions.
+
 [Open the interactive concept](combray-concepts.html) in a current desktop browser. It uses sample content and simulated states, with no live service requests. The standalone preview may load its support libraries from public CDNs; internet access may be needed. It is a reference for the native implementation, not the app's rendering layer.
 
 The [editable source fragment](combray-concepts.fragment.html) preserves the original concept. The standalone file contains the preview wrapper and supporting runtime so another developer can inspect it outside the original conversation. Edit the source if refining the concept, then regenerate the wrapper or explicitly document a new export method. Do not independently modify both files and let them drift.

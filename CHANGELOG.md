@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A bottom-first new-tab launchpad with Continue, ordered pinned links,
+  frequent sites, hide/restore controls and direct Hister/Karakeep access.
+  New tab has a persistent + button on Home, pages, the address editor and
+  Find in page; local typing suggestions appear above the field.
 - A site-check harness (`testing/sitecheck/`) that loads the pages you
   visit, from Hister, in a desktop Servo build and in headless Chromium,
   and ranks what breaks in Servo. A nightly task uses it to fix the
@@ -54,10 +58,10 @@ All notable changes to this project are documented here. The format follows
 - Pages follow the phone's dark theme: sites with dark styles, such as
   Kagi, render dark when the system is in dark mode, and switch when it
   changes.
-- The new-tab page shows Combray's icon and up to six frequent sites: the
-  sites you visited most within the history retention period, each opening
-  its newest page in one tap. Pages with credentials in their address, such
-  as sign-in links, are left out.
+- The new-tab page shows Combray's icon and up to six quick links: pins
+  first, then sites visited most within the history retention period.
+  Automatic links open the site's newest page. Credential-bearing addresses
+  are left out.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

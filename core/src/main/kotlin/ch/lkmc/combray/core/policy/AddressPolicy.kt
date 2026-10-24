@@ -372,6 +372,9 @@ object AddressPolicy {
 
 /** Host handling for history, exclusions and site actions. */
 object HostNames {
+    /** The prefix many sites are also reached under; ranking, hiding and forgetting merge it. */
+    private const val WWW_PREFIX = "www."
+
     private const val BLOB_PREFIX = "blob:"
     private val AUTHORITY_PREFIX = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")
 
@@ -493,6 +496,16 @@ object HostNames {
     /** Exact host match, or a subdomain of [site] when [includeSubdomains]; never a suffix string test. */
     fun matches(host: String, site: String, includeSubdomains: Boolean): Boolean =
         host == site || (includeSubdomains && host.endsWith(".$site"))
+
+    /**
+     * The key a host ranks, hides and is forgotten under: itself without a leading "www.", so
+     * both spellings of one site count as it. Only that spelling merges: "www.sub.example.com"
+     * keys to "sub.example.com", and "example.net" stays itself.
+     */
+    fun mergedSite(host: String): String = host.removePrefix(WWW_PREFIX)
+
+    /** The spellings stored visits of [site] may carry: the merged key and its "www." form. */
+    fun siteSpellings(site: String): List<String> = listOf(site, "$WWW_PREFIX$site")
 
     fun isWeb(url: String): Boolean {
         val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase()

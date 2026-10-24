@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
@@ -44,6 +47,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,9 +77,12 @@ import ch.lkmc.combray.core.browser.TabStep
 import ch.lkmc.combray.core.integration.SaveStatus
 
 /**
- * Back, address, Save, Share, Recent and More: every routine action within thumb reach. A
- * sideways swipe along the bar steps through open tabs ([onSwipeTab]); the Recent sheet stays
- * the visible way to switch, so nothing depends on the gesture.
+ * Back, address, Save, Share, New tab, Recent and More: every routine action within thumb
+ * reach. On the new-tab home the bar is a dock instead: one full-width search affordance and
+ * labeled Hister, Karakeep, +, Recent and More actions ([onHister] and [onKarakeep] open the
+ * Recent sheet on those scopes). A sideways swipe along the bar steps through open tabs
+ * ([onSwipeTab]); the Recent sheet stays the visible way to switch, so nothing depends on the
+ * gesture.
  */
 @Composable
 fun BottomBar(
@@ -90,6 +97,12 @@ fun BottomBar(
     onAddress: () -> Unit,
     onSave: () -> Unit,
     onShare: () -> Unit,
+    /** Recent on its Hister scope; used by the home dock. */
+    onHister: () -> Unit,
+    /** Recent on its Karakeep scope; used by the home dock. */
+    onKarakeep: () -> Unit,
+    /** New tab: a persistent action, always immediately before Recent (owner requirement). */
+    onNewTab: () -> Unit,
     onRecent: () -> Unit,
     /** Long-press shortcut: focus the tab used before the focused one. */
     onRecentLongPress: () -> Unit,
@@ -132,12 +145,24 @@ fun BottomBar(
                     .then(swipe)
                     .fillMaxWidth(),
             ) {
-                // Five 48dp actions leave a narrow phone's chip too little room for a site name, so
+                // Null, blank or home: the dock, not browsing controls. One full-width search
+                // affordance; labeled actions for the two services, +, Recent and More. The
+                // browsing bar's disabled Back/Save/Share have no place here.
+                val home = tab?.url == null
+                // Six 48dp actions leave a narrow phone's chip too little room for a site name, so
                 // the address takes a row of its own above them (owner decision, 22 October 2026).
                 val stacked = maxWidth < STACKED_BAR_BELOW
                 Column {
-                    if (stacked) {
-                        AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp))
+                    if (stacked || home) {
+                        AddressChip(
+                            tab, histerStored, onAddress, onCopyAddress,
+                            hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
+                            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
+                        )
+                    }
+                    if (home) {
+                        HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, onMore)
+                        return@Column
                     }
                     Row(
                         Modifier
@@ -155,6 +180,9 @@ fun BottomBar(
                         IconButton(onClick = onShare, enabled = tab?.url != null) {
                             Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
                         }
+                        IconButton(onClick = onNewTab) {
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
+                        }
                         // TalkBack keeps the count even when the visual badge is hidden.
                         val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
                         val switchPrevious = stringResource(R.string.recent_switch_previous)
@@ -163,7 +191,7 @@ fun BottomBar(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(ACTION_TARGET)
                                 .combinedClickable(
                                     interactionSource = null,
                                     indication = ripple(bounded = false, radius = 20.dp),
@@ -201,6 +229,83 @@ fun BottomBar(
                     Modifier.fillMaxWidth().height(2.dp).align(Alignment.TopCenter).semantics { contentDescription = loading },
                 )
             }
+        }
+    }
+}
+
+/**
+ * The home dock's actions. Labeled so the service shortcuts read as destinations; they reflow
+ * onto a second line when the labels no longer fit (narrow screens, large fonts). + and Recent
+ * are one unit, so a wrap cannot put New tab anywhere but beside Recent.
+ */
+@Composable
+private fun HomeActions(
+    openTabs: Int,
+    tabCounter: TabCounter,
+    onHister: () -> Unit,
+    onKarakeep: () -> Unit,
+    onNewTab: () -> Unit,
+    onRecent: () -> Unit,
+    onRecentLongPress: () -> Unit,
+    onMore: () -> Unit,
+) {
+    FlowRow(
+        Modifier.fillMaxWidth().heightIn(min = STACKED_ACTION_ROW_HEIGHT).padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        DockAction(stringResource(R.string.recent_scope_hister), onHister)
+        DockAction(stringResource(R.string.recent_scope_karakeep), onKarakeep)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onNewTab) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
+            }
+            RecentDockAction(openTabs, tabCounter, onRecent, onRecentLongPress)
+        }
+        DockAction(stringResource(R.string.action_more), onMore)
+    }
+}
+
+/** A labeled home-dock action: the service or surface it opens, in words. */
+@Composable
+private fun DockAction(label: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = ACTION_TARGET)) {
+        Text(label)
+    }
+}
+
+/**
+ * Recent as a labeled dock action: the icon button's open-tab count (badge when enabled,
+ * TalkBack either way) and long-press shortcut preserved.
+ */
+@Composable
+private fun RecentDockAction(openTabs: Int, tabCounter: TabCounter, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val recentLabel = pluralStringResource(R.plurals.action_recent_with_count, openTabs, openTabs)
+    val switchPrevious = stringResource(R.string.recent_switch_previous)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .heightIn(min = ACTION_TARGET)
+            .combinedClickable(
+                interactionSource = null,
+                indication = ripple(),
+                role = Role.Button,
+                onLongClickLabel = switchPrevious,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
+            .semantics { contentDescription = recentLabel }
+            .padding(horizontal = 12.dp),
+    ) {
+        BadgedBox(
+            badge = {
+                if (tabCounter == TabCounter.SHOWN && openTabs > 0) {
+                    Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+                        Text(tabCountLabel(openTabs))
+                    }
+                }
+            },
+        ) {
+            Text(stringResource(R.string.action_recent))
         }
     }
 }
@@ -267,6 +372,7 @@ private fun AddressChip(
     onClick: () -> Unit,
     onCopy: () -> Unit,
     modifier: Modifier,
+    @StringRes hint: Int = R.string.address_placeholder,
 ) {
     val url = tab?.url
     val host = url?.let { displayHost(it) }
@@ -309,7 +415,7 @@ private fun AddressChip(
             }
             // A long host loses its start, never the registrable domain that names the site.
             Text(
-                host ?: stringResource(R.string.address_placeholder),
+                host ?: stringResource(hint),
                 maxLines = 1,
                 overflow = if (host != null) TextOverflow.StartEllipsis else TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge,
@@ -331,8 +437,18 @@ private fun AddressChip(
 /** The single-row bar's height. */
 private val BAR_HEIGHT = 64.dp
 
-/** Below this width the address gets its own row; at 400dp the single row leaves the host about 115dp. */
-private val STACKED_BAR_BELOW = 400.dp
+/** One action's touch target: Android's and Material's 48dp minimum. */
+private val ACTION_TARGET = 48.dp
+
+/** The room the address needs beside the actions to still name a site. */
+private val ADDRESS_MIN_WIDTH = 132.dp
+
+/**
+ * Below this width the address gets its own row: six actions (Back, Save, Share, New tab,
+ * Recent, More) need 6 · 48dp, and the field needs its room beside them. The old five-action
+ * rule was 400dp.
+ */
+private val STACKED_BAR_BELOW = ACTION_TARGET * 6 + ADDRESS_MIN_WIDTH
 
 /** The action row's height under the address row: 48dp targets with a little room. */
 private val STACKED_ACTION_ROW_HEIGHT = 56.dp

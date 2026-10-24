@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_search_hint">Search with Kagi or enter address</string>
+    <string name="home_heading">Where next?</string>
+    <string name="home_continue">Continue</string>
+    <string name="home_continue_tab">Continue, %1$s</string>
+    <string name="home_links_title">Quick links</string>
+    <string name="home_edit">Edit</string>
+    <string name="home_edit_title">Edit new tab</string>
+    <string name="home_show_continue">Show Continue</string>
+    <string name="home_show_frequent">Show frequent sites</string>
+    <string name="home_pinned">Pinned links</string>
+    <string name="home_add_link">Add link</string>
+    <string name="home_edit_link">Edit link</string>
+    <string name="home_link_name">Name</string>
+    <string name="home_link_address">Web address</string>
+    <string name="home_pin">Pin this page</string>
+    <string name="home_unpin">Unpin</string>
+    <string name="home_unpin_named">Unpin %1$s</string>
+    <string name="home_hide_site">Hide site</string>
+    <string name="home_hidden_sites">Hidden sites</string>
+    <string name="home_restore_site">Restore %1$s</string>
+    <string name="home_restore">Restore</string>
+    <string name="home_no_pins">Pin a page or add a link to keep it here.</string>
+    <string name="home_edit_named">Edit %1$s</string>
+    <string name="home_link_options">Options for %1$s</string>
+    <string name="home_move_earlier">Move %1$s earlier</string>
+    <string name="home_move_later">Move %1$s later</string>
+    <string name="home_save_link">Save link</string>
+    <string name="home_invalid_address">Enter a web address, such as https://example.org.</string>
+    <string name="home_sensitive_address">This address looks like a sign-in link. Choose an address without credentials or tokens.</string>
+    <string name="home_link_missing">This link is no longer pinned. Add it again.</string>
+    <string name="home_replace_title">Replace a pinned link</string>
+    <string name="home_replace_body">All six places are pinned. Choose which link to replace.</string>
+    <string name="home_replace_named">Replace %1$s</string>
+    <string name="home_change_failed">Could not save this change. Try again.</string>
+    <string name="home_edit_frequent">Frequent sites</string>
+</resources>
