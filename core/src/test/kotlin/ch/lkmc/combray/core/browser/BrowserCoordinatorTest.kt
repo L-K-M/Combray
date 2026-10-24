@@ -9,6 +9,8 @@ import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
+import ch.lkmc.combray.core.integration.SensitiveUrls
+import ch.lkmc.combray.core.policy.HostNames
 import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
@@ -91,6 +93,9 @@ class BrowserCoordinatorTest {
     private fun recent(query: String? = null) = runBlocking {
         browser.recent(HistoryDepth.forQuery(query)).first().matching(query)
     }
+
+    /** What the new-tab page shows: the sites visited most, sensitive addresses left out. */
+    private fun topSites() = runBlocking { browser.topSites(SensitiveUrls::looksSensitive).first() }
 
     /** Simulates Servo committing [url] as [document] in the view the coordinator created for it. */
     private fun commit(native: Long, document: Long, url: String, kind: HistoryKind = HistoryKind.DOCUMENT_COMMITTED, index: Int = 0, length: Int = 1) {
@@ -984,6 +989,67 @@ class BrowserCoordinatorTest {
         idle()
         assertEquals("https://down.test/", state().activeTab?.url)
         assertTrue(state().activeTab!!.loadFailed)
+    }
+
+    @Test
+    fun topSitesRankTheSitesTheUserVisitsMost() {
+        ready()
+        browser.openUrl("https://a.test/one", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/one")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        now += 1_000
+        browser.openUrl("https://www.a.test/two", Placement.CURRENT_TAB); idle()
+        commit(2, 21, "https://www.a.test/two", index = 1, length = 2)
+
+        val sites = topSites()
+
+        // Pages open tabs show right now count too, and "www." is the same site: a.test has two.
+        assertEquals(listOf("a.test", "b.test"), sites.map { it.site })
+        assertEquals(listOf(2, 1), sites.map { it.visits })
+        // A tap opens the site's newest page.
+        assertEquals("https://www.a.test/two", sites[0].url)
+    }
+
+    @Test
+    fun topSitesLeaveOutForgottenSensitiveFailedAndExpiredPages() {
+        idle() // start-up maintenance must not remove the tab before its visits exist
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            listOf(
+                Triple("https://kept.test/", START, false),
+                // Older than the retention window.
+                Triple("https://old.test/", START - 8 * DAY, false),
+                // Servo's error page for a load that failed.
+                Triple("https://down.test/", START, true),
+                // A tile names only the site; opening it must not replay a sign-in.
+                Triple("https://login.test/callback?access_token=abc", START, false),
+                Triple("https://forgotten.test/", START, false),
+            ).forEachIndexed { index, (url, at, failed) ->
+                dao.insertVisit(VisitEntity("visit$index", "closed", url, HostNames.of(url), null, null, VisitKind.DOCUMENT, at, at, failed))
+            }
+        }
+        browser.forgetSite("forgotten.test", includeSubdomains = false); idle()
+
+        assertEquals(listOf("kept.test"), topSites().map { it.site })
+    }
+
+    @Test
+    fun topSitesBreakTiesByRecencyAndKeepToTheLimit() {
+        idle() // start-up maintenance must not remove the tab before its visits exist
+        val dao = database.browser()
+        runBlocking {
+            dao.insertTab(TabEntity("closed", TabState.CLOSED, null, null, null, START, START, START))
+            (1..8).forEach { index ->
+                val url = "https://site$index.test/"
+                dao.insertVisit(VisitEntity("visit$index", "closed", url, HostNames.of(url), null, null, VisitKind.DOCUMENT, START + index, START + index, false))
+            }
+        }
+
+        // One visit each: the six most recent sites, newest first.
+        assertEquals((8 downTo 3).map { "site$it.test" }, topSites().map { it.site })
     }
 
     @Test

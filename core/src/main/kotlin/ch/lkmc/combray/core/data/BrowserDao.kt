@@ -52,6 +52,17 @@ interface BrowserDao {
     )
     fun observeHistory(since: Long, limit: Int): Flow<List<VisitEntity>>
 
+    /** Recent visits for ranking quick links, including the pages open tabs show now. */
+    @Query(
+        """
+        SELECT * FROM visits
+        WHERE failed = 0 AND lastSeenAt >= :since
+        ORDER BY lastSeenAt DESC
+        LIMIT :limit
+        """,
+    )
+    fun observeRecentVisits(since: Long, limit: Int): Flow<List<VisitEntity>>
+
     @Upsert
     suspend fun setSession(session: SessionEntity)
 

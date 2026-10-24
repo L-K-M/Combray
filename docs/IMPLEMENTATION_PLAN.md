@@ -583,6 +583,7 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 | Swiping sideways on the bottom bar switches tabs | Confirmed (owner request) | New, with #109 |
 | The More sheet keeps "Resume history capture" while capture is paused | Superseded 23 October 2026: capture has no More row; Settings keeps the switch, and the address chip marks pages Hister accepted | #58 |
 | Saves that never reached the server do not use up the ten attempts; they need attention after seven days. Hister's deliberate refusals cancel the capture | Confirmed | #74 |
+| The new-tab page shows Combray's icon and up to six frequent sites (the sites visited most in the retention window, "www." counted as the same site); a tile opens the site's newest page. Pages with credentials in their address do not count | Confirmed (24 October 2026, rework #42 and land it); the sensitive-address rule is Proposed | #42 |
 
 ### Principal risks and response
 

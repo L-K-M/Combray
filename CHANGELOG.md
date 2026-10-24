@@ -47,6 +47,10 @@ All notable changes to this project are documented here. The format follows
 - Pages follow the phone's dark theme: sites with dark styles, such as
   Kagi, render dark when the system is in dark mode, and switch when it
   changes.
+- The new-tab page shows Combray's icon and up to six frequent sites: the
+  sites you visited most within the history retention period, each opening
+  its newest page in one tap. Pages with credentials in their address, such
+  as sign-in links, are left out.
 - Page controls: `<select>` pickers, `alert`/`confirm`/`prompt` dialogs
   naming the asking site (with a way to block a page's repeated dialogs),
   and file upload through Android's document picker.

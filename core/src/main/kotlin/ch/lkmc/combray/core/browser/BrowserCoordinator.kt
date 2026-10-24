@@ -33,7 +33,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -212,6 +214,32 @@ class BrowserCoordinator(
             } + visits.filter { it.lastSeenAt >= cutoff }.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
             items.sortedByDescending { it.time }
         }
+    }
+
+    /**
+     * The sites the user visits most, for the new-tab page: one entry per site (its host without
+     * "www."), most visits first among the newest [RECENT_HISTORY_LIMIT] in the retention window,
+     * ties by recency, each with its newest page. The window starts when the list is collected,
+     * so each new tab ranks the current one. Pages open tabs show now count, as they are what the
+     * user visits; a forgotten page has no visit, so it never ranks. Nor does a page [sensitive]
+     * says carries credentials: a tile names only the site, and opening it must not replay a
+     * sign-in or token link.
+     */
+    fun topSites(sensitive: (url: String) -> Boolean, limit: Int = TOP_SITES_LIMIT): Flow<List<TopSite>> = flow {
+        val since = clock.now() - retention.closedHistoryMillis
+        emitAll(
+            dao.observeRecentVisits(since, RECENT_HISTORY_LIMIT).map { visits ->
+                visits
+                    .filterNot { sensitive(it.url) }
+                    .mapNotNull { visit -> visit.host?.let { it.removePrefix(WWW) to visit } }
+                    // Grouping keeps the newest-first order: each site's first page is its newest,
+                    // and the stable sort below leaves sites with as many visits in recency order.
+                    .groupBy({ it.first }, { it.second })
+                    .map { (site, pages) -> TopSite(site, pages.first().url, pages.size) }
+                    .sortedByDescending { it.visits }
+                    .take(limit)
+            },
+        )
     }
 
     // --- Commands -------------------------------------------------------------------------------
@@ -1488,6 +1516,11 @@ class BrowserCoordinator(
 
         /** Proposed default until measured on the owner's phone (M4). */
         const val MAX_LIVE_VIEWS = 6
+
+        /** Quick-link tiles on the new-tab page: two rows of three. */
+        const val TOP_SITES_LIMIT = 6
+        /** The prefix many sites are also reached under; both spellings rank as one site. */
+        const val WWW = "www."
 
         /** Reader view budget: the article's JSON (native/src/reader.js); longer ones are cut. */
         const val MAX_ARTICLE_BYTES = 512 * 1024

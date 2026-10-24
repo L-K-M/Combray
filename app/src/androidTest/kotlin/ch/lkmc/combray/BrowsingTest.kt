@@ -11,7 +11,9 @@ import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
@@ -98,6 +100,24 @@ class BrowsingTest {
         device.awaitState { it.openTabCount == 1 }
         assertEquals(first, device.browser.browserState.value.activeTab?.id)
         assertScreen(Device.BLUE)
+    }
+
+    @Test
+    fun aNewTabOffersTheSiteVisitedMostAndOpensItsNewestPage() {
+        open(Device.OCHRE)
+        open(Device.GREEN)
+        device.browser.newTab()
+        device.awaitState { it.activeTab?.isHome == true }
+
+        // The tile names the fixture server's site; the new-tab page reads it from history as it shows.
+        val tile = compose.activity.getString(R.string.home_open_site, "localhost")
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithContentDescription(tile).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription(tile).performClick()
+
+        // The site's newest page, in the new tab.
+        device.awaitPage(Fixtures.solid(Device.GREEN))
+        assertEquals(2, device.browser.browserState.value.openTabCount)
+        assertScreen(Device.GREEN)
     }
 
     @Test
