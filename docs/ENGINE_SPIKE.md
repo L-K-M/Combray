@@ -486,3 +486,37 @@ the product debug APK is
 `2a88a0855472c5cb8945db250f83338d03c1dce95379553b8514708b4f30bab9`.
 No physical phone, live integration service, login or full CSS conformance was
 tested. All source changes remain downstream.
+
+## 17. Tab-counter preference checks (24 October 2026)
+
+Settings › Display › Show tab count is off by default. The choice persists;
+the Recent button's TalkBack label keeps the count either way.
+
+Validation used Linux, JDK 21, Rust 1.97.1, NDK r29 and the API-30 x86_64
+`emulator-5580`. The unchanged engine pin was
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. No engine source changed.
+
+```sh
+ANDROID_SDK_ROOT=/home/paseo/android-sdk \
+  COMBRAY_HOST_CC="$PWD/build/tab-counter-host-cc" \
+  COMBRAY_HOST_CXX="$PWD/build/tab-counter-host-c++" \
+  CARGO_BUILD_JOBS=8 scripts/build-native.sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+ANDROID_SDK_ROOT=/home/paseo/android-sdk scripts/check-app.sh emulator-5580 \
+  ch.lkmc.combray.TabCounterTest \
+  ch.lkmc.combray.AccessibilityTest#theBottomBarOnAPageIsAccessible
+```
+
+The local compiler wrappers call the host's Zig-backed `cc`/`c++` with
+`-fno-sanitize=undefined`, as in section 16. Native compilation passed in
+6m08s. All 466 JVM tests, lint, APK assembly, 88 Rust host tests, Rust
+formatting, documentation and whitespace checks passed. Both device checks
+passed in `build/device-checks/20261024T094619Z/`.
+
+The device check verifies hidden/shown counts, live updates and activity
+recreation through the settings service. An earlier test tapping through
+Settings hit the known software-emulator focus timeout (`keyDispatchingTimedOut`,
+run `20261024T093930Z`, also after ahead-of-time compilation). The Settings
+switch itself and a physical phone remain unverified. The first device
+attempt used a stale local library missing `setPageZoom`; rebuilding resolved
+that prerequisite.

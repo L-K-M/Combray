@@ -8,6 +8,9 @@ import kotlinx.coroutines.flow.asStateFlow
 /** How the app picks its colors: follow the system, or one theme whatever the system says. */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/** Whether the Recent button shows the number of open tabs. */
+enum class TabCounter { HIDDEN, SHOWN }
+
 /**
  * The browser's own preferences. Service configuration stays in the database, where it binds
  * queued work; these are plain user choices with nothing depending on them transactionally.
@@ -16,6 +19,7 @@ class BrowserSettings(private val preferences: SharedPreferences) {
     private val unused = MutableStateFlow(read(KEY_UNUSED_TABS, UnusedTabs.entries, UnusedTabs.KEEP))
     private val theme = MutableStateFlow(read(KEY_THEME_MODE, ThemeMode.entries, ThemeMode.SYSTEM))
     private val text = MutableStateFlow(read(KEY_TEXT_SIZE, TextSize.entries, TextSize.DEFAULT))
+    private val counter = MutableStateFlow(read(KEY_TAB_COUNTER, TabCounter.entries, TabCounter.HIDDEN))
 
     val unusedTabs: StateFlow<UnusedTabs> = unused.asStateFlow()
 
@@ -23,12 +27,16 @@ class BrowserSettings(private val preferences: SharedPreferences) {
 
     val textSize: StateFlow<TextSize> = text.asStateFlow()
 
+    val tabCounter: StateFlow<TabCounter> = counter.asStateFlow()
+
     fun setUnusedTabs(choice: UnusedTabs) = write(KEY_UNUSED_TABS, unused, choice)
 
     fun setThemeMode(choice: ThemeMode) = write(KEY_THEME_MODE, theme, choice)
 
     /** Only stores the choice: [BrowserCoordinator.applyTextSize] passes it to the engine. */
     fun setTextSize(size: TextSize) = write(KEY_TEXT_SIZE, text, size)
+
+    fun setTabCounter(choice: TabCounter) = write(KEY_TAB_COUNTER, counter, choice)
 
     /** An unknown stored name falls back to its default: preferences never block startup. */
     private fun <T : Enum<T>> read(key: String, values: List<T>, default: T): T =
@@ -44,6 +52,7 @@ class BrowserSettings(private val preferences: SharedPreferences) {
         private const val KEY_UNUSED_TABS = "unused_tabs"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TEXT_SIZE = "text_size"
+        private const val KEY_TAB_COUNTER = "tab_counter"
     }
 }
 

@@ -164,6 +164,7 @@
     <string name="home_body">Search with Kagi or open an address.</string>
     <string name="settings_display_title">Display</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_tab_counter">Show tab count</string>
     <string name="appearance_system">Follow system</string>
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
