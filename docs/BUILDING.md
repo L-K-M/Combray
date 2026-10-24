@@ -18,9 +18,9 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `97be6cb1fb50b6fe82f677dd30c901102a3fa94a` | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c` | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
 | Upstream base | v0.6.0 (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
-| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, loopback-only WebDriver | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |
@@ -53,13 +53,21 @@ COMBRAY_ABI=x86_64 scripts/build.sh --debug    # for the emulator
 scripts/build.sh --debug --install             # then install and launch on the connected device
 ```
 
-`scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and checks out the exact downstream commit with `scripts/m0/fetch-servo.sh`. Every build verifies the actual commit and refuses local source edits. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
+`scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and checks out the exact downstream commit with `scripts/m0/fetch-servo.sh`. Every build restores and verifies the pinned source. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
 
 ```sh
 scripts/m0/fetch-servo.sh             # fetch the exact downstream SHA; no Android SDK needed
 scripts/build-native.sh               # cargo build + strip → engine/jniLibs/x86_64 (COMBRAY_ABI=arm64 for phones)
 ./gradlew assembleDebug               # → app/build/outputs/apk/debug/app-debug.apk (ch.lkmc.combray.debug)
 ```
+
+After the first fetch, checking out Servo's large source tree can take several
+minutes. The script announces this step and requests Git's checkout progress.
+`^\` followed by `zsh: quit` means the process received SIGQUIT (normally
+Ctrl-\). Rerun the same build command after an interruption: preparation
+replaces partial or edited source and removes untracked leftovers, reusing
+the downloaded commit and ignored build caches. `servo-checkout/servo` is
+disposable; develop engine changes in a separate downstream checkout.
 
 `scripts/build.sh [--debug] [--install]` then runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
 
@@ -141,7 +149,7 @@ scripts/m0/smoke-upstream.sh emulator-5560
 
 `smoke-upstream.sh` repeats mach's Android `smoketest`: it installs `servoapp.apk`, opens a `data:` URL whose script logs `SERVO_ANDROID_SMOKETEST_OK`, and passes when that marker reaches logcat before a crash marker. mach waits 30 seconds; the script waits up to `COMBRAY_SMOKE_TIMEOUT` (900 s default) for software emulation.
 
-`fetch-servo.sh` switches between exact commits without deleting the checkout or its ignored `target/`. It refuses tracked or untracked source edits and preserves detached local commits until you put them on a branch. Successful Python preparation is recorded inside `.git/combray-prepared`; a cached commit, matching stamp and existing Python environment need no network. A deleted environment is prepared again. Both build scripts prepare their required mode, so a baseline build cannot silently become the app's engine.
+`fetch-servo.sh` force-checks out the exact commit and cleans untracked source on every run, including after an interrupted first checkout. Ignored caches such as `target/` and the Python environment are reused; local source edits and commits are not build inputs. Successful Python preparation is recorded inside `.git/combray-prepared`; a cached commit, matching stamp and existing Python environment need no network. A deleted environment is prepared again. Both build scripts prepare their required mode, so a baseline build cannot silently become the app's engine.
 
 The old `servo-checkout/servo-v0.6.0` release extraction is untouched. It is no longer used; inspect it before removing it. To reuse its compilation cache, set `CARGO_TARGET_DIR` explicitly to its `target/` directory.
 

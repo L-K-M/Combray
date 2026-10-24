@@ -295,6 +295,92 @@ Limitations found while building the app:
 - **Pages behind an HTTP sign-in can be captured.** Before the address lost its credentials, Combray skipped such pages for Hister and refused a Karakeep save as sensitive. Now they are treated like a page signed in with a cookie: captured only when Hister capture is on and the host is not excluded.
 - **Emulator compositor.** After about 2.5 hours of headless running, the reference emulator's screenshots turned all black, the launcher included, while the app kept working. This was an emulator problem, not an engine one; `check-app.sh` now detects it before running checks.
 
+### Reddit loading and fixed-layer scrolling (24 October 2026)
+
+The owner reported a partially rendered Reddit feed that kept loading and
+would not scroll. The screenshot's directional button shows that Combray
+received the swipe. Loading does not disable input in `EngineSurfaceView`.
+Reddit answered HTTP 403 from this host, including a mobile User-Agent;
+the live feed and the cause of its unfinished load remain unverified.
+
+A native regression confirmed a separate relevant defect: fixed
+descendants are siblings of the viewport scroll node. When an empty fixed
+scroll box cannot consume a swipe, following spatial parents never reaches
+the viewport. The recovered proposal in Combray PR #116 identified this
+case but had no native or device proof. The smaller downstream fix in
+[Servo PR #5](https://github.com/L-K-M/servo/pull/5) chains only input scrolls
+to the same document's viewport, retaining its input sensitivity. Script
+scrolling stays unchanged. No site-specific script or timeout marks a
+stalled page as loaded.
+
+Candidate engine: `1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c`, based on
+`38633e6cfd3e5d78651ba81698b6e8e30644231f`. The base also contains reviewed
+downstream PR #3's loopback-only WebDriver listener; Combray does not enable
+that listener. No dependency, toolchain or license changed. Modified
+engine files: `components/shared/paint/display_list.rs` and
+`components/shared/paint/tests/compositor.rs`.
+
+Host evidence (Linux x86_64, Rust 1.97.1):
+
+- The new compositor regression failed before the fix: expected viewport
+  offset `(0, 40)`, got `None`. All six compositor tests pass afterward,
+  covering empty/scrollable fixed boxes, page edges, script scrolling,
+  locked viewports and document isolation.
+- GLM review found that touch pans and flings use `ScrollType::Touch`,
+  separately from wheel input. Its regression also failed before correction;
+  both paths now run the same assertions.
+- The initial broad paint test lacked `libwayland-client.so`. With the
+  existing host graphics libraries and `xvfb-run -a`, the full paint API
+  suite passed: two rendering tests and six compositor tests.
+- The original pinned engine built for x86_64 in 7m30s with
+  `scripts/build-native.sh`. Baseline APK SHA-256:
+  `31397733dc16b76debd3abdb492fb507b49f903d9b87896f8459675475e2d8ac`.
+- Kotlin unit tests, lint and debug/test APK assembly passed. The bridge's
+  88 host tests, all 48 script tests, docs and whitespace checks passed.
+- The candidate x86_64 Android engine built in 8m25s (NDK r29, two build
+  jobs). Debug/test APK assembly and ELF packaging checks passed. APK:
+  `0a9f663c07ee8be48a0146dccaa750ad48a0f340ff1268084d5931896dda2678`;
+  engine library:
+  `8a7becb842bcc91b0cfca4ab95b44e69544b83957684700628adb25641607f9b`.
+
+`FixedLayerScrollTest` uses a synthetic transparent fixed drawer over red
+and green page sections. It checks the painted viewport after a real swipe,
+both after load and while an image response is held by the fixture server.
+The latter must keep reporting loading until the test explicitly releases
+the response.
+
+Android baseline (`emulator-5560`, Android 11/API 30, x86_64, software
+emulation/SwiftShader): the saved pre-fix APK failed at the expected pixel
+assertion after the swipe, `b03a2e` instead of `2e6b4f` (164.213 s).
+`build/device-checks/reddit-red/` holds the failure and a screenshot showing
+the direction button over the unmoved page. A copy of `check-app.sh` used
+the saved baseline APK paths; its fixture, install and check logic were
+unchanged.
+
+The candidate passed all six selected checks in
+`build/device-checks/reddit-fixed/`: both fixed-layer checks (68.603 s),
+all three `ScrollTest` checks (139.028 s), and the existing cancelled-media
+check. Thus the page scrolls before an image finishes, loading remains
+truthful, and releasing that response finishes the load. Root jumps,
+same-address reload reset and the overlaid snackbar still work.
+
+```sh
+# Host engine checkout, with the existing host graphics libraries on LD_LIBRARY_PATH:
+xvfb-run -a cargo +1.97.1 test --locked -p servo-paint-api
+
+# Combray, with the host compiler wrappers documented in BUILDING.md:
+CARGO_BUILD_JOBS=2 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+COMBRAY_RESULTS=build/device-checks/reddit-fixed scripts/check-app.sh emulator-5560 \
+  ch.lkmc.combray.FixedLayerScrollTest ch.lkmc.combray.ScrollTest \
+  'ch.lkmc.combray.BrowsingTest#mediaIsCancelledBeforeDownloadingAndThePageIsTold'
+```
+
+Next Reddit evidence requires a network that serves its feed. Its unfinished
+load remains open; these fixture results do not establish live-site support.
+ARM64 runtime was not tested. The companion PR supplies the CI ABI builds
+and full emulator suite before merge.
+
 ## 14. Sol review validation, 21 October 2026
 
 Source baseline: `e5cf8ed`, Servo v0.6.0 at the revision in section 2, patches 0001–0004. The Sol fixes change logical browser/outbox behavior, not the native pin or patch set. Host: Linux x86_64, JDK 21.0.12.1, Rust 1.97.1, NDK 29.0.14206865, SDK platform 37. The existing Zig 0.17 host wrappers described in [BUILDING.md](BUILDING.md) were used.
@@ -368,7 +454,7 @@ Base: `c78d2c206f80a1c8b67eefa97f773bba513205d3` (v0.6.0). Downstream pin: `97be
 | 0004, profile persistence | `718bb542539` | `components/net/resource_thread.rs`, `components/servo/site_data_manager.rs`, `components/shared/base/lib.rs`, `components/shared/net/lib.rs` |
 | 0007, DOM relational queries | `97be6cb1fb5` | Four files in `components/script/`; all 15 Parser hooks preserved, only `parse_has` overridden. Stylesheet `:has()` and `CSS.supports` remain disabled. Imported unchanged in [downstream PR #1](https://github.com/L-K-M/servo/pull/1), from the candidate in [Combray PR #119](https://github.com/L-K-M/Combray/pull/119) |
 
-Copied upstream workflows, `CODEOWNERS` and Dependabot configuration were removed before the first downstream push. The source checkout is now `servo-checkout/servo`, selected by a full SHA in `scripts/m0/servo-pin.sh`. No patch files are applied. The old release extraction and its build cache are preserved. The checkout is verified on every build; dirty source is refused instead of overwritten. The baseline mode fetches the original upstream SHA from our downstream repository.
+Copied upstream workflows, `CODEOWNERS` and Dependabot configuration were removed before the first downstream push. The source checkout is now `servo-checkout/servo`, selected by a full SHA in `scripts/m0/servo-pin.sh`. No patch files are applied. The old release extraction and its build cache are preserved. Initially, preparation refused dirty source; the owner later selected the [disposable-checkout policy](#19-disposable-build-checkout-recovery-24-october-2026). The baseline mode fetches the original upstream SHA from our downstream repository.
 
 Migration checks: all 14 source-preparation regressions pass, including exact SHA despite a moving branch, no SDK, offline reuse, mode switching with cache preserved, local edits and detached commits, pin updates, deleted Python environments, failed preparation retry, unavailable commits and inherited Git state. Review found the detached-commit and stale-environment cases; regression tests failed before their fixes and passed afterward. The complete script suite passes 44 tests. Documentation, shellcheck, Rust formatting and all 22 Rust host tests pass. `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease` passed locally (JDK 21); this first Gradle run had no staged engine.
 
@@ -597,3 +683,120 @@ results and latest CI proof, including both native ABIs and KVM emulator
 fixtures. Read its latest commit's results rather than treating any earlier
 interrupted run as complete. Physical-phone and live-service validation
 remain unperformed; the owner's data and services were not used.
+
+## 19. Disposable build-checkout recovery (24 October 2026)
+
+The owner reported `scripts/build.sh --debug --install` stopping after a
+successful Servo fetch with `^\` / `zsh: quit` (SIGQUIT). Retrying reported
+local changes. An interrupted first checkout can leave partial source, which
+the previous preparation script refused. The owner clarified that
+`servo-checkout/servo` is disposable build input, not an engine worktree.
+
+Preparation now announces the checkout, requests Git progress, force-checks
+out the exact pin and removes untracked leftovers. Downloaded objects and
+ignored compilation/Python caches remain reusable. Source edits and local
+commits are discarded as build inputs; engine development belongs in a
+separate downstream checkout. The pin remains
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`; no engine source change is retained.
+
+Linux validation fetched and prepared that exact commit. A tracked edit and
+an untracked probe were removed by a subsequent preparation, while an ignored
+`target/` probe remained; another run reused the Python environment. Fixture
+regressions cover a partial first checkout with the remote unavailable,
+discarded edits/commits, cache reuse and unchanged clean-file timestamps,
+plus cleanup remaining confined to the managed checkout. Six checks failed
+before the behavioral fix; all 18 source checks and all 48 script checks
+passed afterward.
+
+```sh
+scripts/m0/fetch-servo.sh
+scripts/build.sh --debug --install --check
+python3 -I -m unittest discover -s scripts/tests
+shellcheck scripts/*.sh scripts/m0/servo-pin.sh scripts/m0/env.sh scripts/m0/fetch-servo.sh
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Shell syntax, shellcheck, documentation and whitespace checks passed.
+No macOS native build or device installation was run for this change.
+
+## 20. Close-tab successor (24 October 2026)
+
+Closing the focused tab could select an unused Home tab while another page
+remained open. Successor selection now skips blank tabs in Recent order,
+falling back to Home only when no page remains. The selection stays in the
+close transaction; background closes keep focus, and Undo keeps its existing
+behavior.
+
+The new coordinator regression failed before the fix by selecting the blank
+tab instead of the next page. Afterward all 135 coordinator tests passed,
+including the remaining-blank fallback, background close, Undo and last-tab
+checks. The full JVM tests, lint, debug/test APKs and unsigned release build
+passed on Linux x86_64 with JDK 21 and the pinned toolchains. Native formatting
+and all 88 host tests passed. The x86_64 native build and APK ABI check passed
+against unchanged Servo `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`.
+
+```sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 scripts/check_docs.py
+git diff --check
+# From native/:
+cargo fmt --check
+cargo test --lib
+# From the repository root, using this host's existing compiler wrappers:
+ANDROID_HOME=/home/paseo/android-sdk \
+  COMBRAY_HOST_CC=/home/paseo/workspace/Combray/build/tab-counter-host-cc \
+  COMBRAY_HOST_CXX=/home/paseo/workspace/Combray/build/tab-counter-host-c++ \
+  CARGO_BUILD_JOBS=4 scripts/build-native.sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew assembleDebug assembleDebugAndroidTest
+python3 -I scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk --expected-arch x86_64
+```
+
+`BrowsingTest.closingTheActiveTabShowsTheNextPageInsteadOfAnUnusedHomeTab`
+checks real Servo: close the green page with Home interposed in Recent,
+then verify the red page's tab identity and painted pixels. The test APK
+compiled; local execution was deferred because the shared emulator was
+reserved. The Engine PR checks run this regression before merge. No physical
+device or live services were used.
+
+## 21. Close-notice appearance (24 October 2026)
+
+The owner's dark-mode screenshot showed a light "Tab closed" card on a
+white strip. Material's default snackbar uses inverse colors. Home's outer
+notice padding also left the native engine surface uncovered.
+
+Browser and Recent now share `NoticeHost`, using `surfaceContainerHigh`,
+`onSurface` and `primary` for the card, text and action. Home paints its
+background before reserving notice space. Existing contrast tests cover
+these color pairs in both schemes. No engine source or pin changed.
+
+`NoticeThemeTest` closes a synthetic page in forced Dark and Light, samples
+the painted notice and Home backdrop, then checks Undo's exact tab identity.
+The archived pre-fix APK failed both checks on `emulator-5560` (API 30,
+x86_64): a `29302c` notice in Light, `e7e2d9` in Dark, and a white
+(`ffffff`) backdrop in both. The fixed APK passed both pixel/Undo checks
+and the existing Home-spacing regression. [PR #128](https://github.com/L-K-M/Combray/pull/128)
+records latest device, CI and review results.
+
+Initial attempts on a separate fresh AVD (port 5582) failed before app
+installation: black screenshots and repeated Android `system_server`
+restarts (`Lost network stack`). These were infrastructure failures.
+
+The supplied engine library came from the concurrent successful same-pin
+build in the shared checkout: Rust 1.97.1, NDK r29, downstream Servo
+`97be6cb1fb50b6fe82f677dd30c901102a3fa94a`, using local Zig host wrappers
+(`build/inline-search-native.log`, 4m44s). Plain host `clang` lacked C
+headers; the notice task's corrected build was interrupted when leaving
+the shared checkout. Initial PR CI also built both native ABIs.
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.NoticeThemeTest 'ch.lkmc.combray.HomeTest#aCloseNoticeDoesNotCoverHomeLinks'
+python3 scripts/check_docs.py
+git diff --check
+```
+
+JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
+checks passed locally. Evidence: `build/device-checks/notice-theme-*`
+and `build/notice-theme/`. The PR records latest CI and review results.
+Physical-phone validation remains unverified.

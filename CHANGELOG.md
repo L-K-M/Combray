@@ -137,7 +137,7 @@ All notable changes to this project are documented here. The format follows
 
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
-  patch stack; refuse source edits instead of overwriting them. Add native
+  patch stack; treat the source checkout as disposable build input. Add native
   host, Android ABI and emulator fixture validation for engine-related PRs.
 - Paint heartbeats and other engine events that cannot change anything
   stop running three database reads on the command queue, and the open
@@ -193,8 +193,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Notices such as "Tab closed" follow the app's light or dark appearance.
+  Home also covers the white native surface behind the notice.
+- Closing the active tab returns to the next open page in Recent, skipping
+  unused Home tabs while another page remains open.
+- Servo source preparation announces the large checkout and shows Git progress.
+  Rerunning a build replaces partial or edited source and removes untracked
+  leftovers, reusing downloaded objects and ignored build caches.
 - Kimi's blog startup no longer rejects `:has()` in DOM selectors. Stylesheet
   `:has()` remains unsupported while Servo's style invalidation is incomplete.
+- Pass swipes over empty fixed-position scroll boxes to the page. Preserve
+  script scrolling and pages that deliberately lock their viewport. Live
+  Reddit loading remains unverified: Reddit blocks the test host.
 - A `Retry-After` header too large to convert to milliseconds now waits
   the six-hour ceiling. The conversion overflowed, so the server's delay
   was replaced by the ordinary backoff or an arbitrary one. A value beyond
