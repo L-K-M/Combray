@@ -27,6 +27,7 @@ def page(
     attempted_days_ago: float | None = None,
     decided: bool = False,
 ) -> Page:
+    """A selection row; a verdict without checked_days_ago means checked one day ago."""
     host = urlsplit(url).hostname or ""
     visited = (
         None
