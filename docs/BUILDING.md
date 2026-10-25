@@ -20,7 +20,7 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 | --- | --- | --- |
 | Downstream Servo | `L-K-M/servo`, git `546db2b2db14104de3eb3d7c612a2100ad38f728` | `scripts/m0/servo-pin.sh`; `combray/0.6` is the maintenance branch, not a moving build input |
 | Upstream base | v0.6.0 (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
-| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, loopback-only WebDriver | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |

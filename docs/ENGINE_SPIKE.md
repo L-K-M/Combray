@@ -931,6 +931,10 @@ git diff --check
 Build host: Linux, JDK 21, Rust 1.97.1, NDK 29.0.14206865, local Zig
 wrappers `build/tab-counter-host-cc` and `build/tab-counter-host-c++`.
 Host Rust tests (88), Kotlin tests, lint and device-test compilation pass.
-Native candidate build and post-fix pixel checks are in progress.
+The final x86_64 native candidate built in 3m07s. Final pixel checks,
+both-ABI CI and review results are recorded in
+[PR #130](https://github.com/L-K-M/Combray/pull/130), which gates the pin.
 The Servo-wide `cargo +1.97.1 fmt --check` reports existing formatting
 drift across the imported tree; no unrelated engine files were reformatted.
+Existing engine limits remain: metadata accepts exact `light` or `dark`
+only, and a page opting into dark must paint its dark canvas explicitly.
