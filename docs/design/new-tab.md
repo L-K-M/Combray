@@ -18,8 +18,10 @@ Share, **+**, Recent and More, with the address on a separate row when
 needed. **+** stays beside the field while editing and is available in Find
 in page too. New tab is removed from More.
 
-New tab shows Home with the keyboard closed and reuses an unused blank tab.
-The launcher search shortcut still opens the address editor directly.
+New tab reuses an unused blank tab and focuses Home's existing search field,
+with the keyboard ready. Tapping the field or using the launcher search
+shortcut edits there too, without an additional sheet (owner correction,
+24 October 2026). Close ends typing and keeps Home and its blank tab.
 Cold start restores the active logical tab rather than replacing it with Home.
 
 ## Continue and quick links
@@ -50,7 +52,8 @@ use the existing browser preferences. Icons are local monograms.
 
 ## Typing and recall
 
-While typing, local matches appear above the anchored field, beside which
+Home's search field is editable in place. While typing, local matches appear
+above the anchored field, beside which
 **+** stays visible above the keyboard. Only the suggestion area scrolls.
 Up to five matches show title/domain highlights; open-tab rows explicitly
 switch to that tab, while history rows navigate in the tab being edited.

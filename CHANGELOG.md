@@ -188,6 +188,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- New tab focuses Home's existing search field. Typing, local suggestions
+  and shared search text stay in the page instead of opening another sheet.
+- The address editor has an explicit Close button. On Home it ends typing
+  without closing the tab or discarding the draft.
 - Notices such as "Tab closed" follow the app's light or dark appearance.
   Home also covers the white native surface behind the notice.
 - Closing the active tab returns to the next open page in Recent, skipping
