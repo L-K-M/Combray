@@ -720,6 +720,79 @@ git diff --check
 Shell syntax, shellcheck, documentation and whitespace checks passed.
 No macOS native build or device installation was run for this change.
 
+## Inline Home search (24 October 2026)
+
+The owner corrected New tab's entry behavior: focus Home's existing field,
+without an extra sheet. Home and page-address editing share the draft,
+local suggestions and address policy. New tab resets the field and reuses
+the unused blank. Incoming search text starts selected there and waits for
+submission. Close clears focus and hides the keyboard, keeping Home and the
+draft. A page's address editor still uses its sheet.
+
+`HomeSearchTest.newTabFocusesTheExistingHomeField` failed before the fix on
+API-30 x86_64 `emulator-5560`: no focused editable field was displayed
+(`build/inline-search-red.txt`, one failure, 29.348 seconds). The coordinated
+Close regression independently failed before its change; all five
+`AddressSuggestionsUiTest` checks then passed on the same emulator
+(`build/new-tab-close-green.txt`, 105.886 seconds), including dismissal,
+48dp targets and the narrow, large-font layout.
+
+The initial native x86_64 build and focused device checks used downstream
+pin `97be6cb1fb50b6fe82f677dd30c901102a3fa94a`. This host needs the existing
+`build/tab-counter-host-cc` and `build/tab-counter-host-c++` Zig wrappers
+with `-fno-sanitize=undefined`; default clang failed on missing host headers.
+The successful log is `build/inline-search-native.log` (4m44s).
+
+```sh
+COMBRAY_HOST_CC="$PWD/build/tab-counter-host-cc" \
+COMBRAY_HOST_CXX="$PWD/build/tab-counter-host-c++" \
+CARGO_BUILD_JOBS=6 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.HomeSearchTest ch.lkmc.combray.HomeTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The focused Home checks cover inline focus, repeated +, Close, rotation,
+incoming prefill selection, Recent's New tab and navigation in the original
+blank. Pin-editor field lookups are scoped to their dialog because Home's
+field now remains composed behind it.
+
+Local verification passed all four `HomeSearchTest` checks, five
+`AddressSuggestionsUiTest` checks and three real-Servo Home checks: draft
+rotation/submission in the blank, a local suggestion opening in that blank,
+and page-address editing retaining its original tab. The first attempt
+passed 11 of 12; its empty-field assertion also counted the placeholder.
+Reading `EditableText` corrected the assertion, and the entire four-check
+Home search class passed on rerun (162.315 seconds), against the same app
+APK. Raw evidence: `build/device-checks/inline-search-green/` and
+`build/inline-search-home-green.txt`. JVM tests, lint and debug/test assembly
+passed again after that correction; documentation and whitespace checks pass.
+
+Review found a consumed shared-text prefill could seed a later Home after its
+blank tab closed. The new fixture-free regression failed with the old shared
+text instead of an empty field (`build/inline-search-review-red.txt`, 88.826
+seconds). Ending editing now clears that launch seed, keeping the current
+field's separate draft; Continue and quick-link navigation do the same.
+All five Home search checks and the three real-Servo checks passed afterward.
+One layout row-tap callback assertion failed once; the unchanged full layout
+class then passed all five checks (93.271 seconds). Together these verify 13
+focused checks. Evidence: `build/device-checks/inline-search-reviewed/` and
+`build/inline-search-layout-rerun.txt`. The static text-field description was
+removed in favor of Material's hint/text semantics; spoken TalkBack output
+was not checked.
+
+Final integration includes the merged notice styling and fixed-layer scroll
+changes (#128 and #129). The current Servo pin is
+`1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c`; its local x86_64 rebuild passed
+(3m31s), followed by JVM tests, lint and debug/test assembly (30 seconds).
+Logs: `build/inline-search-current-native.log` and
+`build/inline-search-current-build.log`. The focused device runs above used
+the earlier pin; current-pin runtime proof comes from the final Engine CI.
+
+Final CI/review results are tracked in [PR #127](https://github.com/L-K-M/Combray/pull/127).
+Physical-phone and live-service checks remain unperformed.
+
 ## 20. Close-tab successor (24 October 2026)
 
 Closing the focused tab could select an unused Home tab while another page
@@ -800,3 +873,68 @@ JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
 checks passed locally. Evidence: `build/device-checks/notice-theme-*`
 and `build/notice-theme/`. The PR records latest CI and review results.
 Physical-phone validation remains unverified.
+
+## 22. Default page contrast (25 October 2026)
+
+The owner's screenshot of
+`https://gopher.muffinlabs.com/sdf.org/users/nervtoji/phlog/001.txt`
+showed pale text on white. The response is HTML; its CSS gives the article
+neither a text color nor a background. Servo's UA stylesheet uses
+`CanvasText`, which Stylo 0.21.0 resolves to `#e8e8e8` under a dark
+preference even without a page color scheme. The canvas stays white:
+about 1.23:1 contrast.
+
+The downstream fix supplies a light root `color-scheme` presentational
+hint, or the document's explicit metadata scheme. Author CSS overrides
+the hint. This keeps `prefers-color-scheme` working for sites with dark
+styles and applies to every document, including blank frames, without
+injecting page scripts. Engine source changes:
+
+- `components/script/dom/element/element.rs`: root color-scheme hint.
+- `components/script/dom/document/document.rs`: metadata scheme for layout
+  and root rematching when it changes.
+- `components/script/dom/html/document_metadata/htmlmetaelement.rs`:
+  pass the GC guard for that rematching.
+
+The separate development checkout is used for engine edits;
+`servo-checkout/servo` remains disposable pinned build input.
+Downstream review: [Servo PR #6](https://github.com/L-K-M/servo/pull/6).
+
+`PageContrastTest` uses a `currentColor` swatch and the actual canvas to
+measure inherited text without font antialiasing, with a separate paint
+marker. It covers default and authored-white pages, light/dark changes,
+reload, a new tab, author CSS, dark metadata and metadata changes after
+paint. A title from `matchMedia` checks that the dark preference survives.
+
+Before the fix, the authored-white regression failed with `text color
+e8e8e8` on API-30 x86_64 `emulator-5560`, SwiftShader, software emulation:
+`build/device-checks/page-contrast-red-2/`. The first attempt was obscured
+by Android's System UI ANR dialog; restarting System UI, as documented in
+[BUILDING.md](BUILDING.md), allowed the actual contrast failure to run.
+
+The initial candidate `b7687abc34c34ebb0684dd056de9f99a3e19bf36`
+passed default colors, theme changes, reload, new tabs and author styles,
+but failed the new live-metadata regression with stale `e8e8e8` text after
+a switch to Light (`build/device-checks/page-contrast-green/`, 3/4 passed).
+Restyling without rematching reused the previous root hint. Candidate
+`546db2b2db14104de3eb3d7c612a2100ad38f728` explicitly rematches the root
+and makes it the dirty root before layout.
+
+```sh
+scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.PageContrastTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Build host: Linux, JDK 21, Rust 1.97.1, NDK 29.0.14206865, local Zig
+wrappers `build/tab-counter-host-cc` and `build/tab-counter-host-c++`.
+Host Rust tests (88), Kotlin tests, lint and device-test compilation pass.
+The final x86_64 native candidate built in 3m07s. Final pixel checks,
+both-ABI CI and review results are recorded in
+[PR #130](https://github.com/L-K-M/Combray/pull/130), which gates the pin.
+The Servo-wide `cargo +1.97.1 fmt --check` reports existing formatting
+drift across the imported tree; no unrelated engine files were reformatted.
+Existing engine limits remain: metadata accepts exact `light` or `dark`
+only, and a page opting into dark must paint its dark canvas explicitly.

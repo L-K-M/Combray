@@ -109,6 +109,8 @@ fun BottomBar(
     onMore: () -> Unit,
     onCopyAddress: () -> Unit,
     onSwipeTab: (TabStep) -> Unit,
+    homeSearch: (@Composable () -> Unit)? = null,
+    homeMode: AddressEditorMode = AddressEditorMode.IDLE,
     modifier: Modifier = Modifier,
 ) {
     // A drag along the bar is a swipe once it covers TAB_SWIPE_DISTANCE; shorter drags and taps
@@ -118,6 +120,8 @@ fun BottomBar(
     var dragged by remember { mutableFloatStateOf(0f) }
     val swipe = Modifier.draggable(
         orientation = Orientation.Horizontal,
+        // Horizontal drags in the input move its cursor, not the active tab.
+        enabled = tab?.url != null || homeMode == AddressEditorMode.IDLE,
         state = rememberDraggableState { delta -> dragged += delta },
         onDragStarted = { dragged = 0f },
         onDragStopped = {
@@ -153,7 +157,9 @@ fun BottomBar(
                 // the address takes a row of its own above them (owner decision, 22 October 2026).
                 val stacked = maxWidth < STACKED_BAR_BELOW
                 Column {
-                    if (stacked || home) {
+                    if (home && homeSearch != null) {
+                        homeSearch()
+                    } else if (stacked || home) {
                         AddressChip(
                             tab, histerStored, onAddress, onCopyAddress,
                             hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
@@ -161,7 +167,9 @@ fun BottomBar(
                         )
                     }
                     if (home) {
-                        HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, onMore)
+                        if (homeMode == AddressEditorMode.IDLE) {
+                            HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, onMore)
+                        }
                         return@Column
                     }
                     Row(

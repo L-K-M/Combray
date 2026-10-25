@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,11 +47,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -73,6 +77,9 @@ import kotlinx.coroutines.withContext
 /** Pause after the last keystroke before the matches are ranked again. */
 private const val SUGGESTION_DELAY_MS = 150L
 
+/** Home keeps its field when editing ends; a page's editor is always editing. */
+enum class AddressEditorMode { IDLE, EDITING }
+
 /**
  * Address and search editor above the keyboard. [initialText] (the current address, or text
  * another app sent) starts selected for replacement; the button says what submitting will do,
@@ -94,6 +101,28 @@ fun AddressSheet(
     onNewTab: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        AddressEditor(target, initialText, restartKey, recent, onDecision, onSelectTab, onNewTab, onDismiss)
+    }
+}
+
+/** One draft and local-suggestion pipeline, shared by Home and the page's address sheet. */
+@Composable
+internal fun AddressEditor(
+    target: String?,
+    initialText: String?,
+    restartKey: Int,
+    recent: () -> Flow<List<RecentItem>>,
+    onDecision: (AddressDecision) -> Unit,
+    onSelectTab: (String) -> Unit,
+    onNewTab: () -> Unit,
+    onDismiss: () -> Unit,
+    mode: AddressEditorMode = AddressEditorMode.EDITING,
+    focusKey: Int? = 0,
+    onFocused: () -> Unit = {},
+    @StringRes placeholder: Int = R.string.address_placeholder,
+    modifier: Modifier = Modifier,
+) {
     val initial = initialText.orEmpty()
     var field by rememberSaveable(target, restartKey, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
@@ -106,7 +135,7 @@ fun AddressSheet(
     // runs off the main thread. The prefilled text lists none: it is where you are.
     val items by remember { recent() }.collectAsStateWithLifecycle(emptyList())
     val query = field.text.trim()
-    val edited = AddressSuggestions.shouldSuggest(field.text, prefilled)
+    val edited = mode == AddressEditorMode.EDITING && AddressSuggestions.shouldSuggest(field.text, prefilled)
     val matches by produceState(emptyList<RecentItem>(), items, query, edited) {
         // The last query's rows hide at once: while this one waits out its pause and ranks,
         // stale matches must not pass for its own.
@@ -118,9 +147,10 @@ fun AddressSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        AddressSheetContent(field, { field = it }, matches, target, onDecision, onSelectTab, onNewTab)
-    }
+    AddressSheetContent(
+        field, { field = it }, matches, target, onDecision, onSelectTab, onNewTab, onDismiss,
+        mode, focusKey, onFocused, placeholder, modifier,
+    )
 }
 
 /**
@@ -137,16 +167,23 @@ internal fun AddressSheetContent(
     onDecision: (AddressDecision) -> Unit,
     onSelectTab: (String) -> Unit,
     onNewTab: () -> Unit,
+    onDismiss: () -> Unit,
+    mode: AddressEditorMode = AddressEditorMode.EDITING,
+    focusKey: Int? = 0,
+    onFocused: () -> Unit = {},
+    @StringRes placeholder: Int = R.string.address_placeholder,
+    modifier: Modifier = Modifier,
 ) {
     val interpretation = AddressPolicy.interpret(field.text)
     val query = field.text.trim()
     val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
     val inset = Modifier.padding(horizontal = 16.dp)
 
-    Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+    Column(modifier.fillMaxWidth().padding(bottom = if (mode == AddressEditorMode.EDITING) 16.dp else 0.dp)) {
         // Only the room left above the keyboard, scrolling within it: the field row below stays
         // next to the keyboard, where the thumb is, however many rows there are.
-        if (matches.isNotEmpty()) {
+        if (mode == AddressEditorMode.EDITING && matches.isNotEmpty()) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Bottom) {
                 Text(
                     stringResource(R.string.address_suggestions),
@@ -172,21 +209,33 @@ internal fun AddressSheetContent(
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onNewTab) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
+            if (mode == AddressEditorMode.EDITING) {
+                IconButton(onClick = onNewTab) {
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
+                }
             }
             OutlinedTextField(
                 value = field,
                 onValueChange = onFieldChange,
                 singleLine = true,
-                placeholder = { Text(stringResource(R.string.address_placeholder)) },
+                placeholder = { Text(stringResource(placeholder)) },
+                trailingIcon = if (mode == AddressEditorMode.EDITING) {
+                    {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
+                        }
+                    }
+                } else null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
                 keyboardActions = KeyboardActions(onGo = {
                     if (interpretation.primary !is AddressDecision.Rejected) onDecision(interpretation.primary)
                 }),
-                modifier = Modifier.weight(1f).focusRequester(focus),
+                modifier = Modifier.weight(1f).focusRequester(focus)
+                    .onFocusChanged { if (it.isFocused) onFocused() },
             )
         }
+        if (mode == AddressEditorMode.IDLE) return@Column
+
         val primary = interpretation.primary
         when {
             // Nothing typed yet is not a mistake: a new tab opens without an error.
@@ -209,7 +258,11 @@ internal fun AddressSheetContent(
             }
         }
     }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(focusKey) {
+        if (focusKey == null) return@LaunchedEffect
+        focus.requestFocus()
+        keyboard?.show()
+    }
 }
 
 /**

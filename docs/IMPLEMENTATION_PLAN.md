@@ -73,12 +73,16 @@ The owner approved the [new-tab design](design/new-tab.md) on 24 October
 first; local frequent sites fill the rest, opening their newest retained
 page. Edit offers pin/add/edit/unpin/reorder, hide/restore, and Continue and
 frequent-site visibility. Pins persist in Room schema 5; no remote data or
-favicon service is fetched to show Home. New tab opens Home with the
-keyboard closed; explicit search entry points retain keyboard-first entry.
+favicon service is fetched to show Home. New tab focuses Home's existing
+search field with the keyboard ready, as do explicit search entry points;
+editing stays in the page instead of an extra sheet (owner correction,
+24 October 2026). Close ends typing and keeps Home and its blank tab.
 While typing, local suggestions appear above the anchored field, with +
 beside it. Hister and Karakeep open the existing explicit Recent scopes.
 Site-wide Forget also removes pins and merges the `www.`/bare spelling,
 matching automatic ranking; other subdomains remain opt-in.
+
+Inline-entry regression and build evidence: [engine report](ENGINE_SPIKE.md#inline-home-search-24-october-2026).
 
 ### Reader view
 
@@ -503,7 +507,9 @@ Not done: text selection, downloads, permissions UI and a Recent home layout. Pi
 | Scroll-to-top/bottom | Passed on the API-30 x86_64 emulator: real touch direction, painted page endpoints, same-address reload reset, reader endpoints/RTL placement and accessible targets. Gesture and coordinator unit checks passed. Servo's DOM scroll offset stays stale after programmatic jumps; evidence and limits in [ENGINE_SPIKE.md](ENGINE_SPIKE.md#15-directional-scroll-controls) |
 | Optional tab counter | Off by default; Settings › Display › Show tab count applies at once and persists. JVM preference tests and two API-30 emulator checks passed (24 October 2026): badge visibility, live count, activity recreation and the existing accessible bar. The device check changes the preference directly; opening Settings under instrumentation hit the known emulator focus timeout. [Evidence](ENGINE_SPIKE.md#17-tab-counter-preference-checks-24-october-2026) |
 | Close-notice appearance | Browser and Recent notices follow the app's light/dark appearance; Home covers the native surface behind them. Light/dark pixel regressions fail on the archived APK; pixel, Undo and Home-spacing checks pass on the fix on the reference emulator. JVM/lint/build checks pass. [Evidence and latest results](ENGINE_SPIKE.md#21-close-notice-appearance-24-october-2026) |
+| Default page contrast | A real-Servo pixel regression reproduces pale default text on white in Dark. The downstream engine supplies a light root color-scheme hint unless metadata or CSS opts in. Native/device results and CI/review are tracked in [PR #130](https://github.com/L-K-M/Combray/pull/130). [Reproduction and engine evidence](ENGINE_SPIKE.md#22-default-page-contrast-25-october-2026) |
 | New-tab launchpad | Implemented from the owner's approved design: Continue, durable pin/edit/reorder/hide/restore, section visibility, direct service scopes, above-field local suggestions and a persistent + button. Room migration, coordinator/preferences tests and local JVM/lint/build checks pass. Local emulator run history and the final PR/CI evidence are recorded in [section 18](ENGINE_SPIKE.md#18-new-tab-launchpad-checks-24-october-2026) |
+| Inline new-tab entry | New tab and incoming searches focus Home's existing field; Close ends typing and keeps the draft. Thirteen focused API-30 emulator checks passed, including consumed-prefill cleanup, real-Servo navigation and preservation of page-address editing. [Evidence and final CI/review](ENGINE_SPIKE.md#inline-home-search-24-october-2026) |
 | Find in page | Unit tests pass (coordinator, event parsing, native bounds); requests name the view and document they search, and the engine refuses a replaced document. Device checks `FindTest` and `AccessibilityTest.theFindBarIsAccessible` compile. On #86's branch `FindTest` failed at the match count (5 for 3) before its last fix and has not run since; its scroll assertions read `scrollY`, which #103 found stale after programmatic scrolls on Servo 0.6.0, so they may need painted-content checks instead |
 | Keyboard for page fields | Implemented; unit tests pass (`BrowserCoordinatorTest`, `EngineEventTest`, `PageKeyboardTrackerTest`, `native/src/keyboard.rs`). A field a page focuses on load gets no keyboard until the user taps it; a keyboard the user closed reopens on the next tap; the keyboard closes when the field's document is replaced (a form sent with Enter), when another tab or the home screen is shown and when the tab closes; a hidden tab's field never takes it. Device check `KeyboardTest`, first run: the focused-on-load and Enter checks passed; the reopen check failed, as Back hid the keyboard but the page's field kept focus (the closing never reached the page). The surface now reads the keyboard's visibility from the window instead of from Compose's insets and logs each keyboard decision; not run on a device again yet |
 | Kimi blog startup | Passed on the x86_64 emulator (23 October 2026): the exact failing `:has()` query and the live article load work after patch 0007. DOM selector APIs use native stateless matching; stylesheet `:has()` remains unsupported. All five current Reader checks passed; the broader Browsing run had three Activity teardown timeouts. Evidence and limits: [ENGINE_SPIKE section 16](ENGINE_SPIKE.md#16-kimi-article-compatibility-23-october-2026) |
