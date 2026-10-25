@@ -5,8 +5,10 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import math
 import tempfile
 import unittest
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from unittest import mock
@@ -286,6 +288,28 @@ class RunTest(RunnerTestCase):
         self.assertIsNone(run["finished"])  # An aborted run stays unfinished.
 
 
+def _stale_metrics() -> dict[str, object]:
+    """A cached reference of yesterday's page: none of today's words."""
+    yesterday = " ".join(f"stale{chr(97 + i % 26)}{chr(97 + i // 26)}" for i in range(60))
+    return {**fakes.good_metrics(), "text": yesterday, "textLength": len(yesterday)}
+
+
+class _RefreshFails(fakes.FakeReference):
+    """A reference whose cached results load, while a fresh load fails in the harness."""
+
+    def load(
+        self,
+        url: str,
+        out_dir: Path,
+        *,
+        cache: reference.CachePolicy | None = None,
+        refusal: Callable[[str], str | None] | None = None,
+    ) -> runner.ReferenceOutcome:
+        if cache is reference.CachePolicy.REFRESH:
+            raise OSError("chromium went away")
+        return super().load(url, out_dir, cache=cache, refusal=refusal)
+
+
 class _Refusing:
     """A navigation policy that refuses URLs containing a word."""
 
@@ -363,6 +387,41 @@ class RunSafetyTest(RunnerTestCase):
         self.assertEqual(summary.verdicts, {"excluded": 1})
         self.assertEqual(self.reference.policies, [None, reference.CachePolicy.REFRESH])
         self.assertEqual(self.store.issues(), [])
+
+    def test_a_failed_refresh_leaves_no_cached_screenshot_behind(self) -> None:
+        # The report shows reference.png as this run's reference.
+        self.reference = _RefreshFails(stale={URL: _stale_metrics()})
+
+        summary = self.run_pages(URL)
+
+        self.assertEqual(summary.verdicts, {"reference-failed": 1})
+        page_dir = config.page_dir(summary.run_dir, URL)
+        record = json.loads((page_dir / runner.REFERENCE_RECORD_NAME).read_text())
+        self.assertEqual(record["status"], "error")
+        self.assertFalse((page_dir / reference.SCREENSHOT_NAME).exists())
+
+    def test_a_non_finite_reference_metric_does_not_end_the_run(self) -> None:
+        # Chromium passes NaN and Infinity through from the page; JSON has neither.
+        self.reference.stale[URL] = {
+            **fakes.good_metrics(),
+            "innerWidth": math.nan,
+            "errors": [{"type": "uncaught", "message": "x", "line": math.inf}],
+        }
+
+        summary = self.run_pages(URL, OTHER_URL)
+
+        self.assertEqual(summary.verdicts, {"ok": 2})
+        run = self.store.get_run(summary.run_id)
+        assert run is not None
+        self.assertIsNotNone(run["finished"])
+        outcome = self.store.outcomes_for_run(summary.run_id)[URL]
+        stored = outcome["metrics"]["reference"]["metrics"]
+        self.assertIsNone(stored["innerWidth"])
+        self.assertIsNone(stored["errors"][0]["line"])
+        page_dir = config.page_dir(summary.run_dir, URL)
+        record = (page_dir / runner.REFERENCE_RECORD_NAME).read_text()
+        for constant in ("NaN", "Infinity"):
+            self.assertNotIn(constant, record)
 
     def test_symptom_signatures_are_scoped_to_the_site(self) -> None:
         scope = runner.SiteScope(b"k" * 16)
@@ -467,9 +526,20 @@ class _FakeChromium:
 
     def __init__(self) -> None:
         self.loads: list[str] = []
+        # A script navigation each page attempts, which the navigation guard may stop.
+        self.navigates_to: str | None = None
 
-    def run_page(self, url: str, out_dir: Path, **_: object) -> PageResult:
+    def run_page(
+        self,
+        url: str,
+        out_dir: Path,
+        *,
+        navigation_refusal: Callable[[str], str | None] | None = None,
+        **_: object,
+    ) -> PageResult:
         self.loads.append(url)
+        if self.navigates_to is not None and navigation_refusal is not None:
+            navigation_refusal(self.navigates_to)
         out_dir.mkdir(parents=True, exist_ok=True)
         screenshot = out_dir / reference.SCREENSHOT_NAME
         screenshot.write_bytes(fakes.FAKE_PNG)
@@ -535,6 +605,25 @@ class ChromiumSourceTest(unittest.TestCase):
         fresh = self.source().load(URL, self.root / "run2", cache=reference.CachePolicy.REFRESH)
         self.assertFalse(fresh.cached)
         self.assertTrue(self.source().load(URL, self.root / "run3").cached)
+
+    def test_a_load_the_navigation_policy_cut_short_is_not_cached(self) -> None:
+        # The guard stopped a script navigation, so the page stayed where it was: not
+        # the page as it is, and a cache hit would not ask the policy again.
+        self.chromium.navigates_to = "https://news.example-site.org/logout"
+
+        def refusal(url: str) -> str | None:
+            return "sensitive" if "logout" in url else None
+
+        self.source().load(URL, self.root / "run1", refusal=refusal)
+        second = self.source().load(URL, self.root / "run2", refusal=refusal)
+
+        self.assertFalse(second.cached)
+        self.assertEqual(self.chromium.loads, [URL, URL])
+
+        # A navigation the policy allows leaves a complete result, which is cached.
+        self.chromium.navigates_to = "https://news.example-site.org/next"
+        self.source().load(URL, self.root / "run3", refusal=refusal)
+        self.assertTrue(self.source().load(URL, self.root / "run4", refusal=refusal).cached)
 
     def test_local_files_are_never_cached(self) -> None:
         local = "file:///tmp/fixture.html"

@@ -25,8 +25,15 @@ Commit messages, branch names and text files have no such exception: naming a si
 there ties it to a fix. Commits reachable from an excluded ref (an upstream release
 merged in) are public already and skipped; a merge commit's own changes (a conflict
 resolution) are scanned. IP literals that are not public and single-label hosts are
-not matched (they are everywhere in code and say little about the owner). Binary
-files are scanned by name only.
+not matched (they are everywhere in code and say little about the owner).
+
+Files are scanned as committed, read as UTF-8: git attributes, diff drivers and diff
+settings do not change what is scanned, and the scan refuses to run while the
+repository's own $GIT_DIR/info/attributes, which git always applies, sets anything.
+A binary file's bytes are scanned as text, so a host in another encoding (UTF-16) or
+in compressed data (most PDFs) is not found, even where a configured diff driver
+would convert it; in a merge commit's own changes, a binary file is scanned by name
+only.
 
 It also finds text that would reach the upstream Servo project, which must never be
 contacted: cross-repository references to its issues and pull requests (GitHub links
@@ -42,6 +49,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import ipaddress
+import os
 import re
 import subprocess
 import tempfile
@@ -127,12 +135,17 @@ _NO_NEWLINE_MARKER = "\\"
 # A URL also matches shortened to this many leading path segments, or more.
 _URL_PREFIX_MIN_SEGMENTS = 2
 _IDNA_PREFIX = "xn--"
-# Separators in `git log` output, written by git from the format's %xNN escapes (an
-# argument cannot hold them). NUL cannot occur in a patch's text lines.
+# The separator in `git log` output, written by git from the format's %x00 escape (an
+# argument cannot hold it). No line of a patch starts with NUL (a line in a hunk
+# starts with its prefix), and no commit message holds one (git refuses it).
 _COMMIT_MARKER, _COMMIT_MARKER_FORMAT = "\0", "%x00"
-_MESSAGE_MARKER, _MESSAGE_MARKER_FORMAT = "\x01", "%x01"
-_HASH_END, _HASH_END_FORMAT = "\x02", "%x02"
 _SHORT_HASH = 12
+_BRANCH_PREFIX = "refs/heads/"
+# A path git had to C-quote (control characters, quotes, backslashes), and its escapes:
+# the usual single letters, and any other byte as three octal digits.
+_C_QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+_C_ESCAPE = re.compile(r"\\(?:(?P<octal>[0-7]{3})|(?P<letter>.))")
+_C_ESCAPES = {"a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r"}
 
 # An issue, pull request or discussion of a repository in the upstream organization,
 # as a link or as an owner/repo#number reference. Either makes GitHub show the
@@ -289,14 +302,15 @@ def scan_git_range(
     """Every term that the commits of `git_range` would publish.
 
     Each commit is scanned on its own, since a push publishes every commit and not
-    only the net change: the lines and file names it adds (binary files by name), and
-    its message. A merge commit's own lines (new relative to every parent, such as a
-    conflict resolution) count as added. Commits reachable from `exclude_refs` (an
-    upstream release that was merged in) are skipped: they are already public and
-    not ours. Also scans the range's head when it names a branch (or HEAD on a
-    branch), since branch names are published with a push. A term on an added line is
-    dropped when the same file contained it at the base, and a file name when the
-    file existed there; messages and the branch name are never exempt.
+    only the net change: the lines and file names it adds, and its message (binary
+    files: see the module docstring). A merge commit's own lines (new relative to
+    every parent, such as a conflict resolution) count as added. Commits reachable
+    from `exclude_refs` (an upstream release that was merged in) are skipped: they
+    are already public and not ours. Also scans the range's head when it names a
+    branch (or HEAD on a branch), since branch names are published with a push. A
+    term on an added line is dropped when the same file contained it at the base,
+    and a file name when the file existed there; messages and the branch name are
+    never exempt.
     """
     base, head = parse_range(repo, git_range)
     revisions = [f"{base}..{head}", *(f"^{_verified_commit(repo, ref)}" for ref in exclude_refs)]
@@ -474,26 +488,11 @@ def _commit_patches(
 ) -> Iterator[tuple[str, str, int | None, str]]:
     """(commit, path, line number, text) for every file name and added line in the range.
 
-    File names come with line None. One `git log -p` for the whole range, read as a
-    stream (a range can be large), so file names never pass through git's pathspec
-    parser.
+    File names come with line None. One `git log -p` for the whole range (root
+    commits included), read as a stream (a range can be large), so file names never
+    pass through git's pathspec parser.
     """
-    lines = _git_lines(
-        repo,
-        "-c",
-        "core.quotePath=false",
-        "log",
-        "--reverse",
-        "--no-merges",
-        "--no-renames",
-        "--patch",
-        "--unified=0",
-        "--no-color",
-        "--no-ext-diff",
-        f"--format={_COMMIT_MARKER_FORMAT}%H",
-        *revisions,
-        "--",
-    )
+    lines = _patch_lines(repo, revisions, "--no-merges", "--root", "--patch")
     commit = ""
     path = ""
     number = 0
@@ -506,18 +505,24 @@ def _commit_patches(
                 new_left -= 1
             elif line.startswith("-"):
                 old_left -= 1
-            elif not line.startswith("\\"):  # "\ No newline at end of file" stays inside.
-                old_left = new_left = 0
+            elif line.startswith(" "):  # Context, which --inter-hunk-context=0 prevents.
+                number += 1
+                old_left -= 1
+                new_left -= 1
+            elif not line.startswith(_NO_NEWLINE_MARKER):  # That marker stays inside.
+                # Leaving the hunk would skip its remaining lines unscanned.
+                raise _unreadable_patch(commit)
             continue
         if line.startswith(_COMMIT_MARKER):
             commit = line[len(_COMMIT_MARKER) :][:_SHORT_HASH]
         elif line.startswith(_FILE_HEADER):
-            path = _header_path(line[len(_FILE_HEADER) :])
-            yield commit, path, None, path
-        elif header := _HUNK_HEADER.match(line):
-            number = int(header.group("start"))
-            old_left = int(header.group("old_count") or 1)
-            new_left = int(header.group("new_count") or 1)
+            file_header = line[len(_FILE_HEADER) :]
+            path = _header_path(file_header)
+            yield commit, path, None, _name_text(path, file_header)
+        elif hunk := _HUNK_HEADER.match(line):
+            number = int(hunk.group("start"))
+            old_left = int(hunk.group("old_count") or 1)
+            new_left = int(hunk.group("new_count") or 1)
 
 
 def _merge_patches(
@@ -531,24 +536,10 @@ def _merge_patches(
     the merge adds. Lines taken from one side are that side's commits, scanned there
     or excluded with them. A file new relative to every parent gives its name too.
     """
-    lines = _git_lines(
-        repo,
-        "-c",
-        "core.quotePath=false",
-        "log",
-        "--reverse",
-        "--merges",
-        "--no-renames",
-        "--cc",
-        "--unified=0",
-        "--no-color",
-        "--no-ext-diff",
-        f"--format={_COMMIT_MARKER_FORMAT}%H",
-        *revisions,
-        "--",
-    )
+    lines = _patch_lines(repo, revisions, "--merges", "--cc")
     commit = ""
     path = ""
+    file_header = ""
     in_header = False
     width = 0  # Prefix columns of the current hunk: the number of parents.
     parents_left: list[int] = []  # Lines of each parent still to come in the hunk.
@@ -575,30 +566,102 @@ def _merge_patches(
                 number += 1
                 result_left -= 1
                 continue
-            result_left, parents_left = 0, []  # Malformed: leave the hunk.
+            # Leaving the hunk would skip its remaining lines unscanned.
+            raise _unreadable_patch(commit)
         if line.startswith(_COMMIT_MARKER):
             commit = line[len(_COMMIT_MARKER) :][:_SHORT_HASH]
         elif line.startswith(_COMBINED_FILE_HEADER):
-            path = line[len(_COMBINED_FILE_HEADER) :]
+            file_header = line[len(_COMBINED_FILE_HEADER) :]
+            path = _combined_header_path(file_header)
             in_header = True
         elif in_header and line.startswith(_NEW_FILE_HEADER):
-            yield commit, path, None, path
-        elif header := _COMBINED_HUNK_HEADER.match(line):
+            yield commit, path, None, _name_text(path, file_header)
+        elif hunk := _COMBINED_HUNK_HEADER.match(line):
             in_header = False
-            width = len(header.group("ats")) - 1
+            width = len(hunk.group("ats")) - 1
             parents_left = [
                 int(match.group("count") or 1)
-                for match in _COMBINED_RANGE.finditer(header.group("parents"))
+                for match in _COMBINED_RANGE.finditer(hunk.group("parents"))
             ]
-            number = int(header.group("start"))
-            result_left = int(header.group("count") or 1)
+            number = int(hunk.group("start"))
+            result_left = int(hunk.group("count") or 1)
+
+
+def _patch_lines(repo: Path, revisions: Sequence[str], *selection: str) -> Iterator[str]:
+    """The `git log` patches of the commits `selection` picks from `revisions`, showing
+    the committed bytes.
+
+    git's defaults would let attributes and configuration change the patches, and a
+    scanned commit can set attributes itself: "-diff" prints "Binary files differ"
+    instead of the lines, a diff driver its textconv filter's output, and
+    diff.interHunkContext or log.showRoot add context lines or drop a root commit's
+    patch. So in-tree attributes come from the empty tree, the user's and the system's
+    attributes files are not read (see _git_environment), $GIT_DIR/info/attributes
+    has to be empty, binary files print as text, and file names as stored
+    (core.quotePath=false: only control characters, quotes and backslashes are
+    C-quoted).
+    """
+    _require_no_repository_attributes(repo)
+    empty_tree = _git(repo, "hash-object", "-t", "tree", os.devnull).strip()
+    return _git_lines(
+        repo,
+        "-c",
+        "core.quotePath=false",
+        "-c",
+        f"core.attributesFile={os.devnull}",
+        f"--attr-source={empty_tree}",
+        "log",
+        "--reverse",
+        *selection,
+        "--no-renames",
+        "--unified=0",
+        "--inter-hunk-context=0",
+        "--text",
+        "--no-textconv",
+        "--no-ext-diff",
+        "--no-color",
+        f"--format={_COMMIT_MARKER_FORMAT}%H",
+        *revisions,
+        "--",
+    )
+
+
+def _require_no_repository_attributes(repo: Path) -> None:
+    """Refuse to scan while $GIT_DIR/info/attributes sets anything.
+
+    git always applies that file, and a "-diff" there prints a merge's lines as
+    "Binary files differ" even with --text. Nothing in a clone writes it.
+    """
+    path = Path(
+        _git(repo, "rev-parse", "--path-format=absolute", "--git-path", "info/attributes").strip()
+    )
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise LeakcheckError(f"cannot read {path}: {error.strerror}") from error
+    if any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines()):
+        raise LeakcheckError(
+            f"{path} sets git attributes, which can hide changed lines from this scan "
+            "and cannot be turned off for it; remove them and scan again"
+        )
+
+
+def _unreadable_patch(commit: str) -> LeakcheckError:
+    return LeakcheckError(f"cannot read git's patch of commit {commit}: unexpected line in a hunk")
 
 
 def _header_path(rest: str) -> str:
     """The path in a "diff --git a/P b/P" header (renames are off, so both are P).
 
-    A path git had to quote is returned as quoted, which still contains its text.
+    A path git C-quoted ("a/P" in quotes) is decoded. One that cannot be split is
+    returned as written, which still contains its text.
     """
+    quoted = _c_unquoted(rest)
+    if quoted is not None:
+        name, _ = quoted
+        return name[len("a/") :] if name.startswith("a/") else rest
     if rest.startswith("a/") and len(rest) % 2 == 1:
         length = (len(rest) - len("a/ b/")) // 2
         path = rest[2 : 2 + length]
@@ -607,68 +670,97 @@ def _header_path(rest: str) -> str:
     return rest
 
 
+def _combined_header_path(rest: str) -> str:
+    """The path in a "diff --cc P" header, decoded when git C-quoted it."""
+    quoted = _c_unquoted(rest)
+    if quoted is not None and not quoted[1]:
+        return quoted[0]
+    return rest
+
+
+def _c_unquoted(text: str) -> tuple[str, str] | None:
+    """The C-quoted name `text` starts with, decoded, and the text after it.
+
+    git quotes a path with control characters, quotes or backslashes, and escapes
+    them (a tab as "\\t", byte 1 as "\\001"); read as written, an escape's letter or
+    digits would join the next word. None when `text` does not start with a quote.
+    """
+    match = _C_QUOTED.match(text)
+    if match is None:
+        return None
+    body = match.group(1)
+    decoded = bytearray()
+    position = 0
+    for escape in _C_ESCAPE.finditer(body):
+        decoded += body[position : escape.start()].encode("utf-8")
+        if escape.group("octal") is not None:
+            decoded.append(int(escape.group("octal"), 8))
+        else:
+            letter = escape.group("letter")
+            decoded += _C_ESCAPES.get(letter, letter).encode("utf-8")
+        position = escape.end()
+    decoded += body[position:].encode("utf-8")
+    return decoded.decode("utf-8", "replace"), text[match.end() :]
+
+
+def _name_text(path: str, header: str) -> str:
+    """What is scanned for a file name: its path, and its header as git wrote it as
+    well, so a decoding mistake cannot lose a term."""
+    return path if path == header else f"{path}\n{header}"
+
+
 def _commit_messages(repo: Path, revisions: Sequence[str]) -> Iterator[tuple[str, str]]:
+    """(commit, message) for each commit, the message in UTF-8 whatever git's
+    i18n.logOutputEncoding says."""
     output = _git(
         repo,
         "log",
         "--reverse",
-        f"--format={_MESSAGE_MARKER_FORMAT}%H{_HASH_END_FORMAT}%B",
+        "--encoding=UTF-8",
+        f"--format={_COMMIT_MARKER_FORMAT}%H{_COMMIT_MARKER_FORMAT}%B",
         *revisions,
         "--",
     )
-    for entry in output.split(_MESSAGE_MARKER)[1:]:
-        commit, _, message = entry.partition(_HASH_END)
+    fields = output.split(_COMMIT_MARKER)[1:]
+    if len(fields) % 2:
+        raise LeakcheckError("cannot read git's commit messages: a message holds a NUL byte")
+    for commit, message in zip(fields[::2], fields[1::2], strict=True):
         yield commit[:_SHORT_HASH], message
 
 
 def _branch_name(repo: Path, head: str) -> str | None:
-    if head == "HEAD":
-        try:
-            return _git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip() or None
-        except LeakcheckError:
-            return None  # A detached HEAD has no branch name to publish.
-    try:
-        full = _git(repo, "rev-parse", "--symbolic-full-name", head).strip()
-    except LeakcheckError:
+    """The branch a push of `head` publishes; None when `head` names a commit or a
+    detached HEAD, which publish no branch name."""
+    full = _git(repo, "rev-parse", "--symbolic-full-name", head).strip()
+    if not full.startswith(_BRANCH_PREFIX):
         return None
-    return head if full.startswith("refs/heads/") else None
+    return full[len(_BRANCH_PREFIX) :]
 
 
 def _exists_at(repo: Path, base: str, path: str) -> bool:
-    """Whether the file `path` existed at `base`."""
-    result = subprocess.run(
-        ["git", "-C", str(repo), "cat-file", "-e", f"{base}:{path}"],
-        capture_output=True,
-        timeout=_GIT_TIMEOUT_S,
-        check=False,
-    )
-    return result.returncode == 0
+    """Whether the file `path` existed at `base`.
+
+    git answers "no" and "cannot tell" with the same exit code; both count as no,
+    which keeps the findings for the file's name.
+    """
+    return _git_run(repo, "cat-file", "-e", f"{base}:{path}").returncode == 0
 
 
 def _present_at(repo: Path, base: str, term: str, path: str) -> bool:
     """Whether `term` occurs in the file `path` at `base` as the same whole domain or URL."""
-    result = subprocess.run(
+    result = _git_run(
+        repo,
+        "grep",
+        "-a",  # A binary file's bytes count as text, as in the scanned patches.
+        "-i",
+        "-h",
+        "-F",
+        "-e",
+        term,
+        base,
+        "--",
         # ":(literal)" keeps git from reading the path as a pattern.
-        [
-            "git",
-            "-C",
-            str(repo),
-            "grep",
-            "-I",
-            "-i",
-            "-h",
-            "-F",
-            "-e",
-            term,
-            base,
-            "--",
-            f":(literal){path}",
-        ],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        timeout=_GIT_TIMEOUT_S,
-        check=False,
+        f":(literal){path}",
     )
     if result.returncode == 1:
         return False
@@ -685,28 +777,34 @@ def _present_at(repo: Path, base: str, term: str, path: str) -> bool:
 def _git_lines(repo: Path, *arguments: str) -> Iterator[str]:
     """git's output line by line (without line ends), for output too large to hold.
 
-    stderr goes to a file rather than a pipe: a full stderr pipe would stall git
-    while this reads stdout.
+    Lines end at "\\n" only, as in git's patch format: a carriage return or another
+    line break within a line is part of its text. Lines are decoded as UTF-8, whatever
+    the locale. stderr goes to a file rather than a pipe: a full stderr pipe would
+    stall git while this reads stdout.
     """
+    command = _subcommand(arguments)
     with tempfile.TemporaryFile() as error_file:
         try:
             process = subprocess.Popen(
                 ["git", "-C", str(repo), *arguments],
                 stdout=subprocess.PIPE,
                 stderr=error_file,
-                text=True,
-                errors="replace",
+                env=_git_environment(),
             )
         except OSError as error:
-            raise LeakcheckError(f"git {arguments[0]} failed: {error}") from error
+            raise LeakcheckError(f"git {command} failed: {error}") from error
         assert process.stdout is not None
         try:
             for line in process.stdout:
-                yield line.rstrip("\n")
-            if process.wait(timeout=_GIT_TIMEOUT_S) != 0:
+                yield line.removesuffix(b"\n").decode("utf-8", "replace")
+            try:
+                returncode = process.wait(timeout=_GIT_TIMEOUT_S)
+            except subprocess.TimeoutExpired as error:
+                raise _git_timeout(command) from error
+            if returncode != 0:
                 error_file.seek(0)
                 message = error_file.read().decode("utf-8", "replace").strip()
-                raise LeakcheckError(f"git {arguments[0]} failed: {message}")
+                raise LeakcheckError(f"git {command} failed: {message}")
         finally:
             if process.poll() is None:
                 process.kill()
@@ -715,17 +813,52 @@ def _git_lines(repo: Path, *arguments: str) -> Iterator[str]:
 
 
 def _git(repo: Path, *arguments: str) -> str:
+    """git's output; LeakcheckError when it fails."""
+    result = _git_run(repo, *arguments)
+    if result.returncode != 0:
+        raise LeakcheckError(f"git {_subcommand(arguments)} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def _git_run(repo: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """git's result, its output decoded as UTF-8 whatever the locale.
+
+    A git that cannot start or does not finish raises LeakcheckError: the callers
+    read exit codes as answers, and a failure must never pass for one.
+    """
+    command = _subcommand(arguments)
     try:
-        result = subprocess.run(
+        return subprocess.run(
             ["git", "-C", str(repo), *arguments],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             errors="replace",
+            env=_git_environment(),
             timeout=_GIT_TIMEOUT_S,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise LeakcheckError(f"git {arguments[0]} failed: {error}") from error
-    if result.returncode != 0:
-        raise LeakcheckError(f"git {arguments[0]} failed: {result.stderr.strip()}")
-    return result.stdout
+    except subprocess.TimeoutExpired as error:
+        raise _git_timeout(command) from error
+    except OSError as error:
+        raise LeakcheckError(f"git {command} failed: {error}") from error
+
+
+def _git_environment() -> dict[str, str]:
+    """This process's environment, without the system's git attributes file."""
+    return {**os.environ, "GIT_ATTR_NOSYSTEM": "1"}
+
+
+def _git_timeout(command: str) -> LeakcheckError:
+    # Only the command: its arguments hold the paths and terms being looked for.
+    return LeakcheckError(f"git {command} did not finish within {_GIT_TIMEOUT_S} s")
+
+
+def _subcommand(arguments: Sequence[str]) -> str:
+    """The git command in `arguments`, after global options such as "-c name=value"."""
+    remaining = iter(arguments)
+    for argument in remaining:
+        if argument == "-c":
+            next(remaining, None)
+        elif not argument.startswith("-"):
+            return argument
+    raise AssertionError(f"no git command in {arguments}")

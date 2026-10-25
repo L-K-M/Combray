@@ -5,10 +5,12 @@ The only server involved is a fake Hister on 127.0.0.1; no engine process starts
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -119,6 +121,9 @@ class ArgumentTest(CliTestCase):
             ["select", "--budget", "many"],
             ["run", "--budget", "3", NEWS],
             ["run", "--minutes", "0"],
+            # No run's time budget: never ending, or too large for a timedelta.
+            *(["run", "--servo", str(self.binary), "--minutes", m, NEWS] for m in ("inf", "nan")),
+            ["run", "--servo", str(self.binary), "--minutes", "1e15", NEWS],
             ["check"],
             ["check", NEWS, "--repeat", "0"],
             ["mark", "hang"],
@@ -199,6 +204,29 @@ class DoctorTest(CliTestCase):
         self.exposure = None
         code, out, _ = self.sitecheck("doctor", "--offline", "--servo", str(self.binary))
         self.assertIn("ok    webdriver: answers on loopback only", out)
+
+    def test_a_damaged_store_fails_its_check_and_the_other_checks_still_run(self) -> None:
+        db_path = config.state_db_path(self.data)
+
+        def garbage() -> None:
+            db_path.write_bytes(b"not a database " * 100)
+
+        def newer_schema() -> None:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                connection.execute("PRAGMA user_version = 999")
+
+        config.ensure_private_dir(self.data)
+        for damage in (garbage, newer_schema):
+            with self.subTest(damage=damage.__name__):
+                db_path.unlink(missing_ok=True)
+                damage()
+
+                code, out, err = self.sitecheck("doctor", "--offline", "--servo", str(self.binary))
+
+                self.assertEqual(code, cli.EXIT_FAILURE, out + err)
+                self.assertIn(f"FAIL  store: cannot read {db_path}", out)
+                for later in ("servo:", "chromium:", "disk:"):
+                    self.assertIn(later, out)
 
     def test_warns_about_a_readable_token_file(self) -> None:
         env_file = self.config / config.HISTER_ENV_NAME
@@ -286,11 +314,15 @@ class RunFlowTest(CliTestCase):
             "https://user:pw@www.example-news.org/",
             "javascript:alert(1)",
             str(self.root / "missing.html"),
+            "http://[::1/case.html",  # Not a URL urllib can split.
         ):
-            with self.subTest(url=url):
-                code, _, err = self.sitecheck("run", "--servo", str(self.binary), url)
-                self.assertEqual(code, cli.EXIT_USAGE)
-                self.assertTrue("refusing" in err or "no such file" in err or "policy" in err, err)
+            for command in ("run", "check"):
+                with self.subTest(url=url, command=command):
+                    code, _, err = self.sitecheck(command, "--servo", str(self.binary), url)
+                    self.assertEqual(code, cli.EXIT_USAGE)
+                    self.assertTrue(
+                        "refusing" in err or "no such file" in err or "policy" in err, err
+                    )
 
     def test_a_run_needs_pages_a_binary_and_pillow(self) -> None:
         code, _, err = self.sitecheck("run", "--servo", str(self.binary))
@@ -902,6 +934,30 @@ class LeakcheckCliTest(CliTestCase):
                 "HEAD",
             )
         self.assertEqual((code, out), (0, ""))
+
+    def test_a_scan_git_could_not_finish_is_an_error_not_a_pass(self) -> None:
+        self.seed(SHOP)
+        repo = self.root / "repo"
+        repo.mkdir()
+        with mock.patch.dict(os.environ, _GIT_ENV):
+            for arguments in (
+                ["init", "--quiet", "--initial-branch=main"],
+                ["commit", "--quiet", "--no-verify", "--allow-empty", "-m", "base"],
+            ):
+                subprocess.run(
+                    ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *arguments], check=True
+                )
+            (repo / "shop.example-store.net.html").write_text("<p>synthetic</p>\n")
+            for arguments in (["add", "--all"], ["commit", "--quiet", "--no-verify", "-m", "x"]):
+                subprocess.run(
+                    ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *arguments], check=True
+                )
+            with fakes.git_timing_out("cat-file"):
+                code, out, err = self.sitecheck(
+                    "leakcheck", "--repo", str(repo), "--git-range", "HEAD~1..HEAD"
+                )
+        self.assertEqual((code, out), (cli.EXIT_USAGE, ""), err)
+        self.assertIn("git cat-file", err)
 
     def test_text_files_are_scanned_whatever_the_base_contains(self) -> None:
         self.seed(SHOP)

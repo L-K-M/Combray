@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,7 @@ from unittest import mock
 
 from sitecheck import leakcheck
 from sitecheck.leakcheck import Leak, TermKind
+from tests import fakes
 
 # Synthetic stand-ins for pages from a history.
 HOSTS = ("www.private-blog.net", "news.secret-paper.co.uk", "old-site.org", "nas", "192.168.1.20")
@@ -254,6 +257,34 @@ class GitRangeTest(unittest.TestCase):
         self.git("add", "--all")
         self.git("commit", "--quiet", "--no-verify", "-m", message)
 
+    def head(self) -> str:
+        """The current commit as findings name it."""
+        return self.git("rev-parse", "--short=12", "HEAD").strip()
+
+    def merge_resolving(self, resolution: bytes) -> tuple[str, str]:
+        """A merge whose conflict in shared.txt is resolved as `resolution`.
+
+        Returns a base before both sides and the merge commit; the other side's
+        commits are reachable from the "upstream" branch.
+        """
+        (self.repo / "shared.txt").write_text("one\ntwo\nthree\n")
+        self.commit("Add shared")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "--quiet", "-b", "upstream")
+        (self.repo / "shared.txt").write_text("one\nupstream two\nthree\n")
+        self.commit("Upstream change")
+        self.git("checkout", "--quiet", "main")
+        (self.repo / "shared.txt").write_text("one\nour two\nthree\n")
+        self.commit("Our change")
+        subprocess.run(
+            ["git", "-C", str(self.repo), "merge", "--quiet", "--no-edit", "upstream"],
+            capture_output=True,
+            check=False,
+        )
+        (self.repo / "shared.txt").write_bytes(resolution)
+        self.commit("Merge upstream")
+        return base, self.head()
+
     def test_finds_terms_in_added_lines_file_names_and_messages(self) -> None:
         (self.repo / "notes.txt").write_text(
             "line one\nexample.com is fine\nbroken on www.private-blog.net\n"
@@ -333,8 +364,18 @@ class GitRangeTest(unittest.TestCase):
         self.git("checkout", "--quiet", "-b", "fix-private-blog.net-menu")
         (self.repo / "fix.txt").write_text("a synthetic reduced case\n")
         self.commit("Fix menu")
-        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
-        self.assertEqual([str(leak) for leak in leaks], ["branch: matched site private-blog.net"])
+        for head in ("HEAD", "@", "fix-private-blog.net-menu"):
+            with self.subTest(head=head):
+                leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..{head}", terms())
+                self.assertEqual(
+                    [str(leak) for leak in leaks], ["branch: matched site private-blog.net"]
+                )
+
+    def test_a_detached_head_has_no_branch_name(self) -> None:
+        (self.repo / "fix.txt").write_text("a synthetic reduced case\n")
+        self.commit("Fix menu")
+        self.git("checkout", "--quiet", "--detach")
+        self.assertEqual(leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms()), [])
 
     def test_a_clean_range(self) -> None:
         (self.repo / "fix.txt").write_text("a synthetic reduced case on example.com\n")
@@ -384,23 +425,7 @@ class GitRangeTest(unittest.TestCase):
         )
 
     def test_a_conflict_resolution_in_a_merge_is_scanned(self) -> None:
-        (self.repo / "shared.txt").write_text("one\ntwo\nthree\n")
-        self.commit("Add shared")
-        base = self.git("rev-parse", "HEAD").strip()
-        self.git("checkout", "--quiet", "-b", "upstream")
-        (self.repo / "shared.txt").write_text("one\nupstream two\nthree\n")
-        self.commit("Upstream change")
-        self.git("checkout", "--quiet", "main")
-        (self.repo / "shared.txt").write_text("one\nour two\nthree\n")
-        self.commit("Our change")
-        subprocess.run(
-            ["git", "-C", str(self.repo), "merge", "--quiet", "--no-edit", "upstream"],
-            capture_output=True,
-            check=False,
-        )
-        (self.repo / "shared.txt").write_text("one\nsee www.private-blog.net for repro\nthree\n")
-        self.commit("Merge upstream")
-        merge = self.git("rev-parse", "--short=12", "HEAD").strip()
+        base, merge = self.merge_resolving(b"one\nsee www.private-blog.net for repro\nthree\n")
 
         leaks = leakcheck.scan_git_range(
             self.repo, f"{base}..HEAD", terms(), exclude_refs=["upstream"]
@@ -413,6 +438,243 @@ class GitRangeTest(unittest.TestCase):
                 f"shared.txt:2 (commit {merge}): matched site private-blog.net",
             ],
         )
+
+    def test_a_lone_carriage_return_does_not_end_the_hunk(self) -> None:
+        # Only "\n" ends a line in a patch. A reduced test case for a line-break bug
+        # may hold a lone "\r" before the line that names a site.
+        (self.repo / "case.html").write_bytes(
+            b"<p>a\rb</p>\n<a href=https://www.private-blog.net/x>x</a>\n"
+        )
+        self.commit("Add a test")
+        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+        self.assertIn(
+            f"case.html:2 (commit {self.head()}): matched site private-blog.net", map(str, leaks)
+        )
+
+    def test_a_lone_carriage_return_in_a_merge_resolution(self) -> None:
+        base, merge = self.merge_resolving(b"one\nx\ra\nsee www.private-blog.net\nthree\n")
+        leaks = leakcheck.scan_git_range(
+            self.repo, f"{base}..HEAD", terms(), exclude_refs=["upstream"]
+        )
+        self.assertIn(
+            f"shared.txt:3 (commit {merge}): matched site private-blog.net", map(str, leaks)
+        )
+
+    def test_diff_drivers_and_attributes_do_not_change_the_scanned_lines(self) -> None:
+        # A textconv driver prints its own output instead of the committed lines, and a
+        # "-diff" attribute prints "Binary files differ"; a commit can set them itself.
+        user_attributes = self.repo / ".git" / "user-attributes"
+        user_attributes.write_text("*.md -diff\n")
+        self.git("config", "core.attributesFile", str(user_attributes))
+        self.git("config", "diff.tidy.textconv", "sed s/private-blog/xxxxxx/")
+        (self.repo / ".gitattributes").write_text("*.html diff=tidy\n*.txt -diff\n")
+        for name in ("case.html", "notes.txt", "notes.md"):
+            (self.repo / name).write_text("seen on private-blog.net\n")
+        self.commit("Add tests")
+
+        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+
+        self.assertEqual(
+            sorted((leak.location, leak.line) for leak in leaks),
+            [("case.html", 1), ("notes.md", 1), ("notes.txt", 1)],
+        )
+
+    def test_a_minus_diff_attribute_does_not_hide_a_merge_resolution(self) -> None:
+        (self.repo / ".gitattributes").write_text("*.txt -diff\n")
+        base, merge = self.merge_resolving(b"one\nsee www.private-blog.net\nthree\n")
+        leaks = leakcheck.scan_git_range(
+            self.repo, f"{base}..HEAD", terms(), exclude_refs=["upstream"]
+        )
+        self.assertIn(
+            f"shared.txt:2 (commit {merge}): matched site private-blog.net", map(str, leaks)
+        )
+
+    def test_attributes_no_option_turns_off_stop_the_scan(self) -> None:
+        # $GIT_DIR/info/attributes always applies; it could hide lines as above.
+        info = self.repo / ".git" / "info"
+        info.mkdir(exist_ok=True)
+        (info / "attributes").write_text("# local\n*.html -diff\n")
+        (self.repo / "fix.txt").write_text("a synthetic reduced case\n")
+        self.commit("Fix menu")
+
+        with self.assertRaisesRegex(leakcheck.LeakcheckError, "info/attributes"):
+            leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+        (info / "attributes").write_text("# nothing set\n\n")
+        self.assertEqual(leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms()), [])
+
+    def test_binary_file_contents_are_scanned_as_text(self) -> None:
+        (self.repo / "case.bin").write_bytes(b"\x00\x01see www.private-blog.net\x00\n")
+        self.commit("Add a binary test file")
+        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+        self.assertIn(
+            f"case.bin:1 (commit {self.head()}): matched host www.private-blog.net",
+            map(str, leaks),
+        )
+
+    def test_context_lines_from_the_configuration_do_not_end_the_hunk(self) -> None:
+        lines = [f"line {number}" for number in range(1, 11)]
+        (self.repo / "notes.txt").write_text("\n".join(lines) + "\n")
+        self.commit("Add notes")
+        base = self.git("rev-parse", "HEAD").strip()
+        lines[0] = "first line edited"
+        lines[4] = "see www.private-blog.net"
+        (self.repo / "notes.txt").write_text("\n".join(lines) + "\n")
+        self.commit("Edit notes")
+        # Joins nearby hunks with the context lines between them.
+        self.git("config", "diff.interHunkContext", "5")
+
+        leaks = leakcheck.scan_git_range(self.repo, f"{base}..HEAD", terms())
+
+        self.assertIn(
+            f"notes.txt:5 (commit {self.head()}): matched site private-blog.net", map(str, leaks)
+        )
+
+    def test_a_root_commit_in_the_range_is_scanned(self) -> None:
+        # log.showRoot=false prints a root commit without its patch.
+        self.git("config", "log.showRoot", "false")
+        self.git("checkout", "--quiet", "--orphan", "fresh")
+        self.git("rm", "-r", "--quiet", "--cached", ".")
+        (self.repo / "README.md").unlink()
+        (self.repo / "case.html").write_text("see www.private-blog.net\n")
+        self.commit("Start over")
+
+        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+
+        self.assertIn(
+            f"case.html:1 (commit {self.head()}): matched site private-blog.net", map(str, leaks)
+        )
+
+    def test_file_names_git_quotes_are_decoded(self) -> None:
+        # git C-quotes a name with a control character, a quote or a backslash ("\t",
+        # "\001", "\""): the escape must not hide the term after it, and the name must
+        # be the file's for the check of what existed at the base.
+        existing = 'we"ird-old-site.org.html'
+        (self.repo / existing).write_text("one\n")
+        self.commit("Add a quoted name")
+        base = self.git("rev-parse", "HEAD").strip()
+        (self.repo / existing).write_text("one\ntwo\n")
+        added = ["tab\tprivate-blog.net.html", "ctl\x01private-blog.net.html", 'q"private-blog.net']
+        for name in added:
+            (self.repo / name).write_text("x\n")
+        self.commit("Add cases")
+        commit = self.head()
+        self.git("checkout", "--quiet", "-b", "side", base)
+        (self.repo / "side.txt").write_text("s\n")
+        self.commit("Side change")
+        self.git("checkout", "--quiet", "main")
+        self.git("merge", "--quiet", "--no-commit", "side")
+        merged = 'm"tab\tprivate-blog.net.html'
+        (self.repo / merged).write_text("x\n")
+        self.commit("Merge side")
+
+        leaks = leakcheck.scan_git_range(self.repo, f"{base}..HEAD", terms())
+
+        self.assertEqual(
+            sorted((leak.location, leak.line, leak.term, leak.commit) for leak in leaks),
+            sorted(
+                [(name, None, "private-blog.net", commit) for name in added]
+                + [(merged, None, "private-blog.net", self.head())]
+            ),
+        )
+
+    def test_messages_are_read_as_utf8_whatever_the_output_encoding(self) -> None:
+        self.git("config", "i18n.logOutputEncoding", "ISO-8859-1")
+        (self.repo / "fix.txt").write_text("a synthetic reduced case\n")
+        self.commit("Fix the menu on bücher-leak.net")
+        inventory = leakcheck.inventory(["bücher-leak.net"], [], [])
+
+        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", inventory)
+
+        self.assertEqual(
+            [str(leak) for leak in leaks], [f"commit {self.head()}:1: matched host bücher-leak.net"]
+        )
+
+    def test_control_characters_do_not_hide_the_rest_of_a_message(self) -> None:
+        (self.repo / "fix.txt").write_text("a synthetic reduced case\n")
+        self.commit("Fix the menu\x01\x02 seen on old-site.org")
+        leaks = leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+        self.assertEqual(
+            [str(leak) for leak in leaks], [f"commit {self.head()}:1: matched host old-site.org"]
+        )
+
+    def test_output_is_read_as_utf8_whatever_the_locale(self) -> None:
+        # Under a Latin-1 locale, UTF-8 output read with the locale's encoding turns
+        # "ü" into "Ã¼" and hides a Unicode host, and "é" into "Ã©", which ends a word
+        # where UTF-8 does not.
+        (self.repo / "menu.txt").write_text("caféprivate-example.org\n", encoding="utf-8")
+        self.commit("Add menu")
+        base = self.git("rev-parse", "HEAD").strip()
+        (self.repo / "menu.txt").write_text(
+            "caféprivate-example.org\nvisit private-example.org\n", encoding="utf-8"
+        )
+        (self.repo / "case.html").write_text("<p>see bücher-leak.net</p>\n", encoding="utf-8")
+        self.commit("Fix the menu on bücher-leak.net")
+        commit = self.head()
+
+        encoding, leaks = self.scan_in_locale(
+            "en_US.ISO8859-1", f"{base}..HEAD", ["bücher-leak.net", "private-example.org"]
+        )
+
+        if encoding.replace("-", "").lower() == "utf8":
+            self.skipTest("no ISO 8859-1 locale on this machine")
+        self.assertEqual(
+            sorted(leaks),
+            sorted(
+                [
+                    f"menu.txt:2 (commit {commit}): matched host private-example.org",
+                    f"case.html:1 (commit {commit}): matched host bücher-leak.net",
+                    f"commit {commit}:1: matched host bücher-leak.net",
+                ]
+            ),
+        )
+
+    def scan_in_locale(
+        self, locale_name: str, git_range: str, hosts: list[str]
+    ) -> tuple[str, list[str]]:
+        """Scans in a child interpreter under `locale_name`: its preferred encoding
+        and the findings."""
+        package_root = Path(leakcheck.__file__).resolve().parent.parent
+        script = (
+            "import json, locale, sys; from pathlib import Path; "
+            f"sys.path.insert(0, {str(package_root)!r}); "
+            "from sitecheck import leakcheck; "
+            "terms = leakcheck.inventory(json.loads(sys.argv[3]), [], []); "
+            "leaks = leakcheck.scan_git_range(Path(sys.argv[1]), sys.argv[2], terms); "
+            "print(json.dumps([locale.getpreferredencoding(False), [str(l) for l in leaks]]))"
+        )
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("LC_", "PYTHON")) and key != "LANG"
+        }
+        environment["LC_ALL"] = locale_name
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", script, str(self.repo), git_range, json.dumps(hosts)],
+            env=environment,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+        encoding, leaks = json.loads(result.stdout)
+        return encoding, leaks
+
+    def test_a_git_command_that_does_not_finish_stops_the_scan(self) -> None:
+        # A scan that could not look must never pass as clean, and the error names
+        # the git command, not the path or term it was looking for.
+        self.git("checkout", "--quiet", "-b", "fix-menu")
+        (self.repo / "private-blog.net.html").write_text("see www.private-blog.net\n")
+        self.commit("Add a test")
+        for markers, command in (
+            (("cat-file",), "git cat-file"),
+            (("grep",), "git grep"),
+            (("--patch",), "git log"),
+            (("symbolic-ref", "--symbolic-full-name"), "git "),
+        ):
+            with self.subTest(command=command), fakes.git_timing_out(*markers):
+                with self.assertRaises(leakcheck.LeakcheckError) as raised:
+                    leakcheck.scan_git_range(self.repo, f"{self.base}..HEAD", terms())
+                self.assertIn(command, str(raised.exception))
+                self.assertNotIn("private-blog", str(raised.exception))
 
     def test_invalid_ranges(self) -> None:
         for git_range in ("HEAD", "a...b", f"{self.base}..nope", "-x..HEAD"):

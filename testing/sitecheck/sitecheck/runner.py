@@ -31,6 +31,7 @@ import gzip
 import hashlib
 import hmac
 import json
+import math
 import sys
 import time
 import traceback
@@ -325,15 +326,18 @@ class ChromiumSource:
             if cached is not None:
                 return ReferenceOutcome(cached.result, cached=True)
 
+        blocked = _RefusalRecorder(refusal)
         result = self._chromium.run_page(
             url,
             out_dir,
             user_agent=self._user_agent,
             probe_source=probe,
             timing=self._timing,
-            navigation_refusal=refusal,
+            navigation_refusal=blocked if refusal else None,
         )
-        if cacheable:
+        # A load the navigation guard cut short shows the page before the navigation:
+        # no baseline to reuse, and a cache hit would not ask the policy again.
+        if cacheable and blocked.refused is None:
             reference.store_cached_reference(
                 self._data,
                 result,
@@ -690,6 +694,10 @@ def _load_reference(
     navigation it blocked, or a redirect it could only follow. None when it stayed."""
     blocked = _RefusalRecorder(refusal)
     outcome = _guarded_reference(source, url, page_dir, out, blocked if refusal else None, cache)
+    if outcome.result.screenshot is None:
+        # A refresh that failed would leave the cached load's screenshot, which the
+        # report shows as this run's reference.
+        (page_dir / reference.SCREENSHOT_NAME).unlink(missing_ok=True)
     _write_engine_files(page_dir, outcome.result, _REFERENCE_FILES)
     return outcome, blocked.refused or _left_policy(outcome.result, url, refusal)
 
@@ -838,15 +846,17 @@ def _stored_metrics(
     if reference_outcome is not None:
         reference_record = _engine_record(reference_outcome.result)
         reference_record["cached"] = reference_outcome.cached
-    return {
-        "bucket": bucket,
-        "attempt_verdict": attempt.verdict.kind.value,
-        "flaky": verdict.kind is VerdictKind.FLAKY,
-        "findings": [_finding_record(finding) for finding in verdict.findings],
-        "servo": _engine_record(attempt.servo),
-        "reference": reference_record,
-        "images": None if attempt.images is None else dict(attempt.images),
-    }
+    return _json_safe(
+        {
+            "bucket": bucket,
+            "attempt_verdict": attempt.verdict.kind.value,
+            "flaky": verdict.kind is VerdictKind.FLAKY,
+            "findings": [_finding_record(finding) for finding in verdict.findings],
+            "servo": _engine_record(attempt.servo),
+            "reference": reference_record,
+            "images": None if attempt.images is None else dict(attempt.images),
+        }
+    )
 
 
 def _engine_record(result: PageResult) -> dict[str, Any]:
@@ -878,6 +888,21 @@ def _without_text(metrics: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return {key: value for key, value in metrics.items() if key != "text"}
 
 
+def _json_safe(value: Any) -> Any:
+    """`value` with NaN and the infinities replaced by None, as WebDriver does.
+
+    Chromium passes them through from a page (one can replace window.innerWidth), but
+    JSON has neither and the store refuses them.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Mapping):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _image_evidence(
     comparer: ImageComparer | None, servo_result: PageResult, reference_result: PageResult | None
 ) -> Mapping[str, Any] | None:
@@ -903,7 +928,7 @@ def _write_engine_files(directory: Path, result: PageResult, names: _EngineFiles
     record = result.to_json()
     record["metrics"] = _without_text(result.metrics)
     config.write_private_file(
-        directory / names.record, json.dumps(record, indent=2).encode("utf-8")
+        directory / names.record, json.dumps(_json_safe(record), indent=2).encode("utf-8")
     )
 
     text = (result.metrics or {}).get("text")

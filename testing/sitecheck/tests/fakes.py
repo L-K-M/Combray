@@ -1,14 +1,17 @@
 """Scripted stand-ins for both engines and the image comparison, for the runner,
-report and CLI tests. Nothing here starts a process or opens a socket."""
+report and CLI tests, and a git that does not finish in time for the leak check
+tests. Nothing here starts a process or opens a socket."""
 
 from __future__ import annotations
 
 import contextlib
+import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from sitecheck.model import CrashInfo, Engine, PageError, PageResult, PageStatus
 from sitecheck.reference import CachePolicy
@@ -179,3 +182,19 @@ class StepClock:
 
 def urls_of(pages: Sequence[Mapping[str, Any]]) -> list[str]:
     return [page["url"] for page in pages]
+
+
+@contextlib.contextmanager
+def git_timing_out(*markers: str) -> Iterator[None]:
+    """Processes with any of `markers` among their arguments do not exit within the
+    timeout they are waited for; every other process runs as usual."""
+    real_popen = subprocess.Popen
+
+    class SlowPopen(real_popen):  # type: ignore[misc, valid-type]
+        def wait(self, timeout: float | None = None) -> int:
+            if timeout is not None and any(marker in self.args for marker in markers):
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            return super().wait(timeout)
+
+    with mock.patch.object(subprocess, "Popen", SlowPopen):
+        yield

@@ -24,6 +24,7 @@ import io
 import itertools
 import json
 import logging
+import math
 import os
 import secrets
 import shutil
@@ -487,7 +488,7 @@ def _cmd_run(args: argparse.Namespace, rt: Runtime) -> int:
                     targets,
                     _engines(rt, binary, identity, ref),
                     policy=runner.AttemptPolicy.retrying(args.retries),
-                    time_budget=None if args.minutes is None else timedelta(minutes=args.minutes),
+                    time_budget=args.minutes,
                     progress=rt.stderr,
                     scope=runner.SiteScope(config.signature_key(data)),
                     navigation=url_policy,
@@ -868,7 +869,10 @@ def _named_targets(
     rows: list[store.PageRow] = []
     for raw in urls:
         url = raw.strip()
-        scheme = urlsplit(url).scheme.lower()
+        try:
+            scheme = urlsplit(url).scheme.lower()
+        except ValueError as error:  # Such as an unclosed IPv6 bracket.
+            raise config.ConfigError(f"refusing {url}: not a valid URL ({error})") from None
         if not scheme and Path(url).is_file():
             url, scheme = Path(url).resolve().as_uri(), "file"
         if scheme == "file":
@@ -1163,10 +1167,15 @@ def _doctor_store(data: Path, rt: Runtime, report_check: _ReportCheck) -> None:
     if not db_path.is_file():
         report_check(_Health.WARN, "store", "empty: run `sitecheck seed` or `sitecheck sync`")
         return
-    with store.open_store(db_path, clock=rt.now) as db:
-        eligible = len(db.selection_rows())
-        names = db.hosts_and_sites()
-        latest = db.latest_run_id()
+    try:
+        with store.open_store(db_path, clock=rt.now) as db:
+            eligible = len(db.selection_rows())
+            names = db.hosts_and_sites()
+            latest = db.latest_run_id()
+    except (store.StoreError, sqlite3.Error, OSError) as error:
+        # The other checks still run: one of them may explain this (a full disk).
+        report_check(_Health.FAIL, "store", f"cannot read {db_path}: {error}")
+        return
     report_check(
         _Health.OK,
         "store",
@@ -1353,14 +1362,21 @@ def _int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"not a whole number: {text!r}") from None
 
 
-def _positive_minutes(text: str) -> float:
+def _time_budget(text: str) -> timedelta:
+    """--minutes, checked before a run exists: an infinite or huge budget would fail
+    only after the run was created, leaving an empty run behind."""
     try:
-        value = float(text)
+        minutes = float(text)
     except ValueError:
         raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
-    if not value > 0:
+    if not math.isfinite(minutes):
+        raise argparse.ArgumentTypeError(f"not a finite number: {text!r}")
+    if minutes <= 0:
         raise argparse.ArgumentTypeError("must be more than 0")
-    return value
+    try:
+        return timedelta(minutes=minutes)
+    except OverflowError:
+        raise argparse.ArgumentTypeError(f"too large: {text!r}") from None
 
 
 def _parser() -> _Parser:
@@ -1398,7 +1414,7 @@ def _parser() -> _Parser:
     run.add_argument("--urls", metavar="FILE", help="check the URLs in FILE, one per line")
     run.add_argument("url", nargs="*", help="check these URLs or local files")
     run.add_argument("--label", help="run label; reports compare runs with the same label")
-    run.add_argument("--minutes", type=_positive_minutes, help="stop starting pages after M min")
+    run.add_argument("--minutes", type=_time_budget, help="stop starting pages after M min")
     run.add_argument("--compare", metavar="RUN", help="run id or 'latest' to compare with")
     run.add_argument(
         "--retries", type=_non_negative_int, default=1, help="servo reloads of a failing page"

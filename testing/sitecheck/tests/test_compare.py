@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import string
 import unittest
 from typing import Any
@@ -684,6 +685,32 @@ class ImagesTest(unittest.TestCase):
         self.assertEqual(verdict.kind, VerdictKind.OK)
 
 
+class NonFiniteMetricTest(unittest.TestCase):
+    """Chromium passes NaN and Infinity through from the page (which can replace
+    window.innerWidth, say); such a metric was not measured."""
+
+    def test_a_non_finite_reference_metric_skips_its_rule(self) -> None:
+        # The Servo metrics that would make the metric's rule fire against a number.
+        cases = {
+            "innerWidth": {"scrollWidth": 800},
+            "scrollWidth": {"scrollWidth": 800},
+            "imagesLoaded": {"imagesLoaded": 0},
+            "imagesBroken": {"imagesBroken": 9},
+            "textLength": {"textLength": 5},
+        }
+        for metric, servo_metrics in cases.items():
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(metric=metric, value=value):
+                    verdict = compare.verdict(
+                        servo(**servo_metrics), ref(**{metric: value}), images()
+                    )
+                    self.assertEqual(verdict.kind, VerdictKind.OK)
+
+    def test_a_non_finite_screenshot_statistic_skips_its_rule(self) -> None:
+        evidence = images(servo_stddev=math.nan, score=math.nan)
+        self.assertEqual(compare.verdict(servo(), ref(), evidence).kind, VerdictKind.OK)
+
+
 class SlowLoadTest(unittest.TestCase):
     def test_slow_load_when_the_page_is_otherwise_fine(self) -> None:
         verdict = compare.verdict(servo(navigation_timed_out=True), ref(), images())
@@ -703,6 +730,11 @@ class SlowLoadTest(unittest.TestCase):
             servo(navigation_timed_out=True, scrollWidth=800), ref(), images()
         )
         self.assertEqual(kinds(verdict), [VerdictKind.LAYOUT_OVERFLOW])
+
+    def test_not_reported_alongside_a_visual_difference(self) -> None:
+        verdict = compare.verdict(servo(navigation_timed_out=True), ref(), images(score=0.3))
+        self.assertEqual(kinds(verdict), [VerdictKind.VISUAL_DIFF])
+        self.assertEqual(verdict.signatures, ["visual-diff"])
 
 
 class VisualDiffTest(unittest.TestCase):

@@ -40,6 +40,7 @@ sites' pages alone.
 
 from __future__ import annotations
 
+import math
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -352,6 +353,8 @@ def _metric_findings(
     findings.extend(_js_findings(servo, ref))
     findings.extend(_optional(_overflow_finding(servo.metrics, ref.metrics, signatures)))
     findings.extend(_optional(_images_finding(servo.metrics, ref.metrics, signatures)))
+    if blank is None:
+        findings.extend(_optional(_visual_finding(img, signatures)))
 
     # A load event that never fired only matters when nothing else explains it.
     if not findings and servo.navigation_timed_out and not ref.navigation_timed_out:
@@ -362,9 +365,6 @@ def _metric_findings(
                 signatures.symptom("slow-load"),
             )
         )
-
-    if blank is None:
-        findings.extend(_optional(_visual_finding(img, signatures)))
     return findings
 
 
@@ -609,12 +609,17 @@ def _words(text: str) -> list[str]:
 
 
 def _number(metrics: Mapping[str, Any], key: str) -> float | None:
-    """A numeric metric, or None when the probe could not measure it."""
+    """A numeric metric, or None when the probe could not measure it.
+
+    NaN and the infinities are no measurement: Chromium passes them through from a
+    page that replaced what the probe reads (WebDriver turns them into null).
+    """
     value = metrics.get(key)
     # bool is an int subclass; a probe returning True for a count is a bug, not 1.
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value)
+    number = float(value)
+    return number if math.isfinite(number) else None
 
 
 def _stddev(img: Mapping[str, Any] | None, engine: str) -> float | None:
