@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import stat
@@ -93,18 +94,16 @@ class SchemaTests(StoreTestCase):
         reopened = self.open()
 
         self.assertEqual(reopened.get_meta("hister_last_sync"), "1760000000")
-        with sqlite3.connect(self.path) as raw:
+        with contextlib.closing(sqlite3.connect(self.path)) as raw:
             self.assertEqual(raw.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             self.assertEqual(raw.execute("PRAGMA journal_mode").fetchone()[0], "wal")
             tables = {row[0] for row in raw.execute("SELECT name FROM sqlite_master")}
-        raw.close()
         self.assertTrue({"pages", "meta", "runs", "results", "issues", "issue_pages"} <= tables)
 
     def test_newer_schema_is_refused(self) -> None:
         self.store.close()
-        raw = sqlite3.connect(self.path)
-        raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
-        raw.close()
+        with contextlib.closing(sqlite3.connect(self.path)) as raw:
+            raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
 
         with self.assertRaisesRegex(StoreError, "newer"):
             open_store(self.path)
@@ -128,6 +127,21 @@ class SchemaTests(StoreTestCase):
     def test_missing_directory_is_an_error(self) -> None:
         with self.assertRaises(StoreError):
             open_store(self.dir / "missing" / "state.sqlite3")
+
+    def test_a_full_database_reports_its_own_error_and_stays_usable(self) -> None:
+        # SQLite rolls the whole transaction back itself on some errors, such as a full
+        # disk; the store must report that error, not its own failed ROLLBACK.
+        connection = self.store._connection
+        (pages,) = connection.execute("PRAGMA page_count").fetchone()
+        connection.execute(f"PRAGMA max_page_count = {pages}")
+        rows = [page(f"https://p{i}.example.org/{'x' * 500}") for i in range(200)]
+
+        with self.assertRaisesRegex(sqlite3.OperationalError, "full"):
+            self.store.upsert_pages(rows)
+
+        connection.execute(f"PRAGMA max_page_count = {2**30}")
+        self.assertEqual(self.store.upsert_pages([page(A)]), UpsertCounts(new=1, updated=0))
+        self.assertEqual([row["url"] for row in self.store.selection_rows()], [A])
 
     def test_foreign_keys_are_enforced(self) -> None:
         with self.assertRaisesRegex(StoreError, "No run"):
@@ -272,18 +286,17 @@ class MigrationTests(StoreTestCase):
     def test_a_version_1_store_is_upgraded_and_syncs_in_full_next(self) -> None:
         self.store.close()
         self.path.unlink()
-        raw = sqlite3.connect(self.path)
-        raw.executescript(store_module._SCHEMA_V1)
-        raw.execute("PRAGMA user_version = 1")
-        raw.execute("INSERT INTO meta (key, value) VALUES ('hister_last_sync', '1760000000')")
-        raw.execute(
-            "INSERT INTO pages (url, host, site, template, source, eligible, reason, add_count, "
-            "first_seen, last_seen) VALUES (?, 'a.example.org', 'example.org', NULL, 'hister', "
-            "1, 'ok', 4, 'x', 'x')",
-            (A,),
-        )
-        raw.commit()
-        raw.close()
+        with contextlib.closing(sqlite3.connect(self.path)) as raw:
+            raw.executescript(store_module._SCHEMA_V1)
+            raw.execute("PRAGMA user_version = 1")
+            raw.execute("INSERT INTO meta (key, value) VALUES ('hister_last_sync', '1760000000')")
+            raw.execute(
+                "INSERT INTO pages (url, host, site, template, source, eligible, reason, "
+                "add_count, first_seen, last_seen) VALUES (?, 'a.example.org', 'example.org', "
+                "NULL, 'hister', 1, 'ok', 4, 'x', 'x')",
+                (A,),
+            )
+            raw.commit()
 
         upgraded = self.open()
 
@@ -400,6 +413,16 @@ class ResultTests(StoreTestCase):
         self.assertEqual(outcomes[A]["attempt"], 2)
         self.assertEqual(outcomes[A]["verdict"], "flaky")
 
+    def test_signatures_from_an_iterator_are_stored(self) -> None:
+        # Validation must not use up a one-shot iterable before it is stored.
+        run_id = self.store.create_run()
+        signatures = (signature for signature in ("crash:x", "js:y"))
+
+        self.store.record_result(run_id, A, 1, "crash", 5, signatures, None, None, 1)
+
+        (result,) = self.store.results_for_run(run_id)
+        self.assertEqual(result["signatures"], ["crash:x", "js:y"])
+
     def test_invalid_results_are_refused(self) -> None:
         run_id = self.store.create_run()
         url = "https://a.example.org/"
@@ -497,7 +520,9 @@ class IssueTests(StoreTestCase):
 
         self.assertEqual(update.new, ("crash:components/layout/flow.rs:12", "js:x is not defined"))
         self.assertEqual(update.seen, 2)
-        crash, _ = self.store.issues()
+        issues = {issue["signature"]: issue for issue in self.store.issues()}
+        self.assertEqual(len(issues), 2)
+        crash = issues[signature]
         self.assertEqual(crash["signature"], signature)
         self.assertEqual(crash["kind"], "crash")
         self.assertEqual(crash["status"], "open")

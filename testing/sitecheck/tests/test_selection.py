@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 import unittest
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -26,6 +27,7 @@ def page(
     attempted_days_ago: float | None = None,
     decided: bool = False,
 ) -> Page:
+    """A selection row; a verdict without checked_days_ago means checked one day ago."""
     host = urlsplit(url).hostname or ""
     visited = (
         None
@@ -79,8 +81,13 @@ class InputTest(unittest.TestCase):
             select([page("https://a.com/", verdict="exploded")], 5, NOW, SEED)
 
     def test_naive_last_checked_is_an_error(self) -> None:
-        naive = Page("https://a.com/", "a.com", None, 1, None, datetime(2026, 1, 1), "ok", 0)
-        with self.assertRaises(ValueError):
+        naive = replace(page("https://a.com/", verdict="ok"), last_checked=datetime(2026, 1, 1))
+        with self.assertRaisesRegex(ValueError, "last_checked must be timezone-aware"):
+            select([naive], 5, NOW, SEED)
+
+    def test_naive_last_attempted_is_an_error(self) -> None:
+        naive = replace(page("https://a.com/"), last_attempted=datetime(2026, 1, 1))
+        with self.assertRaisesRegex(ValueError, "last_attempted must be timezone-aware"):
             select([naive], 5, NOW, SEED)
 
     def test_fewer_pages_than_budget(self) -> None:
