@@ -33,15 +33,6 @@ SHOP = "https://shop.example-store.net/"
 TOKEN = "tok-very-secret-test-token-1234"
 USER_AGENT = config.user_agent("0.6.0")
 
-_GIT_ENV = {
-    "GIT_CONFIG_GLOBAL": os.devnull,
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_AUTHOR_NAME": "Test",
-    "GIT_AUTHOR_EMAIL": "test@example.com",
-    "GIT_COMMITTER_NAME": "Test",
-    "GIT_COMMITTER_EMAIL": "test@example.com",
-}
-
 
 class CliTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -144,7 +135,7 @@ class ArgumentTest(CliTestCase):
         package_root = Path(cli.__file__).resolve().parent.parent
         result = subprocess.run(
             [
-                os.sys.executable,
+                sys.executable,
                 "-I",
                 "-c",
                 f"import sys; sys.path.insert(0, {str(package_root)!r}); "
@@ -902,7 +893,7 @@ class LeakcheckCliTest(CliTestCase):
         self.seed(SHOP)
         repo = self.root / "repo"
         repo.mkdir()
-        with mock.patch.dict(os.environ, _GIT_ENV):
+        with fakes.isolated_git_environment():
 
             def git(*arguments: str) -> None:
                 subprocess.run(
@@ -923,7 +914,7 @@ class LeakcheckCliTest(CliTestCase):
         self.assertEqual(code, cli.EXIT_FAILURE)
         self.assertIn(": matched host shop.example-store.net", out)
         self.assertTrue(out.startswith("a.txt:2 (commit "), out)
-        with mock.patch.dict(os.environ, _GIT_ENV):
+        with fakes.isolated_git_environment():
             code, out, _ = self.sitecheck(
                 "leakcheck",
                 "--repo",
@@ -939,7 +930,7 @@ class LeakcheckCliTest(CliTestCase):
         self.seed(SHOP)
         repo = self.root / "repo"
         repo.mkdir()
-        with mock.patch.dict(os.environ, _GIT_ENV):
+        with fakes.isolated_git_environment():
             for arguments in (
                 ["init", "--quiet", "--initial-branch=main"],
                 ["commit", "--quiet", "--no-verify", "--allow-empty", "-m", "base"],
@@ -965,7 +956,7 @@ class LeakcheckCliTest(CliTestCase):
         repo.mkdir()
         pr = self.root / "pr.md"
         pr.write_text("Fixes the menu on shop.example-store.net.\n")
-        with mock.patch.dict(os.environ, _GIT_ENV):
+        with fakes.isolated_git_environment():
             subprocess.run(["git", "-C", str(repo), "init", "--quiet", "-b", "main"], check=True)
             (repo / "a.txt").write_text("shop.example-store.net is already here\n")
             for arguments in (["add", "a.txt"], ["commit", "--quiet", "--no-verify", "-m", "base"]):

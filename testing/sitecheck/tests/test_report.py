@@ -127,7 +127,11 @@ class WriteReportTest(ReportTestCase):
         page = files.html.read_text()
         self.assertTrue(page.startswith("<!doctype html>"))
         self.assertIn(f'<img src="pages/{shop_key}/servo.png"', page)
-        self.assertIn("Content-Security-Policy", page)
+        # Browsers apply a policy from a meta tag only inside <head>.
+        head = page.partition("</head>")[0]
+        self.assertRegex(
+            head, r"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none';"
+        )
 
     def test_a_page_without_a_servo_screenshot_says_so(self) -> None:
         # Servo answers the probe but cannot take a screenshot of a page whose load
@@ -192,14 +196,17 @@ class WriteReportTest(ReportTestCase):
         self.assertNotIn("<img src=x", page)
         self.assertIn("&lt;script&gt;", page)
         # Every resource is a relative path into the run directory.
-        for source in re.findall(r'<(?:img|link|script)[^>]*(?:src|href)="([^"]*)"', page):
+        sources = re.findall(r'<(?:img|link|script)[^>]*(?:src|href)="([^"]*)"', page)
+        self.assertTrue(sources, "the report embeds no screenshots to check")
+        for source in sources:
             self.assertRegex(source, r"^pages/[0-9a-f]{16}/")
 
     def test_markdown_escapes_table_breaking_characters(self) -> None:
         url = "https://news.example-site.org/a|b"
         run_id = self.run_with({}, url)
         markdown = report.write_report(self.store, self.data, run_id).markdown.read_text()
-        row = next(line for line in markdown.splitlines() if "a%7Cb" in line)
+        row = next((line for line in markdown.splitlines() if "a%7Cb" in line), "")
+        self.assertTrue(row, f"no row names the escaped URL:\n{markdown}")
         self.assertEqual(row.count(" | "), 7)  # Eight cells, none split by the URL.
 
     def test_changes_against_an_earlier_run(self) -> None:

@@ -68,7 +68,10 @@ def result(
     navigation_timed_out: bool = False,
     **metric_overrides: Any,
 ) -> PageResult:
-    has_metrics = status is PageStatus.OK and metric_overrides.pop("no_metrics", False) is False
+    no_metrics = metric_overrides.pop("no_metrics", False)
+    has_metrics = status is PageStatus.OK and not no_metrics
+    if metric_overrides and not has_metrics:
+        raise TypeError(f"metric overrides on a result without metrics: {sorted(metric_overrides)}")
     return PageResult(
         engine=engine,
         url="https://example.com/",
@@ -238,8 +241,13 @@ class VerdictPathTest(unittest.TestCase):
                 self.assertFalse(verdict.triaged)
 
     def test_without_a_reference_nothing_but_crash_and_hang_is_judged(self) -> None:
-        for result in (servo(), servo(status=PageStatus.NAVIGATION_ERROR), servo(text="")):
-            with self.subTest(status=result.status):
+        cases = (
+            ("loaded", servo()),
+            ("navigation error", servo(status=PageStatus.NAVIGATION_ERROR)),
+            ("loaded without text", servo(text="")),
+        )
+        for case, result in cases:
+            with self.subTest(case=case):
                 verdict = compare.verdict(result, None, None)
                 self.assertEqual(verdict.kind, VerdictKind.NOT_COMPARED)
                 self.assertEqual((verdict.severity, verdict.signatures), (0, []))
@@ -314,17 +322,17 @@ class ScopeTest(unittest.TestCase):
 
     def test_reference_with_little_text_and_blank_screenshot_is_excluded(self) -> None:
         cases = [
-            # (reference textLength, reference stddev, excluded)
-            (49, 3.9, True),
-            (0, 0.0, True),
-            (50, 3.9, False),
-            (49, 4.0, False),
+            # (reference textLength, reference stddev, verdict)
+            (49, 3.9, VerdictKind.REFERENCE_FAILED),
+            (0, 0.0, VerdictKind.REFERENCE_FAILED),
+            (50, 3.9, VerdictKind.OK),
+            (49, 4.0, VerdictKind.OK),
         ]
-        for text_length, stddev, excluded in cases:
+        for text_length, stddev, expected in cases:
             with self.subTest(text_length=text_length, stddev=stddev):
                 reference = ref(text="x" * text_length, textLength=text_length)
                 verdict = compare.verdict(servo(), reference, images(ref_stddev=stddev))
-                self.assertEqual(verdict.kind is VerdictKind.REFERENCE_FAILED, excluded)
+                self.assertEqual(verdict.kind, expected)
 
     def test_reference_with_little_text_is_kept_without_image_evidence(self) -> None:
         reference = ref(text="hi", textLength=2)
@@ -552,6 +560,9 @@ class ScriptErrorTest(unittest.TestCase):
         self.assertEqual(verdict.kind, VerdictKind.OK)
 
     def test_a_reference_message_with_a_stack_matches_the_servo_message(self) -> None:
+        # Deliberately asymmetric: Servo's console messages never become findings
+        # (test_console_messages_are_not_compared), but a reference console message
+        # still matches by wording, since the page may log there what it throws in Servo.
         reference_error = PageError("console", "Error: custom boom\n    at file:///x.html:1:331")
         verdict = compare.verdict(
             servo(errors=(uncaught("custom boom"),)), ref(errors=(reference_error,)), images()

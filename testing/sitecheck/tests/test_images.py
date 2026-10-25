@@ -24,6 +24,9 @@ class WithoutPillowTest(unittest.TestCase):
 
     def test_missing_pillow_raises_an_actionable_error(self) -> None:
         # A None entry in sys.modules makes the import fail like a missing package.
+        # It only stops import statements run inside the block, so this relies on
+        # images importing Pillow inside its functions: a module-level import would
+        # already hold the real module, and the test would not see the error path.
         with mock.patch.dict(sys.modules, {"PIL": None}):
             self.assertFalse(images.available())
             with self.assertRaises(images.ImagesUnavailable) as raised:

@@ -9,7 +9,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from sitecheck import leakcheck
 from sitecheck.leakcheck import Leak, TermKind
@@ -23,16 +22,6 @@ URLS = (
     "https://www.private-blog.net/",
     "file:///Users/someone/fixture.html",
 )
-
-# Commands below must not depend on the developer's git configuration (signing, hooks).
-_GIT_ENV = {
-    "GIT_CONFIG_GLOBAL": os.devnull,
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_AUTHOR_NAME": "Test",
-    "GIT_AUTHOR_EMAIL": "test@example.com",
-    "GIT_COMMITTER_NAME": "Test",
-    "GIT_COMMITTER_EMAIL": "test@example.com",
-}
 
 
 def terms() -> leakcheck.Inventory:
@@ -234,9 +223,7 @@ class UpstreamContactTest(unittest.TestCase):
 
 class GitRangeTest(unittest.TestCase):
     def setUp(self) -> None:
-        patcher = mock.patch.dict(os.environ, _GIT_ENV)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.enterContext(fakes.isolated_git_environment())
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.repo = Path(temporary.name)
@@ -276,11 +263,12 @@ class GitRangeTest(unittest.TestCase):
         self.git("checkout", "--quiet", "main")
         (self.repo / "shared.txt").write_text("one\nour two\nthree\n")
         self.commit("Our change")
-        subprocess.run(
+        merge = subprocess.run(
             ["git", "-C", str(self.repo), "merge", "--quiet", "--no-edit", "upstream"],
             capture_output=True,
             check=False,
         )
+        self.assertEqual(merge.returncode, 1, "the merge did not stop at a conflict")
         (self.repo / "shared.txt").write_bytes(resolution)
         self.commit("Merge upstream")
         return base, self.head()
@@ -681,7 +669,7 @@ class GitRangeTest(unittest.TestCase):
             with self.subTest(git_range=git_range), self.assertRaises(leakcheck.LeakcheckError):
                 leakcheck.scan_git_range(self.repo, git_range, terms())
 
-    def test_unreadable_text_file(self) -> None:
+    def test_a_missing_text_file_is_rejected(self) -> None:
         with self.assertRaises(leakcheck.LeakcheckError):
             leakcheck.scan_files([self.repo / "missing.md"], terms())
 

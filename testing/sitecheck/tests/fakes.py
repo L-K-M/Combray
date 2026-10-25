@@ -1,10 +1,12 @@
 """Scripted stand-ins for both engines and the image comparison, for the runner,
-report and CLI tests, and a git that does not finish in time for the leak check
-tests. Nothing here starts a process or opens a socket."""
+report and CLI tests, and, for the leak check tests, a git that does not finish in
+time and an environment that keeps test git commands to their own repository.
+Nothing here starts a process or opens a socket."""
 
 from __future__ import annotations
 
 import contextlib
+import os
 import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -197,4 +199,27 @@ def git_timing_out(*markers: str) -> Iterator[None]:
             return super().wait(timeout)
 
     with mock.patch.object(subprocess, "Popen", SlowPopen):
+        yield
+
+
+_GIT_ENV = {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+
+
+@contextlib.contextmanager
+def isolated_git_environment() -> Iterator[None]:
+    """Git commands run in this block depend on neither the developer's git
+    configuration (signing, hooks) nor an inherited GIT_* variable.
+
+    A git hook that runs the tests passes GIT_DIR or GIT_INDEX_FILE on, which would
+    point the tests' git commands, and the scans, at the hook's repository.
+    """
+    without_git = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    with mock.patch.dict(os.environ, {**without_git, **_GIT_ENV}, clear=True):
         yield
