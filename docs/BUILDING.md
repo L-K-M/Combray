@@ -18,7 +18,7 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c` | `scripts/m0/servo-pin.sh`; `combray/0.6` is the maintenance branch, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `546db2b2db14104de3eb3d7c612a2100ad38f728` | `scripts/m0/servo-pin.sh`; `combray/0.6` is the maintenance branch, not a moving build input |
 | Upstream base | v0.6.0 (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
 | Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, loopback-only WebDriver | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
