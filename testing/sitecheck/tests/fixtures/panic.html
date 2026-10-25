@@ -1,0 +1,10 @@
+<!doctype html>
+<!-- Live-check fixture: panics Servo's script thread through ServoTestUtils.panic(),
+     which exists only with the pref dom_servo_helpers_enabled=true. -->
+<html>
+<head><meta charset="utf-8"><title>Sitecheck panic fixture</title></head>
+<body>
+<p>Before the panic.</p>
+<script>ServoTestUtils.panic();</script>
+</body>
+</html>
