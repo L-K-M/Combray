@@ -12,6 +12,11 @@ All notable changes to this project are documented here. The format follows
   frequent sites, hide/restore controls and direct Hister/Karakeep access.
   New tab has a persistent + button on Home, pages, the address editor and
   Find in page; local typing suggestions appear above the field.
+- A site-check harness (`testing/sitecheck/`) that loads the pages you
+  visit, from Hister, in a desktop Servo build and in headless Chromium,
+  and ranks what breaks in Servo. A nightly task uses it to fix the
+  engine, follow upstream Servo releases and move the engine pin. Its
+  data stays on the machine that runs it. See docs/SITECHECK.md.
 - Settings › Display › Show tab count: an optional counter on the tabs
   button, off by default. The choice persists across restarts.
 - Long-press Recent to switch to the tab you used before this one (a tap

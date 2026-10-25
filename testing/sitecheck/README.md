@@ -284,10 +284,15 @@ reports show counts, ratios and error signatures.
   visitors see them. Pages that differ per load (ads, rotating content) add noise.
 - `site` is an approximation without the Public Suffix List (`github.io` counts as one
   site).
-- The leak check matches hosts, sites and URLs as text. It reads binary files by name
-  only, skips single-label hosts and non-public IP addresses, and does not look for
-  hosts of public references the engine work cites (specifications, engine trackers,
-  the project's own repositories; `leakcheck.PUBLIC_REFERENCES`).
+- The leak check matches hosts, sites and URLs as text in the committed bytes, read as
+  UTF-8 whatever git attributes or diff drivers say. A binary file's bytes count as
+  text, but a host in another encoding (UTF-16) or in compressed data is not found,
+  and in a merge commit's own changes binary files are read by name only. It refuses
+  to scan while the repository's `.git/info/attributes` sets anything, since git
+  applies that file to the scan. It skips single-label hosts and non-public IP
+  addresses, and does not look for hosts of public references the engine work cites
+  (specifications, engine trackers, the project's own repositories;
+  `leakcheck.PUBLIC_REFERENCES`).
 - POSIX only (process groups, `flock`); macOS and Linux.
 
 ## Development

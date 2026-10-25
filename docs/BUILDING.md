@@ -18,7 +18,7 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `546db2b2db14104de3eb3d7c612a2100ad38f728` | `scripts/m0/servo-pin.sh`; `combray/0.6` is the maintenance branch, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `546db2b2db14104de3eb3d7c612a2100ad38f728` | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
 | Upstream base | v0.6.0 (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
 | Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
@@ -165,20 +165,22 @@ They still need the fetched tree because Cargo reads the Android-only path depen
 
 **Owner rule: source pulls only from `servo/servo`.** No issues, PRs, comments, reviews, reactions, pushes, GitHub fork API calls or outreach. All AI-assisted work and review stays in `L-K-M/servo` and `L-K-M/Combray`. The downstream repository preserves upstream history without a GitHub fork relationship, and has no copied upstream workflows, reviewer assignments or dependency bot configuration.
 
-Check upstream source weekly during active development; take security fixes promptly. Keep this app on reviewed 0.6.x maintenance updates. A move to upstream `main` is a separate tested upgrade, never an automatic merge.
+Follow upstream releases (owner decision, 24 October 2026). The newest `combray/0.N` branch is the published downstream line. Upstream backports to `release/v0.N` are merged into it; a new upstream release line `v0.M` starts `combray/0.M` at the current tip, and its release tag is merged there. Upstream `main` is never merged wholesale; a fix that only exists there is backported with `git cherry-pick -x`. The [nightly task](SITECHECK.md#the-nightly-task) checks upstream weekly and does this work; take security fixes promptly by hand when needed.
 
-In a clean downstream clone, choose a reviewed maintenance tag or commit:
+In a clean downstream clone, for a new release line (`0.N` is the current line, `v0.M.x` the new release tag):
 
 ```sh
-git switch combray/0.6
-git pull --ff-only origin combray/0.6
-git switch -c engine/update-0.6
-git fetch --no-tags https://github.com/servo/servo.git <reviewed-0.6.x-tag-or-SHA>
+git fetch origin
+git push origin origin/combray/0.N:refs/heads/combray/0.M
+git switch -c engine/upstream-v0.M.x origin/combray/0.N
+git fetch --no-tags https://github.com/servo/servo.git refs/tags/v0.M.x
 git merge --no-ff FETCH_HEAD
-git diff --name-status combray/0.6 -- .github/
+git diff --name-status origin/combray/0.N -- .github/
 ```
 
-Resolve engine/API conflicts and inspect any reintroduced `.github` automation before pushing downstream. Keep original licenses. Open the engine PR against `combray/0.6`; never rewrite its published history. If an equivalent fix arrives through a source pull, reconcile our version downstream.
+For backports, branch from `origin/combray/0.N` and merge `refs/heads/release/v0.N` the same way.
+
+Resolve engine/API conflicts and inspect any reintroduced `.github` automation before pushing downstream. Keep original licenses. Open the engine PR against the new or current `combray/0.N`, merge it with a merge commit, and never rewrite published history. After a merge, drop downstream commits that upstream now covers (keep their tests where useful) and list them in the PR. A new line becomes the downstream repository's default branch once its merge lands.
 
 In a Combray PR, set the full candidate SHA and its upstream base in `scripts/m0/servo-pin.sh`. Update this table and `ENGINE_SPIKE.md`; reconcile `native/Cargo.lock`, resources, toolchains and notices if they changed. Require host tests, both native ABI builds, packaging checks and x86_64 fixture/device evidence on that candidate. Run critical regressions in the M0 harness as needed. Merge the downstream engine PR preserving its commits, then land the Combray pin only after its CI and review pass. The Engine workflow records build/device evidence; an arm64 build does not prove arm64 runtime support.
 
