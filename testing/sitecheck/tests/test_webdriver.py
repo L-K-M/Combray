@@ -78,7 +78,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(reply.body)
         except ConnectionError:
-            pass  # The client gave up (it timed out, say); nobody is left to answer.
+            # The client gave up (it timed out, say): nobody is left to answer, so
+            # stop serving this connection.
+            self.close_connection = True
 
     do_GET = do_POST = do_DELETE = _handle
 

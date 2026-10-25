@@ -888,14 +888,15 @@ def _write_transaction(connection: sqlite3.Connection) -> Iterator[None]:
     connection.execute("BEGIN IMMEDIATE")
     try:
         yield
+        connection.execute("COMMIT")
     except BaseException:
         # After some errors (a full disk, an I/O error) SQLite has already rolled the
         # whole transaction back; a second ROLLBACK would fail and replace the error
-        # that says what went wrong.
+        # that says what went wrong. A COMMIT that failed (SQLITE_BUSY) can leave it
+        # open, and the connection must not stay inside it.
         if connection.in_transaction:
             connection.execute("ROLLBACK")
         raise
-    connection.execute("COMMIT")
 
 
 def _user_version(connection: sqlite3.Connection) -> int:

@@ -553,8 +553,10 @@ class LogCaptureTests(unittest.TestCase):
             self.assertEqual(child.wait(timeout=10), 0)
             self.assertIsInstance(writer.error, OSError)
             self.assertEqual(writer.error.errno, errno.ENOSPC)
+            written = log_path.read_text()
+            self.assertIn("line 0\n", written)  # Lines from before the failure survive.
             # Lines after the failure are read and discarded, not written.
-            self.assertNotIn("line 19999", log_path.read_text())
+            self.assertNotIn("line 19999", written)
 
 
 class PageScriptTests(unittest.TestCase):
