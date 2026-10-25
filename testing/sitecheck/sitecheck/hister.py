@@ -2,8 +2,8 @@
 
 Only ``GET {base}/api/history`` is used. It returns the latest indexed documents,
 newest first, ``PAGE_SIZE`` per page. Each response carries an opaque ``page_key``
-(the last hit's sort values) that the next request sends as ``last``; servers that
-send none page by the last document's URL instead. The
+(the last hit's sort values) that the next request sends as ``last``; when a response
+has no ``page_key``, the client pages by the last document's URL instead. The
 client keeps only what selection needs (URL, update time, visit count): titles,
 page text and HTML in the response are dropped and never stored.
 

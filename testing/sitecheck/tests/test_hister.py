@@ -217,17 +217,40 @@ class PagingTests(HisterTestCase):
         )
 
     def test_follows_the_page_key_of_current_servers(self) -> None:
-        server = self.serve(paged_by_key([make_docs("p1", PAGE_SIZE), make_docs("p2", 7)]))
+        # Two full pages, then an empty one: each request sends the key of the page
+        # before it, so following one key is not enough to pass.
+        server = self.serve(paged_by_key([make_docs("p1", PAGE_SIZE), make_docs("p2", PAGE_SIZE)]))
         stats = HisterStats()
 
         docs = list(self.client(server).iter_documents(stats=stats))
 
-        self.assertEqual(len(docs), PAGE_SIZE + 7)
+        self.assertEqual(len(docs), 2 * PAGE_SIZE)
         self.assertEqual(stats.stop_reason, StopReason.END)
-        first, second = server.requests
+        first, second, third = server.requests
         self.assertNotIn("last", first.query)
         # The cursor is the server's opaque page key, not a document URL.
         self.assertEqual(json.loads(second.query["last"][0])[1], "doc-0")
+        self.assertEqual(json.loads(third.query["last"][0])[1], "doc-1")
+
+    def test_a_repeated_page_key_stops_paging(self) -> None:
+        key = json.dumps(["1760100000", "doc-0"])
+        server = self.serve(
+            lambda request: json_response({"documents": make_docs("a", PAGE_SIZE), "page_key": key})
+        )
+        stats = HisterStats()
+
+        docs = list(self.client(server).iter_documents(stats=stats))
+
+        self.assertEqual(len(docs), 2 * PAGE_SIZE)
+        self.assertEqual(stats.stop_reason, StopReason.CURSOR_REPEAT)
+        self.assertEqual(len(server.requests), 2)
+
+    def test_a_non_string_page_key_is_an_error(self) -> None:
+        server = self.serve(
+            lambda request: json_response({"documents": make_docs("a", 1), "page_key": 42})
+        )
+        with self.assertRaisesRegex(HisterError, "page_key"):
+            list(self.client(server).iter_documents())
 
     def test_stops_on_empty_page(self) -> None:
         first = make_docs("a", PAGE_SIZE)
