@@ -873,3 +873,68 @@ JVM tests, lint, debug/test/release APK assembly, documentation and whitespace
 checks passed locally. Evidence: `build/device-checks/notice-theme-*`
 and `build/notice-theme/`. The PR records latest CI and review results.
 Physical-phone validation remains unverified.
+
+## 22. Default page contrast (25 October 2026)
+
+The owner's screenshot of
+`https://gopher.muffinlabs.com/sdf.org/users/nervtoji/phlog/001.txt`
+showed pale text on white. The response is HTML; its CSS gives the article
+neither a text color nor a background. Servo's UA stylesheet uses
+`CanvasText`, which Stylo 0.21.0 resolves to `#e8e8e8` under a dark
+preference even without a page color scheme. The canvas stays white:
+about 1.23:1 contrast.
+
+The downstream fix supplies a light root `color-scheme` presentational
+hint, or the document's explicit metadata scheme. Author CSS overrides
+the hint. This keeps `prefers-color-scheme` working for sites with dark
+styles and applies to every document, including blank frames, without
+injecting page scripts. Engine source changes:
+
+- `components/script/dom/element/element.rs`: root color-scheme hint.
+- `components/script/dom/document/document.rs`: metadata scheme for layout
+  and root rematching when it changes.
+- `components/script/dom/html/document_metadata/htmlmetaelement.rs`:
+  pass the GC guard for that rematching.
+
+The separate development checkout is used for engine edits;
+`servo-checkout/servo` remains disposable pinned build input.
+Downstream review: [Servo PR #6](https://github.com/L-K-M/servo/pull/6).
+
+`PageContrastTest` uses a `currentColor` swatch and the actual canvas to
+measure inherited text without font antialiasing, with a separate paint
+marker. It covers default and authored-white pages, light/dark changes,
+reload, a new tab, author CSS, dark metadata and metadata changes after
+paint. A title from `matchMedia` checks that the dark preference survives.
+
+Before the fix, the authored-white regression failed with `text color
+e8e8e8` on API-30 x86_64 `emulator-5560`, SwiftShader, software emulation:
+`build/device-checks/page-contrast-red-2/`. The first attempt was obscured
+by Android's System UI ANR dialog; restarting System UI, as documented in
+[BUILDING.md](BUILDING.md), allowed the actual contrast failure to run.
+
+The initial candidate `b7687abc34c34ebb0684dd056de9f99a3e19bf36`
+passed default colors, theme changes, reload, new tabs and author styles,
+but failed the new live-metadata regression with stale `e8e8e8` text after
+a switch to Light (`build/device-checks/page-contrast-green/`, 3/4 passed).
+Restyling without rematching reused the previous root hint. Candidate
+`546db2b2db14104de3eb3d7c612a2100ad38f728` explicitly rematches the root
+and makes it the dirty root before layout.
+
+```sh
+scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5560 ch.lkmc.combray.PageContrastTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Build host: Linux, JDK 21, Rust 1.97.1, NDK 29.0.14206865, local Zig
+wrappers `build/tab-counter-host-cc` and `build/tab-counter-host-c++`.
+Host Rust tests (88), Kotlin tests, lint and device-test compilation pass.
+The final x86_64 native candidate built in 3m07s. Final pixel checks,
+both-ABI CI and review results are recorded in
+[PR #130](https://github.com/L-K-M/Combray/pull/130), which gates the pin.
+The Servo-wide `cargo +1.97.1 fmt --check` reports existing formatting
+drift across the imported tree; no unrelated engine files were reformatted.
+Existing engine limits remain: metadata accepts exact `light` or `dark`
+only, and a page opting into dark must paint its dark canvas explicitly.

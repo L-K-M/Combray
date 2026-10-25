@@ -188,6 +188,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages without a dark color scheme keep readable dark text on white when
+  Combray is dark; site CSS and metadata can still opt into dark colors.
 - New tab focuses Home's existing search field. Typing, local suggestions
   and shared search text stay in the page instead of opening another sheet.
 - The address editor has an explicit Close button. On Home it ends typing

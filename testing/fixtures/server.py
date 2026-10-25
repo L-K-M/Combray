@@ -30,6 +30,8 @@ Pages
   /popup.html                calls window.open on load, without a tap; the title turns
                              POPUP:still-here 3 s later
   /scheme.html               page in #2e6b4f, or #3b4f8a when it matches prefers-color-scheme: dark
+  /contrast.html             inherited text-color swatch, green paint marker and page canvas;
+                              ?mode=white|dark|meta|authored exercises site color declarations
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
@@ -495,6 +497,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, POPUP_PAGE)
         if path == "/scheme.html":
             return self.send(200, SCHEME_PAGE)
+        if path == "/contrast.html":
+            mode = query.get("mode", [""])[0]
+            colors = {
+                "white": "body{background:white;min-height:100vh}",
+                "dark": "html{color-scheme:dark;background:Canvas}",
+                "meta": "html{background:Canvas}",
+                "authored": "html{color:white;background:#3b4f8a}",
+            }.get(mode, "")
+            marker = {"dark": "#3b4f8a", "meta": "#b03a2e", "authored": "#8a5a2b"}.get(mode, "#2e6b4f")
+            metadata = "<meta name='color-scheme' content='dark'>" if mode == "meta" else ""
+            # currentColor makes inherited text measurable without font antialiasing.
+            return self.send(http.HTTPStatus.OK, page("CONTRAST:waiting",
+                "<p>Default text must contrast with the canvas.</p><div id='ink'></div><div id='paint'></div>"
+                "<script>const scheme=matchMedia('(prefers-color-scheme:dark)');"
+                "function report(){document.title='CONTRAST:'+(scheme.matches?'dark':'light')}"
+                "scheme.addEventListener('change',report);report();"
+                "const meta=document.querySelector('meta[name=color-scheme]');let step=0;"
+                "if(meta)document.getElementById('paint').onclick=function(){step++;"
+                "if(step==1)meta.content='light';else if(step==2)meta.content='dark';else meta.remove();"
+                "this.style.background=['','#2e6b4f','#3b4f8a','#8a5a2b'][Math.min(step,3)];};</script>",
+                metadata + "<style>body{margin:0}#ink,#paint{position:fixed;top:0;bottom:0}"
+                "#ink{left:0;width:40vw;background:currentColor}"
+                "#paint{left:40vw;width:20vw;background:" + marker + "}" + colors + "</style>"))
         if path == "/has-selector.html":
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
         if path == "/empty.html":
