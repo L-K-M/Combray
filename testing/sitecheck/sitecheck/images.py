@@ -179,8 +179,9 @@ def _load_rgb(path: Path) -> Image:
         with image_module.open(path) as opened:
             opened.load()
             image = opened
-    except (OSError, ValueError) as error:
-        # OSError covers a missing file and Pillow's UnidentifiedImageError.
+    except (OSError, ValueError, image_module.DecompressionBombError) as error:
+        # OSError covers a missing file and Pillow's UnidentifiedImageError; a
+        # DecompressionBombError, a declared size Pillow refuses to decode.
         raise ScreenshotError(f"cannot read {path.name}: {error}") from error
 
     if image.width == 0 or image.height == 0:

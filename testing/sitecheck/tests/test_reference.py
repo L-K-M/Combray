@@ -1,23 +1,27 @@
-"""Tests for sitecheck.reference that need no browser: the reference cache and helpers."""
+"""Tests for sitecheck.reference that need no browser: the reference cache and helpers,
+and how the comparison's image loading treats a screenshot it must not decode."""
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
+import errno
 import http.server
 import importlib.util
 import json
 import os
 import re
+import struct
 import tempfile
 import threading
 import unittest
+import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sitecheck import config, model, reference, servo
+from sitecheck import config, images, model, reference, servo
 from sitecheck.model import Engine, PageError, PageResult, PageStatus
 
 URL = "https://example.com/page"
@@ -149,6 +153,62 @@ class ReferenceCacheTest(unittest.TestCase):
 
     def test_prune_without_a_cache_directory(self) -> None:
         self.assertEqual(reference.prune_reference_cache(self.root / "missing"), 0)
+
+    def test_an_interrupted_overwrite_leaves_no_entry(self) -> None:
+        self.store()
+        newer_png = self.page_dir / "newer.png"
+        newer_png.write_bytes(b"\x89PNG newer screenshot")
+        newer = dataclasses.replace(
+            self.result(), metrics={"text": "newer", "textLength": 5}, screenshot=newer_png
+        )
+        replace_file = reference._replace_file
+
+        def fail_on_the_record(path: Path, write: Any) -> None:
+            if path.name == "reference.json":
+                raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+            replace_file(path, write)
+
+        with (
+            mock.patch.object(reference, "_replace_file", fail_on_the_record),
+            self.assertRaises(OSError),
+        ):
+            self.store(newer)
+
+        # The new screenshot is in place, so the old record must not vouch for it.
+        self.assertIsNone(self.load())
+        self.assertEqual(reference.prune_reference_cache(self.data, now=NOW), 1)
+
+
+def png_header_only(width: int, height: int) -> bytes:
+    """A PNG that declares `width` x `height` RGB pixels and holds none."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", b"") + chunk(b"IEND", b"")
+
+
+@unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is not installed")
+class ScreenshotLoadingTest(unittest.TestCase):
+    def test_a_decompression_bomb_only_skips_the_image_rules(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as directory:
+            readable = Path(directory) / "reference.png"
+            Image.new("RGB", (412, 915), "white").save(readable)
+            # Pillow refuses to decode anything over twice its MAX_IMAGE_PIXELS.
+            bomb = Path(directory) / "servo.png"
+            bomb.write_bytes(png_header_only(20000, 20000))
+
+            evidence = images.compare_screenshots(bomb, readable)
+
+        self.assertIsNone(evidence["servo"])
+        self.assertIsNotNone(evidence["reference"])
+        self.assertIsNone(evidence["similarity"])
+        (error,) = evidence["errors"]
+        self.assertTrue(error.startswith("servo: cannot read servo.png"), error)
 
 
 class _RecordingLauncher:

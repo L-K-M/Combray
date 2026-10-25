@@ -37,6 +37,13 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("usage: supervisor.py PROFILE COMMAND [ARGUMENT...]", file=sys.stderr)
         return _EXIT_CANNOT_START
+    if os.getpgrp() != os.getpid():
+        # _watch_parent ends by killing this process's group: without a group of its
+        # own, that would be the group of whoever started it. servo.py starts it in a
+        # new session; it must not create one itself, which would leave the group
+        # sitecheck kills.
+        print("sitecheck supervisor: must be started as a process group leader", file=sys.stderr)
+        return _EXIT_CANNOT_START
     profile, command = argv[0], argv[1:]
     try:
         child = subprocess.Popen(command, stdin=subprocess.DEVNULL)

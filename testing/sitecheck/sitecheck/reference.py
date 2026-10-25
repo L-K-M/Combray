@@ -418,8 +418,11 @@ def store_cached_reference(
         ),
         "result": result.to_json(),
     }
-    # The screenshot goes first: a record names a complete entry.
+    # Any earlier record goes first and the new one last: a record names a complete
+    # entry. In between the entry is a miss, which prune removes if it stays one.
     screenshot = result.screenshot.read_bytes()
+    with contextlib.suppress(FileNotFoundError):
+        (entry / _CACHE_RECORD_NAME).unlink()
     _replace_file(entry / SCREENSHOT_NAME, lambda handle: handle.write(screenshot))
     _replace_file(
         entry / _CACHE_RECORD_NAME,
