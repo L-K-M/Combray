@@ -148,6 +148,34 @@ class SchemaTests(StoreTestCase):
             self.store.record_result("no-such-run", A, 1, "ok", 0, [], {}, None, 1)
 
 
+class _CommitFails:
+    """A connection whose COMMIT fails while leaving the transaction open, as
+    SQLITE_BUSY would; it records the statements it was given."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+        self.in_transaction = False
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+        if statement.startswith("BEGIN"):
+            self.in_transaction = True
+        elif statement == "COMMIT":
+            raise sqlite3.OperationalError("database is locked")
+        elif statement == "ROLLBACK":
+            self.in_transaction = False
+
+
+class WriteTransactionTests(unittest.TestCase):
+    def test_a_failed_commit_rolls_back_and_keeps_its_error(self) -> None:
+        connection = _CommitFails()
+        with self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"):
+            with store_module._write_transaction(connection):  # type: ignore[arg-type]
+                pass
+        self.assertEqual(connection.statements, ["BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"])
+        self.assertFalse(connection.in_transaction)
+
+
 class PageTests(StoreTestCase):
     def test_upsert_counts_new_and_updated(self) -> None:
         first = self.store.upsert_pages([page(A), page(B)])
