@@ -393,13 +393,9 @@ def check_page(
         # The reference is loaded once, after Servo's first load, and reused by the
         # retries: they ask whether Servo repeats itself, not whether the site does.
         if number == 1 and engines.reference is not None:
-            blocked = _RefusalRecorder(refusal)
-            reference_outcome = _guarded_reference(
-                engines.reference, url, page_dir, out, blocked if refusal else None
+            reference_outcome, excluded = _load_reference(
+                engines.reference, url, page_dir, out, refusal
             )
-            _write_engine_files(page_dir, reference_outcome.result, _REFERENCE_FILES)
-            # A navigation the reference blocked, or a redirect it could only follow.
-            excluded = blocked.refused or _left_policy(reference_outcome.result, url, refusal)
             if excluded is not None:
                 verdict = compare.policy_excluded(
                     f"the reference ended up at a URL the policy excludes: {excluded}"
@@ -418,10 +414,15 @@ def check_page(
             and engines.reference is not None
         ):
             # The cached reference may be days old; judge against today's page.
-            reference_outcome = _guarded_reference(
+            reference_outcome, excluded = _load_reference(
                 engines.reference, url, page_dir, out, refusal, reference.CachePolicy.REFRESH
             )
-            _write_engine_files(page_dir, reference_outcome.result, _REFERENCE_FILES)
+            if excluded is not None:
+                verdict = compare.policy_excluded(
+                    f"the reference ended up at a URL the policy excludes: {excluded}"
+                )
+                attempts.append(Attempt(number, attempt_dir, servo_result, None, verdict))
+                break
             reference_result = reference_outcome.result
             images = _image_evidence(engines.compare_images, servo_result, reference_result)
             verdict = compare.verdict(servo_result, reference_result, images, scope=scope)
@@ -675,6 +676,22 @@ def _guarded(
         raise
     except Exception as error:
         return _harness_failure(engine, url, directory, error, out)
+
+
+def _load_reference(
+    source: ReferenceSource,
+    url: str,
+    page_dir: Path,
+    out: TextIO,
+    refusal: NavigationRefusal | None,
+    cache: reference.CachePolicy | None = None,
+) -> tuple[ReferenceOutcome, str | None]:
+    """Load the reference into `page_dir`, and say why it left the policy: a
+    navigation it blocked, or a redirect it could only follow. None when it stayed."""
+    blocked = _RefusalRecorder(refusal)
+    outcome = _guarded_reference(source, url, page_dir, out, blocked if refusal else None, cache)
+    _write_engine_files(page_dir, outcome.result, _REFERENCE_FILES)
+    return outcome, blocked.refused or _left_policy(outcome.result, url, refusal)
 
 
 def _guarded_reference(

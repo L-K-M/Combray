@@ -103,13 +103,16 @@ class FakeReference:
 
     A URL in `stale` comes from the cache with those metrics until a load asks for a
     fresh result (CachePolicy.REFRESH). A URL in `navigates_to` tries to navigate to
-    the URL given there, which the navigation refusal may block.
+    the URL given there, which the navigation refusal may block. A URL in
+    `redirects_when_fresh` ends up at the URL given there on a fresh (uncached) load,
+    like a server redirect the refusal could not block.
     """
 
     failing: frozenset[str] = frozenset()
     name: str = "fake-chromium 1.0"
     stale: dict[str, Mapping[str, Any]] = field(default_factory=dict)
     navigates_to: dict[str, str] = field(default_factory=dict)
+    redirects_when_fresh: dict[str, str] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     policies: list[CachePolicy | None] = field(default_factory=list)
     refusals: list[Callable[[str], str | None] | None] = field(default_factory=list)
@@ -137,6 +140,8 @@ class FakeReference:
         screenshot.write_bytes(FAKE_PNG)
         cached = url in self.stale and cache is not CachePolicy.REFRESH
         metrics = dict(self.stale[url]) if cached else good_metrics()
+        if not cached and url in self.redirects_when_fresh:
+            metrics["url"] = self.redirects_when_fresh[url]
         result = PageResult(
             Engine.CHROMIUM, url, PageStatus.OK, 1100, metrics=metrics, screenshot=screenshot
         )

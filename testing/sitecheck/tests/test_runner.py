@@ -346,6 +346,24 @@ class RunSafetyTest(RunnerTestCase):
         record = summary.pages[0]["reference"]
         self.assertFalse(record["cached"])
 
+    def test_a_fresh_reference_that_left_the_policy_discards_the_page(self) -> None:
+        # A stale cached reference fails the comparison; today's page redirects to a
+        # URL the policy refuses. The fresh load must exclude the page, as a first
+        # load would, instead of being judged.
+        yesterday = " ".join(f"stale{chr(97 + i % 26)}{chr(97 + i // 26)}" for i in range(60))
+        self.reference.stale[URL] = {
+            **fakes.good_metrics(),
+            "text": yesterday,
+            "textLength": len(yesterday),
+        }
+        self.reference.redirects_when_fresh[URL] = "https://news.example-site.org/logout"
+
+        summary = self.run_pages(URL, navigation=_Refusing("logout"))
+
+        self.assertEqual(summary.verdicts, {"excluded": 1})
+        self.assertEqual(self.reference.policies, [None, reference.CachePolicy.REFRESH])
+        self.assertEqual(self.store.issues(), [])
+
     def test_symptom_signatures_are_scoped_to_the_site(self) -> None:
         scope = runner.SiteScope(b"k" * 16)
         self.servo.default = fakes.HANG_LOAD
