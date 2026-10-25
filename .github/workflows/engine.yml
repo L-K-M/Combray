@@ -35,6 +35,8 @@ on:
       - scripts/summarize-instrumentation.py
       - scripts/verify-apk.py
       - testing/**
+      # The desktop site-check harness never reaches the Android build or devices.
+      - "!testing/sitecheck/**"
       - app/src/androidTest/**
       - app/build.gradle.kts
       - build.gradle.kts
