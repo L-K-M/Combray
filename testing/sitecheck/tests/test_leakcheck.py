@@ -84,6 +84,30 @@ class InventoryTest(unittest.TestCase):
         self.assertTrue(inventory.empty, inventory)
 
 
+class AttributionTest(unittest.TestCase):
+    def test_the_required_attribution_lines_are_not_leaks(self) -> None:
+        # Every commit and PR the tooling writes ends with these lines; a history that
+        # visited the same sites must not block every push.
+        inventory = leakcheck.inventory(
+            ["www.anthropic.com", "claude.com", "visited.example-site.net"],
+            ["anthropic.com", "claude.com", "visited.example-site.net"],
+            ["https://claude.com/claude-code", "https://www.anthropic.com/news"],
+        )
+        text = (
+            "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"
+            "Generated with [Claude Code](https://claude.com/claude-code)\n"
+        )
+        self.assertEqual(leakcheck.scan_text("t", text, inventory), [])
+        # Only the attribution hosts are allowed; another visited host still counts.
+        self.assertEqual(
+            [
+                leak.term
+                for leak in leakcheck.scan_text("t", "see visited.example-site.net", inventory)
+            ],
+            ["visited.example-site.net"],
+        )
+
+
 class UrlSpellingTest(unittest.TestCase):
     """A stored URL is also found when written without its query or shortened."""
 

@@ -101,13 +101,17 @@ PUBLIC_REFERENCES = frozenset(
         "docs.rs",
         "crates.io",
         "github.com/servo",
-        "github.com/l-k-m/combray",
-        "github.com/l-k-m/servo",
+        # The owner's organization, home of both repositories the nightly task works in.
+        "github.com/l-k-m",
         "github.com/whatwg",
         "github.com/w3c",
         "github.com/web-platform-tests",
         "github.com/tc39",
         "github.com/rust-lang",
+        # The attribution lines the tooling ends every commit and PR with
+        # (noreply@anthropic.com, claude.com/claude-code).
+        "anthropic.com",
+        "claude.com",
     }
 )
 
