@@ -1,0 +1,9 @@
+<!doctype html>
+<!-- Live-check fixture: an alert() nobody answers must not block the probe. -->
+<html>
+<head><meta charset="utf-8"><title>Sitecheck dialog fixture</title></head>
+<body>
+<p>Before the dialog.</p>
+<script>alert("sitecheck-dialog"); document.body.insertAdjacentHTML("beforeend", "<p>After the dialog.</p>");</script>
+</body>
+</html>

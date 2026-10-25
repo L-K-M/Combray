@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Live-check fixture: a short page whose word list is dominated by a <select>.
+     Chromium's innerText lists the options, Servo's does not; the probe's text must
+     leave them out in both engines. -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sitecheck select fixture</title>
+</head>
+<body>
+<h1>Choose a country</h1>
+<p>Visible paragraph text stays.</p>
+<form>
+<select name="country">
+<option>Optionalpha</option><option>Optionbravo</option><option>Optioncharlie</option>
+<option>Optiondelta</option><option>Optionecho</option><option>Optionfoxtrot</option>
+</select>
+<datalist id="suggestions"><option value="Datalistword">Datalistword</option></datalist>
+<textarea>Textareaword</textarea>
+</form>
+<div style="display: none"><span>Hiddenword</span><select><option>Hiddenoption</option></select></div>
+<p>Closing words after the form.</p>
+</body>
+</html>
