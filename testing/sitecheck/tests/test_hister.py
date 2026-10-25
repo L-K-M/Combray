@@ -130,6 +130,22 @@ def paged(pages: dict[str | None, list[dict[str, Any]] | None]) -> Callable[[Rec
     return respond
 
 
+def paged_by_key(pages: list[list[dict[str, Any]]]) -> Callable[[Recorded], Response]:
+    """Serve ``pages`` the way current Hister does: each response carries an opaque
+    ``page_key`` (the last hit's sort values) that the next request sends as ``last``.
+    A ``last`` the server cannot parse is ignored, so the first page comes again."""
+    keys = [json.dumps([str(1_760_100_000 - index), f"doc-{index}"]) for index in range(len(pages))]
+
+    def respond(request: Recorded) -> Response:
+        cursor = request.query.get("last", [None])[0]
+        index = keys.index(cursor) + 1 if cursor in keys else 0
+        if index >= len(pages):
+            return json_response({"documents": None})
+        return json_response({"documents": pages[index], "page_key": keys[index]})
+
+    return respond
+
+
 class HisterTestCase(unittest.TestCase):
     def serve(
         self, responder: Callable[[Recorded], Response], hold_open: float = 0.0
@@ -199,6 +215,42 @@ class PagingTests(HisterTestCase):
             doc,
             HisterDoc(url="https://site0.example.org/a/0", updated=1_760_100_000, add_count=1),
         )
+
+    def test_follows_the_page_key_of_current_servers(self) -> None:
+        # Two full pages, then an empty one: each request sends the key of the page
+        # before it, so following one key is not enough to pass.
+        server = self.serve(paged_by_key([make_docs("p1", PAGE_SIZE), make_docs("p2", PAGE_SIZE)]))
+        stats = HisterStats()
+
+        docs = list(self.client(server).iter_documents(stats=stats))
+
+        self.assertEqual(len(docs), 2 * PAGE_SIZE)
+        self.assertEqual(stats.stop_reason, StopReason.END)
+        first, second, third = server.requests
+        self.assertNotIn("last", first.query)
+        # The cursor is the server's opaque page key, not a document URL.
+        self.assertEqual(json.loads(second.query["last"][0])[1], "doc-0")
+        self.assertEqual(json.loads(third.query["last"][0])[1], "doc-1")
+
+    def test_a_repeated_page_key_stops_paging(self) -> None:
+        key = json.dumps(["1760100000", "doc-0"])
+        server = self.serve(
+            lambda request: json_response({"documents": make_docs("a", PAGE_SIZE), "page_key": key})
+        )
+        stats = HisterStats()
+
+        docs = list(self.client(server).iter_documents(stats=stats))
+
+        self.assertEqual(len(docs), 2 * PAGE_SIZE)
+        self.assertEqual(stats.stop_reason, StopReason.CURSOR_REPEAT)
+        self.assertEqual(len(server.requests), 2)
+
+    def test_a_non_string_page_key_is_an_error(self) -> None:
+        server = self.serve(
+            lambda request: json_response({"documents": make_docs("a", 1), "page_key": 42})
+        )
+        with self.assertRaisesRegex(HisterError, "page_key"):
+            list(self.client(server).iter_documents())
 
     def test_stops_on_empty_page(self) -> None:
         first = make_docs("a", PAGE_SIZE)

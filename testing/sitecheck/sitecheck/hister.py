@@ -1,7 +1,9 @@
 """Read the owner's browsing history from a Hister server.
 
 Only ``GET {base}/api/history`` is used. It returns the latest indexed documents,
-newest first, ``PAGE_SIZE`` per page, and pages with a ``last=<url>`` cursor. The
+newest first, ``PAGE_SIZE`` per page. Each response carries an opaque ``page_key``
+(the last hit's sort values) that the next request sends as ``last``; when a response
+has no ``page_key``, the client pages by the last document's URL instead. The
 client keeps only what selection needs (URL, update time, visit count): titles,
 page text and HTML in the response are dropped and never stored.
 
@@ -183,7 +185,7 @@ class HisterClient:
                 )
                 return
 
-            raw_docs = self._fetch_page(cursor, date_from)
+            raw_docs, page_key = self._fetch_page(cursor, date_from)
             stats.pages += 1
             for raw in raw_docs:
                 doc = _parse_document(raw)
@@ -197,10 +199,12 @@ class HisterClient:
                 stats.stop_reason = StopReason.END
                 return
 
-            next_cursor = _cursor_of(raw_docs[-1])
+            # A server that cannot parse the cursor ignores it and sends the first page
+            # again, which the repeat check below catches.
+            next_cursor = page_key if page_key else _cursor_of(raw_docs[-1])
             if next_cursor in seen_cursors:
                 stats.stop_reason = StopReason.CURSOR_REPEAT
-                # The cursor is a history URL, so it stays out of the log.
+                # The cursor can be a history URL, so it stays out of the log.
                 _log.warning(
                     "Hister repeated a paging cursor after %d pages; stopped to avoid a loop",
                     stats.pages,
@@ -209,7 +213,11 @@ class HisterClient:
             seen_cursors.add(next_cursor)
             cursor = next_cursor
 
-    def _fetch_page(self, cursor: str | None, date_from: int | None) -> list[Any]:
+    def _fetch_page(
+        self, cursor: str | None, date_from: int | None
+    ) -> tuple[list[Any], str | None]:
+        """One page of raw documents, and the server's cursor for the next page (None
+        when it sends none)."""
         params: dict[str, str] = {}
         if cursor is not None:
             params["last"] = cursor
@@ -222,13 +230,16 @@ class HisterClient:
         payload = self._get_json(url)
         if not isinstance(payload, dict):
             raise HisterError("Hister history response is not a JSON object")
+        page_key = payload.get("page_key")
+        if page_key is not None and not isinstance(page_key, str):
+            raise HisterError("Hister history response has a non-string 'page_key' field")
         documents = payload.get("documents")
         # Go encodes an empty slice as null.
         if documents is None:
-            return []
+            return [], page_key or None
         if not isinstance(documents, list):
             raise HisterError("Hister history response has a non-list 'documents' field")
-        return documents
+        return documents, page_key or None
 
     def _get_json(self, url: str) -> Any:
         try:
