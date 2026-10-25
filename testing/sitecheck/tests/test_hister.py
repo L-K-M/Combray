@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import email.message
+import io
 import json
 import socket
 import threading
 import time
 import unittest
 import urllib.parse
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,7 +55,7 @@ class FakeServer:
                 parts = urllib.parse.urlsplit(self.path)
                 recorded = Recorded(
                     path=parts.path,
-                    query=urllib.parse.parse_qs(parts.query),
+                    query=urllib.parse.parse_qs(parts.query, keep_blank_values=True),
                     headers={name.lower(): value for name, value in self.headers.items()},
                 )
                 server.requests.append(recorded)
@@ -139,10 +142,12 @@ class HisterTestCase(unittest.TestCase):
         return HisterClient(server.base_url, TOKEN, timeout=timeout)
 
     def assert_token_absent(self, error: BaseException) -> None:
+        # Case-insensitive: a server can echo the token in a host name, which is
+        # lowercased or uppercased on the way.
         current: BaseException | None = error
         while current is not None:
-            self.assertNotIn(TOKEN, str(current))
-            self.assertNotIn(TOKEN, repr(current))
+            self.assertNotIn(TOKEN.lower(), str(current).lower())
+            self.assertNotIn(TOKEN.lower(), repr(current).lower())
             current = current.__cause__ or current.__context__
 
     def fetch_error(self, client: HisterClient) -> HisterError:
@@ -266,6 +271,13 @@ class PagingTests(HisterTestCase):
         self.assertEqual(len(server.requests), 2)
         for request in server.requests:
             self.assertEqual(request.query["date_from"], ["1760000000"])
+
+    def test_token_is_sent_without_surrounding_whitespace(self) -> None:
+        server = self.serve(paged({None: []}))
+
+        list(HisterClient(server.base_url, f" \t{TOKEN} ").iter_documents())
+
+        self.assertEqual(server.requests[0].headers["x-access-token"], TOKEN)
 
     def test_base_path_prefix_is_kept(self) -> None:
         server = self.serve(paged({None: []}))
@@ -443,6 +455,24 @@ class ErrorTests(HisterTestCase):
 
                 self.fetch_error(self.client(server))
 
+    def test_redirect_to_an_explicit_port_zero_is_another_origin(self) -> None:
+        # Port 0 is not the scheme's default port. Checked on the handler directly:
+        # the fake server cannot listen on port 80, and nothing is sent.
+        request = urllib.request.Request("http://hister.example.org/api/history")
+        request.add_header("X-access-token", TOKEN)
+        handler = hister._SameOriginRedirectHandler()
+
+        with self.assertRaisesRegex(HisterError, "another origin") as caught:
+            handler.redirect_request(
+                request,
+                io.BytesIO(),
+                302,
+                "Found",
+                email.message.Message(),
+                "http://hister.example.org:0/api/history",
+            )
+        self.assert_token_absent(caught.exception)
+
     def test_malformed_redirect_is_an_error(self) -> None:
         for status in (301, 302, 303, 307, 308):
             with self.subTest(status=status):
@@ -543,6 +573,22 @@ class ConfigTests(unittest.TestCase):
                 with self.assertRaises(HisterConfigError) as caught:
                     HisterClient("https://hister.example.org", token)
                 self.assertNotIn(TOKEN, str(caught.exception))
+
+    def test_tokens_that_are_not_printable_ascii_are_rejected_without_echoing_them(self) -> None:
+        # http.client sends header values as Latin-1: anything else would fail later
+        # with an error that holds the token.
+        for token in (
+            f"{TOKEN}\u20ac",
+            f"\u201c{TOKEN}\u201d",
+            f"{TOKEN}\x1fx",
+            f"{TOKEN}\x7f",
+            f"{TOKEN}\tx",
+        ):
+            with self.subTest(repr(token)):
+                with self.assertRaisesRegex(HisterConfigError, "printable ASCII") as caught:
+                    HisterClient("https://hister.example.org", token)
+                self.assertNotIn(TOKEN, str(caught.exception))
+                self.assertNotIn(TOKEN, repr(caught.exception))
 
     def test_incremental_date_from_overlaps_by_a_day(self) -> None:
         self.assertIsNone(incremental_date_from(None))
