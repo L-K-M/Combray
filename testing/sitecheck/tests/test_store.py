@@ -169,9 +169,11 @@ class _CommitFails:
 class WriteTransactionTests(unittest.TestCase):
     def test_a_failed_commit_rolls_back_and_keeps_its_error(self) -> None:
         connection = _CommitFails()
-        with self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"):
-            with store_module._write_transaction(connection):  # type: ignore[arg-type]
-                pass
+        with (
+            self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"),
+            store_module._write_transaction(connection),  # type: ignore[arg-type]
+        ):
+            pass
         self.assertEqual(connection.statements, ["BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"])
         self.assertFalse(connection.in_transaction)
 
