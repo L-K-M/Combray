@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import errno
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from typing import IO
 from unittest import mock
 
 from sitecheck import model, servo
@@ -383,6 +385,16 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(classified.status, PageStatus.OK)
         self.assertIn("screenshot", classified.detail)
 
+    def test_the_wall_clock_while_ending_the_session_of_a_finished_page_is_no_hang(
+        self,
+    ) -> None:
+        # Everything was captured; the watchdog fired before close() cancelled it.
+        capture = servo._Capture(stage=servo._Stage.DONE, metrics={"text": "page"})
+        classified = self.classify(capture, servo._StopReason.WALL_CLOCK)
+        self.assertEqual(classified.status, PageStatus.OK)
+        self.assertIsNone(classified.hang_cause)
+        self.assertIn("ending the session", classified.detail)
+
     def test_a_probe_of_about_blank_is_not_the_page(self) -> None:
         capture = servo._Capture(
             stage=servo._Stage.DONE, metrics={"url": "about:blank", "text": "", "textLength": 0}
@@ -418,11 +430,30 @@ class ClassifyTests(unittest.TestCase):
 
 class ProcessGroupTests(unittest.TestCase):
     def test_killing_an_already_exited_group_logs_no_warning(self) -> None:
-        # The group's only member is a zombie: macOS answers killpg with EPERM.
+        # The sleep lets `true` exit first. _kill_group's poll() then reaps the leader,
+        # so killpg answers ESRCH (the group is gone) and nothing is logged.
         process = subprocess.Popen(["true"], start_new_session=True)
         time.sleep(0.3)
         with self.assertNoLogs(servo._LOGGER, level=logging.WARNING):
             servo._kill_group(process, 0.1)
+
+    @unittest.skipUnless(
+        sys.platform == "darwin", "only macOS answers killpg with EPERM for a zombie group"
+    )
+    def test_signalling_a_group_of_only_an_unreaped_zombie_logs_no_warning(self) -> None:
+        process = subprocess.Popen(["true"], start_new_session=True)
+        self.addCleanup(process.wait)
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                os.killpg(process.pid, 0)
+            except PermissionError:
+                break  # Exited but not yet reaped: a zombie group.
+            self.assertLess(time.monotonic(), deadline, "the child never became a zombie")
+            time.sleep(0.01)
+        with self.assertNoLogs(servo._LOGGER, level=logging.WARNING):
+            servo._signal_group(process, signal.SIGKILL)
+        self.assertIsNotNone(process.returncode)
 
     def test_exposure_check_tells_loopback_from_all_interfaces(self) -> None:
         for host, exposed in (("127.0.0.1", False), ("0.0.0.0", True)):
@@ -434,6 +465,96 @@ class ProcessGroupTests(unittest.TestCase):
                     self.skipTest("this machine has no network address")
                 found = servo.webdriver_exposure(listener.getsockname()[1])
                 self.assertEqual(found is not None, exposed)
+
+
+class SupervisorTests(unittest.TestCase):
+    def test_refuses_to_run_outside_a_group_of_its_own(self) -> None:
+        # The supervisor ends by killing its whole process group, so as an ordinary
+        # child it would kill its parent's group. Here the parent leads a new group,
+        # which is all a supervisor without the check could kill.
+        with tempfile.TemporaryDirectory() as directory:
+            supervisor = [
+                sys.executable,
+                "-I",
+                "-S",
+                str(servo._SUPERVISOR_PATH),
+                directory,
+                "true",
+            ]
+            # The supervisor's stdin is at end of file at once: "sitecheck is gone".
+            parent = (
+                "import subprocess, sys; "
+                f"sys.exit(subprocess.run({supervisor!r}, stdin=subprocess.DEVNULL).returncode)"
+            )
+            completed = subprocess.run(
+                [sys.executable, "-I", "-c", parent],
+                start_new_session=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+        self.assertEqual(completed.returncode, 127, completed.stderr)
+        self.assertIn("must be started as a process group leader", completed.stderr)
+
+
+class _FailingFlushFile:
+    """servo.log's file, failing one flush with ENOSPC after `flushes` successful ones,
+    like a disk that filled up for a moment."""
+
+    def __init__(self, file: IO[bytes], flushes: int) -> None:
+        self._file = file
+        self._flushes_left = flushes
+
+    @property
+    def closed(self) -> bool:
+        return self._file.closed
+
+    def write(self, data: bytes) -> int:
+        return self._file.write(data)
+
+    def flush(self) -> None:
+        self._flushes_left -= 1
+        if self._flushes_left == -1:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        self._file.flush()
+
+    def close(self) -> None:
+        self._file.close()
+
+
+def log_writer_failing_after(flushes: int) -> type[servo._LogWriter]:
+    class FailingLogWriter(servo._LogWriter):
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            self._file = _FailingFlushFile(self._file, flushes)  # type: ignore[assignment]
+
+    return FailingLogWriter
+
+
+class LogCaptureTests(unittest.TestCase):
+    def test_a_failed_log_write_keeps_draining_the_output_and_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "servo.log"
+            writer = log_writer_failing_after(3)(log_path)
+            # More output than a pipe holds: a reader that stopped would leave the child
+            # blocked, and a closed pipe would kill it.
+            child = subprocess.Popen(
+                [sys.executable, "-I", "-c", "for n in range(20000): print('line', n)"],
+                stdout=subprocess.PIPE,
+            )
+            self.addCleanup(child.wait)
+            self.addCleanup(child.kill)
+            assert child.stdout is not None
+
+            servo._pump(child.stdout, writer, b"")
+            writer.close()
+
+            self.assertEqual(child.wait(timeout=10), 0)
+            self.assertIsInstance(writer.error, OSError)
+            self.assertEqual(writer.error.errno, errno.ENOSPC)
+            # Lines after the failure are read and discarded, not written.
+            self.assertNotIn("line 19999", log_path.read_text())
 
 
 class PageScriptTests(unittest.TestCase):
@@ -499,6 +620,14 @@ class FakeServoshellTestCase(unittest.TestCase):
             key, _, value = line.removeprefix("stdout| FAKE ").partition("=")
             facts.setdefault(key, []).append(value)
         return facts
+
+    def wait_for_fact(self, key: str) -> None:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if (self.out_dir / "servo.log").exists() and key in self.fake_facts():
+                return
+            time.sleep(0.05)
+        self.fail(f"the fake never reported {key}")
 
     def assert_cleaned_up(self, facts: dict[str, list[str]]) -> None:
         self.assertEqual(servo._live_groups, set())
@@ -762,7 +891,8 @@ class RunPageTests(FakeServoshellTestCase):
         self.assertIn("wall clock of 1.5 s exceeded during navigate", result.detail)
         self.assertIsNone(result.crash)
         self.assertEqual(len(facts["child_pid"]), 1)  # assert_cleaned_up checked it is gone.
-        self.assertLess(elapsed, 1.5 + 0.5 + 4)  # Wall clock + SIGTERM grace + slack.
+        # Wall clock + SIGTERM grace + slack.
+        self.assertLess(elapsed, timing.wall_clock + timing.kill_grace + 4)
 
     def test_script_timeout_is_a_hang(self) -> None:
         result, _ = self.run_fake("script-timeout")
@@ -824,13 +954,31 @@ class RunPageTests(FakeServoshellTestCase):
         with self.assertRaises(RuntimeError):
             self.run_fake("normal")
 
-    def wait_for_fact(self, key: str) -> None:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if (self.out_dir / "servo.log").exists() and key in self.fake_facts():
-                return
-            time.sleep(0.05)
-        self.fail(f"the fake never reported {key}")
+    def test_a_log_that_could_not_be_written_fails_the_page(self) -> None:
+        # A verdict from an incomplete log could miss a panic.
+        with (
+            mock.patch.object(servo, "_LogWriter", log_writer_failing_after(3)),
+            self.assertRaises(OSError) as raised,
+        ):
+            self.run_fake("normal")
+
+        self.assertIn("servo.log could not be written", str(raised.exception))
+        self.assert_cleaned_up(self.fake_facts())
+
+
+class ExposureCheckTests(FakeServoshellTestCase):
+    def test_a_servoshell_that_never_gets_ready_reports_the_end_of_its_log(self) -> None:
+        # The log lives in the temporary profile, which is gone when the error arrives.
+        for mode, last_words in (
+            ("usage-error", "error: unexpected argument"),
+            ("startup-panic", "Address already in use"),
+        ):
+            with self.subTest(mode=mode):
+                with self.assertRaises(RuntimeError) as raised:
+                    servo.check_webdriver_exposure(self.fake_binary(mode), USER_AGENT)
+                self.assertIn("before WebDriver was ready", str(raised.exception))
+                self.assertIn(last_words, str(raised.exception))
+        self.assertEqual(servo._live_groups, set())
 
 
 class HarnessDeathTests(FakeServoshellTestCase):
@@ -870,14 +1018,6 @@ class HarnessDeathTests(FakeServoshellTestCase):
         for pid in facts.get("pid", []) + facts.get("child_pid", []):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(int(pid), signal.SIGKILL)
-
-    def wait_for_fact(self, key: str) -> None:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if (self.out_dir / "servo.log").exists() and key in self.fake_facts():
-                return
-            time.sleep(0.05)
-        self.fail(f"the fake never reported {key}")
 
 
 class ArgumentValidationTests(unittest.TestCase):

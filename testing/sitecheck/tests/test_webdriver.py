@@ -71,11 +71,14 @@ class _Handler(BaseHTTPRequestHandler):
         if reply.drop_connection:
             self.close_connection = True
             return
-        self.send_response(reply.status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(reply.body)))
-        self.end_headers()
-        self.wfile.write(reply.body)
+        try:
+            self.send_response(reply.status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply.body)))
+            self.end_headers()
+            self.wfile.write(reply.body)
+        except ConnectionError:
+            pass  # The client gave up (it timed out, say); nobody is left to answer.
 
     do_GET = do_POST = do_DELETE = _handle
 

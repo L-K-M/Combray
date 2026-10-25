@@ -142,6 +142,8 @@ _STDOUT_PREFIX_TEXT = _STDOUT_PREFIX.decode("ascii")
 _LINE_TRUNCATED_SUFFIX = b" [line truncated by sitecheck]\n"
 _LOG_TRUNCATED_LINE = b"[sitecheck] log truncated: size cap reached\n"
 _MAX_ERRORS = 200
+# How much of servo.log an error message quotes when the log itself goes away.
+_LOG_TAIL_LINES = 10
 
 # Servo replaces a page it could not load, or whose script thread crashed, with a
 # built-in page (components/default-resources/resources/*.html). location.href keeps
@@ -206,8 +208,9 @@ def run_page(
     Writes ``servo.log`` (always) and ``servo.png`` (when a screenshot was taken)
     into ``out_dir``. The process group and the temporary profile are gone when
     this returns, whatever the outcome. Raises ``ValueError`` or
-    ``FileNotFoundError`` for invalid arguments, and ``RuntimeError`` after
-    ``terminate_all()``.
+    ``FileNotFoundError`` for invalid arguments, ``RuntimeError`` after
+    ``terminate_all()``, and ``OSError`` when ``servo.log`` could not be written
+    in full.
     """
     _validate_page_url(url)
     _validate_binary(binary)
@@ -242,8 +245,13 @@ def run_page(
             _drive(process, client, url, port, screenshot_path, timing, capture)
             _end_session(client, process, capture)
         exit_info = process.exit_info()
+        log_error = process.log_error
     finally:
         _remove_profile(profile_root)
+
+    if log_error is not None:
+        # A verdict from an incomplete log could miss a panic or the page's errors.
+        raise OSError(f"servo.log could not be written: {log_error}") from log_error
 
     log = parse_log(read_log(log_path))
     classified = _classify(capture, exit_info, log, timing)
@@ -285,7 +293,8 @@ def check_webdriver_exposure(binary: Path, user_agent: str) -> str | None:
 
     For `sitecheck doctor`: the network address:port (see `webdriver_exposure`), or
     None when it answers on loopback only. Raises RuntimeError when servoshell does
-    not become ready, FileNotFoundError when the binary is missing.
+    not become ready, with the end of its log (no page is loaded, so it holds no
+    page data), and FileNotFoundError when the binary is missing.
     """
     _validate_binary(binary)
     timing = DEFAULT_TIMING
@@ -309,9 +318,12 @@ def check_webdriver_exposure(binary: Path, user_agent: str) -> str | None:
         ) as process:
             client = WebDriverClient(f"http://{_WEBDRIVER_HOST}:{port}")
             not_ready = _wait_until_ready(process, client, timing.ready_timeout)
-            if not_ready is not None:
-                raise RuntimeError(not_ready)
-            return webdriver_exposure(port)
+            if not_ready is None:
+                return webdriver_exposure(port)
+        # close() has joined the output readers, so the log is complete; it goes with
+        # the profile, so its end (a rejected flag, a panic) travels in the error.
+        tail = _log_tail(log_path)
+        raise RuntimeError(_join(not_ready, f"servo.log ends with: {tail}" if tail else None))
     finally:
         _remove_profile(profile_root)
 
@@ -529,6 +541,17 @@ def _clip(message: str) -> str:
     return message[:MAX_ERROR_MESSAGE_CHARS]
 
 
+def _log_tail(path: Path) -> str:
+    """The last non-empty lines of a servo.log joined by " | ", for an error message;
+    empty when there are none or the log cannot be read."""
+    try:
+        text = read_log(path)
+    except OSError:
+        return ""
+    lines = [line for line in text.split("\n") if line.strip()]
+    return " | ".join(lines[-_LOG_TAIL_LINES:])
+
+
 # --- driving one page ---------------------------------------------------------------
 
 
@@ -544,6 +567,7 @@ class _Stage(enum.Enum):
 
 
 _STAGES_BEFORE_PAGE = frozenset({_Stage.STARTUP, _Stage.SESSION})
+_STAGES_AFTER_PROBE = frozenset({_Stage.SCREENSHOT, _Stage.DONE})
 
 
 class _FailureKind(enum.Enum):
@@ -870,9 +894,13 @@ def _classify(
             detail = _join(detail, failure.detail)
         return _Classification(PageStatus.ERROR, detail=_join(detail, notes))
 
-    if wall_clock and capture.stage is _Stage.SCREENSHOT and capture.metrics is not None:
-        # The probe answered; only the screenshot waited for a render that never came.
-        note = f"screenshot: wall clock of {timing.wall_clock:g} s reached"
+    if wall_clock and capture.metrics is not None and capture.stage in _STAGES_AFTER_PROBE:
+        # The probe answered, so the page is not hung: only the screenshot waited for a
+        # render that never came, or the watchdog fired while the session was ending.
+        if capture.stage is _Stage.SCREENSHOT:
+            note = f"screenshot: wall clock of {timing.wall_clock:g} s reached"
+        else:
+            note = f"wall clock of {timing.wall_clock:g} s reached while ending the session"
         return _page_outcome(capture, _join(note, notes))
     if wall_clock:
         detail = f"wall clock of {timing.wall_clock:g} s exceeded during {stage}"
@@ -1045,6 +1073,11 @@ class _ServoProcess:
     def stop_requested(self) -> bool:
         return self._stopped.is_set()
 
+    @property
+    def log_error(self) -> OSError | None:
+        """The error that kept servo.log from being written in full, or None."""
+        return self._log.error if self._log is not None else None
+
     def has_exited(self) -> bool:
         assert self._proc is not None
         if self._proc.poll() is None:
@@ -1190,31 +1223,54 @@ def _describe_returncode(returncode: int | None) -> str:
 
 
 class _LogWriter:
-    """Writes whole lines from servoshell's stdout and stderr into one capped file."""
+    """Writes whole lines from servoshell's stdout and stderr into one capped file.
+
+    A write that fails (a full disk) does not stop the readers: they go on reading
+    and discarding servoshell's output, so it neither blocks on a full pipe nor dies
+    of a closed one. The first error is kept in ``error`` for the caller to report,
+    since the log then misses lines.
+    """
 
     def __init__(self, path: Path) -> None:
         self._file = path.open("wb")
         self._lock = threading.Lock()
         self._size = 0
         self._full = False
+        self._error: OSError | None = None
+
+    @property
+    def error(self) -> OSError | None:
+        """The first write error, after which the log took no more lines; or None."""
+        return self._error
 
     def write_line(self, prefix: bytes, line: bytes) -> None:
         with self._lock:
             if self._full or self._file.closed:
                 return
             entry = prefix + line
-            if self._size + len(entry) > _MAX_LOG_BYTES:
+            try:
+                if self._size + len(entry) > _MAX_LOG_BYTES:
+                    self._full = True
+                    self._file.write(_LOG_TRUNCATED_LINE)
+                    return
+                self._file.write(entry)
+                # Flushed per line so a stuck page's log can be followed while it runs.
+                self._file.flush()
+            except OSError as error:
+                self._error = error  # The first one: being full, the log takes no more.
                 self._full = True
-                self._file.write(_LOG_TRUNCATED_LINE)
                 return
-            self._file.write(entry)
-            # Flushed per line so a stuck page's log can be followed while it runs.
-            self._file.flush()
             self._size += len(entry)
 
     def close(self) -> None:
         with self._lock:
-            self._file.close()
+            if self._error is None:
+                self._file.close()
+                return
+            # Closing flushes what the failed write left buffered, which may fail
+            # again; the error is reported already.
+            with contextlib.suppress(OSError):
+                self._file.close()
 
 
 def _pump(stream: IO[bytes], log: _LogWriter, prefix: bytes) -> None:

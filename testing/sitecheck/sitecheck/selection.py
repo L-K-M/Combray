@@ -258,6 +258,8 @@ def _validated(pages: Iterable[Page]) -> list[Page]:
             raise ValueError("the same page appears twice in the selection input")
         if page.last_checked is not None and page.last_checked.tzinfo is None:
             raise ValueError("last_checked must be timezone-aware")
+        if page.last_attempted is not None and page.last_attempted.tzinfo is None:
+            raise ValueError("last_attempted must be timezone-aware")
         if page.last_verdict is not None:
             VerdictKind(page.last_verdict)  # Raises ValueError for an unknown verdict.
         by_url[page.url] = page

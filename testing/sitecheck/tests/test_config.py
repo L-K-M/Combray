@@ -13,6 +13,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sitecheck import config
 from sitecheck.config import ConfigError, HisterSettings, RunLockedError
@@ -116,6 +117,50 @@ class PathTest(unittest.TestCase):
         )
         self.assertEqual(config.deny_list_path(Path("/c")), Path("/c/deny.txt"))
         self.assertEqual(config.private_seeds_path(Path("/c")), Path("/c/seeds.txt"))
+
+
+class PrivateFileTest(TempDirTest):
+    def test_content_reaches_the_disk_before_it_replaces_the_old_file(self) -> None:
+        # Otherwise a crash can leave an empty file under the final name.
+        path = self.write("report.md", "old")
+        calls: list[str] = []
+        fsync, replace = os.fsync, os.replace
+
+        def recording_fsync(descriptor: int) -> None:
+            calls.append("fsync")
+            fsync(descriptor)
+
+        def recording_replace(source: str, target: Path) -> None:
+            calls.append("replace")
+            replace(source, target)
+
+        with (
+            mock.patch.object(config.os, "fsync", recording_fsync),
+            mock.patch.object(config.os, "replace", recording_replace),
+        ):
+            config.write_private_file(path, b"new")
+
+        self.assertEqual(calls, ["fsync", "replace"])
+        self.assertEqual(path.read_bytes(), b"new")
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_signature_key_is_created_once_and_kept(self) -> None:
+        key = config.signature_key(self.root)
+
+        self.assertEqual(len(key), 32)
+        self.assertEqual(config.signature_key(self.root), key)
+        path = self.root / config.SIGNATURE_KEY_NAME
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_a_damaged_signature_key_is_an_error_not_replaced(self) -> None:
+        # A new key would rename every site-scoped issue signature without a word.
+        path = self.root / config.SIGNATURE_KEY_NAME
+        for content in (b"", b"short"):
+            with self.subTest(content=content):
+                path.write_bytes(content)
+                with self.assertRaisesRegex(ConfigError, "damaged"):
+                    config.signature_key(self.root)
+                self.assertEqual(path.read_bytes(), content)
 
 
 class RunLockTest(TempDirTest):

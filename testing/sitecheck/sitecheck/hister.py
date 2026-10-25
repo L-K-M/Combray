@@ -380,7 +380,15 @@ def _validated_token(token: str) -> str:
     # A line break would split the header and inject others into the request.
     if any(char in token for char in "\r\n\0"):
         raise HisterConfigError("HISTER_TOKEN contains a line break or NUL character")
-    return token.strip()
+    token = token.strip()
+    # http.client sends header values as Latin-1 and fails on other characters with
+    # an error that holds the token; control characters do not belong in a token.
+    if not (token.isascii() and token.isprintable()):
+        raise HisterConfigError(
+            "HISTER_TOKEN must be printable ASCII; check it for typographic quotes or "
+            "other characters added when it was pasted"
+        )
+    return token
 
 
 def _origin(url: str) -> tuple[str, str, int | None] | None:
@@ -391,7 +399,9 @@ def _origin(url: str) -> tuple[str, str, int | None] | None:
     except ValueError:
         return None
     scheme = parts.scheme.lower()
-    return scheme, (parts.hostname or "").lower(), port or DEFAULT_PORTS.get(scheme)
+    if port is None:
+        port = DEFAULT_PORTS.get(scheme)  # An explicit ":0" stays 0, another origin.
+    return scheme, (parts.hostname or "").lower(), port
 
 
 def _origin_text(url: str) -> str:

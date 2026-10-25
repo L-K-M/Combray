@@ -15,6 +15,7 @@ by the caller, which resolves planned pages (see `is_public_address`).
 
 from __future__ import annotations
 
+import functools
 import ipaddress
 import posixpath
 import re
@@ -157,10 +158,11 @@ FILE_EXTENSIONS = frozenset(
     }
 )  # fmt: skip
 
-# A page is a search result page when its last path segment is one of these and it
-# has one of the query keys below (Kagi, Google and Bing use /search?q=, YouTube
-# /results?search_query=). Matching the last segment rather than the whole path also
-# covers localized paths such as /en/search.
+# A page is a search result page when its last path segment is one of these, or its
+# path is the root, and it has one of the query keys below (Kagi, Google and Bing use
+# /search?q=, YouTube /results?search_query=, DuckDuckGo and Qwant /?q=). Matching
+# the last segment rather than the whole path also covers localized paths such as
+# /en/search. "p" (Yahoo) is also a sensitive key, which is checked first.
 SEARCH_PATH_SEGMENTS = frozenset({"search", "results"})
 SEARCH_QUERY_KEYS = frozenset({"q", "query", "search", "p", "search_query"})
 
@@ -206,6 +208,10 @@ _FORBIDDEN_HOST_CHARACTERS = frozenset('%<>"{}|\\^`[]/?#@:')
 _URL_SCHEME_SEPARATOR = "://"
 # Path segments a browser resolves away ("/a/../b" loads "/b"), in any encoding.
 _DOT_SEGMENTS = frozenset({".", ".."})
+# Browsers read it as "/" in http(s) paths (WHATWG URL); urlsplit keeps it in a segment.
+_BACKSLASH = "\\"
+# More URL-prefix entries than a hand-written deny list holds.
+_DENY_PREFIX_CACHE_SIZE = 1024
 # IPv6 ranges that embed an IPv4 address in their last 32 bits: IPv4-compatible
 # (::a.b.c.d, deprecated but still parsed) and NAT64 (RFC 6052).
 _IPV4_EMBEDDING_NETWORKS = (
@@ -235,6 +241,15 @@ class _Url:
     port: int | None  # None when absent or the scheme's default.
     path: str
     params: tuple[_Param, ...]  # Tracking parameters removed, sorted by key.
+
+
+@dataclass(frozen=True)
+class _DenyPrefix:
+    """A URL-prefix deny entry in the form `_deny_matches` compares loosely."""
+
+    origin: tuple[str, str, int | None]  # Scheme, host as a browser maps it, port.
+    path: str  # See `_folded`.
+    params: frozenset[str]  # See `_folded_param`; empty when the entry has no query.
 
 
 def classify(url: str, hister_host: str | None = None, deny: Iterable[str] = ()) -> Decision:
@@ -270,7 +285,7 @@ def classify(url: str, hister_host: str | None = None, deny: Iterable[str] = ())
         return _rejected(host_problem, host)
     if hister_host and _within(mapped_host, _clean_host(hister_host)):
         return _rejected(Reason.HISTER_HOST, host)
-    if _has_dot_segment(parts.path):
+    if _browser_rewrites_path(parts.path):
         # The browser would load another path than the one the deny list and the
         # keyword rules see; history from a browser never contains such paths.
         return _rejected(Reason.INVALID, host)
@@ -283,7 +298,7 @@ def classify(url: str, hister_host: str | None = None, deny: Iterable[str] = ())
         params=_kept_params(parts.query),
     )
     normalized = _unsplit(parsed)
-    if any(_deny_matches(normalize_deny_entry(entry), host, normalized) for entry in deny):
+    if any(_deny_matches(normalize_deny_entry(entry), parsed, mapped_host) for entry in deny):
         return _rejected(Reason.DENIED, host)
     if _is_sensitive(parsed):
         return _rejected(Reason.SENSITIVE, host)
@@ -354,7 +369,10 @@ def normalize_deny_entry(entry: str) -> str:
     A host suffix ("example.com", ".example.com") denies that host and its subdomains.
     An http(s) URL prefix ("https://example.com/private/") denies normalized URLs that
     start with it; its scheme and host are normalized like URLs, and a prefix without
-    a path gets "/" so it cannot match a longer host name.
+    a path gets "/" so it cannot match a longer host name. Matching errs towards
+    denying: hosts are compared as a browser maps them, paths and queries ignoring
+    case and percent-encoding, and a prefix with a query denies its path whenever the
+    URL has at least those parameters, in any order.
     """
     text = entry.strip()
     if not text or any(character.isspace() for character in text):
@@ -377,8 +395,8 @@ def normalize_deny_entry(entry: str) -> str:
     port = parts.port
     if port == DEFAULT_PORTS[parts.scheme]:
         port = None
-    if _has_dot_segment(parts.path):
-        raise ValueError("a URL prefix must not contain . or .. path segments")
+    if _browser_rewrites_path(parts.path):
+        raise ValueError("a URL prefix must not contain . or .. path segments or backslashes")
     prefix = f"{parts.scheme}://{_netloc(host, port)}{parts.path or '/'}"
     # Canonicalized like the URLs it is matched against (sorted, tracking dropped),
     # so a URL pasted from the address bar denies that page.
@@ -455,7 +473,11 @@ def _browser_host(host: str) -> str | None:
     return _clean_host(mapped)
 
 
-def _has_dot_segment(path: str) -> bool:
+def _browser_rewrites_path(path: str) -> bool:
+    """Whether a browser loads another path than `path`: it reads "\\" as "/" in
+    http(s) URLs and resolves dot segments in any encoding."""
+    if _BACKSLASH in path:
+        return True
     return any(unquote(segment) in _DOT_SEGMENTS for segment in path.split("/"))
 
 
@@ -486,7 +508,13 @@ def _host_problem(host: str) -> Reason | None:
     address = _ip_address(host)
     if address is not None:
         return None if _is_public(address) else Reason.PRIVATE_IP
-    if any(character.isspace() or character in _FORBIDDEN_HOST_CHARACTERS for character in host):
+    # Browsers refuse control characters in a host; the IDNA codec lets them through.
+    if any(
+        not character.isprintable()
+        or character.isspace()
+        or character in _FORBIDDEN_HOST_CHARACTERS
+        for character in host
+    ):
         return Reason.INVALID
 
     labels = host.split(".")
@@ -549,10 +577,43 @@ def _ascii_host(host: str) -> str:
         return host
 
 
-def _deny_matches(entry: str, host: str, normalized: str) -> bool:
-    if _URL_SCHEME_SEPARATOR in entry:
-        return normalized.startswith(entry)
-    return _within(host, entry)
+def _deny_matches(entry: str, url: _Url, mapped_host: str) -> bool:
+    """Whether a normalized deny entry covers `url`, whose host a browser maps to `mapped_host`."""
+    if _URL_SCHEME_SEPARATOR not in entry:
+        return _within(mapped_host, entry)
+    if _unsplit(url).startswith(entry):
+        return True
+
+    # Looser comparisons that only add matches: a server may serve the denied page
+    # under another spelling of its URL, and when in doubt a URL is skipped.
+    prefix = _deny_prefix(entry)
+    if (url.scheme, mapped_host, url.port) != prefix.origin:
+        return False
+    path = _folded(url.path)
+    if not prefix.params:
+        return path.startswith(prefix.path)
+    return path == prefix.path and prefix.params <= {_folded_param(param) for param in url.params}
+
+
+# Classifying a history checks every URL against every entry; parse each entry once.
+@functools.lru_cache(maxsize=_DENY_PREFIX_CACHE_SIZE)
+def _deny_prefix(entry: str) -> _DenyPrefix:
+    denied = _parse(entry)
+    return _DenyPrefix(
+        origin=(denied.scheme, _browser_host(denied.host) or denied.host, denied.port),
+        path=_folded(denied.path),
+        params=frozenset(_folded_param(param) for param in denied.params),
+    )
+
+
+def _folded(path: str) -> str:
+    """A path decoded and without case, as a lenient server may read it."""
+    return unquote(path).casefold()
+
+
+def _folded_param(param: _Param) -> str:
+    """A query parameter as "key=value", decoded and without case; a bare key has "="."""
+    return f"{param.key}={param.value}".casefold()
 
 
 def _is_sensitive(url: _Url) -> bool:
@@ -648,7 +709,7 @@ def _is_file(path: str) -> bool:
 
 def _is_search_page(url: _Url) -> bool:
     segments = [segment for segment in url.path.split("/") if segment]
-    if not segments or unquote(segments[-1]).casefold() not in SEARCH_PATH_SEGMENTS:
+    if segments and unquote(segments[-1]).casefold() not in SEARCH_PATH_SEGMENTS:
         return False
     return any(param.key.casefold() in SEARCH_QUERY_KEYS for param in url.params)
 

@@ -361,7 +361,7 @@ class Store:
         now = self._now()
         new = 0
         updated = 0
-        with self._transaction():
+        with _write_transaction(self._connection):
             for row in rows:
                 values = _page_values(row)
                 exists = self._connection.execute(
@@ -434,7 +434,7 @@ class Store:
 
     def reclassify_pages(self, changes: Iterable[PageClassification]) -> None:
         """Store new URL-policy outcomes, for instance after the deny list grew."""
-        with self._transaction():
+        with _write_transaction(self._connection):
             for change in changes:
                 if not isinstance(change.reason, str) or not isinstance(change.eligible, bool):
                     raise ValueError("a classification needs a bool eligible and a str reason")
@@ -468,7 +468,7 @@ class Store:
         their latest time, whichever documents this sync happened to reread.
         """
         affected: set[str] = set()
-        with self._transaction():
+        with _write_transaction(self._connection):
             for visit in visits:
                 if not visit.document or not visit.page_url:
                     raise ValueError("a visit needs a document and a page")
@@ -511,7 +511,7 @@ class Store:
         the selection never loads them.
         """
         now = self._now()
-        with self._transaction():
+        with _write_transaction(self._connection):
             self._connection.executemany(
                 "INSERT OR IGNORE INTO derived_hosts (host, first_seen) VALUES (?, ?)",
                 [(host, now) for host in sorted(set(hosts)) if host],
@@ -668,7 +668,10 @@ class Store:
         _require_int(duration_ms, "duration_ms", minimum=0)
         if not isinstance(url, str) or not url:
             raise ValueError("url must be a non-empty string")
-        if isinstance(signatures, str) or not all(isinstance(s, str) for s in signatures):
+        if isinstance(signatures, str):
+            raise ValueError("signatures must be a sequence of strings")
+        signature_list = list(signatures)  # Read once: an iterator is empty the second time.
+        if not all(isinstance(s, str) for s in signature_list):
             raise ValueError("signatures must be a sequence of strings")
         if metrics is not None and not isinstance(metrics, Mapping):
             raise ValueError("metrics must be a mapping or None")
@@ -682,7 +685,7 @@ class Store:
                     attempt,
                     verdict_value,
                     severity,
-                    _json(list(signatures)),
+                    _json(signature_list),
                     None if metrics is None else _json(dict(metrics)),
                     None if artifacts is None else os.fspath(artifacts),
                     duration_ms,
@@ -737,7 +740,7 @@ class Store:
 
         new: list[str] = []
         reopened: list[str] = []
-        with self._transaction():
+        with _write_transaction(self._connection):
             run = self._require_run(run_id)
             run_key = (run["started"], run["run_order"])
             for signature, (kind, urls) in sorted(by_signature.items()):
@@ -830,18 +833,6 @@ class Store:
     def _now(self) -> str:
         return _iso(self._clock())
 
-    @contextmanager
-    def _transaction(self) -> Iterator[None]:
-        # IMMEDIATE takes the write lock up front, so a concurrent reader-turned-
-        # writer cannot make this transaction fail halfway with SQLITE_BUSY.
-        self._connection.execute("BEGIN IMMEDIATE")
-        try:
-            yield
-        except BaseException:
-            self._connection.execute("ROLLBACK")
-            raise
-        self._connection.execute("COMMIT")
-
     def _require_run(self, run_id: str) -> sqlite3.Row:
         row = self._connection.execute(
             "SELECT id, started, rowid AS run_order FROM runs WHERE id = ?", (run_id,)
@@ -879,8 +870,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
             f"{SCHEMA_VERSION}; update sitecheck"
         )
     while version < SCHEMA_VERSION:
-        connection.execute("BEGIN IMMEDIATE")
-        try:
+        with _write_transaction(connection):
             # Another process may have migrated while this one waited for the lock.
             version = _user_version(connection)
             if version < SCHEMA_VERSION:
@@ -888,10 +878,24 @@ def _migrate(connection: sqlite3.Connection) -> None:
                 version += 1
                 # PRAGMA takes no bound parameters; version is an int from this module.
                 connection.execute(f"PRAGMA user_version = {version:d}")
-        except BaseException:
+
+
+@contextmanager
+def _write_transaction(connection: sqlite3.Connection) -> Iterator[None]:
+    """Run the block in one transaction: committed if it completes, else rolled back."""
+    # IMMEDIATE takes the write lock up front, so a concurrent reader-turned-writer
+    # cannot make this transaction fail halfway with SQLITE_BUSY.
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        # After some errors (a full disk, an I/O error) SQLite has already rolled the
+        # whole transaction back; a second ROLLBACK would fail and replace the error
+        # that says what went wrong.
+        if connection.in_transaction:
             connection.execute("ROLLBACK")
-            raise
-        connection.execute("COMMIT")
+        raise
+    connection.execute("COMMIT")
 
 
 def _user_version(connection: sqlite3.Connection) -> int:

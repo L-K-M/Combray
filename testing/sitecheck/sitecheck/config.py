@@ -207,12 +207,16 @@ def write_private_file(path: Path, content: bytes) -> None:
 
     The content goes to a new temporary file next to `path`, which is then renamed
     over it, so neither an existing file's looser mode nor a symlink at `path` is
-    reused, and a reader never sees half a file.
+    reused, and a reader never sees half a file. The content is synced before the
+    rename, so a crash cannot leave an empty file under the final name (macOS's
+    fsync does not flush the drive's own cache).
     """
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temporary, path)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -244,19 +248,25 @@ def signature_key(data: Path) -> bytes:
     """The private key that tags sites in symptom signatures, created on first use.
 
     It stays in the data directory, so a tag quoted outside cannot be traced back
-    to a site by hashing candidate names.
+    to a site by hashing candidate names. A key file that is too short raises
+    ConfigError rather than being replaced: a new key renames the site tag of every
+    stored issue signature, so wontfix and upstream decisions would stop matching.
     """
     path = data / SIGNATURE_KEY_NAME
     try:
         key = path.read_bytes()
     except FileNotFoundError:
-        key = b""
+        key = secrets.token_bytes(_SIGNATURE_KEY_BYTES)
+        write_private_file(path, key)
+        return key
     except OSError as error:
         raise ConfigError(f"cannot read {path}: {error.strerror}") from error
-    if len(key) >= _SIGNATURE_KEY_BYTES:
-        return key
-    key = secrets.token_bytes(_SIGNATURE_KEY_BYTES)
-    write_private_file(path, key)
+    if len(key) < _SIGNATURE_KEY_BYTES:
+        raise ConfigError(
+            f"{path} is damaged ({len(key)} bytes, expected at least {_SIGNATURE_KEY_BYTES}); "
+            "restore it from a backup, or delete it to start a new key, which gives "
+            "existing site-scoped issues new signatures"
+        )
     return key
 
 

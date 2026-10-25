@@ -42,6 +42,10 @@ class ReasonTest(unittest.TestCase):
         ("https://ex%61mple.com/", Reason.INVALID),
         ("https://a..b.com/", Reason.INVALID),
         ("https://./", Reason.INVALID),
+        # Control characters, which browsers refuse in a host.
+        ("https://a\x00b.example.com/", Reason.INVALID),
+        ("https://a\x01b.example.com/", Reason.INVALID),
+        ("https://a\x7fb.example.com/", Reason.INVALID),
         # Scheme.
         ("", Reason.SCHEME),
         ("ftp://example.com/file", Reason.SCHEME),
@@ -86,6 +90,8 @@ class ReasonTest(unittest.TestCase):
         ("http://0x7f.0.0.1/", Reason.PRIVATE_IP),
         ("http://2130706433/", Reason.PRIVATE_IP),
         ("http://017700000001/", Reason.PRIVATE_IP),
+        # A numeric last label makes browsers parse the host as IPv4; names they then
+        # cannot parse are excluded too (fail closed).
         ("http://example.123/", Reason.PRIVATE_IP),
         # Private names.
         ("http://localhost/", Reason.PRIVATE_HOST),
@@ -118,7 +124,10 @@ class ReasonTest(unittest.TestCase):
         ("https://news.example.com/private/report", Reason.DENIED),
         ("HTTPS://NEWS.example.com:443/private/", Reason.DENIED),
         ("https://news.example.com/public/report", Reason.OK),
-        ("https://news.example.com/Private/report", Reason.OK),
+        # Paths are compared ignoring case and percent-encoding: a server may treat
+        # them as the same page, and when in doubt a URL is skipped.
+        ("https://news.example.com/Private/report", Reason.DENIED),
+        ("https://news.example.com/%70rivate/report", Reason.DENIED),
         # Actions and secrets in path segments.
         ("https://example.com/logout", Reason.SENSITIVE),
         ("https://example.com/Log-Out", Reason.SENSITIVE),
@@ -205,6 +214,10 @@ class ReasonTest(unittest.TestCase):
         ("https://www.youtube.com/results?search_query=servo", Reason.SEARCH),
         ("https://example.com/en/search/?query=servo", Reason.SEARCH),
         ("https://example.com/Search?Q=servo", Reason.SEARCH),
+        # Home-page search boxes submit to the root path.
+        ("https://duckduckgo.com/?q=servo", Reason.SEARCH),
+        ("https://www.qwant.com/?q=servo", Reason.SEARCH),
+        ("https://example.com/?page=2", Reason.OK),
         ("https://example.com/search", Reason.OK),
         ("https://example.com/search?page=2", Reason.OK),
         ("https://example.com/research?q=servo", Reason.OK),
@@ -356,19 +369,23 @@ class PrivateNetworkNameTest(unittest.TestCase):
 
     def test_is_public_address(self) -> None:
         self.assertTrue(urlpolicy.is_public_address("8.8.8.8"))
+        self.assertTrue(urlpolicy.is_public_address("2606:4700:4700::1111"))
         for address in ("127.0.0.1", "192.168.1.1", "::1", "fe80::1%en0", "100.100.1.1", "nope"):
             with self.subTest(address=address):
                 self.assertFalse(urlpolicy.is_public_address(address))
 
 
 class DotSegmentTest(unittest.TestCase):
-    def test_paths_with_dot_segments_are_invalid(self) -> None:
+    def test_paths_a_browser_would_rewrite_are_invalid(self) -> None:
         deny = ("https://example.org/private/",)
         for url in (
             "https://example.org/public/../private/page",
             "https://example.org/public/%2e%2e/private/page",
             "https://example.org/public/%2E./private/page",
             "https://example.org/a/./b",
+            # Browsers read "\" as "/" in http(s) paths.
+            "https://example.org/public\\..\\private/page",
+            "https://example.org/private\\page",
         ):
             with self.subTest(url=url):
                 self.assertEqual(classify(url, deny=deny).reason, Reason.INVALID)
@@ -563,9 +580,44 @@ class DenyEntryTest(unittest.TestCase):
             "https://u@x.com/",
             "host:80",
             "https://example.com/a/../b",
+            "https://example.com/a\\b",
         ):
             with self.subTest(entry=entry), self.assertRaises(ValueError):
                 normalize_deny_entry(entry)
+
+    def test_a_prefix_denies_its_pages_however_their_urls_are_spelled(self) -> None:
+        cases = (
+            # Hosts are compared as a browser maps them, in either direction.
+            ("https://xn--bcher-kva.de/konto/x", "https://bücher.de/konto/"),
+            ("https://bücher.de/konto/x", "https://xn--bcher-kva.de/konto/"),
+            ("https://news.\uff45\uff58\uff41\uff4d\uff50\uff4c\uff45.com/private/x", DENY[1]),
+            ("https://news.example.com\u3002/private/x", DENY[1]),
+            # Case and percent-encoding of the query.
+            ("https://shop.example.org/p?ID=A%2D1", "https://shop.example.org/p?id=a-1"),
+            # A query entry denies its page with other parameters in any order.
+            (
+                "https://video.example.org/watch?app=desktop&v=abc",
+                "https://video.example.org/watch?v=abc",
+            ),
+        )
+        for url, entry in cases:
+            with self.subTest(url=url, entry=entry):
+                self.assertEqual(classify(url, deny=(entry,)).reason, Reason.DENIED)
+
+    def test_a_query_prefix_denies_only_its_own_page(self) -> None:
+        deny = ("https://video.example.org/watch?v=abc",)
+        for url in (
+            "https://video.example.org/watch?v=xyz",
+            "https://video.example.org/watch?app=desktop&v=xyz",
+            "https://video.example.org/watch/v/abc?v=abc",
+            "https://video.example.org/",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(classify(url, deny=deny).reason, Reason.OK)
+
+    def test_a_host_suffix_denies_the_host_as_a_browser_maps_it(self) -> None:
+        decision = classify("https://www.blocked.example.org\u3002/", deny=DENY)
+        self.assertEqual(decision.reason, Reason.DENIED)
 
     def test_an_exact_url_from_the_address_bar_denies_its_page(self) -> None:
         for entry in (
