@@ -14,8 +14,8 @@ The app and the M0 harness ([ENGINE_SPIKE.md](docs/ENGINE_SPIKE.md), [BUILDING.m
 
 | Component | Use | License / notes |
 | --- | --- | --- |
-| Downstream Servo, based on v0.6.0 | Engine, linked into `libcombray_engine.so` | MPL-2.0. Exact source: the `L-K-M/servo` commit in [`scripts/m0/servo-pin.sh`](scripts/m0/servo-pin.sh). Modified covered files are identified by its [diff from the upstream base](https://github.com/L-K-M/servo/compare/c78d2c206f80a1c8b67eefa97f773bba513205d3...1a96dd8d50b891e71ff2c5b74df1627d8bdcbe9c); the original MPL notices remain |
-| Servo's crate dependencies (`native/Cargo.lock`), including prebuilt SpiderMonkey (`mozjs_sys` 153.3.0-0), jemalloc and aws-lc | Linked into the native library | Mixed: MPL-2.0, MIT, Apache-2.0, BSD and others; listed with license texts in the app (below) |
+| Downstream Servo, based on v0.7.0 | Engine, linked into `libcombray_engine.so` | MPL-2.0. Exact source: the `L-K-M/servo` commit in [`scripts/m0/servo-pin.sh`](scripts/m0/servo-pin.sh). Modified covered files are identified by its [diff from the upstream base](https://github.com/L-K-M/servo/compare/aac43a3f31a259f04a574f5ec4e959c943ad7cc7...9c3dd2cd5e774b4c694ae877e8051586ba83857b); the original MPL notices remain |
+| Servo's crate dependencies (`native/Cargo.lock`), including prebuilt SpiderMonkey (`mozjs_sys` 153.3.0-1), jemalloc and aws-lc | Linked into the native library | Mixed: MPL-2.0, MIT, Apache-2.0, BSD and others; listed with license texts in the app (below) |
 | Android NDK r29 `libc++_shared.so` | Packaged in the harness APK | Apache-2.0 with LLVM exception (see the NDK's `NOTICE`) |
 | Gradle wrapper (`gradlew`, `spike/android/gradlew`, `gradle/wrapper/gradle-wrapper.jar`) | Build tooling, copied from Servo's Android project | Apache-2.0 (Gradle) |
 | AndroidX (Activity, AppCompat resources, Core, Core SplashScreen, Lifecycle, Room, SQLite, VectorDrawable, WorkManager), Jetpack Compose (UI, Foundation, Material 3), Material icons core | Bundled in the app APK (`gradle/libs.versions.toml`) | Apache-2.0 |

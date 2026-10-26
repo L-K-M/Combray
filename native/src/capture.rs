@@ -19,7 +19,7 @@
 //! The page can redefine any built-in the script uses. That only lets a page misreport its
 //! own content; it cannot attach text to another document, because identity comes from the
 //! engine, not from the script result. A page can still make the script slow or never finish:
-//! Servo v0.6.0 has no interrupt for embedder scripts, so the deadline only abandons the result.
+//! Servo v0.7.0 has no interrupt for embedder scripts, so the deadline only abandons the result.
 
 use std::collections::BTreeSet;
 #[cfg(target_os = "android")]

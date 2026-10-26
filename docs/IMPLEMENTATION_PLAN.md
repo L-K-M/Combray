@@ -581,7 +581,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Reader view through Readability.js in the page | Decided (20 October 2026) | Firefox's article detection, run in the document shown (no second fetch, no cookies leave Servo); rendered natively as text, never as page markup. A page can only misreport its own article |
 | Cookie-based Kagi login; no API | Proposed | Satisfies web search with normal browsing |
 | URL/title recovery, not full serialized session | Proposed guarantee | Exact native history/storage support unproven |
-| Engine revision/toolchain/packaging | Updated (owner, 23 October 2026) | Exact `L-K-M/servo` commit from `combray/0.6`, based on v0.6.0; Rust 1.97.1, NDK r29. Source pulls only from `servo/servo`; all work downstream. [Maintenance](BUILDING.md#updating-servo) |
+| Engine revision/toolchain/packaging | Updated (owner, 23 October 2026) | Exact `L-K-M/servo` commit from `combray/0.7`, based on v0.7.0; Rust 1.97.1, NDK r29. Source pulls only from `servo/servo`; all work downstream. [Maintenance](BUILDING.md#updating-servo) |
 | Disposable engine build checkout | Confirmed (owner, 24 October 2026) | `servo-checkout/servo` contains no development work: preparation discards source edits and untracked files, reusing ignored caches. Use a separate downstream checkout for engine changes |
 | Application ID | Confirmed (19 October 2026) | Owner confirmed `ch.lkmc.combray`; `.debug` suffix for debug builds |
 | API levels | Proposed (M1) | minSdk 30 (the native library links with API 30 wrappers), targetSdk 36 |
