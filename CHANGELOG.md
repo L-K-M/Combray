@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Settings › About links the engine's exact source: the `L-K-M/servo`
+  commit in `scripts/m0/servo-pin.sh`.
+- Third-party notices for the Rust standard library (also shipped as
+  `Rust-Licenses.html`), the NDK's libunwind and compiler-rt, and Servo's
+  baked-in Public Suffix List, HSTS preload list and GATT blocklist.
 - A bottom-first new-tab launchpad with Continue, ordered pinned links,
   frequent sites, hide/restore controls and direct Hister/Karakeep access.
   New tab has a persistent + button on Home, pages, the address editor and
@@ -140,6 +145,9 @@ All notable changes to this project are documented here. The format follows
   crates, and a backported fix for a crash when a pending `setTimeout`
   callback was collected before it ran. Hidden tabs are throttled by Servo
   itself now, and only the selected tab has system focus.
+- Every verified APK (release, Engine and CI artifacts, `scripts/build.sh`)
+  must carry the third-party notices. The device checks' test APK is no
+  longer a downloadable CI artifact.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -198,6 +206,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The notices show the whole LLVM license for libc++ instead of its
+  heading, twelve crates' real copyright notices instead of SPDX
+  templates, and aws-lc-rs's own notice next to the generic ISC text.
 - Pages without a dark color scheme keep readable dark text on white when
   Combray is dark; site CSS and metadata can still opt into dark colors.
 - New tab focuses Home's existing search field. Typing, local suggestions

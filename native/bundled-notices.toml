@@ -1,7 +1,9 @@
-# C and C++ code compiled into the engine library that cargo-about cannot see: it reads crate
-# metadata, not the sources a crate's build script compiles or the archive it downloads.
+# Code and data in the engine library that cargo-about cannot see: it reads crate metadata, not
+# the sources a crate's build script compiles, the archive it downloads or the files it embeds.
 # scripts/generate-notices.py reads each `files` entry from the named crate's registry source,
-# and each `repo-files` entry from this repository (code vendored here, with its `version`).
+# each `repo-files` entry from this repository (code vendored here, with its `version`), and
+# each `servo-files` entry from the pinned Servo checkout. `requires-text` lists phrases the
+# texts must contain, so a changed source cannot silently shorten them.
 #
 # Found by listing the members and symbols of the linked static archives (SpiderMonkey's
 # prebuilt libjs_static.a, the build-script outputs under target/<abi>/release/build). Recheck
@@ -126,10 +128,21 @@ license = "ISC AND (Apache-2.0 OR ISC) AND OpenSSL"
 files = ["aws-lc/LICENSE", "aws-lc/third_party/fiat/LICENSE"]
 
 # Shipped next to the engine as libc++_shared.so. The text is the LLVM section of the pinned
-# NDK's NOTICE.toolchain.
+# NDK's NOTICE.toolchain: Apache-2.0, the LLVM exceptions and the legacy NCSA license.
 [[library]]
 name = "LLVM libc++"
 ndk-notice = "The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:"
+ndk-notice-last-heading = "Legacy LLVM License (https://llvm.org/docs/DeveloperPolicy.html#legacy):"
+requires-text = ["LLVM Exceptions to the Apache 2.0 License", "University of Illinois"]
+license = "Apache-2.0 WITH LLVM-exception"
+
+# Statically linked into libcombray_engine.so by the NDK's clang: libunwind (native/build.rs
+# points -lgcc at it) and the compiler-rt builtins. Same LLVM text as libc++.
+[[library]]
+name = "LLVM libunwind and compiler-rt builtins"
+ndk-notice = "The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:"
+ndk-notice-last-heading = "Legacy LLVM License (https://llvm.org/docs/DeveloperPolicy.html#legacy):"
+requires-text = ["LLVM Exceptions to the Apache 2.0 License", "University of Illinois"]
 license = "Apache-2.0 WITH LLVM-exception"
 
 [[library]]
@@ -158,3 +171,91 @@ name = "LZ4 (OpenType Sanitizer)"
 crate = "fontsan"
 license = "BSD-2-Clause"
 files = ["src/deps/lz4/lib/LICENSE"]
+
+# Data files Servo's `bundled` feature bakes into the engine (components/default-resources).
+[[library]]
+name = "Public Suffix List"
+license = "MPL-2.0"
+# components/default-resources/resources/public_domains.txt, from https://publicsuffix.org/list/
+spdx-text = "MPL-2.0"
+
+[[library]]
+name = "Chromium HSTS preload list"
+license = "BSD-3-Clause"
+# hsts_preload.fstmap, built from Chromium's transport_security_state_static.json
+# (python/servo/bootstrap_commands.py).
+repo-files = ["native/licenses/chromium/LICENSE"]
+
+[[library]]
+name = "Web Bluetooth GATT blocklist"
+license = "Apache-2.0"
+# gatt_blocklist.txt, from https://github.com/WebBluetoothCG/registries
+spdx-text = "Apache-2.0"
+
+# Crates for which cargo-about finds no license file with a copyright line and fills in an SPDX
+# template ("<year> <owner>"). These texts replace the template; the generator fails on any
+# template left. Entries without `version` follow the locked version. Provenance of the
+# native/licenses files: native/licenses/README.md.
+
+[[crate]]
+name = "alloc-stdlib"
+version = "0.2.4"
+repo-files = ["native/licenses/alloc-stdlib-0.2.4/LICENSE"]
+
+[[crate]]
+name = "aws-lc-rs"
+# cargo-about shows the canonical ISC text, whose copyright line names the ISC; the crate's
+# LICENSE carries its own copyright notice.
+files = ["LICENSE"]
+
+[[crate]]
+name = "aws-lc-sys"
+files = ["LICENSE"]
+
+[[crate]]
+name = "dpi"
+# The crate's LICENSE is Apache-2.0; this file covers the code it took from libm.
+files = ["LICENSE-LIBM-MIT"]
+
+[[crate]]
+name = "libm"
+files = ["LICENSE.txt"]
+
+[[crate]]
+name = "nom-language"
+version = "0.1.0"
+repo-files = ["native/licenses/nom-language-0.1.0/LICENSE"]
+
+[[crate]]
+name = "realfft"
+version = "3.5.0"
+repo-files = ["native/licenses/realfft-3.5.0/LICENSE"]
+
+[[crate]]
+name = "servo-script-bindings"
+# Its BSD-3-Clause part is WHATWG specification text.
+servo-files = ["LICENSE_WHATWG_SPECS"]
+
+[[crate]]
+name = "sha1_smol"
+files = ["LICENSE"]
+
+[[crate]]
+name = "taffy"
+version = "0.14.0"
+repo-files = ["native/licenses/taffy-0.14.0/LICENSE"]
+
+[[crate]]
+name = "void"
+version = "1.0.2"
+repo-files = ["native/licenses/void-1.0.2/LICENSE-MIT"]
+
+[[crate]]
+name = "wuff"
+version = "0.2.9"
+repo-files = ["native/licenses/wuff/LICENSE"]
+
+[[crate]]
+name = "wuff-capi"
+version = "0.2.0"
+repo-files = ["native/licenses/wuff/LICENSE"]

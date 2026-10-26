@@ -13,7 +13,7 @@ Combray connects to **Karakeep** for quick saves, **Hister** for long-term histo
 
 ## Status
 
-Combray runs on a pinned commit of [our downstream Servo](https://github.com/L-K-M/servo/tree/combray/0.7), based on v0.7.0, through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging and local signing support; personal signing, release CI and dependency notices remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
+Combray runs on a pinned commit of [our downstream Servo](https://github.com/L-K-M/servo/tree/combray/0.7), based on v0.7.0, through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. All 18 device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging, local signing support and third-party notices in the app; personal signing and release CI remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
 
 ## Start here
 
@@ -66,4 +66,4 @@ scripts/release.sh X.Y.Z --push  # bump, tag vX.Y.Z, push; the tag publishes the
 
 ## License
 
-The existing project [Unlicense](LICENSE) is preserved. Servo and any other incorporated dependencies keep their own licenses and obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
+Combray's own code is released under the [Unlicense](LICENSE). The APK bundles Servo and its Rust crates, SpiderMonkey and the other C/C++ libraries compiled into the engine, the Rust standard library, the NDK's LLVM runtime, and the AndroidX, Jetpack Compose and Kotlin libraries, which keep their own licenses. Their notices ship inside the APK (`assets/notices/native.json`, `assets/notices/Rust-Licenses.html` and Licensee's `assets/app/cash/licensee/artifacts.json`) and appear under Settings › About › Third-party notices, next to the exact engine source. The license files in `native/licenses/` and `native/src/vendor/` are those components' texts, not Combray's. See [third-party notices](THIRD_PARTY_NOTICES.md) for the inventory.

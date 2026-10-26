@@ -89,12 +89,15 @@ To regenerate the launcher icon after changing `media-sources/icon.png`: `python
 
 ### Third-party notices
 
-Settings › About lists every third-party component in the APK with its license texts and links to this repository. [Third-party notices](../THIRD_PARTY_NOTICES.md) links the exact downstream engine source.
+Settings › About lists the APK's third-party components with their license texts and links this repository and the exact engine commit. The list covers the parts below; `scripts/verify-apk.py` fails a build whose APK lacks the notice files. [Third-party notices](../THIRD_PARTY_NOTICES.md) has the inventory.
 
 | Part | Source | When it updates |
 | --- | --- | --- |
 | Rust crates linked into the engine | `cargo about` (0.9.2) with `native/about.toml` | Regenerate after changing `native/Cargo.lock` |
-| C/C++ code compiled into the engine (SpiderMonkey and its ICU, ANGLE, FreeType, HarfBuzz, …) and libc++ | `native/bundled-notices.toml`, read from the crates' sources and the pinned NDK | Recheck the list after changing the Servo pin; it was found by listing the linked archives' members and symbols |
+| C/C++ code compiled into the engine (SpiderMonkey and its ICU, ANGLE, FreeType, HarfBuzz, …), libc++, libunwind and compiler-rt | `native/bundled-notices.toml`, read from the crates' sources and the pinned NDK | Recheck the list after changing the Servo pin; it was found by listing the linked archives' members and symbols |
+| Vendored JavaScript and Servo's baked-in data files (Public Suffix List, HSTS preload list, GATT blocklist) | `native/bundled-notices.toml`, with `native/src/vendor/*.LICENSE.md` and `native/licenses/` | Recheck after updating a vendored script or changing the Servo pin (`components/default-resources`) |
+| Crates cargo-about shows without their own copyright line | `[[crate]]` entries in `native/bundled-notices.toml`, texts from the crate, `native/licenses/` or the Servo checkout | The generator fails on an SPDX template (`<year> <owner>`) or a `[[crate]]` version that no longer matches |
+| Rust standard library | The pinned toolchain's `COPYRIGHT-library.html`, as text and verbatim `Rust-Licenses.html` | Regenerate after changing `native/rust-toolchain.toml` |
 | Java/Kotlin libraries | Licensee Gradle plugin, at build time | Automatic; the build fails on a license other than Apache-2.0 |
 
 ```sh
@@ -102,7 +105,7 @@ cargo install cargo-about --version 0.9.2 --locked   # once
 ANDROID_SDK_ROOT=... scripts/generate-notices.py     # needs a native build's registry sources
 ```
 
-The script writes `app/src/main/assets/notices/native.json` with hashes of its inputs; `scripts/tests/test_notices.py` fails CI when an input changed without regenerating. The cargo-about target filter keeps a few crates the Android build does not link (for example `wayland-sys`); listing extra is harmless. This inventory is not a legal review.
+The script writes `app/src/main/assets/notices/native.json` and `Rust-Licenses.html` beside it, with hashes of its inputs (including the Servo pin and the Rust toolchain); `scripts/tests/test_notices.py` fails CI when an input changed without regenerating. The cargo-about target filter keeps a few crates the Android build does not link (for example `wayland-sys`); listing extra is harmless. This inventory is not a legal review.
 
 ### Local release signing
 
