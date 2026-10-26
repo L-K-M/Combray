@@ -958,8 +958,8 @@ Bridge changes for the v0.7 embedder API:
   (`set_focused`) and every view starts focused. Only the selected view
   keeps it; new, hidden and deselected views lose it.
 - `WebView::set_throttled()` is gone; Servo throttles hidden views
-  itself. `setThrottled` now hides a view, and lifting it shows the view
-  again only when it is the selected one.
+  itself. `setThrottled` now hides a view and drops its focus; lifting it
+  shows and focuses the view again only when it is the selected one.
 
 `native/Cargo.lock` is Servo's v0.7 lockfile reduced to this crate's
 graph, with no version changes; `log` and `rustls` exact pins follow it

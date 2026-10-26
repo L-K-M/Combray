@@ -498,8 +498,14 @@ impl Engine {
             } => {
                 if let Some(tab) = self.tab(id) {
                     match throttling {
-                        Throttling::Throttled => tab.webview.hide(),
-                        Throttling::Normal if self.active == Some(id) => tab.webview.show(),
+                        Throttling::Throttled => {
+                            tab.webview.set_focused(false);
+                            tab.webview.hide();
+                        },
+                        Throttling::Normal if self.active == Some(id) => {
+                            tab.webview.show();
+                            tab.webview.set_focused(true);
+                        },
                         Throttling::Normal => {},
                     }
                 }
