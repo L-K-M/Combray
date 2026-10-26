@@ -84,8 +84,14 @@ class Preview(HTMLParser):
 
 def servo_compare_errors() -> list[str]:
     """The notices' link to the modified Servo files must compare the pinned commit with its base."""
+    if not SERVO_PIN.is_file():
+        return ["scripts/m0/servo-pin.sh: missing; cannot check the Servo compare link"]
     pin = dict(re.findall(r'^export (COMBRAY_SERVO_\w+)="([^"]*)"', SERVO_PIN.read_text(encoding="utf-8"), re.M))
-    expected = (pin.get("COMBRAY_SERVO_UPSTREAM_REVISION"), pin.get("COMBRAY_SERVO_GIT_REVISION"))
+    names = ("COMBRAY_SERVO_UPSTREAM_REVISION", "COMBRAY_SERVO_GIT_REVISION")
+    missing = [name for name in names if name not in pin]
+    if missing:
+        return [f"scripts/m0/servo-pin.sh: no {', '.join(missing)} to check the Servo compare link against"]
+    expected = (pin[names[0]], pin[names[1]])
     links = SERVO_COMPARE.findall((ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8"))
     if not links:
         return ["THIRD_PARTY_NOTICES.md: no L-K-M/servo compare link for the modified Servo files"]
