@@ -98,6 +98,37 @@ class GeneratorTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.generator.spdx_text({}, "MPL-2.0")
 
+    def test_a_section_runs_past_its_underlined_headings(self):
+        lines = [
+            "=====", "First:", "=====", "", "first text", "", "=====", "Middle:", "=====", "middle text",
+            "=====", "Last:", "=====", "last text", "", "", "=====", "Next notice:", "=====", "other text",
+        ]
+        section = self.generator.notice_section(lines, "First:", "Last:")
+        for text in ("first text", "middle text", "last text"):
+            self.assertIn(text, section)
+        self.assertNotIn("Next notice", section)
+        self.assertNotIn("other text", section)
+
+    def test_a_missing_heading_finds_no_section(self):
+        self.assertIsNone(self.generator.notice_section(["First:", "=====", "text"], "First:", "Last:"))
+
+    def test_a_license_template_is_reported(self):
+        components = [{"name": "a", "version": "1", "texts": [0]}, {"name": "b", "version": "2", "texts": [1, 2]}]
+        texts = [
+            "MIT License\n\nCopyright (c) <year> <copyright holders>\n",
+            "Copyright (c) 2016 Dropbox, Inc.\n",
+            # FreeType's license asks for this credit line; it is not a template.
+            "Portions of this software are copyright © <year> The FreeType Project\n",
+        ]
+        self.assertEqual(self.generator.templated(components, texts), ["a 1"])
+
+    def test_an_html_notice_becomes_plain_text(self):
+        html = (
+            "<html><head><title>Title</title></head><body>\n<h1>Notices</h1>\n"
+            "<p>A &amp; B\n   wrapped</p>\n<pre>  indented\n    text</pre></body></html>"
+        )
+        self.assertEqual(self.generator.HtmlText.convert(html), "Notices\n\nA & B wrapped\n\n  indented\n    text\n")
+
 
 if __name__ == "__main__":
     unittest.main()

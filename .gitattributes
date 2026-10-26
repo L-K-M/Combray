@@ -15,3 +15,5 @@ gradlew text eol=lf
 *.webp binary
 # Raw device output kept verbatim as evidence
 docs/engine-spike/*.txt -whitespace
+# Copied verbatim from the Rust toolchain by scripts/generate-notices.py
+app/src/main/assets/notices/Rust-Licenses.html -whitespace
