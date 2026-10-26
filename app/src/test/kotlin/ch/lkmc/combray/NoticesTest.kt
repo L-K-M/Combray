@@ -41,6 +41,13 @@ class NoticesTest {
         assertThrows(IllegalArgumentException::class.java) { Notices.parse(broken, "[]") }
     }
 
+    /** Settings › About links the exact engine source: the commit scripts/m0/servo-pin.sh pins. */
+    @Test
+    fun theEngineSourceIsThePinnedCommit() {
+        val pin = Regex("COMBRAY_SERVO_GIT_REVISION=\"([0-9a-f]{40})\"").find(File("../scripts/m0/servo-pin.sh").readText())
+        assertEquals("https://github.com/L-K-M/servo/tree/${pin!!.groupValues[1]}", BuildConfig.SERVO_SOURCE_URL)
+    }
+
     /** The committed engine notices parse and name the engine. */
     @Test
     fun theBundledEngineNoticesParse() {

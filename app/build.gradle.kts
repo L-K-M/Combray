@@ -13,6 +13,14 @@ val servoVersion = Regex("\\[\\[package]]\\Rname = \"servo\"\\Rversion = \"([^\"
     .find(rootProject.file("native/Cargo.lock").readText())?.groupValues?.get(1)
     ?: error("no servo package in native/Cargo.lock")
 
+// The engine's exact source, the downstream commit scripts/m0/servo-pin.sh pins: shown in
+// Settings › About for MPL-2.0 §3.2.
+val servoPin = rootProject.file("scripts/m0/servo-pin.sh").readText()
+fun servoPinValue(name: String) = Regex("^export $name=\"([^\"]+)\"$", RegexOption.MULTILINE)
+    .find(servoPin)?.groupValues?.get(1) ?: error("no $name in scripts/m0/servo-pin.sh")
+val servoSourceUrl = servoPinValue("COMBRAY_SERVO_REPOSITORY").removeSuffix(".git") +
+    "/tree/" + servoPinValue("COMBRAY_SERVO_GIT_REVISION")
+
 // Signing is opt-in and local. CI may still assemble an unsigned APK to check Kotlin.
 val signingVariables = listOf("COMBRAY_KEYSTORE_FILE", "COMBRAY_KEYSTORE_PASSWORD", "COMBRAY_KEY_ALIAS", "COMBRAY_KEY_PASSWORD")
 val signingValues = signingVariables.associateWith { providers.environmentVariable(it).orNull }
@@ -45,6 +53,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SERVO_VERSION", "\"$servoVersion\"")
+        buildConfigField("String", "SERVO_SOURCE_URL", "\"$servoSourceUrl\"")
     }
 
     signingConfigs {

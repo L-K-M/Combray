@@ -84,7 +84,10 @@ import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
-/** Where the source of this build, including the engine patches, is published (MPL-2.0 §3.2). */
+/**
+ * Where the source of this build is published (MPL-2.0 §3.2). The engine's exact source is
+ * BuildConfig.SERVO_SOURCE_URL.
+ */
 private const val SOURCE_URL = "https://github.com/L-K-M/Combray"
 
 /** Queue states the user can retry or discard one by one. */
@@ -174,6 +177,7 @@ fun SettingsSheet(
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
             Text(stringResource(R.string.settings_engine, BuildConfig.SERVO_VERSION))
             SelectionContainer { Text(stringResource(R.string.settings_source, SOURCE_URL)) }
+            SelectionContainer { Text(stringResource(R.string.settings_engine_source, BuildConfig.SERVO_SOURCE_URL)) }
             OutlinedButton(onClick = { showNotices = true }, modifier = Modifier.padding(top = 8.dp)) {
                 Text(stringResource(R.string.notices_title))
             }
