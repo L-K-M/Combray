@@ -12,8 +12,6 @@ ROOT = Path(__file__).resolve().parents[2]
 NOTICES = ROOT / "app/src/main/assets/notices/native.json"
 RUST_NOTICES = ROOT / "app/src/main/assets/notices/Rust-Licenses.html"
 REGENERATE = "inputs changed: run scripts/generate-notices.py on the native build host"
-# An SPDX template's copyright line, which cargo-about prints when a crate ships no license file.
-TEMPLATE = re.compile(r"<(owner|copyright holders?)>", re.IGNORECASE)
 
 
 class NoticesTest(unittest.TestCase):
@@ -73,11 +71,12 @@ class NoticesTest(unittest.TestCase):
         self.assertIn(b"Copyright notices for The Rust Standard Library", RUST_NOTICES.read_bytes())
 
     def test_no_component_is_shown_with_a_license_template(self):
-        templated = [
-            f"{component['name']} {component['version']}" for component in self.notices["components"]
-            if any(TEMPLATE.search(self.notices["texts"][index]) for index in component["texts"])
-        ]
+        templated = load_generator().templated(self.notices["components"], self.notices["texts"])
         self.assertEqual(templated, [], "add the real license texts to native/bundled-notices.toml")
+
+    def test_aws_lc_rs_carries_its_own_copyright_notice(self):
+        # cargo-about shows it with the canonical ISC text, whose copyright line names the ISC.
+        self.assertIn("Copyright Amazon.com, Inc. or its affiliates.", self.component_text("aws-lc-rs"))
 
 
 def load_generator():
@@ -122,12 +121,34 @@ class GeneratorTest(unittest.TestCase):
         ]
         self.assertEqual(self.generator.templated(components, texts), ["a 1"])
 
+    def test_every_accepted_licenses_template_is_reported(self):
+        # The copyright lines of the SPDX texts cargo-about falls back to for native/about.toml's
+        # accepted licenses: BSD, MIT and NCSA.
+        lines = [
+            "Copyright (c) <year> <owner>. All rights reserved.",
+            "Copyright (c) <year> <copyright holders>",
+            "Copyright (c) <Year> <Owner Organization Name>. All rights reserved.",
+        ]
+        components = [{"name": str(index), "version": "1", "texts": [index]} for index in range(len(lines))]
+        self.assertEqual(self.generator.templated(components, lines), ["0 1", "1 1", "2 1"])
+
+    def test_every_repository_text_is_a_hashed_input(self):
+        config = {"library": [{"repo-files": ["native/src/vendor/x.LICENSE.md"]}], "crate": [{"repo-files": ["third_party/y/LICENSE"]}]}
+        inputs = self.generator.hashed_inputs(config)
+        self.assertIn("native/src/vendor/x.LICENSE.md", inputs)
+        self.assertIn("third_party/y/LICENSE", inputs)
+        self.assertIn("scripts/m0/servo-pin.sh", inputs)
+
     def test_an_html_notice_becomes_plain_text(self):
         html = (
             "<html><head><title>Title</title></head><body>\n<h1>Notices</h1>\n"
             "<p>A &amp; B\n   wrapped</p>\n<pre>  indented\n    text</pre></body></html>"
         )
         self.assertEqual(self.generator.HtmlText.convert(html), "Notices\n\nA & B wrapped\n\n  indented\n    text\n")
+
+    def test_a_stray_end_tag_hides_no_text(self):
+        html = "<p>before</p></head></pre><p>after   it</p>"
+        self.assertEqual(self.generator.HtmlText.convert(html), "before\n\nafter it\n")
 
 
 if __name__ == "__main__":

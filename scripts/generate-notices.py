@@ -36,22 +36,26 @@ RUST_TOOLCHAIN = NATIVE / "rust-toolchain.toml"
 SERVO = ROOT / "servo-checkout/servo"
 REGISTRY = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")) / "registry/src"
 
-# Inputs whose change requires regenerating; the test recomputes these. The Servo pin counts:
-# Servo's crates are path dependencies, so a new pin can change their texts without touching
-# Cargo.lock. native/licenses holds texts for components that publish none (and a README).
-HASHED_INPUTS = [
-    "native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml", "native/src/vendor/Readability.LICENSE.md",
-    "native/src/vendor/web-animations.LICENSE.md", "native/rust-toolchain.toml",
-    "scripts/generate-notices.py", "scripts/m0/servo-pin.sh",
-] + sorted(
-    path.relative_to(ROOT).as_posix() for path in (NATIVE / "licenses").rglob("*") if path.is_file() and path.suffix != ".md"
-)
+
+def hashed_inputs(config: dict) -> list[str]:
+    """Inputs whose change requires regenerating; the test recomputes these. The Servo pin counts:
+    Servo's crates are path dependencies, so a new pin can change their texts without touching
+    Cargo.lock. Every `repo-files` text bundled-notices.toml names counts too."""
+    repo_files = {file for entries in config.values() for entry in entries for file in entry.get("repo-files", [])}
+    return [
+        "native/Cargo.lock", "native/about.toml", "native/bundled-notices.toml", "native/rust-toolchain.toml",
+        "scripts/generate-notices.py", "scripts/m0/servo-pin.sh",
+    ] + sorted(repo_files)
+
+
+HASHED_INPUTS = hashed_inputs(tomllib.loads((NATIVE / "bundled-notices.toml").read_text()))
 
 # Text the JVM libraries (all Apache-2.0, checked by Licensee) are shown with.
 JVM_LICENSES = ["Apache-2.0"]
 
-# An SPDX template's copyright line, which cargo-about prints for a crate without license files.
-TEMPLATE = re.compile(r"<(owner|copyright holders?)>", re.IGNORECASE)
+# An SPDX template's copyright line, which cargo-about prints for a crate without license files:
+# "<owner>" (BSD), "<copyright holders>" (MIT), "<Owner Organization Name>" (NCSA).
+TEMPLATE = re.compile(r"<(owner( organization name)?|copyright holders?)>", re.IGNORECASE)
 RULE = re.compile(r"=+")
 
 
@@ -143,8 +147,9 @@ class HtmlText(HTMLParser):
             self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
-        self.hidden -= tag in ("head", "script", "style")
-        self.pre -= tag == "pre"
+        # A stray end tag must not drive a counter negative and hide the rest of the text.
+        self.hidden = max(0, self.hidden - (tag in ("head", "script", "style")))
+        self.pre = max(0, self.pre - (tag == "pre"))
         if tag in self.BLOCKS:
             self.parts.append("\n")
 

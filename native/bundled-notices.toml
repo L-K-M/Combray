@@ -203,6 +203,12 @@ version = "0.2.4"
 repo-files = ["native/licenses/alloc-stdlib-0.2.4/LICENSE"]
 
 [[crate]]
+name = "aws-lc-rs"
+# cargo-about shows the canonical ISC text, whose copyright line names the ISC; the crate's
+# LICENSE carries its own copyright notice.
+files = ["LICENSE"]
+
+[[crate]]
 name = "aws-lc-sys"
 files = ["LICENSE"]
 

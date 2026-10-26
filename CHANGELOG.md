@@ -202,8 +202,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - The notices show the whole LLVM license for libc++ instead of its
-  heading, and twelve crates' real copyright notices instead of SPDX
-  templates.
+  heading, twelve crates' real copyright notices instead of SPDX
+  templates, and aws-lc-rs's own notice next to the generic ISC text.
 - Pages without a dark color scheme keep readable dark text on white when
   Combray is dark; site CSS and metadata can still opt into dark colors.
 - New tab focuses Home's existing search field. Typing, local suggestions
