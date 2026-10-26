@@ -5,8 +5,8 @@
 #             page scripts (always meaningful; none needs the Servo tree).
 #   android — JVM tests, Android lint, debug + release APKs, the device
 #             checks' test APK (compiled, not run), a check that Room's
-#             exported schemas are committed, and a debug APK uploaded as a
-#             rolling artifact. The repo is set up before the
+#             exported schemas are committed, the third-party notices in
+#             both APKs, and a debug APK uploaded as a rolling artifact. The repo is set up before the
 #             app exists: until gradlew is committed this job records a notice
 #             and passes, then turns itself on with no workflow change.
 #
@@ -141,6 +141,14 @@ jobs:
       - name: Assemble release (proves R8 / minification)
         if: steps.detect.outputs.present == 'true'
         run: ./gradlew assembleRelease
+
+      # These APKs carry no engine, but the debug one is published below: both
+      # must carry the third-party notices Settings › About shows.
+      - name: Check third-party notices in the APKs
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          python3 -I scripts/verify-apk.py --notices-only app/build/outputs/apk/debug/app-debug.apk
+          python3 -I scripts/verify-apk.py --notices-only app/build/outputs/apk/release/app-release.apk
 
       - name: Upload debug APK
         if: steps.detect.outputs.present == 'true'

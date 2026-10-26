@@ -65,6 +65,7 @@ jobs:
 
       # Asset names say what they contain: <base>-<vX.Y.Z>-<os>-<arch>.
       # Servo ships per-ABI native libraries and M0 starts with arm64.
+      # verify-apk.py also requires the third-party notices inside the APK.
       - name: Stage release artifacts
         run: |
           ARCH="arm64"
