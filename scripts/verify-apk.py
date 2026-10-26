@@ -66,9 +66,14 @@ def read_json(apk, name):
 
 
 def verify_notices(apk):
-    for name in (NOTICES, RUST_NOTICES, JVM_NOTICES):
+    producers = {
+        NOTICES: "scripts/generate-notices.py",
+        RUST_NOTICES: "scripts/generate-notices.py",
+        JVM_NOTICES: "the Licensee Gradle plugin",
+    }
+    for name, producer in producers.items():
         if name not in apk.namelist() or apk.getinfo(name).file_size == 0:
-            raise ValueError(f"APK is missing {name} or it is empty; see scripts/generate-notices.py")
+            raise ValueError(f"APK is missing {name} or it is empty; see {producer}")
 
     native = read_json(apk, NOTICES)
     try:

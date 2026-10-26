@@ -164,6 +164,7 @@ class ApkBuildTest(unittest.TestCase):
                 result = self.build("--debug")
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(name, result.stderr)
+                self.assertIn("Licensee" if "licensee" in name else "generate-notices.py", result.stderr)
                 self.assertFalse((self.root / "dist").exists())
 
     def test_a_truncated_llvm_notice_is_rejected(self):
