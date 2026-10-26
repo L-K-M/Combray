@@ -17,8 +17,9 @@
 #            runners): the real fixture checks of scripts/check-app.sh, with its
 #            evidence uploaded whether it passes or fails. It runs whenever the
 #            x86_64 APK exists; a build that never produced it fails here rather
-#            than silently "passing" as skipped. It deletes the test APK artifact
-#            when it finishes.
+#            than silently "passing" as skipped.
+#   cleanup — deletes the test APK artifact once the device job ends. The only
+#            job that may delete artifacts, and it runs no repository code.
 #
 # Hardening (family contract): least-privilege token, cancel superseded PR runs
 # but never an in-progress run on a non-PR ref, a timeout on every job, actions
@@ -186,7 +187,7 @@ jobs:
 
       # The device job needs this leg's test APK: it must carry the app APK's
       # debug signature. It bundles JUnit (EPL-1.0) and Hamcrest without their
-      # notices, so it is not published: one day at most, deleted by the device
+      # notices, so it is not published: one day at most, deleted by the cleanup
       # job.
       - if: matrix.abi == 'x86_64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -213,10 +214,6 @@ jobs:
     # The artifact download below is the real gate — when the x86_64 leg did not
     # produce APKs the job fails honestly instead of skipping as "passed".
     if: ${{ !cancelled() }}
-    permissions:
-      contents: read
-      # Deletes the test APK artifact once the checks ran.
-      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -283,10 +280,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # The test APK artifact only carried the APK between jobs; when deletion
-      # fails (a fork's read-only token), it still expires after one day.
+  # The test APK artifact only carried the APK to the device job. Deleting it
+  # needs actions: write, so that permission stays out of the jobs that run the
+  # build and the checks. When deletion fails (a fork's read-only token), the
+  # artifact still expires after one day.
+  cleanup:
+    name: Delete the test APK artifact
+    needs: device
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
       - name: Delete the test APK artifact
-        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: combray-test-apk-x86_64-${{ github.sha }}
