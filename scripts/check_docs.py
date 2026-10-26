@@ -21,6 +21,8 @@ REQUIRED = (
 )
 LINK = re.compile(r"!?\[[^\]\n]*\]\(([^)\n]+)\)")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+SERVO_PIN = ROOT / "scripts/m0/servo-pin.sh"
+SERVO_COMPARE = re.compile(r"https://github\.com/L-K-M/servo/compare/([0-9a-f]{40})\.\.\.([0-9a-f]{40})")
 
 
 def prose(source: str) -> str:
@@ -80,6 +82,25 @@ class Preview(HTMLParser):
                 self.frames.append(source)
 
 
+def servo_compare_errors() -> list[str]:
+    """The notices' link to the modified Servo files must compare the pinned commit with its base."""
+    if not SERVO_PIN.is_file():
+        return ["scripts/m0/servo-pin.sh: missing; cannot check the Servo compare link"]
+    pin = dict(re.findall(r'^export (COMBRAY_SERVO_\w+)="([^"]*)"', SERVO_PIN.read_text(encoding="utf-8"), re.M))
+    names = ("COMBRAY_SERVO_UPSTREAM_REVISION", "COMBRAY_SERVO_GIT_REVISION")
+    missing = [name for name in names if name not in pin]
+    if missing:
+        return [f"scripts/m0/servo-pin.sh: no {', '.join(missing)} to check the Servo compare link against"]
+    expected = (pin[names[0]], pin[names[1]])
+    links = SERVO_COMPARE.findall((ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8"))
+    if not links:
+        return ["THIRD_PARTY_NOTICES.md: no L-K-M/servo compare link for the modified Servo files"]
+    return [
+        f"THIRD_PARTY_NOTICES.md: Servo compare link {base}...{head} does not match scripts/m0/servo-pin.sh"
+        for base, head in links if (base, head) != expected
+    ]
+
+
 def main() -> int:
     errors = []
     for relative in REQUIRED:
@@ -130,6 +151,9 @@ def main() -> int:
                     break
             if transparent or color not in {0, 2}:
                 errors.append("icon.png: expected the original opaque RGB/grayscale source")
+
+    if (ROOT / "THIRD_PARTY_NOTICES.md").is_file():
+        errors += servo_compare_errors()
 
     fragment = ROOT / "docs/design/combray-concepts.fragment.html"
     exported = ROOT / "docs/design/combray-concepts.html"
