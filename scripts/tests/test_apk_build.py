@@ -15,6 +15,23 @@ import zipfile
 SCRIPTS = Path(__file__).resolve().parents[1]
 LIBRARIES = ("libcombray_engine.so", "libc++_shared.so")
 ELF_MACHINES = {"arm64-v8a": 183, "x86_64": 62}
+# The smallest notice assets verify-apk.py accepts: the components it requires, with their texts.
+NOTICES = {
+    "assets/notices/native.json": json.dumps({
+        "components": [
+            {"name": "servo", "texts": [0]},
+            {"name": "LLVM libc++", "texts": [1]},
+            {"name": "Rust standard library", "texts": [2]},
+        ],
+        "texts": [
+            "Mozilla Public License Version 2.0",
+            "---- LLVM Exceptions to the Apache 2.0 License ----",
+            "The Rust Standard Library is dual-licensed under Apache 2.0 and MIT terms.",
+        ],
+    }),
+    "assets/notices/Rust-Licenses.html": "<title>Copyright notices for The Rust Standard Library</title>",
+    "assets/app/cash/licensee/artifacts.json": json.dumps([{"groupId": "androidx.core", "artifactId": "core"}]),
+}
 
 
 class ApkBuildTest(unittest.TestCase):
@@ -43,7 +60,7 @@ class ApkBuildTest(unittest.TestCase):
         self.engine.chmod(0o755)
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("COMBRAY_")}
 
-    def fixture(self, abi="x86_64", libraries=LIBRARIES, machine=None, variant="debug", output=None):
+    def fixture(self, abi="x86_64", libraries=LIBRARIES, machine=None, variant="debug", output=None, notices=NOTICES):
         header = struct.pack(
             "<16sHHIQQQIHHHHHH",
             b"\x7fELF\x02\x01\x01" + bytes(9),
@@ -54,6 +71,8 @@ class ApkBuildTest(unittest.TestCase):
             apk.writestr("AndroidManifest.xml", b"test manifest")
             for library in libraries:
                 apk.writestr(f"lib/{abi}/{library}", header)
+            for name, content in notices.items():
+                apk.writestr(name, content)
         (self.root / "fixture-metadata.json").write_text(json.dumps({
             "artifactType": {"type": "APK"},
             "variantName": variant,
@@ -137,6 +156,47 @@ class ApkBuildTest(unittest.TestCase):
         result = self.build("--debug")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("libc++_shared.so", result.stderr)
+
+    def test_missing_notices_are_rejected(self):
+        for name in NOTICES:
+            with self.subTest(name):
+                self.fixture(notices={key: value for key, value in NOTICES.items() if key != name})
+                result = self.build("--debug")
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(name, result.stderr)
+                self.assertFalse((self.root / "dist").exists())
+
+    def test_a_truncated_llvm_notice_is_rejected(self):
+        native = json.loads(NOTICES["assets/notices/native.json"])
+        native["texts"][1] = "The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:"
+        self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps(native)})
+        result = self.build("--debug")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LLVM libc++", result.stderr)
+
+    def test_malformed_notices_are_rejected(self):
+        self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps({"components": [{}]})})
+        result = self.build("--debug")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("native.json", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def verify_notices_only(self):
+        return subprocess.run(
+            ["python3", "-I", str(SCRIPTS / "verify-apk.py"), "--notices-only", str(self.root / "fixture.apk")],
+            text=True, capture_output=True, check=False,
+        )
+
+    def test_notices_only_accepts_an_apk_without_the_engine(self):
+        self.fixture(libraries=())
+        result = self.verify_notices_only()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_notices_only_still_requires_the_notices(self):
+        self.fixture(libraries=(), notices={})
+        result = self.verify_notices_only()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("assets/notices/native.json", result.stderr)
 
     def test_mislabelled_elf_is_rejected(self):
         self.fixture(abi="arm64-v8a", machine=ELF_MACHINES["x86_64"])

@@ -10,7 +10,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTICES = ROOT / "app/src/main/assets/notices/native.json"
+RUST_NOTICES = ROOT / "app/src/main/assets/notices/Rust-Licenses.html"
 REGENERATE = "inputs changed: run scripts/generate-notices.py on the native build host"
+# An SPDX template's copyright line, which cargo-about prints when a crate ships no license file.
+TEMPLATE = re.compile(r"<(owner|copyright holders?)>", re.IGNORECASE)
 
 
 class NoticesTest(unittest.TestCase):
@@ -38,8 +41,43 @@ class NoticesTest(unittest.TestCase):
 
     def test_the_engine_and_its_bundled_libraries_are_named(self):
         names = {component["name"] for component in self.notices["components"]}
-        for name in ("servo", "SpiderMonkey", "ANGLE", "FreeType", "HarfBuzz", "LLVM libc++"):
-            self.assertIn(name, names)
+        required = (
+            "servo", "SpiderMonkey", "ANGLE", "FreeType", "HarfBuzz", "LLVM libc++",
+            "LLVM libunwind and compiler-rt builtins", "Rust standard library",
+            "Public Suffix List", "Chromium HSTS preload list", "Web Bluetooth GATT blocklist",
+        )
+        self.assertEqual([name for name in required if name not in names], [])
+
+    def test_a_servo_pin_or_toolchain_change_needs_regenerating(self):
+        for name in ("scripts/m0/servo-pin.sh", "native/rust-toolchain.toml"):
+            self.assertIn(name, self.notices["inputs"])
+
+    def component_text(self, name):
+        components = [component for component in self.notices["components"] if component["name"] == name]
+        self.assertEqual(len(components), 1, name)
+        return "".join(self.notices["texts"][index] for index in components[0]["texts"])
+
+    def test_the_llvm_runtime_notice_is_complete(self):
+        for name in ("LLVM libc++", "LLVM libunwind and compiler-rt builtins"):
+            text = self.component_text(name)
+            self.assertIn("LLVM Exceptions to the Apache 2.0 License", text, name)
+            self.assertIn("University of Illinois", text, name)
+            self.assertGreater(len(text), 10_000, name)
+
+    def test_the_rust_standard_library_notice_is_the_pinned_toolchains(self):
+        channel = re.search(r'^channel = "([^"]+)"', (ROOT / "native/rust-toolchain.toml").read_text(), re.M)
+        self.assertIsNotNone(channel, "no channel in native/rust-toolchain.toml")
+        self.assertIn("The Rust Standard Library is dual-licensed", self.component_text("Rust standard library"))
+        component = next(c for c in self.notices["components"] if c["name"] == "Rust standard library")
+        self.assertEqual(component["version"], channel.group(1), REGENERATE)
+        self.assertIn(b"Copyright notices for The Rust Standard Library", RUST_NOTICES.read_bytes())
+
+    def test_no_component_is_shown_with_a_license_template(self):
+        templated = [
+            f"{component['name']} {component['version']}" for component in self.notices["components"]
+            if any(TEMPLATE.search(self.notices["texts"][index]) for index in component["texts"])
+        ]
+        self.assertEqual(templated, [], "add the real license texts to native/bundled-notices.toml")
 
 
 def load_generator():
