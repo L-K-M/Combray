@@ -6,7 +6,7 @@ Status: phase 0a is done ([below](#phases)). The rest is a proposal awaiting the
 
 ## Owner decisions
 
-- **Scope of "Servo is mandatory"** (27 October 2026): it covers web content. Non-HTML content such as PDF may use another renderer. pdf.js inside Servo remains the preferred direction.
+- **Scope of "Servo is mandatory"** (27 October 2026): the rule does not apply to non-HTML content, so a PDF may use another renderer. pdf.js still looks like the best option.
 - **PDF text in Hister** (27 October 2026): same opt-in and exclusions as pages, no separate switch.
 - **Next steps** (27 October 2026): fix the stand-in page capture (phase 0a), then run the probe (phase 0b).
 
@@ -14,7 +14,7 @@ Status: phase 0a is done ([below](#phases)). The rest is a proposal awaiting the
 
 Servo paths are relative to the Servo checkout.
 
-- A top-level navigation to `application/pdf` becomes Servo's synthesized page "Unknown content type (application/pdf)." The same happens for `application/octet-stream` and for any response with `Content-Disposition: attachment` (`components/script/dom/servoparser/mod.rs`, `load_document`).
+- A top-level navigation to `application/pdf` becomes Servo's synthesized page "Unknown content type (application/pdf)." The same happens for `application/octet-stream` and any other type Servo has no viewer for (`components/script/dom/servoparser/mod.rs`, `load_document`). Servo ignores `Content-Disposition` when it navigates: a response sent as an attachment is shown by its type alone, so a PDF attachment also becomes the stand-in page.
   - The page commits at the PDF's URL with an opaque origin (`Document::mark_as_internal`).
 - Servo keeps downloading the whole body and drops every chunk (`is_synthesized_document` in `servoparser/mod.rs`).
   - There is no download API, `<a download>` is not implemented, and `<embed>`/`<object>` fetch nothing.
@@ -108,7 +108,7 @@ Why this one, now that another renderer would be allowed:
 1. **The downstream engine change:** about 130 to 180 lines, never offered upstream.
 2. **Size cap:** 32 MiB to start. Above it, "too large to show here", with Save to Karakeep.
 3. **APK contents:** about 2.2 to 4.2 MB inside the native library (CJK cmaps 1.2 MB, standard fonts 0.8 MB). Drop the Liberation fonts, which are GPLv2 with a font exception?
-4. **Attachments and octet-stream:** show PDFs sent as attachments inline, as Firefox for Android does? Treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF?
+4. **Attachments and octet-stream:** Servo ignores `Content-Disposition`, so the viewer would show PDFs sent as attachments inline, as Firefox for Android does. Keep that, or honour `attachment` once a download hook exists? Treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF?
 5. **Phase 4 scope.**
 6. **The probe on the owner's arm64 phone,** for the speed gate.
 

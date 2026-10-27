@@ -113,7 +113,8 @@ class ReaderTest {
     fun aFileServoCannotShowHasNoArticle() {
         // Servo's page in place of the PDF, "Unknown content type (application/pdf).", is no article.
         device.browser.openUrl(Fixtures.PDF, Placement.CURRENT_TAB)
-        device.awaitPage(Fixtures.PDF)
+        // The stand-in page has committed: a Servo that stopped showing one would not pass for this.
+        device.awaitState { it.activeTab?.url == Fixtures.PDF && it.activeTab?.page != null && it.activeTab?.loading == false }
         device.browser.openReader()
         val reader = device.awaitState { it.reader != null && it.reader !is ReaderState.Loading }.reader
         assertTrue("$reader", reader is ReaderState.Unavailable)
