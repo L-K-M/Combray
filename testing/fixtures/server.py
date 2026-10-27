@@ -51,6 +51,14 @@ service's own host is never captured for Hister)
   key "fixture-key"
 Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
   POST /hister/api/add (needs Origin: hister://), GET /hister/search?q=&format=json; token "fixture-token"
+PDF probe (draft PR experiment, docs/PDF.md phase 0b; inputs from testing/fixtures/pdfprobe/fetch.py)
+  /pdfprobe/strict/...       testing/fixtures/pdfprobe with the viewer's Content-Security-Policy
+  /pdfprobe/open/...         the same files without it
+  .../generated/<name>.pdf   fixture.pdf, cjk.pdf (non-embedded Japanese font) and pages-300.pdf
+  /pdfprobe/<mode>/checkpoint?engine=&csp=&name=
+                             held until POST /_admin/probe-release with the same query (120 s at most)
+  POST /_admin/probe-report  JSON result from the probe page; snapshots go to --probe-out
+  POST /_admin/probe-memory  JSON memory sample from the device check
 Admin (for the checks)
   GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log, media
   POST /_admin/reset                    forget everything
@@ -63,6 +71,7 @@ import base64
 import html
 import http.server
 import json
+import pathlib
 import threading
 import time
 import urllib.parse
@@ -79,6 +88,21 @@ COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60
 MAX_BODY_BYTES = 2 * 1024 * 1024
 FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unauthorized"}
 # Slow enough that a media download in progress is still running when a check looks.
+PDFPROBE_DIR = pathlib.Path(__file__).resolve().parent / "pdfprobe"
+PDFPROBE_FILES = {"index.html", "probe.mjs", "features.mjs", "feature-worker.mjs", "probe-worker.mjs",
+                  "probe-worker-legacy.mjs", "worker-console.mjs", "pdfium-worker.mjs"}
+# What a PDF viewer document would run under: its own scripts and workers, wasm, no eval, no
+# network beyond its own files.
+PDFPROBE_CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
+                "connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data: blob:; "
+                "style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+PDFPROBE_TYPES = {".html": "text/html; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+                  ".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm",
+                  ".pdf": "application/pdf", ".ttf": "font/ttf", ".icc": "application/vnd.iccprofile"}
+CHECKPOINT_SECONDS = 120
+probe_out = None  # --probe-out: where the probe's snapshots and reports go
+checkpoints = {}  # "engine/csp/name" -> threading.Event
+
 MEDIA_CHUNK_BYTES = 16 * 1024
 MEDIA_CHUNKS = 32
 MEDIA_CHUNK_DELAY_SECONDS = 0.25
@@ -94,23 +118,73 @@ def fresh_media():
     return {"requests": 0, "completed": 0}
 
 
-state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media(), "probe": []}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 scroll_load_finished = threading.Event()
 
 
+def pdf_stream(content):
+    return b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content)
+
+
 def pdf_document(text):
     """A minimal valid one-page PDF showing `text` (ASCII) in Helvetica."""
     stream = f"BT /F1 24 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
-    objects = [
+    return pdf_file([
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+        pdf_stream(stream),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    ]
+    ])
+
+
+def cjk_document():
+    """One page of Japanese in a non-embedded CID font (HeiseiMin-W3) through the predefined
+    UniJIS-UCS2-H CMap, so a viewer needs its CMaps and a system fallback font; a Helvetica line
+    below it."""
+    japanese = "日本語の文書".encode("utf-16-be").hex().upper().encode("ascii")
+    stream = (b"BT /F1 32 Tf 72 700 Td <%s> Tj ET BT /F2 18 Tf 72 640 Td (PDF-CJK-FIXTURE) Tj ET" % japanese)
+    return pdf_file([
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R /F2 8 0 R >> >> /Contents 4 0 R >>",
+        pdf_stream(stream),
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /HeiseiMin-W3 /Encoding /UniJIS-UCS2-H /DescendantFonts [6 0 R] >>",
+        b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HeiseiMin-W3 "
+        b"/CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 2 >> /FontDescriptor 7 0 R /DW 1000 >>",
+        b"<< /Type /FontDescriptor /FontName /HeiseiMin-W3 /Flags 6 /FontBBox [-123 -257 1001 910] "
+        b"/ItalicAngle 0 /Ascent 723 /Descent -241 /CapHeight 709 /StemV 69 >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ])
+
+
+PROBE_WORDS = ("servo pdf probe page render glyph canvas worker memory scroll text search "
+               "capture reader find history document viewer").split()
+
+
+def many_pages_document(count=300, lines=40):
+    """`count` text-heavy pages in Helvetica, each starting PROBE-PAGE-<nnnn>."""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", None, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for number in range(1, count + 1):
+        body = [f"BT /F1 16 Tf 54 750 Td (PROBE-PAGE-{number:04d} of {count}) Tj ET"]
+        for line in range(lines):
+            words = " ".join(PROBE_WORDS[(number * 7 + line * 3 + k) % len(PROBE_WORDS)] for k in range(12))
+            body.append(f"BT /F1 10 Tf 54 {720 - line * 16} Td ({words}) Tj ET")
+        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                       b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (len(objects) + 2))
+        kids.append(len(objects))
+        objects.append(pdf_stream("\n".join(body).encode("ascii")))
+    objects[1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % kid for kid in kids), count)
+    return pdf_file(objects)
+
+
+def pdf_file(objects):
+    """A PDF of `objects` (object n is objects[n - 1]); object 1 is the catalog."""
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -124,6 +198,7 @@ def pdf_document(text):
 
 
 PDF_DOCUMENT = pdf_document("PDF-FIXTURE-TEXT")
+PROBE_GENERATED = {"fixture.pdf": PDF_DOCUMENT, "cjk.pdf": cjk_document(), "pages-300.pdf": many_pages_document()}
 
 
 def page(title, body, head=""):
@@ -583,6 +658,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "#paint{left:40vw;width:20vw;background:" + marker + "}" + colors + "</style>"))
         if path == "/has-selector.html":
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
+        if path.startswith("/pdfprobe/"):
+            return self.pdfprobe(path, query)
         if path == "/document.pdf":
             return self.send(200, PDF_DOCUMENT, "application/pdf")
         if path == "/empty.html":
@@ -653,9 +730,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = url.path
         raw = self.body()
 
+        if path == "/_admin/probe-release":
+            key = "/".join(query.get(field, [""])[0] for field in ("engine", "csp", "name"))
+            with lock:
+                event = checkpoints.setdefault(key, threading.Event())
+            event.set()
+            return self.send(204)
+        if path == "/_admin/probe-report":
+            return self.probe_record(raw, snapshot=True)
+        if path == "/_admin/probe-memory":
+            return self.probe_record(raw, snapshot=False)
         if path == "/_admin/reset":
             scroll_load_finished.clear()
             with lock:
+                state["probe"].clear()
+                checkpoints.clear()
                 state["bookmarks"].clear()
                 state["lists"].clear()
                 state["lists"].update(fresh_lists())
@@ -751,6 +840,63 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with lock:
             state["media"]["completed"] += 1
 
+    def pdfprobe(self, path, query):
+        parts = path.split("/", 3)  # "", "pdfprobe", mode, rest
+        if len(parts) != 4 or parts[2] not in ("strict", "open"):
+            return self.send(404, page("not found", ""))
+        rest = parts[3]
+        headers = [("Content-Security-Policy", PDFPROBE_CSP)] if parts[2] == "strict" else []
+
+        if rest == "checkpoint":
+            return self.probe_checkpoint(query)
+        if rest.startswith("generated/"):
+            body = PROBE_GENERATED.get(rest[len("generated/"):])
+            if body is None:
+                return self.send(404, page("not found", ""))
+            return self.send(200, body, "application/pdf", headers)
+
+        name = rest or "index.html"
+        if name in PDFPROBE_FILES:
+            file = PDFPROBE_DIR / name
+        elif name.startswith("vendor/"):
+            vendor = (PDFPROBE_DIR / "vendor").resolve()
+            file = (PDFPROBE_DIR / name).resolve()
+            if vendor not in file.parents:
+                return self.send(404, page("not found", ""))
+        else:
+            return self.send(404, page("not found", ""))
+        if not file.is_file():
+            return self.send(404, page("not found (run testing/fixtures/pdfprobe/fetch.py)", ""))
+        content_type = PDFPROBE_TYPES.get(file.suffix, "application/octet-stream")
+        return self.send(200, file.read_bytes(), content_type, headers)
+
+    def probe_checkpoint(self, query):
+        key = "/".join(query.get(field, [""])[0] for field in ("engine", "csp", "name"))
+        with lock:
+            event = checkpoints.setdefault(key, threading.Event())
+        released = event.wait(CHECKPOINT_SECONDS)
+        print(json.dumps({"probe": "checkpoint", "key": key, "released": released}), flush=True)
+        return self.send(200, "released" if released else "timeout", "text/plain")
+
+    def probe_record(self, raw, snapshot):
+        try:
+            record = json.loads(raw)
+        except ValueError:
+            return self.send_json(400, {"error": "bad json"})
+        image = record.pop("snapshot", None) if snapshot else None
+        if image and probe_out and image.startswith("data:image/png;base64,"):
+            name = "-".join("".join(c for c in str(record.get(field, "")) if c.isalnum() or c in "-_")
+                            for field in ("engine", "csp", "name")) + ".png"
+            (probe_out / name).write_bytes(base64.b64decode(image.split(",", 1)[1]))
+            record["snapshot"] = name
+        with lock:
+            state["probe"].append(record)
+        print(json.dumps({"probe": record}, ensure_ascii=False), flush=True)
+        if probe_out:
+            with open(probe_out / "reports.jsonl", "a", encoding="utf-8") as reports:
+                reports.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return self.send(204)
+
     def hister_authorized(self):
         token = self.headers.get("X-Access-Token") or self.headers.get("Authorization", "").removeprefix("Bearer ")
         return token == HISTER_TOKEN
@@ -784,7 +930,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--probe-out", type=pathlib.Path)
     args = parser.parse_args()
+    global probe_out
+    if args.probe_out:
+        args.probe_out.mkdir(parents=True, exist_ok=True)
+        probe_out = args.probe_out
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"serving Combray fixtures on http://127.0.0.1:{args.port}", flush=True)
     server.serve_forever()
