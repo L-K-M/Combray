@@ -63,7 +63,10 @@ class PdfProbeTest {
             } catch (timeout: TimeoutCancellationException) {
                 gaveUp(engine, csp)
             }
-            if (title == DONE) return
+            if (title == DONE) {
+                afterLeaving(engine, csp)
+                return
+            }
             check(!title.startsWith(FAIL)) { "probe $engine/$csp broke: $title" }
 
             val name = checkpointOf(title)!!
@@ -73,6 +76,18 @@ class PdfProbeTest {
             post("/_admin/probe-memory", memory(engine, csp, name).toString())
             post("/_admin/probe-release?engine=$engine&csp=$csp&name=$name", "")
         }
+    }
+
+    /**
+     * What a person closing the PDF would see: the tab goes to another page, Servo discards the
+     * probe's document and workers, and memory is sampled once that has settled.
+     */
+    private fun afterLeaving(engine: String, csp: String) {
+        val elsewhere = Fixtures.solid(Device.GREEN)
+        device.browser.openUrl(elsewhere, Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.url == elsewhere && it.activeTab?.title == Fixtures.title(Device.GREEN) }
+        Thread.sleep(LEAVE_SETTLE_MS)
+        post("/_admin/probe-memory", memory(engine, csp, "after-leave").toString())
     }
 
     /** Records where the page was when the check gave up (the summary shows it), then fails. */
@@ -121,6 +136,7 @@ class PdfProbeTest {
         const val CHECKPOINT = "PROBE:checkpoint:"
         const val PROBE_TIMEOUT_MS = 25 * 60 * 1000L
         const val SETTLE_MS = 2_000L
+        const val LEAVE_SETTLE_MS = 10_000L
 
         fun checkpointOf(title: String): String? = title.takeIf { it.startsWith(CHECKPOINT) }?.removePrefix(CHECKPOINT)
     }

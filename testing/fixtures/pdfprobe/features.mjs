@@ -23,6 +23,10 @@ const BUILT_INS = {
   "URL.parse": () => typeof URL.parse === "function",
   "structuredClone": () => typeof structuredClone === "function",
   "ReadableStream": () => typeof ReadableStream === "function",
+  "ReadableStream async iteration": () => typeof ReadableStream === "function" &&
+    typeof ReadableStream.prototype[Symbol.asyncIterator] === "function",
+  "DecompressionStream": () => typeof DecompressionStream === "function",
+  "TestUtils.gc": () => typeof TestUtils === "object" && typeof TestUtils.gc === "function",
   "TextDecoder": () => typeof TextDecoder === "function",
   "fetch": () => typeof fetch === "function",
   "OffscreenCanvas": () => typeof OffscreenCanvas === "function",

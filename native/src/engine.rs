@@ -682,6 +682,9 @@ impl Engine {
         preferences.set_value("dom_fontface_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_adoptedstylesheet_enabled", PrefValue::Bool(true));
+        // PDF probe branch only (never merged): TestUtils.gc() lets the probe tell memory a
+        // garbage collection would free from memory that stays.
+        preferences.set_value("dom_testutils_enabled", PrefValue::Bool(true));
 
         let servo = ServoBuilder::default()
             .opts(opts)

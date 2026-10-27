@@ -9,6 +9,7 @@
 // ./checkpoint until it is released), PROBE:done at the end, PROBE:fail:<why> if the
 // harness itself broke. A document that fails is a result, not a harness failure.
 import { detect } from "./features.mjs";
+import { installPolyfills } from "./polyfills.mjs";
 
 const params = new URLSearchParams(location.search);
 const ENGINE = params.get("engine") || "pdfjs";
@@ -105,8 +106,18 @@ async function report(kind, data) {
   }
 }
 
-// Holds the page while the device check samples memory.
+// Holds the page while the device check samples memory: as it is, then (where Servo offers
+// TestUtils.gc) after garbage collection, so retained memory shows apart from garbage.
 async function checkpoint(name) {
+  await hold(name);
+  if (typeof TestUtils !== "object" || typeof TestUtils.gc !== "function") return;
+  await TestUtils.gc();
+  await TestUtils.gc();
+  await sleep(SETTLE_MS);
+  await hold(`${name}-gc`);
+}
+
+async function hold(name) {
   status(`checkpoint:${name}`);
   show(`checkpoint ${name}`);
   const response = await fetch(new URL(`checkpoint?engine=${ENGINE}&csp=${CSP}&name=${name}`, BASE));
@@ -491,7 +502,7 @@ async function threeOpen(engine) {
 
 async function main() {
   status("running:features");
-  await report("features", await features());
+  await report("features", { ...(await features()), polyfilled: installPolyfills() });
   await checkpoint("baseline");
 
   status("running:init");

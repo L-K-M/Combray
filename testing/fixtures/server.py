@@ -90,7 +90,7 @@ FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unaut
 # Slow enough that a media download in progress is still running when a check looks.
 PDFPROBE_DIR = pathlib.Path(__file__).resolve().parent / "pdfprobe"
 PDFPROBE_FILES = {"index.html", "probe.mjs", "features.mjs", "feature-worker.mjs", "probe-worker.mjs",
-                  "probe-worker-legacy.mjs", "worker-console.mjs", "pdfium-worker.mjs"}
+                  "probe-worker-legacy.mjs", "worker-console.mjs", "pdfium-worker.mjs", "polyfills.mjs"}
 # What a PDF viewer document would run under: its own scripts and workers, wasm, no eval, no
 # network beyond its own files.
 PDFPROBE_CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
