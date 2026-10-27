@@ -27,6 +27,7 @@ Evidence comes from three places:
   for an engine message: panic patterns are matched only on lines outside both.
 - The process itself: an exit the runner did not cause is a crash.
 
+Servo also runs Combray's own page script (``app_page_script``), as the app does.
 ``errors_userscript.js`` also runs in Servo; its records arrive in the probe's
 ``errors`` metric. They are a second, partial source (servoshell runs userscripts
 only after ``<head>`` is inserted), so ``PageResult.errors`` comes from the log
@@ -77,6 +78,18 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 _PROBE_PATH = _PACKAGE_DIR / "probe.js"
 # Installed for servoshell with --userscripts; reference.py installs it in Chromium.
 ERRORS_USERSCRIPT_PATH = _PACKAGE_DIR / "errors_userscript.js"
+# Combray's Android build runs native/src/animations.js, with the web-animations-js
+# polyfill in its placeholder, before every document's own scripts (see
+# native/src/animations.rs). servoshell runs it too, so a page that works only with it
+# is judged as the app shows it. Chromium does not need it: the script steps aside for
+# a native Element.animate().
+_APP_SOURCE_DIR = _PACKAGE_DIR.parents[2] / "native" / "src"
+_APP_PAGE_SCRIPT_TEMPLATE = _APP_SOURCE_DIR / "animations.js"
+_APP_PAGE_SCRIPT_POLYFILL = _APP_SOURCE_DIR / "vendor" / "web-animations-next-lite.min.js"
+_APP_PAGE_SCRIPT_PLACEHOLDER = "__WEB_ANIMATIONS__"
+# servoshell runs userscripts in file-name order, so the error capture comes first and
+# also records this script's errors.
+APP_PAGE_SCRIPT_NAME = "page_script.js"
 _SUPERVISOR_PATH = _PACKAGE_DIR / "supervisor.py"
 # The supervisor imports nothing outside the standard library; -I keeps the
 # harness's environment and paths out, -S skips site packages for a quick start.
@@ -1292,14 +1305,27 @@ def _pump(stream: IO[bytes], log: _LogWriter, prefix: bytes) -> None:
 # --- setup --------------------------------------------------------------------------
 
 
+@functools.cache
+def app_page_script() -> str:
+    """Combray's page script, built as native/src/animations.rs builds it."""
+    template = _APP_PAGE_SCRIPT_TEMPLATE.read_text(encoding="utf-8")
+    if template.count(_APP_PAGE_SCRIPT_PLACEHOLDER) != 1:
+        raise config.ConfigError(
+            f"{_APP_PAGE_SCRIPT_TEMPLATE} must hold {_APP_PAGE_SCRIPT_PLACEHOLDER} exactly once"
+        )
+    polyfill = _APP_PAGE_SCRIPT_POLYFILL.read_text(encoding="utf-8")
+    return template.replace(_APP_PAGE_SCRIPT_PLACEHOLDER, polyfill, 1)
+
+
 def _prepare_profile(profile_root: Path) -> tuple[Path, Path, Path]:
     """Create the empty config, userscripts and temporary directories; return them."""
     config_dir = profile_root / "config"
     config_dir.mkdir()
-    # servoshell runs every file in this directory, so it holds only our script.
+    # servoshell runs every file in this directory, so it holds only our scripts.
     userscripts_dir = profile_root / "userscripts"
     userscripts_dir.mkdir()
     shutil.copyfile(ERRORS_USERSCRIPT_PATH, userscripts_dir / ERRORS_USERSCRIPT_PATH.name)
+    (userscripts_dir / APP_PAGE_SCRIPT_NAME).write_text(app_page_script(), encoding="utf-8")
     # Servo's --temporary-storage disk cache goes to $TMPDIR/cache.sqlite3 (it names
     # the file next to a temporary directory instead of inside it), so TMPDIR points
     # into the profile and the cache goes with it.

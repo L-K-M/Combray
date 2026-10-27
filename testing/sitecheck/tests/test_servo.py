@@ -577,6 +577,22 @@ class PageScriptTests(unittest.TestCase):
         self.assertIn('addEventListener("unhandledrejection"', source)
 
 
+    def test_app_page_script_embeds_the_polyfill_once(self) -> None:
+        source_dir = Path(__file__).resolve().parents[3] / "native" / "src"
+        template = (source_dir / "animations.js").read_text(encoding="utf-8")
+        polyfill = (source_dir / "vendor" / "web-animations-next-lite.min.js").read_text(
+            encoding="utf-8"
+        )
+        script = servo.app_page_script()
+
+        self.assertNotIn("__WEB_ANIMATIONS__", script)
+        self.assertEqual(script.count(polyfill), 1)
+        self.assertEqual(script, template.replace("__WEB_ANIMATIONS__", polyfill))
+
+    def test_error_capture_runs_before_the_app_page_script(self) -> None:
+        self.assertLess(servo.ERRORS_USERSCRIPT_PATH.name, servo.APP_PAGE_SCRIPT_NAME)
+
+
 class FakeServoshellTestCase(unittest.TestCase):
     """Runs run_page against fixtures/fake_servoshell.py in a chosen mode."""
 
@@ -697,7 +713,7 @@ class RunPageTests(FakeServoshellTestCase):
         self.assertEqual(facts["navigate"], [FAKE_URL])
         self.assertEqual(len(facts["scroll"]), 2)
         self.assertEqual(facts["deleted"], [""])
-        self.assertEqual(facts["userscripts"], ['["errors_userscript.js"]'])
+        self.assertEqual(facts["userscripts"], ['["errors_userscript.js", "page_script.js"]'])
         self.assertEqual(facts["config_dir_entries"], ["[]"])
         self.assertEqual(facts["rust_backtrace"], ["1"])
         self.assertNotIn("HISTER_TOKEN", facts["env"][0])
