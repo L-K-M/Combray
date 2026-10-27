@@ -79,6 +79,8 @@ ENGINE_PREFS: Mapping[str, bool] = MappingProxyType(
         "dom_fontface_enabled": True,
         "dom_indexeddb_enabled": True,
         "dom_adoptedstylesheet_enabled": True,
+        # PDF probe branch only (never merged), mirroring native/src/engine.rs.
+        "dom_testutils_enabled": True,
     }
 )
 
