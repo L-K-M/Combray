@@ -83,6 +83,12 @@ object Fixtures {
     /** A page without any text. */
     const val EMPTY = "$BASE/empty.html"
 
+    /**
+     * A one-page PDF (`application/pdf`) reading PDF-FIXTURE-TEXT. Servo cannot show it: it
+     * commits a stand-in page, "Unknown content type (application/pdf).", with no title.
+     */
+    const val PDF = "$BASE/document.pdf"
+
     /** A page the server answers only after several seconds. */
     const val SLOW = "$BASE/slow.html"
 

@@ -63,6 +63,9 @@ pub const MAX_DEFERRAL: Duration = Duration::from_secs(10);
 
 const SCRIPT_TEMPLATE: &str = include_str!("capture.js");
 const READER_TEMPLATE: &str = include_str!("reader.js");
+/// Recognises Servo's stand-in page for a file it cannot show, such as a PDF: both scripts read
+/// nothing from it, so its "Unknown content type" sentence never passes for the file's text.
+const STAND_IN: &str = include_str!("stand_in.js");
 /// Mozilla Readability 0.6.0 (Apache-2.0), from the npm package `@mozilla/readability`.
 const READABILITY: &str = include_str!("vendor/Readability.js");
 
@@ -88,6 +91,7 @@ pub fn capture_script(max_text_bytes: usize, time_budget: Duration) -> String {
         .replace("__MAX_TEXT_BYTES__", &max_text_bytes.to_string())
         .replace("__MAX_NODES__", &MAX_NODES.to_string())
         .replace("__MAX_MILLIS__", &time_budget.as_millis().to_string())
+        .replacen("__STAND_IN__", STAND_IN, 1)
 }
 
 /// How long a capture may run in the page: briefly for the page on screen, which the user may
@@ -192,6 +196,7 @@ pub fn article_script(max_text_bytes: usize) -> String {
     READER_TEMPLATE
         .replace("__MAX_TEXT_BYTES__", &max_text_bytes.to_string())
         .replace("__MAX_NODES__", &MAX_NODES.to_string())
+        .replacen("__STAND_IN__", STAND_IN, 1)
         .replacen("__READABILITY__", READABILITY, 1)
 }
 
@@ -369,7 +374,24 @@ mod tests {
     fn script_has_no_unfilled_placeholders() {
         let script = capture_script(DEFAULT_MAX_TEXT_BYTES, VISIBLE_SCRIPT_BUDGET);
         assert!(!script.contains("__MAX_"));
+        assert!(!script.contains("__STAND_IN__"));
         assert!(script.trim_end().ends_with("})(262144, 50000, 400)"));
+    }
+
+    #[test]
+    fn both_scripts_check_for_servos_stand_in_page_inside_their_function() {
+        for (kind, wrapper) in [
+            (
+                CaptureKind::PageText,
+                "(function (maxTextBytes, maxNodes, maxMillis) {",
+            ),
+            (CaptureKind::Article, "(function (maxBytes, maxNodes) {"),
+        ] {
+            let script = script(kind, DEFAULT_MAX_TEXT_BYTES, VISIBLE_SCRIPT_BUDGET);
+            let declared = script.find("function isServoStandIn()").unwrap();
+            // Declared inside the wrapping function, not as a page global.
+            assert!(script.find(wrapper).unwrap() < declared, "{kind:?}");
+        }
     }
 
     #[test]
@@ -463,6 +485,7 @@ mod tests {
         );
         assert!(!script.contains("__MAX_"));
         assert!(!script.contains("__READABILITY__"));
+        assert!(!script.contains("__STAND_IN__"));
         assert!(script.contains("function Readability(doc, options)"));
         // Readability is declared inside the wrapping function, not as a page global.
         let wrapper = script.find("(function (maxBytes, maxNodes) {").unwrap();
