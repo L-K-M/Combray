@@ -167,7 +167,8 @@ local servers (loopback or private hosts, non-default ports) are ever cached.
    stops instead: a proxy in fake-IP mode answers for everything).
 2. **Per page, one engine at a time:** a fresh servoshell (`--headless`, 412×915 CSS px at
    device pixel ratio 1, Servo's Android user agent, the preferences of Combray's
-   `native/src/engine.rs`, an empty temporary profile) loads the page over WebDriver,
+   `native/src/engine.rs` and the page script it injects (`native/src/animations.js`),
+   an empty temporary profile) loads the page over WebDriver,
    waits until the page replaced the initial `about:blank` and finished loading (at most
    45 s), waits 3 s, scrolls to the bottom and back, runs `probe.js` and takes a
    screenshot. Then Chromium does the same with the same user agent, viewport, pixel

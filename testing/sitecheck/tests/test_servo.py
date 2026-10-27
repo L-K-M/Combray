@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import IO
 from unittest import mock
 
-from sitecheck import model, servo
+from sitecheck import config, model, servo
 from sitecheck.model import CrashInfo, Engine, PageError, PageResult, PageStatus
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -577,6 +577,31 @@ class PageScriptTests(unittest.TestCase):
         self.assertIn('addEventListener("unhandledrejection"', source)
 
 
+    def test_app_page_script_embeds_the_polyfill_once(self) -> None:
+        source_dir = Path(__file__).resolve().parents[3] / "native" / "src"
+        template = (source_dir / "animations.js").read_text(encoding="utf-8")
+        polyfill = (source_dir / "vendor" / "web-animations-next-lite.min.js").read_text(
+            encoding="utf-8"
+        )
+        script = servo.app_page_script()
+
+        self.assertNotIn("__WEB_ANIMATIONS__", script)
+        self.assertEqual(script.count(polyfill), 1)
+        self.assertEqual(script, template.replace("__WEB_ANIMATIONS__", polyfill))
+
+    def test_a_missing_app_page_script_is_a_config_error(self) -> None:
+        servo.app_page_script.cache_clear()
+        self.addCleanup(servo.app_page_script.cache_clear)
+        missing = Path(__file__).resolve().parent / "no-such-animations.js"
+
+        with mock.patch.object(servo, "_APP_PAGE_SCRIPT_TEMPLATE", missing):
+            with self.assertRaisesRegex(config.ConfigError, "no-such-animations.js"):
+                servo.app_page_script()
+
+    def test_error_capture_runs_before_the_app_page_script(self) -> None:
+        self.assertLess(servo.ERRORS_USERSCRIPT_PATH.name, servo.APP_PAGE_SCRIPT_NAME)
+
+
 class FakeServoshellTestCase(unittest.TestCase):
     """Runs run_page against fixtures/fake_servoshell.py in a chosen mode."""
 
@@ -697,7 +722,7 @@ class RunPageTests(FakeServoshellTestCase):
         self.assertEqual(facts["navigate"], [FAKE_URL])
         self.assertEqual(len(facts["scroll"]), 2)
         self.assertEqual(facts["deleted"], [""])
-        self.assertEqual(facts["userscripts"], ['["errors_userscript.js"]'])
+        self.assertEqual(facts["userscripts"], ['["errors_userscript.js", "page_script.js"]'])
         self.assertEqual(facts["config_dir_entries"], ["[]"])
         self.assertEqual(facts["rust_backtrace"], ["1"])
         self.assertNotIn("HISTER_TOKEN", facts["env"][0])
