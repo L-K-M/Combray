@@ -87,7 +87,10 @@
     return style.contentVisibility === "hidden";
   }
 
-  var root = document.body || document.documentElement;
+  __STAND_IN__
+
+  // Servo's stand-in for a file it cannot show (a PDF) has no text of that file: read nothing.
+  var root = isServoStandIn() ? null : document.body || document.documentElement;
   // Explicit stack: [node, closing] where closing marks the end of a block element.
   var stack = root ? [[root, false]] : [];
   // No time at all (a hidden page whose deadline leaves none): read nothing.

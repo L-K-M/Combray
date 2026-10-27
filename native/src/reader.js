@@ -22,6 +22,8 @@
   return (function () {
     "use strict";
 
+    __STAND_IN__
+
     var result = {
       url: String(document.URL),
       title: String(document.title),
@@ -30,6 +32,8 @@
       nodes: 0,
       nodeBudgetExhausted: false
     };
+    // Servo's stand-in for a file it cannot show (a PDF) is no article.
+    if (isServoStandIn()) return result;
     var article = new Readability(document.cloneNode(true), {
       maxElemsToParse: maxNodes,
       // The content element itself rather than its HTML: it is walked below, never serialized.

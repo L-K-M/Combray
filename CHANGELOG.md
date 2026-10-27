@@ -212,6 +212,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A PDF, or another file Servo cannot show, no longer reaches Hister as
+  the sentence "Unknown content type (application/pdf).", and reader view
+  no longer offers that sentence as an article. Servo shows such a file as
+  a one-line page of its own at the file's address; capture and reader
+  view now read nothing from it.
 - The notices show the whole LLVM license for libc++ instead of its
   heading, twelve crates' real copyright notices instead of SPDX
   templates, and aws-lc-rs's own notice next to the generic ISC text.
