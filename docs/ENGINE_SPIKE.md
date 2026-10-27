@@ -972,3 +972,33 @@ Host checks on macOS: `cargo fmt --check` and `cargo test --lib` (88) in
 test. This host has no Android SDK: both native ABI builds, packaging and
 the emulator checks are the Engine workflow's evidence, recorded in the pin
 PR.
+
+## 24. Downstream fixes on the v0.7 line (27 October 2026)
+
+The pin moves to `combray/0.7` tip
+`6e493693b81baf47d93535d8683b4e7e83962641` (upstream base still v0.7.0,
+`aac43a3f31a259f04a574f5ec4e959c943ad7cc7`). The nightly maintenance task
+landed these downstream changes there, each with a regression test,
+servoshell build, the related WPT directories, a site-check regression
+sweep and an independent review:
+
+- [Servo PR #8](https://github.com/L-K-M/servo/pull/8): the parsed foreign
+  attribute `xmlns` on `<svg>` and `<math>` has a null prefix again (its
+  name was `:xmlns`).
+- [Servo PR #9](https://github.com/L-K-M/servo/pull/9): `console.table` and
+  `console.dirxml` exist and log their arguments.
+- [Servo PR #10](https://github.com/L-K-M/servo/pull/10): backport of
+  upstream's zstd 0.14.3, zstd-safe 8.2.0 and zstd-sys 2.1.2 updates
+  (RUSTSEC-2026-0391, -0398, -0403, -0410).
+- [Servo PR #11](https://github.com/L-K-M/servo/pull/11):
+  `performance.measure()` converts every PerformanceTiming name instead of
+  throwing `OperationError` for `fetchStart` and others.
+
+No embedder API changed. `native/Cargo.lock` takes the same three zstd
+versions as Servo's lockfile; nothing else changes. The notices were
+regenerated for the new lockfile and pin; the NDK did not change, so its
+LLVM section is the same text.
+
+This host has no Android SDK: both native ABI builds, packaging and the
+emulator checks are the Engine workflow's evidence, recorded in the pin
+PR.
