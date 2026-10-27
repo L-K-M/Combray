@@ -51,6 +51,9 @@ object Fixtures {
     /** Titled `WA:ok` once Element.animate() behaves, `WA:missing` without it, `WA:fail:<why>` otherwise. */
     const val ANIMATE = "$BASE/animate.html"
 
+    /** Titled `XP:ok` once FontFace, adoptedStyleSheets and IndexedDB work, `XP:fail:<why>` otherwise. */
+    const val APIS = "$BASE/apis.html"
+
     /** Answered once per [key] (title [ONCE_TITLE]); later requests fail like a lost connection. */
     fun once(key: String) = "$BASE/once.html?k=$key"
 

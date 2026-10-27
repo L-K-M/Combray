@@ -140,6 +140,38 @@ INTERSECTION_PAGE = page(
     " }).observe(document.getElementById('target')); }</script>",
 )
 
+# Reports in its title whether the experimental APIs Combray turns on in Servo work: FontFace with
+# document.fonts, adoptedStyleSheets and IndexedDB. Pages that call them unconditionally stop with a
+# TypeError without them.
+APIS_PAGE = page(
+    "XP:waiting",
+    "<p id='target'>styled</p><script>"
+    "function fail(why) { document.title = 'XP:fail:' + why; }"
+    "try {"
+    " var face = new FontFace('Fixture Sans', 'local(sans-serif)');"
+    " document.fonts.add(face);"
+    " if (!document.fonts.has(face)) throw new Error('font not added');"
+    " var sheet = new CSSStyleSheet();"
+    " sheet.insertRule('#target { color: rgb(0, 128, 0); }');"
+    " document.adoptedStyleSheets = [sheet];"
+    " var color = getComputedStyle(document.getElementById('target')).color;"
+    " if (color !== 'rgb(0, 128, 0)') throw new Error('adopted sheet ' + color);"
+    " var open = indexedDB.open('fixture', 1);"
+    " open.onupgradeneeded = function () { open.result.createObjectStore('store'); };"
+    " open.onerror = function () { fail('open ' + open.error); };"
+    " open.onsuccess = function () { try {"
+    "  var store = open.result.transaction('store', 'readwrite').objectStore('store');"
+    "  store.put({value: 7}, 'key');"
+    "  var read = store.get('key');"
+    "  read.onerror = function () { fail('get ' + read.error); };"
+    "  read.onsuccess = function () {"
+    "   if (read.result && read.result.value === 7) document.title = 'XP:ok';"
+    "   else fail('read ' + JSON.stringify(read.result));"
+    "  };"
+    " } catch (e) { fail('store ' + e.message); } };"
+    "} catch (e) { fail(e.message); }</script>",
+)
+
 # Reports in its title whether element animations work: docs.mistral.ai runs an endless marquee
 # through Element.animate() and shows an error page without it.
 ANIMATE_PAGE = page(
@@ -468,6 +500,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":
             return self.send(200, ANIMATE_PAGE)
+        if path == "/apis.html":
+            return self.send(200, APIS_PAGE)
         if path == "/slow.html":
             time.sleep(SLOW_PAGE_SECONDS)
             return self.send(200, page("SLOW", "<p>SLOW</p>"))

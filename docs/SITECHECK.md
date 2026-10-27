@@ -15,7 +15,7 @@ Combray's engine is only as useful as the sites it renders. This document descri
 | Private state | `~/.local/share/combray-sitecheck/` | Page inventory, results, screenshots, reports, the nightly ledger |
 | Nightly task | a scheduled Claude Code task on the owner's Mac, 01:00 local time | Runs the procedure below |
 
-The desktop build approximates the Android engine: same Servo source, preferences mirrored from `native/src/engine.rs` (a unit test fails when they drift), Servo's Android user agent and a 412×915 CSS-pixel viewport. Platform code (fonts, GPU, input) differs, so a clean desktop result is evidence, not proof, of a working page on the phone.
+The desktop build approximates the Android engine: same Servo source, preferences mirrored from `native/src/engine.rs` (a unit test fails when they drift), the page script the app injects before each document's own scripts (`native/src/animations.js`), Servo's Android user agent and a 412×915 CSS-pixel viewport. Platform code (fonts, GPU, input) differs, so a clean desktop result is evidence, not proof, of a working page on the phone.
 
 ## Privacy and safety
 

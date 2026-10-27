@@ -144,6 +144,8 @@ All notable changes to this project are documented here. The format follows
   zstd crates, `console.table` and `console.dirxml`, inline SVG attribute
   names that scripts can read again, and `performance.measure()` from
   `fetchStart` and other navigation timing names.
+- Pages can use FontFace and `document.fonts`, `adoptedStyleSheets` and
+  IndexedDB: Servo's experimental support for them is now on.
 - Move the engine to Servo v0.7.0 (downstream `combray/0.7`). It brings
   upstream's fixes for script hangs while scrolling, patched TLS and crypto
   crates, and a backported fix for a crash when a pending `setTimeout`
