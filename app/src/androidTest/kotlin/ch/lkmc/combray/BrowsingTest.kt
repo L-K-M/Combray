@@ -324,6 +324,15 @@ class BrowsingTest {
     }
 
     @Test
+    fun pagesCanUseTheEnabledExperimentalApis() {
+        device.browser.openUrl(Fixtures.APIS, Placement.CURRENT_TAB)
+        val state = device.awaitState {
+            it.activeTab?.title?.let { title -> title.startsWith(APIS_PREFIX) && title != APIS_WAITING } == true
+        }
+        assertEquals(APIS_OK, state.activeTab?.title)
+    }
+
+    @Test
     fun pagesCanAnimateElements() {
         device.browser.openUrl(Fixtures.ANIMATE, Placement.CURRENT_TAB)
         val state = device.awaitState {
@@ -546,6 +555,9 @@ class BrowsingTest {
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val APIS_PREFIX = "XP:"
+        const val APIS_WAITING = "XP:waiting"
+        const val APIS_OK = "XP:ok"
         const val SCREEN_PREFIX = "SCREEN:"
         const val SCREEN_WIDTHS = 4
         const val MEDIA_FAILED = "MEDIA:errors:2"

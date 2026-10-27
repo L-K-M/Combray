@@ -76,6 +76,9 @@ ENGINE_PREFS: Mapping[str, bool] = MappingProxyType(
     {
         "viewport_meta_enabled": True,
         "dom_intersection_observer_enabled": True,
+        "dom_fontface_enabled": True,
+        "dom_indexeddb_enabled": True,
+        "dom_adoptedstylesheet_enabled": True,
     }
 )
 
