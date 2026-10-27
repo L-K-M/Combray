@@ -272,8 +272,9 @@ jobs:
           # One instrumentation run (one app process) per engine, most important first: a crash
           # in one cannot spoil the others, and each starts from the same memory.
           COMBRAY_RESULTS="$PWD/build/device-checks/pdfprobe" scripts/check-app.sh emulator-5560 \
-            ch.lkmc.combray.PdfProbeTest#pdfjsLegacy ch.lkmc.combray.PdfProbeTest#pdfiumWasm \
-            ch.lkmc.combray.PdfProbeTest#pdfjsLegacyWithoutCsp ch.lkmc.combray.PdfProbeTest#pdfjsModern || status=$?
+            ch.lkmc.combray.PdfProbeTest#pdfjsLegacyTwice \
+            ch.lkmc.combray.PdfProbeTest#pdfjsLegacyWithoutFontFaceTwice \
+            ch.lkmc.combray.PdfProbeTest#pdfiumWasmTwice || status=$?
           if [ -f build/device-checks/pdfprobe/pdfprobe/reports.jsonl ]; then
             python3 -I testing/fixtures/pdfprobe/summarize.py build/device-checks/pdfprobe/pdfprobe | tee build/device-checks/pdfprobe/pdfprobe/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -13,6 +13,12 @@ import { installPolyfills } from "./polyfills.mjs";
 
 const params = new URLSearchParams(location.search);
 const ENGINE = params.get("engine") || "pdfjs";
+// fonts=off: pdf.js draws glyphs as paths instead of loading each embedded font as a FontFace.
+const FONT_FACES = params.get("fonts") !== "off";
+// rounds=N: the corpus runs N times, to tell a one-off cost from memory that keeps growing.
+const ROUNDS = Math.max(1, Math.min(3, Number(params.get("rounds")) || 1));
+// How this run is named in reports and checkpoints.
+const LABEL = ENGINE + (FONT_FACES ? "" : "-nofontface") + (ROUNDS > 1 ? `-x${ROUNDS}` : "");
 const CSP = location.pathname.includes("/strict/") ? "strict" : "open";
 const BASE = new URL("./", import.meta.url).href;
 const PDFJS = `${BASE}vendor/pdfjs/package/`;
@@ -98,7 +104,7 @@ function withTimeout(promise, ms, label) {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function report(kind, data) {
-  const body = JSON.stringify({ engine: ENGINE, csp: CSP, kind, ...data });
+  const body = JSON.stringify({ engine: LABEL, csp: CSP, kind, ...data });
   try {
     await fetch("/_admin/probe-report", { method: "POST", headers: { "Content-Type": "application/json" }, body });
   } catch (error) {
@@ -120,7 +126,7 @@ async function checkpoint(name) {
 async function hold(name) {
   status(`checkpoint:${name}`);
   show(`checkpoint ${name}`);
-  const response = await fetch(new URL(`checkpoint?engine=${ENGINE}&csp=${CSP}&name=${name}`, BASE));
+  const response = await fetch(new URL(`checkpoint?engine=${LABEL}&csp=${CSP}&name=${name}`, BASE));
   await response.text();
 }
 
@@ -193,6 +199,7 @@ class PdfjsEngine {
       wasmUrl: `${PDFJS}wasm/`,
       iccUrl: `${PDFJS}iccs/`,
       enableXfa: false,
+      disableFontFace: !FONT_FACES,
       verbosity: this.lib.VerbosityLevel.WARNINGS,
     });
     try {
@@ -359,7 +366,26 @@ async function features() {
   } catch (error) {
     worker = { error: errorText(error) };
   }
-  return { page, worker, fontFace: await fontFaceFromBytes() };
+  return { page, worker, fontFace: await fontFaceFromBytes(), canvasCjk: canvasCjk() };
+}
+
+// Japanese drawn with canvas text in a generic family: a PDF's non-embedded CJK font ends up
+// here. The snapshot shows glyphs or empty boxes.
+function canvasCjk() {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 480;
+    canvas.height = 80;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#000";
+    context.font = "48px sans-serif";
+    context.fillText("日本語の文書", 10, 60);
+    return { ink: inkRatio(canvas), width: context.measureText("日本語の文書").width, snapshot: canvas.toDataURL("image/png") };
+  } catch (error) {
+    return { error: errorText(error) };
+  }
 }
 
 // pdf.js loads embedded fonts as FontFace objects made from bytes; a face that loads must also
@@ -502,7 +528,10 @@ async function threeOpen(engine) {
 
 async function main() {
   status("running:features");
-  await report("features", { ...(await features()), polyfilled: installPolyfills() });
+  const found = await features();
+  const { snapshot: cjkSnapshot, ...cjk } = found.canvasCjk;
+  await report("features", { ...found, canvasCjk: cjk, polyfilled: installPolyfills() });
+  if (cjkSnapshot) await report("canvas-cjk", { name: "canvas-cjk", snapshot: cjkSnapshot });
   await checkpoint("baseline");
 
   status("running:init");
@@ -517,18 +546,21 @@ async function main() {
   }
   await report("init", init);
 
-  for (const entry of CORPUS) {
-    if (timeLeft() < THREE_OPEN_RESERVE_MS) {
-      await report("document", { name: entry.name, feature: entry.kind, skipped: "probe deadline" });
-      continue;
+  for (let round = 1; round <= ROUNDS; round++) {
+    for (const corpusEntry of CORPUS) {
+      const entry = round === 1 ? corpusEntry : { ...corpusEntry, name: `${corpusEntry.name}#${round}` };
+      if (timeLeft() < THREE_OPEN_RESERVE_MS) {
+        await report("document", { name: entry.name, feature: entry.kind, skipped: "probe deadline" });
+        continue;
+      }
+      status(`running:${entry.name}`);
+      const result = await runDocument(engine, entry);
+      show(`${entry.name}: ${result.error ? "error" : `${result.renderMs} ms, ink ${result.ink}, text ${result.textFound}`}`);
+      await report("document", result);
+      await flushPageLog(entry.name);
     }
-    status(`running:${entry.name}`);
-    const result = await runDocument(engine, entry);
-    show(`${entry.name}: ${result.error ? "error" : `${result.renderMs} ms, ink ${result.ink}, text ${result.textFound}`}`);
-    await report("document", result);
-    await flushPageLog(entry.name);
+    await checkpoint(round === 1 ? "after-corpus" : `after-corpus-${round}`);
   }
-  await checkpoint("after-corpus");
 
   status("running:many-pages");
   await report("many-pages", await manyPages(engine));

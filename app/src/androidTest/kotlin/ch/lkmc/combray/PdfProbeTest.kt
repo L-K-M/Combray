@@ -48,33 +48,45 @@ class PdfProbeTest {
     @Test
     fun pdfjsLegacyWithoutCsp() = probe("pdfjs-legacy", OPEN)
 
-    private fun probe(engine: String, csp: String) {
-        device.browser.openUrl("${Fixtures.BASE}/pdfprobe/$csp/index.html?engine=$engine", Placement.CURRENT_TAB)
+    // The corpus twice, to tell a one-off cost from memory that keeps growing; and pdf.js without
+    // FontFace (glyphs drawn as paths), to tell whether loaded web fonts are what stays.
+    @Test
+    fun pdfjsLegacyTwice() = probe("pdfjs-legacy", STRICT, "&rounds=2", "pdfjs-legacy-x2")
+
+    @Test
+    fun pdfjsLegacyWithoutFontFaceTwice() = probe("pdfjs-legacy", STRICT, "&rounds=2&fonts=off", "pdfjs-legacy-nofontface-x2")
+
+    @Test
+    fun pdfiumWasmTwice() = probe("pdfium", STRICT, "&rounds=2", "pdfium-x2")
+
+    /** [label] names the run in the reports and checkpoints, as the page names it. */
+    private fun probe(engine: String, csp: String, options: String = "", label: String = engine) {
+        device.browser.openUrl("${Fixtures.BASE}/pdfprobe/$csp/index.html?engine=$engine$options", Placement.CURRENT_TAB)
         val handled = mutableSetOf<String>()
         val deadline = System.currentTimeMillis() + PROBE_TIMEOUT_MS
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
-            if (remaining <= 0) gaveUp(engine, csp)
+            if (remaining <= 0) gaveUp(label, csp)
             val title = try {
                 device.awaitState(remaining) { state ->
                     val title = state.activeTab?.title.orEmpty()
                     title == DONE || title.startsWith(FAIL) || checkpointOf(title)?.let { it !in handled } == true
                 }.activeTab?.title.orEmpty()
             } catch (timeout: TimeoutCancellationException) {
-                gaveUp(engine, csp)
+                gaveUp(label, csp)
             }
             if (title == DONE) {
-                afterLeaving(engine, csp)
+                afterLeaving(label, csp)
                 return
             }
-            check(!title.startsWith(FAIL)) { "probe $engine/$csp broke: $title" }
+            check(!title.startsWith(FAIL)) { "probe $label/$csp broke: $title" }
 
             val name = checkpointOf(title)!!
             handled += name
             // Let the page's last frames and the engine's frees land before measuring.
             Thread.sleep(SETTLE_MS)
-            post("/_admin/probe-memory", memory(engine, csp, name).toString())
-            post("/_admin/probe-release?engine=$engine&csp=$csp&name=$name", "")
+            post("/_admin/probe-memory", memory(label, csp, name).toString())
+            post("/_admin/probe-release?engine=$label&csp=$csp&name=$name", "")
         }
     }
 

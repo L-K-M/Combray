@@ -45,7 +45,9 @@ def main():
                                   if "error" not in worker else [f"module worker failed: {first_line(worker['error'])}"])
                 lines += [f"- Page lacks: {', '.join(missing) or 'nothing'}",
                           f"- Module worker lacks: {', '.join(worker_missing) or 'nothing'}",
-                          f"- FontFace from bytes: {json.dumps(item.get('fontFace'))}", ""]
+                          f"- FontFace from bytes: {json.dumps(item.get('fontFace'))}",
+                          f"- Canvas Japanese text: {json.dumps(item.get('canvasCjk'))} (see the canvas-cjk snapshot)",
+                          f"- Polyfilled: {', '.join(item.get('polyfilled') or []) or 'nothing'}", ""]
             elif kind == "init":
                 outcome = first_line(item["error"]) if "error" in item else f"{round(item.get('ms', 0))} ms"
                 lines += [f"- Init: {outcome}", ""]
