@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.Placement
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.TimeoutCancellationException
 import org.json.JSONObject
 import org.junit.Before
 import org.junit.Rule
@@ -53,11 +54,15 @@ class PdfProbeTest {
         val deadline = System.currentTimeMillis() + PROBE_TIMEOUT_MS
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
-            check(remaining > 0) { "probe $engine/$csp did not finish: ${device.browser.browserState.value.activeTab?.title}" }
-            val title = device.awaitState(remaining) { state ->
-                val title = state.activeTab?.title.orEmpty()
-                title == DONE || title.startsWith(FAIL) || checkpointOf(title)?.let { it !in handled } == true
-            }.activeTab?.title.orEmpty()
+            if (remaining <= 0) gaveUp(engine, csp)
+            val title = try {
+                device.awaitState(remaining) { state ->
+                    val title = state.activeTab?.title.orEmpty()
+                    title == DONE || title.startsWith(FAIL) || checkpointOf(title)?.let { it !in handled } == true
+                }.activeTab?.title.orEmpty()
+            } catch (timeout: TimeoutCancellationException) {
+                gaveUp(engine, csp)
+            }
             if (title == DONE) return
             check(!title.startsWith(FAIL)) { "probe $engine/$csp broke: $title" }
 
@@ -68,6 +73,15 @@ class PdfProbeTest {
             post("/_admin/probe-memory", memory(engine, csp, name).toString())
             post("/_admin/probe-release?engine=$engine&csp=$csp&name=$name", "")
         }
+    }
+
+    /** Records where the page was when the check gave up (the summary shows it), then fails. */
+    private fun gaveUp(engine: String, csp: String): Nothing {
+        val title = device.browser.browserState.value.activeTab?.title
+        val record = JSONObject().put("engine", engine).put("csp", csp).put("kind", "harness-error")
+            .put("error", "device check gave up after ${PROBE_TIMEOUT_MS / 60_000} minutes at title $title")
+        runCatching { post("/_admin/probe-report", record.toString()) }
+        error("probe $engine/$csp did not finish: $title")
     }
 
     private fun memory(engine: String, csp: String, name: String): JSONObject {
@@ -82,6 +96,10 @@ class PdfProbeTest {
             .put("graphicsKb", info.getMemoryStat("summary.graphics"))
             .put("javaHeapKb", info.getMemoryStat("summary.java-heap"))
             .put("codeKb", info.getMemoryStat("summary.code"))
+            // Servo's jemalloc heap, SpiderMonkey's GC heap and wasm memory are unnamed mappings:
+            // they count here, not in the native heap.
+            .put("privateOtherKb", info.getMemoryStat("summary.private-other"))
+            .put("systemKb", info.getMemoryStat("summary.system"))
             .put("nativeAllocatedKb", Debug.getNativeHeapAllocatedSize() / 1024)
     }
 

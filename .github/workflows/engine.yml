@@ -269,7 +269,11 @@ jobs:
           # PDF probe draft (docs/PDF.md, phase 0b): only the probe runs on this branch.
           python3 -I testing/fixtures/pdfprobe/fetch.py
           scripts/m0/emulator.sh
-          COMBRAY_RESULTS="$PWD/build/device-checks/pdfprobe" scripts/check-app.sh emulator-5560 ch.lkmc.combray.PdfProbeTest || status=$?
+          # One instrumentation run (one app process) per engine, most important first: a crash
+          # in one cannot spoil the others, and each starts from the same memory.
+          COMBRAY_RESULTS="$PWD/build/device-checks/pdfprobe" scripts/check-app.sh emulator-5560 \
+            ch.lkmc.combray.PdfProbeTest#pdfjsLegacy ch.lkmc.combray.PdfProbeTest#pdfiumWasm \
+            ch.lkmc.combray.PdfProbeTest#pdfjsLegacyWithoutCsp ch.lkmc.combray.PdfProbeTest#pdfjsModern || status=$?
           if [ -f build/device-checks/pdfprobe/pdfprobe/reports.jsonl ]; then
             python3 -I testing/fixtures/pdfprobe/summarize.py build/device-checks/pdfprobe/pdfprobe | tee build/device-checks/pdfprobe/pdfprobe/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -54,7 +54,7 @@ Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
 PDF probe (draft PR experiment, docs/PDF.md phase 0b; inputs from testing/fixtures/pdfprobe/fetch.py)
   /pdfprobe/strict/...       testing/fixtures/pdfprobe with the viewer's Content-Security-Policy
   /pdfprobe/open/...         the same files without it
-  .../generated/<name>.pdf   fixture.pdf, cjk.pdf (non-embedded Japanese font) and pages-300.pdf
+  .../generated/<name>.pdf   fixture.pdf, cjk.pdf (non-embedded Japanese font only) and pages-300.pdf
   /pdfprobe/<mode>/checkpoint?engine=&csp=&name=
                              held until POST /_admin/probe-release with the same query (120 s at most)
   POST /_admin/probe-report  JSON result from the probe page; snapshots go to --probe-out
@@ -143,22 +143,21 @@ def pdf_document(text):
 
 def cjk_document():
     """One page of Japanese in a non-embedded CID font (HeiseiMin-W3) through the predefined
-    UniJIS-UCS2-H CMap, so a viewer needs its CMaps and a system fallback font; a Helvetica line
-    below it."""
+    UniJIS-UCS2-H CMap, so a viewer needs its CMaps and a system fallback font. Nothing else is
+    on the page: any ink is Japanese glyphs."""
     japanese = "日本語の文書".encode("utf-16-be").hex().upper().encode("ascii")
-    stream = (b"BT /F1 32 Tf 72 700 Td <%s> Tj ET BT /F2 18 Tf 72 640 Td (PDF-CJK-FIXTURE) Tj ET" % japanese)
+    stream = b"BT /F1 32 Tf 72 700 Td <%s> Tj ET" % japanese
     return pdf_file([
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        b"/Resources << /Font << /F1 5 0 R /F2 8 0 R >> >> /Contents 4 0 R >>",
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
         pdf_stream(stream),
         b"<< /Type /Font /Subtype /Type0 /BaseFont /HeiseiMin-W3 /Encoding /UniJIS-UCS2-H /DescendantFonts [6 0 R] >>",
         b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HeiseiMin-W3 "
         b"/CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 2 >> /FontDescriptor 7 0 R /DW 1000 >>",
         b"<< /Type /FontDescriptor /FontName /HeiseiMin-W3 /Flags 6 /FontBBox [-123 -257 1001 910] "
         b"/ItalicAngle 0 /Ascent 723 /Descent -241 /CapHeight 709 /StemV 69 >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ])
 
 

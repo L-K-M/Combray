@@ -30,18 +30,26 @@ const TEXT_BUDGET_MS = 60_000;
 const DOCUMENT_BUDGET_MS = 30_000;
 const MANY_PAGES_BUDGET_MS = 300_000;
 const SETTLE_MS = 3_000;
+// The whole run stops starting new work after this, keeping time for the three-open step and the
+// last memory samples before the device check gives up (25 minutes).
+const RUN_DEADLINE_MS = 18 * 60_000;
+const THREE_OPEN_RESERVE_MS = 4 * 60_000;
+const runStarted = performance.now();
+const timeLeft = () => runStarted + RUN_DEADLINE_MS - performance.now();
 
 const CORPUS = [
   { name: "fixture", url: "generated/fixture.pdf", kind: "standard font (Helvetica), not embedded", expect: /PDF-FIXTURE-TEXT/ },
   { name: "cjk", url: "generated/cjk.pdf", kind: "Japanese, non-embedded CID font, UniJIS-UCS2-H CMap", expect: /日本語/ },
   { name: "tracemonkey", url: "vendor/corpus/tracemonkey.pdf", kind: "embedded Type1, 14 pages", expect: /Trace-based Just-in-Time/ },
   { name: "TAMReview", url: "vendor/corpus/TAMReview.pdf", kind: "ICCBased colours, embedded fonts, 23 pages", expect: /Technology Acceptance Model/ },
-  { name: "ArabicCIDTrueType", url: "vendor/corpus/ArabicCIDTrueType.pdf", kind: "CID TrueType, right to left", expect: /[؀-ۿﹰ-﻿]/ },
+  { name: "ArabicCIDTrueType", url: "vendor/corpus/ArabicCIDTrueType.pdf", kind: "CID TrueType, right to left", expect: /[\u0600-\u06FF\uFE70-\uFEFF]/ },
   { name: "jp2k-resetprob", url: "vendor/corpus/jp2k-resetprob.pdf", kind: "JPEG 2000 (OpenJPEG wasm)" },
   { name: "jpx_smaskindata", url: "vendor/corpus/jpx_smaskindata.pdf", kind: "JPEG 2000 with SMaskInData" },
   { name: "bitmap-symbol", url: "vendor/corpus/bitmap-symbol.pdf", kind: "JBIG2 (wasm)" },
   { name: "function_based_shading", url: "vendor/corpus/function_based_shading.pdf", kind: "function-based shading" },
   { name: "axial_shading_many_inputs", url: "vendor/corpus/axial_shading_many_inputs.pdf", kind: "axial shading" },
+  // Without ImageDecoder and OffscreenCanvas (both off in Servo) pdf.js decodes JPEG in JS.
+  { name: "issue19971", url: "vendor/corpus/issue19971.pdf", kind: "JPEG photo 2500x1364 with ICC profile, 6 pages" },
 ];
 const MANY = "generated/pages-300.pdf";
 const THREE = ["vendor/corpus/tracemonkey.pdf", "vendor/corpus/TAMReview.pdf", MANY];
@@ -63,6 +71,11 @@ addEventListener("unhandledrejection", event => pageLog.push(`unhandled rejectio
 
 function show(line) {
   logElement.textContent += `${line}\n`;
+}
+
+// Sent as the run goes, so a run the device check gives up on still has its log.
+async function flushPageLog(after) {
+  if (pageLog.length) await report("page-log", { after, lines: pageLog.splice(0) });
 }
 
 function status(text) {
@@ -216,15 +229,37 @@ class PdfjsEngine {
     }), WORKER_TIMEOUT_MS, "worker log").catch(error => [`no worker log: ${error.message}`]);
   }
 
+  // A wedged worker never answers pdf.js's Terminate message: stop waiting and kill it.
   async close(handle) {
-    await handle.task.destroy();
+    try {
+      await withTimeout(handle.task.destroy(), WORKER_TIMEOUT_MS, "close");
+    } catch (error) {
+      if (handle.task._worker) handle.task._worker.destroy();
+      throw error;
+    }
   }
 }
 
-class PdfiumEngine {
+// One worker and one wasm instance per document, as pdf.js starts one worker per document, so
+// open times and memory compare like for like.
+class PdfiumInstance {
   constructor() {
     this.pending = new Map();
     this.nextId = 1;
+    this.errors = [];
+  }
+
+  async start() {
+    this.worker = new Worker(new URL("./pdfium-worker.mjs", import.meta.url), { type: "module" });
+    this.worker.addEventListener("error", event => this.errors.push(`worker error: ${event.message}`));
+    this.worker.addEventListener("message", ({ data }) => {
+      const pending = this.pending.get(data.id);
+      if (!pending) return;
+      this.pending.delete(data.id);
+      if (data.error) pending.reject(new Error(data.error));
+      else pending.resolve(data);
+    });
+    await this.call("init", { wasmUrl: new URL("./vendor/pdfium/package/dist/pdfium.wasm", import.meta.url).href });
   }
 
   call(op, args = {}, transfer = []) {
@@ -235,27 +270,39 @@ class PdfiumEngine {
     }), DOC_TIMEOUT_MS, `pdfium ${op}`);
   }
 
+  stop() {
+    this.worker.terminate();
+    for (const pending of this.pending.values()) pending.reject(new Error("worker stopped"));
+    this.pending.clear();
+  }
+}
+
+class PdfiumEngine {
+  // Starts and stops one instance: how long the worker and wasm take to come up.
   async init() {
-    this.worker = new Worker(new URL("./pdfium-worker.mjs", import.meta.url), { type: "module" });
-    this.workerErrors = [];
-    this.worker.addEventListener("error", event => this.workerErrors.push(`worker error: ${event.message}`));
-    this.worker.addEventListener("message", ({ data }) => {
-      const pending = this.pending.get(data.id);
-      if (!pending) return;
-      this.pending.delete(data.id);
-      if (data.error) pending.reject(new Error(data.error));
-      else pending.resolve(data);
-    });
-    const result = await this.call("init", { wasmUrl: new URL("./vendor/pdfium/package/dist/pdfium.wasm", import.meta.url).href });
-    return { ms: result.ms, version: "@embedpdf/pdfium 2.15.1" };
+    const started = performance.now();
+    const instance = new PdfiumInstance();
+    try {
+      await instance.start();
+    } finally {
+      instance.stop();
+    }
+    return { ms: performance.now() - started, version: "@embedpdf/pdfium 2.15.1" };
   }
 
   async open(url) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`${url}: ${response.status}`);
-    const bytes = await response.arrayBuffer();
-    const { doc, pages } = await this.call("open", { bytes }, [bytes]);
-    return { doc, pages };
+    const instance = new PdfiumInstance();
+    try {
+      await instance.start();
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${url}: ${response.status}`);
+      const bytes = await response.arrayBuffer();
+      const { doc, pages } = await instance.call("open", { bytes }, [bytes]);
+      return { instance, doc, pages };
+    } catch (error) {
+      instance.stop();
+      throw error;
+    }
   }
 
   realWorker() {
@@ -263,22 +310,26 @@ class PdfiumEngine {
   }
 
   async render(handle, index, canvas) {
-    const { width, height, pixels } = await this.call("render", { doc: handle.doc, index, width: PAGE_WIDTH });
+    const { width, height, pixels } = await handle.instance.call("render", { doc: handle.doc, index, width: PAGE_WIDTH });
     canvas.width = width;
     canvas.height = height;
     canvas.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
   }
 
   async text(handle, index) {
-    return (await this.call("text", { doc: handle.doc, index })).text;
+    return (await handle.instance.call("text", { doc: handle.doc, index })).text;
   }
 
-  async workerLog() {
-    return this.workerErrors.splice(0);
+  async workerLog(handle) {
+    return handle.instance.errors.splice(0);
   }
 
   async close(handle) {
-    await this.call("close", { doc: handle.doc });
+    try {
+      await handle.instance.call("close", { doc: handle.doc });
+    } finally {
+      handle.instance.stop();
+    }
   }
 }
 
@@ -338,6 +389,9 @@ async function runDocument(engine, entry) {
       canvases.push(canvas);
       const pageStarted = performance.now();
       await withTimeout(engine.render(handle, index, canvas), DOC_TIMEOUT_MS, `render page ${index + 1}`);
+      // Servo's canvas thread rasterises lazily: reading a pixel waits for the page's pixels, so
+      // the time covers drawing as PDFium's (which rasterises in its worker) does.
+      if (canvas.width && canvas.height) canvas.getContext("2d").getImageData(0, 0, 1, 1);
       times.push(performance.now() - pageStarted);
       if (index === 0) {
         result.ink = inkRatio(canvas);
@@ -377,8 +431,9 @@ async function manyPages(engine) {
     result.pages = handle.pages;
     const times = [];
     const drawStarted = performance.now();
+    const drawBudget = Math.min(MANY_PAGES_BUDGET_MS, timeLeft() - THREE_OPEN_RESERVE_MS);
     for (let index = 0; index < Math.min(handle.pages, MANY_PAGES); index++) {
-      if (performance.now() - drawStarted > MANY_PAGES_BUDGET_MS) break;
+      if (performance.now() - drawStarted > drawBudget) break;
       status(`running:page-${index + 1}`);
       const canvas = newCanvas();
       canvases.push(canvas);
@@ -391,9 +446,10 @@ async function manyPages(engine) {
     await checkpoint("after-50-pages");
 
     const textStarted = performance.now();
+    const textBudget = Math.min(TEXT_BUDGET_MS, timeLeft() - THREE_OPEN_RESERVE_MS);
     let chars = 0;
     let pagesRead = 0;
-    for (let index = 0; index < handle.pages && performance.now() - textStarted < TEXT_BUDGET_MS; index++) {
+    for (let index = 0; index < handle.pages && performance.now() - textStarted < textBudget; index++) {
       chars += (await withTimeout(engine.text(handle, index), DOC_TIMEOUT_MS, `text page ${index + 1}`)).length;
       pagesRead++;
     }
@@ -451,20 +507,26 @@ async function main() {
   await report("init", init);
 
   for (const entry of CORPUS) {
+    if (timeLeft() < THREE_OPEN_RESERVE_MS) {
+      await report("document", { name: entry.name, feature: entry.kind, skipped: "probe deadline" });
+      continue;
+    }
     status(`running:${entry.name}`);
     const result = await runDocument(engine, entry);
     show(`${entry.name}: ${result.error ? "error" : `${result.renderMs} ms, ink ${result.ink}, text ${result.textFound}`}`);
     await report("document", result);
+    await flushPageLog(entry.name);
   }
   await checkpoint("after-corpus");
 
   status("running:many-pages");
   await report("many-pages", await manyPages(engine));
+  await flushPageLog("many-pages");
 
   status("running:three-open");
   await report("three-open", await threeOpen(engine));
 
-  await report("page-log", { lines: pageLog });
+  await flushPageLog("three-open");
   status("done");
 }
 

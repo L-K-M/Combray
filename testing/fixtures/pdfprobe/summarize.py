@@ -6,11 +6,24 @@
 import collections
 import json
 import pathlib
+import re
 import sys
+
+# Log lines that change what the timings mean: a fallback pdf.js or Servo took instead.
+FALLBACK = re.compile(r"fake worker|Failed to load font|Cannot load system font|instantiateWasm|getJsModule"
+                      r"|ICCBased|falling back|worker error|uncaught|unhandled", re.IGNORECASE)
 
 
 def first_line(text):
     return (text or "").strip().splitlines()[0][:160] if text else ""
+
+
+def fallbacks(lines):
+    return list(dict.fromkeys(line[:200] for line in lines if FALLBACK.search(line)))
+
+
+def mb(kb):
+    return round(int(kb or 0) / 1024, 1)
 
 
 def main():
@@ -40,11 +53,19 @@ def main():
         if documents:
             lines += ["| Document | Open ms | Page ms | Ink | Text | Real worker | Problem |", "|---|---|---|---|---|---|---|"]
             for doc in documents:
-                problem = first_line(doc.get("error")) or "; ".join(doc.get("workerLog", [])[:2])[:160]
+                problem = (doc.get("skipped") or first_line(doc.get("error"))
+                           or "; ".join(fallbacks(doc.get("workerLog", [])))[:300])
                 lines.append(f"| {doc['name']} | {doc.get('openMs', '')} | {doc.get('renderMs', '')} | {doc.get('ink', '')} "
                              f"| {doc.get('textFound', '')} | {doc.get('realWorker', '')} | {problem.replace('|', '/')} |")
-            lines.append("")
+            lines += ["", "Page ms: until Servo's canvas holds the page's pixels (PDFium: rasterised in its worker, then "
+                      "copied in). pdf.js and PDFium both start one worker per document, inside Open ms.", ""]
         for item in items:
+            if item.get("kind") == "three-open":
+                lines += [f"- Three documents open at once: {first_line(item.get('error')) or 'ok'}", ""]
+            if item.get("kind") == "page-log":
+                notes = fallbacks(item.get("lines", []))
+                if notes:
+                    lines += [f"- Page log after {item.get('after')}: {line}" for line in notes] + [""]
             if item.get("kind") == "many-pages":
                 lines += [f"- 300-page document: open {item.get('openMs')} ms, pages drawn {json.dumps(item.get('render'))}, "
                           f"text {json.dumps(item.get('text'))} {first_line(item.get('error'))}", ""]
@@ -52,11 +73,15 @@ def main():
                 lines += [f"- Harness error: {first_line(item.get('error'))}", ""]
         memory = [item for item in items if item.get("kind") == "memory"]
         if memory:
-            lines += ["| Checkpoint | PSS MB | Native heap MB | Graphics MB |", "|---|---|---|---|"]
+            baseline = next((m for m in memory if m.get("name") == "baseline"), memory[0])
+            lines += ["| Checkpoint | PSS MB | PSS change MB | libc malloc MB | Unnamed mappings MB | Graphics MB |",
+                      "|---|---|---|---|---|---|"]
             for sample in memory:
-                mb = lambda key: round(int(sample.get(key) or 0) / 1024, 1)
-                lines.append(f"| {sample['name']} | {mb('totalPssKb')} | {mb('nativeHeapKb')} | {mb('graphicsKb')} |")
-            lines.append("")
+                change = mb(int(sample.get("totalPssKb") or 0) - int(baseline.get("totalPssKb") or 0))
+                lines.append(f"| {sample['name']} | {mb(sample.get('totalPssKb'))} | {change} | {mb(sample.get('nativeHeapKb'))} "
+                             f"| {mb(sample.get('privateOtherKb'))} | {mb(sample.get('graphicsKb'))} |")
+            lines += ["", "Servo's Rust heap (jemalloc), SpiderMonkey's GC heap and wasm memory are unnamed mappings, "
+                      "not libc malloc. Graphics means little on the emulator's software GPU.", ""]
     print("\n".join(lines))
 
 

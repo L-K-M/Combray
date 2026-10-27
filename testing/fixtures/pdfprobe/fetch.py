@@ -52,6 +52,7 @@ CORPUS = {
     "bitmap-symbol.pdf": "39bf73b128947979f9a6080791ad03e206ea5756f4b4d37b6609e154d4f875b2",
     "function_based_shading.pdf": "21a0d4951f2d45f86d90dd9bac824805b54b2bd2fefe6efad763d227d484ed64",
     "axial_shading_many_inputs.pdf": "4d86a414969c1c849e6866193c2c41653463d694a02ffc91b0ba663a7d107ee8",
+    "issue19971.pdf": "178c6207203151cf4036cd377d233e92a3cfb07e7787dd68bc2b2203d5ef3ce1",
 }
 
 

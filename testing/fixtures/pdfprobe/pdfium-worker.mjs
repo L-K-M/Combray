@@ -5,8 +5,9 @@
 // Requests: { id, op, ...args }; answers: { id, ...result } or { id, error }.
 import { init } from "./vendor/pdfium/package/dist/index.browser.js";
 
-// FPDF_RenderPageBitmap flags (fpdfview.h): draw annotations.
+// FPDF_RenderPageBitmap flags (fpdfview.h): draw annotations; write RGBA instead of BGRA.
 const FPDF_ANNOT = 0x01;
+const FPDF_REVERSE_BYTE_ORDER = 0x10;
 const WHITE = 0xffffffff;
 
 let pdfium = null;
@@ -43,24 +44,18 @@ const ops = {
     try {
       const scale = width / pdfium.FPDF_GetPageWidthF(page);
       const height = Math.max(1, Math.round(pdfium.FPDF_GetPageHeightF(page) * scale));
-      // 0: no alpha channel, BGRx.
-      const bitmap = pdfium.FPDFBitmap_Create(width, height, 0);
+      // 1: with alpha. The white fill keeps it opaque, so the RGBA rows are ImageData as they are.
+      const bitmap = pdfium.FPDFBitmap_Create(width, height, 1);
       try {
         pdfium.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, WHITE);
-        pdfium.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, FPDF_ANNOT);
+        pdfium.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
         const stride = pdfium.FPDFBitmap_GetStride(bitmap);
         const source = pdfium.FPDFBitmap_GetBuffer(bitmap);
         const heap = pdfium.pdfium.HEAPU8;
-        const pixels = new Uint8ClampedArray(width * height * 4);
+        const row = width * 4;
+        const pixels = new Uint8ClampedArray(row * height);
         for (let y = 0; y < height; y++) {
-          let from = source + y * stride;
-          let to = y * width * 4;
-          for (let x = 0; x < width; x++, from += 4, to += 4) {
-            pixels[to] = heap[from + 2];
-            pixels[to + 1] = heap[from + 1];
-            pixels[to + 2] = heap[from];
-            pixels[to + 3] = 255;
-          }
+          pixels.set(heap.subarray(source + y * stride, source + y * stride + row), y * row);
         }
         return { width, height, pixels, ms: performance.now() - started, transfer: [pixels.buffer] };
       } finally {
