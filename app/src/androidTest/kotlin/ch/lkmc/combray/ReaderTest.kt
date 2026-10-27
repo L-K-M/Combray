@@ -109,6 +109,16 @@ class ReaderTest {
         device.awaitState { it.reader == null }
     }
 
+    @Test
+    fun aFileServoCannotShowHasNoArticle() {
+        // Servo's page in place of the PDF, "Unknown content type (application/pdf).", is no article.
+        device.browser.openUrl(Fixtures.PDF, Placement.CURRENT_TAB)
+        device.awaitPage(Fixtures.PDF)
+        device.browser.openReader()
+        val reader = device.awaitState { it.reader != null && it.reader !is ReaderState.Loading }.reader
+        assertTrue("$reader", reader is ReaderState.Unavailable)
+    }
+
     /** Taps [target] where the text of the node containing [node] lays it out. */
     private fun tapText(node: String, target: String) {
         val paragraph = compose.onNodeWithText(node, substring = true)

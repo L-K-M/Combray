@@ -83,6 +83,20 @@ class HisterTest {
     }
 
     @Test
+    fun aFileServoCannotShowIsNotSentAsItsStandInPage() {
+        // Servo shows the PDF as a page of its own at the PDF's address, saying "Unknown content
+        // type (application/pdf).": that sentence is not the file's text.
+        device.browser.openUrl(Fixtures.PDF, Placement.CURRENT_TAB)
+        device.awaitPage(Fixtures.PDF)
+
+        // A page loaded after it is captured, so capture was running meanwhile.
+        val later = "${Fixtures.BASE}/rendered.html?p=afterpdf${System.currentTimeMillis()}"
+        device.browser.openUrl(later, Placement.NEW_TAB)
+        awaitDocument(later)
+        assertFalse(documents().has(Fixtures.PDF))
+    }
+
+    @Test
     fun pausedCaptureSendsNothing() {
         runBlocking { hister.setCaptureEnabled(false) }
         val url = "${Fixtures.BASE}/rendered.html?p=paused${System.currentTimeMillis()}"

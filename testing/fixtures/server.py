@@ -42,6 +42,7 @@ Pages
                              (page zoom checks)
   /fixed-scroll.html         transparent fixed scroll box over a red/green page
                               (?loading=1 holds an image until /_admin/finish-scroll-load)
+  /document.pdf              one-page PDF (application/pdf) whose page reads PDF-FIXTURE-TEXT
   (the five control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -97,6 +98,32 @@ state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "medi
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 scroll_load_finished = threading.Event()
+
+
+def pdf_document(text):
+    """A minimal valid one-page PDF showing `text` (ASCII) in Helvetica."""
+    stream = f"BT /F1 24 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+PDF_DOCUMENT = pdf_document("PDF-FIXTURE-TEXT")
 
 
 def page(title, body, head=""):
@@ -556,6 +583,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "#paint{left:40vw;width:20vw;background:" + marker + "}" + colors + "</style>"))
         if path == "/has-selector.html":
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
+        if path == "/document.pdf":
+            return self.send(200, PDF_DOCUMENT, "application/pdf")
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
