@@ -159,7 +159,7 @@ APIS_PAGE = page(
     " var open = indexedDB.open('fixture', 1);"
     " open.onupgradeneeded = function () { open.result.createObjectStore('store'); };"
     " open.onerror = function () { fail('open ' + open.error); };"
-    " open.onsuccess = function () {"
+    " open.onsuccess = function () { try {"
     "  var store = open.result.transaction('store', 'readwrite').objectStore('store');"
     "  store.put({value: 7}, 'key');"
     "  var read = store.get('key');"
@@ -168,7 +168,7 @@ APIS_PAGE = page(
     "   if (read.result && read.result.value === 7) document.title = 'XP:ok';"
     "   else fail('read ' + JSON.stringify(read.result));"
     "  };"
-    " };"
+    " } catch (e) { fail('store ' + e.message); } };"
     "} catch (e) { fail(e.message); }</script>",
 )
 
