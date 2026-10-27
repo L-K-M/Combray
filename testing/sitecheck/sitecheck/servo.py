@@ -1308,6 +1308,9 @@ def _pump(stream: IO[bytes], log: _LogWriter, prefix: bytes) -> None:
 @functools.cache
 def app_page_script() -> str:
     """Combray's page script, built as native/src/animations.rs builds it."""
+    for path in (_APP_PAGE_SCRIPT_TEMPLATE, _APP_PAGE_SCRIPT_POLYFILL):
+        if not path.is_file():
+            raise config.ConfigError(f"{path} is missing; the harness needs Combray's native/src")
     template = _APP_PAGE_SCRIPT_TEMPLATE.read_text(encoding="utf-8")
     if template.count(_APP_PAGE_SCRIPT_PLACEHOLDER) != 1:
         raise config.ConfigError(

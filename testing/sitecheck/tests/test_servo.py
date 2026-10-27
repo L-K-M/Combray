@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import IO
 from unittest import mock
 
-from sitecheck import model, servo
+from sitecheck import config, model, servo
 from sitecheck.model import CrashInfo, Engine, PageError, PageResult, PageStatus
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -588,6 +588,15 @@ class PageScriptTests(unittest.TestCase):
         self.assertNotIn("__WEB_ANIMATIONS__", script)
         self.assertEqual(script.count(polyfill), 1)
         self.assertEqual(script, template.replace("__WEB_ANIMATIONS__", polyfill))
+
+    def test_a_missing_app_page_script_is_a_config_error(self) -> None:
+        servo.app_page_script.cache_clear()
+        self.addCleanup(servo.app_page_script.cache_clear)
+        missing = Path(__file__).resolve().parent / "no-such-animations.js"
+
+        with mock.patch.object(servo, "_APP_PAGE_SCRIPT_TEMPLATE", missing):
+            with self.assertRaisesRegex(config.ConfigError, "no-such-animations.js"):
+                servo.app_page_script()
 
     def test_error_capture_runs_before_the_app_page_script(self) -> None:
         self.assertLess(servo.ERRORS_USERSCRIPT_PATH.name, servo.APP_PAGE_SCRIPT_NAME)
