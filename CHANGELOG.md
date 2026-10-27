@@ -140,6 +140,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Pages can use FontFace and `document.fonts`, `adoptedStyleSheets` and
+  IndexedDB: Servo's experimental support for them is now on.
 - Move the engine to Servo v0.7.0 (downstream `combray/0.7`). It brings
   upstream's fixes for script hangs while scrolling, patched TLS and crypto
   crates, and a backported fix for a crash when a pending `setTimeout`
