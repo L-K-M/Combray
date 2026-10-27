@@ -18,12 +18,12 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `546db2b2db14104de3eb3d7c612a2100ad38f728` | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
-| Upstream base | v0.6.0 (LTS line), git `c78d2c206f80a1c8b67eefa97f773bba513205d3` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
-| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Downstream Servo | `L-K-M/servo`, git `9c3dd2cd5e774b4c694ae877e8051586ba83857b` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
+| Upstream base | v0.7.0, git `aac43a3f31a259f04a574f5ec4e959c943ad7cc7` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
+| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS and crypto crates, a backported timer GC fix | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
-| SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-0`, downloaded by its build script | Servo's lockfile |
+| SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-1`, downloaded by its build script | Servo's lockfile |
 | Android NDK | r29, `29.0.14206865` | `env.sh`, which also rejects a `PATH` where the linker wrapper named in `native/.cargo/config.toml` resolves outside it; Servo's build rejects other majors |
 | Android SDK | platform `android-37` (compileSdk), build-tools 36.0.0 | `app/build.gradle.kts`, `spike/android/app/build.gradle.kts` |
 | App: Gradle / AGP / Kotlin | Gradle 9.8.1 (distribution SHA-256 pinned), AGP 9.4.1, Kotlin 2.4.21, KSP 2.3.12 | `gradle/wrapper/`, `gradle/libs.versions.toml` |

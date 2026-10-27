@@ -1,6 +1,6 @@
 //! Find in page.
 //!
-//! Servo v0.6.0 has no embedder find API and no `window.find`. `find.js` runs in the tab's
+//! Servo v0.7.0 has no embedder find API and no `window.find`. `find.js` runs in the tab's
 //! current document through `WebView::evaluate_javascript_in_document`, like capture: it walks
 //! the rendered text with node, match and time budgets, selects one match with a DOM `Range`
 //! (Servo paints document selections) and scrolls it into view.

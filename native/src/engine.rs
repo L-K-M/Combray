@@ -490,10 +490,24 @@ impl Engine {
                 document,
                 edge,
             } => self.scroll_to_edge(view, document, edge),
-            Command::SetThrottling { tab, throttling } => {
-                if let Some(tab) = self.tab(tab) {
-                    tab.webview
-                        .set_throttled(throttling == Throttling::Throttled);
+            // Servo throttles exactly the hidden views, so throttling hides a view and
+            // lifting it shows the view again only if it is the selected one.
+            Command::SetThrottling {
+                tab: id,
+                throttling,
+            } => {
+                if let Some(tab) = self.tab(id) {
+                    match throttling {
+                        Throttling::Throttled => {
+                            tab.webview.set_focused(false);
+                            tab.webview.hide();
+                        },
+                        Throttling::Normal if self.active == Some(id) => {
+                            tab.webview.show();
+                            tab.webview.set_focused(true);
+                        },
+                        Throttling::Normal => {},
+                    }
                 }
             },
             Command::SetPageZoom { zoom } => self.set_page_zoom(zoom),
@@ -788,6 +802,8 @@ impl Engine {
         opening_tap: OpeningTap,
     ) -> String {
         webview.hide();
+        // Servo starts every view with system focus; only the selected view has it.
+        webview.set_focused(false);
         webview.set_page_zoom(self.page_zoom);
         // Servo starts every view light; documents it loads later inherit the view's theme.
         webview.notify_theme_change(servo_theme(self.appearance));
@@ -856,6 +872,7 @@ impl Engine {
     /// Hides every view; the surface shows no page until a tab is selected again.
     fn select_none(&mut self) {
         for tab in self.tabs.values() {
+            tab.webview.set_focused(false);
             tab.webview.hide();
         }
         self.withhold_keyboard();
@@ -912,11 +929,12 @@ impl Engine {
 
         for (id, other) in &self.tabs {
             if *id != tab {
+                other.webview.set_focused(false);
                 other.webview.hide();
             }
         }
         selected.webview.show();
-        selected.webview.focus();
+        selected.webview.set_focused(true);
 
         if self.active != Some(tab) {
             self.withhold_keyboard();

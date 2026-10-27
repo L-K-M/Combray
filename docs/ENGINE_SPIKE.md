@@ -938,3 +938,36 @@ The Servo-wide `cargo +1.97.1 fmt --check` reports existing formatting
 drift across the imported tree; no unrelated engine files were reformatted.
 Existing engine limits remain: metadata accepts exact `light` or `dark`
 only, and a page opting into dark must paint its dark canvas explicitly.
+
+## 23. Servo v0.7.0 pin (26 October 2026)
+
+The nightly maintenance task merged upstream v0.7.0 into the new downstream
+line `combray/0.7` ([Servo PR #7](https://github.com/L-K-M/servo/pull/7)),
+validated there with servoshell builds, the downstream regression tests,
+Servo's selector and timer WPT directories and a site check against the
+previous line. This moves the pin to its tip
+`9c3dd2cd5e774b4c694ae877e8051586ba83857b` (upstream base v0.7.0,
+`aac43a3f31a259f04a574f5ec4e959c943ad7cc7`). All downstream engine changes
+from `combray/0.6` remain; the line adds patched TLS and crypto crates
+(cargo-deny advisories in v0.7.0's lockfile) and a backport of upstream
+`3ae0049380f`, which roots pending timer callbacks.
+
+Bridge changes for the v0.7 embedder API:
+
+- `WebView::focus()` is gone; system focus is per view
+  (`set_focused`) and every view starts focused. Only the selected view
+  keeps it; new, hidden and deselected views lose it.
+- `WebView::set_throttled()` is gone; Servo throttles hidden views
+  itself. `setThrottled` now hides a view and drops its focus; lifting it
+  shows and focuses the view again only when it is the selected one.
+
+`native/Cargo.lock` is Servo's v0.7 lockfile reduced to this crate's
+graph, with no version changes; `log` and `rustls` exact pins follow it
+(0.4.34, 0.23.46). The notices were regenerated with cargo-about 0.9.2;
+the NDK did not change, so its LLVM section is the same text.
+
+Host checks on macOS: `cargo fmt --check` and `cargo test --lib` (88) in
+`native/`, `python3 scripts/check_docs.py`, `git diff --check`, the notices
+test. This host has no Android SDK: both native ABI builds, packaging and
+the emulator checks are the Engine workflow's evidence, recorded in the pin
+PR.

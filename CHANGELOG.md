@@ -140,6 +140,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Move the engine to Servo v0.7.0 (downstream `combray/0.7`). It brings
+  upstream's fixes for script hangs while scrolling, patched TLS and crypto
+  crates, and a backported fix for a crash when a pending `setTimeout`
+  callback was collected before it ran. Hidden tabs are throttled by Servo
+  itself now, and only the selected tab has system focus.
 - Every verified APK (release, Engine and CI artifacts, `scripts/build.sh`)
   must carry the third-party notices. The device checks' test APK is no
   longer a downloadable CI artifact.

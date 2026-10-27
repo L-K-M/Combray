@@ -252,7 +252,7 @@ repo-files = ["native/licenses/void-1.0.2/LICENSE-MIT"]
 
 [[crate]]
 name = "wuff"
-version = "0.2.8"
+version = "0.2.9"
 repo-files = ["native/licenses/wuff/LICENSE"]
 
 [[crate]]
