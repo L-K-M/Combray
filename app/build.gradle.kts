@@ -127,6 +127,8 @@ dependencies {
 
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
 
     // Device checks against the real engine (scripts/check-app.sh).
     androidTestImplementation(platform(libs.androidx.compose.bom))

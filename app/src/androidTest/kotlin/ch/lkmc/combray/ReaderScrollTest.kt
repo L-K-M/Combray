@@ -29,11 +29,7 @@ class ReaderScrollTest {
 
     @Test
     fun readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles() {
-        val article = Article("Article start", null, null, rightToLeft = true,
-            blocks = (0..79).map { ArticleBlock(BlockKind.PARAGRAPH, 0, listOf(ArticleSpan("Paragraph $it"))) }, truncated = false)
-        compose.setContent {
-            CombrayTheme { ReaderView(ReaderState.Ready("tab", "https://fixture.test/", article), TextSize.DEFAULT, {}, {}) }
-        }
+        showReader()
         compose.onNodeWithContentDescription("Scroll to bottom").assertDoesNotExist()
         compose.onNode(hasScrollAction()).performTouchInput { swipeUp() }
         val down = compose.onNodeWithContentDescription("Scroll to bottom").assertIsDisplayed()
@@ -45,5 +41,43 @@ class ReaderScrollTest {
         compose.onNodeWithContentDescription("Scroll to top").assertIsDisplayed().performClick()
         compose.onNodeWithText("Article start").assertIsDisplayed()
         compose.onNodeWithContentDescription("Scroll to top").assertDoesNotExist()
+    }
+
+    @Test
+    fun readerScrollingRenewsTheButtonAndIdleFadesIt() {
+        showReader()
+        compose.mainClock.autoAdvance = false
+        repeat(4) {
+            // Short, slow drags leave room for the next one instead of flinging to the end.
+            compose.onNode(hasScrollAction()).performTouchInput {
+                swipeUp(startY = centerY + height * 0.1f, endY = centerY - height * 0.1f, durationMillis = SWIPE_DURATION_MS)
+            }
+            compose.mainClock.advanceTimeBy(SCROLL_INTERVAL_MS)
+            compose.onNodeWithContentDescription("Scroll to bottom").assertIsDisplayed()
+        }
+
+        compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
+        compose.onNodeWithContentDescription("Scroll to bottom").assertDoesNotExist()
+        compose.onNode(hasScrollAction()).performTouchInput {
+            swipeDown(startY = centerY - height * 0.1f, endY = centerY + height * 0.1f, durationMillis = SWIPE_DURATION_MS)
+        }
+        compose.mainClock.advanceTimeBy(SCROLL_INTERVAL_MS)
+        compose.onNodeWithContentDescription("Scroll to top").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
+        compose.onNodeWithContentDescription("Scroll to top").assertDoesNotExist()
+    }
+
+    private fun showReader() {
+        val article = Article("Article start", null, null, rightToLeft = true,
+            blocks = (0..79).map { ArticleBlock(BlockKind.PARAGRAPH, 0, listOf(ArticleSpan("Paragraph $it"))) }, truncated = false)
+        compose.setContent {
+            CombrayTheme { ReaderView(ReaderState.Ready("tab", "https://fixture.test/", article), TextSize.DEFAULT, {}, {}) }
+        }
+    }
+
+    private companion object {
+        const val SCROLL_INTERVAL_MS = 1_000L
+        const val IDLE_WAIT_MS = 3_000L
+        const val SWIPE_DURATION_MS = 600L
     }
 }
