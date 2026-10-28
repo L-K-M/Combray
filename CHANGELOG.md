@@ -140,6 +140,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Pages can measure SVG shapes: the engine implements `getTotalLength()`
+  and `getPointAtLength()`, which stroke drawing and motion-path
+  animations call.
 - Pages built from deeply nested flex containers no longer freeze while
   laying out: the engine takes upstream's flex layout reuse.
 - Update the engine to the latest downstream `combray/0.7` commit: patched
