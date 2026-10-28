@@ -2295,6 +2295,13 @@ class BrowserCoordinatorTest {
         assertEquals("clip.mp4 bank.example.com", split.name)
         assertEquals("clip.mp4", reversed.name)
         assertEquals("cdn.example.org", bare.name)
+
+        // A carriage return and an embedding control fare the same.
+        media(1, 10, "https://cdn.example.org/clip%0D.mp4")
+        media(1, 10, "https://cdn.example.org/%E2%80%AAembedded.mp4")
+        val (embedded, carriage) = state().activeTab!!.media
+        assertEquals("embedded.mp4", embedded.name)
+        assertEquals("clip .mp4", carriage.name)
     }
 
     @Test

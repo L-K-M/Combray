@@ -825,7 +825,7 @@ class BrowserCoordinator(
             if (!shown || page.playableShown) return
             page.playableShown = true
             page.plainPending = false
-            // Replaces a plain notice the UI has not shown yet.
+            // Overwrites any notice the UI has not taken yet, as every notice does; that includes this page's plain one.
             state.update { it.copy(notice = Notice.MediaPlayable(MediaPageRef(view.tabId, page.id))) }
             return
         }
@@ -1711,7 +1711,8 @@ class BrowserCoordinator(
             if (name.length <= MAX_MEDIA_NAME) return name
             // Never end on half a surrogate pair.
             val end = if (name[MAX_MEDIA_NAME - 1].isHighSurrogate()) MAX_MEDIA_NAME - 1 else MAX_MEDIA_NAME
-            return name.substring(0, end)
+            // A cut can land just after a space.
+            return name.substring(0, end).trimEnd()
         }
 
         /**

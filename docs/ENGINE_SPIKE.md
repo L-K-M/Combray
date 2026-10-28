@@ -1185,8 +1185,11 @@ Host checks, run on Linux x86_64 with no emulator:
   assembleDebugAndroidTest`: passed; 520 unit tests, 0 failed. Lint
   reports only warnings that predate this change.
 
-Not run here: `engine.rs`, `delegate.rs` and the JNI code are
-Android-only, so this host has not compiled them; `scripts/build-native.sh`
-and `BrowsingTest#mediaIsCancelledBeforeDownloadingAndThePageIsTold`
-(which now expects two `media_blocked` entries for its fixture) wait for
-the Engine workflow. Its results go in the PR before merge.
+`engine.rs`, `delegate.rs` and the JNI code are Android-only, so this
+host did not compile them. [Engine run 40731746689](https://github.com/L-K-M/Combray/actions/runs/40731746689)
+at `77796d7` built the native engine for x86_64 and arm64 and passed all
+129 emulator fixture checks on the API 30 x86_64 emulator, including
+`BrowsingTest#mediaIsCancelledBeforeDownloadingAndThePageIsTold`, which
+now expects two media entries for its fixture page. Review changes after
+that run (local names in `history_changed`, an empty authority refused
+in `reportable_url`, tests) go through the PR's next Engine run.

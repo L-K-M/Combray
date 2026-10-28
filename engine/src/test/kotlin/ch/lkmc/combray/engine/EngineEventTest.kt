@@ -88,10 +88,11 @@ class EngineEventTest {
     @Test
     fun mediaBlockedWithAnUnknownKindIsRejected() {
         val failure = runCatching {
-            EngineEvent.parse("""{"type":"media_blocked","document":7,"kind":"image","url":null,"referrer":null,"tab":2,"generation":5}""")
+            EngineEvent.parse("""{"schema":1,"type":"media_blocked","document":7,"kind":"image","url":null,"referrer":null,"tab":2,"generation":5}""")
         }.exceptionOrNull()
 
         assertTrue(failure is IllegalArgumentException)
+        assertEquals("unknown media kind image", failure?.message)
     }
 
     @Test

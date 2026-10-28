@@ -71,7 +71,7 @@ pub(crate) fn cancelled_kind(destination: &str) -> Option<MediaKind> {
 /// reported.
 ///
 /// `url` is a serialized URL, so its scheme is lower case and its authority ends at the first
-/// `/` after `//`.
+/// `/`, `?` or `#` after `//`; an empty authority is refused all the same.
 pub(crate) fn reportable_url(kind: MediaKind, url: &str) -> Option<&str> {
     if kind == MediaKind::Track || url.len() > MAX_MEDIA_URL_BYTES {
         return None;
@@ -80,7 +80,7 @@ pub(crate) fn reportable_url(kind: MediaKind, url: &str) -> Option<&str> {
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    if authority.contains('@') {
+    if authority.is_empty() || authority.contains('@') {
         return None;
     }
     Some(url)
@@ -255,6 +255,8 @@ mod tests {
             "https://ada:secret@example.org/a.mp4",
             "http://ada@example.org/a.mp4",
             "https://ada@example.org?a",
+            "https://",
+            "http:///a.mp4",
         ] {
             assert_eq!(reportable_url(MediaKind::Video, url), None, "{url}");
         }
@@ -385,6 +387,11 @@ mod tests {
             MediaReport::Nothing
         );
 
+        // A repeat is free: one token has refilled, and it is still there for the next URL.
+        assert_eq!(
+            page.note(Some(&url(0)), &mut budget, start + 1000),
+            MediaReport::Nothing
+        );
         assert_eq!(
             page.note(Some(&url(100)), &mut budget, start + 1000),
             MediaReport::Playable(url(100))

@@ -2142,10 +2142,12 @@ impl Engine {
         let page_changed = match change {
             HistoryChange::NewDocument => true,
             HistoryChange::SameDocumentUrl => {
-                tab.current_url
+                let old_key = tab
+                    .current_url
                     .as_ref()
-                    .map(|url| media::page_key(url.as_str()))
-                    != url.as_ref().map(|url| media::page_key(url.as_str()))
+                    .map(|old| media::page_key(old.as_str()));
+                let new_key = url.as_ref().map(|new| media::page_key(new.as_str()));
+                old_key != new_key
             },
             HistoryChange::ListOnly => false,
         };
