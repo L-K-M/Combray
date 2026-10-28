@@ -1048,3 +1048,122 @@ changes. The notices were regenerated for the new pin.
 This host has no Android SDK: both native ABI builds, packaging and the
 emulator checks are the Engine workflow's evidence, recorded in the pin
 PR.
+
+## 27. PDF probe in Servo 0.7 (27 October 2026)
+
+Phase 0b of [PDF.md](PDF.md#phases) measured pdf.js 6.4.299 (modern and
+legacy builds) and PDFium compiled to WebAssembly (`@embedpdf/pdfium`
+2.15.1) inside Servo. It ran as a draft PR that was never merged and is
+now closed, [L-K-M/Combray#142](https://github.com/L-K-M/Combray/pull/142),
+commits `de501ae` to `e959209`. Its harness (`testing/fixtures/pdfprobe/`
+and `PdfProbeTest`) exists only in those commits. Each engine rendered the
+corpus in a Servo document under the planned viewer CSP
+(`'wasm-unsafe-eval'`, no eval), with one module worker per document, and
+the device check sampled the app's memory (`Debug.MemoryInfo`) at
+checkpoints. Each engine ran in its own app process.
+
+- Environment: Engine CI on the API 30 x86_64 emulator (SwiftShader GPU),
+  with Combray's real Servo build from `combray/0.7` at
+  `6e493693b81baf47d93535d8683b4e7e83962641`, the pin at the time.
+- Corpus: three generated files (`fixture.pdf` in non-embedded Helvetica,
+  `cjk.pdf` in a non-embedded Japanese CID font through UniJIS-UCS2-H, and
+  `pages-300.pdf`) and nine mozilla/pdf.js test files pinned at `ea6cf5c`
+  by sha256: tracemonkey, TAMReview, ArabicCIDTrueType, jp2k-resetprob,
+  jpx_smaskindata, bitmap-symbol, function_based_shading,
+  axial_shading_many_inputs and issue19971.
+- [Engine run 40500206133](https://github.com/L-K-M/Combray/actions/runs/40500206133)
+  at `382e31b`: both pdf.js builds under the strict CSP, the legacy build
+  without a CSP, and PDFium-wasm.
+- [Engine run 40506187604](https://github.com/L-K-M/Combray/actions/runs/40506187604)
+  at `9806129`: adds memory samples after `TestUtils.gc()`, a
+  ReadableStream async-iteration polyfill, and a sample after the tab
+  navigates to another page. Servo may keep the left document in session
+  history, so that sample is not a full teardown.
+- [Engine run 40514996703](https://github.com/L-K-M/Combray/actions/runs/40514996703)
+  at `e959209`: each engine reads the corpus twice, pdf.js runs once more
+  with FontFace off (glyphs drawn as paths), and the page draws Japanese
+  with canvas text.
+- Commands, on the probe commits: `python3 -I
+  testing/fixtures/pdfprobe/fetch.py` downloads the engines and corpus
+  against pinned hashes; `scripts/check-app.sh <serial>` with the
+  `PdfProbeTest` methods runs them (run 3:
+  `ch.lkmc.combray.PdfProbeTest#pdfjsLegacyTwice`,
+  `#pdfjsLegacyWithoutFontFaceTwice` and `#pdfiumWasmTwice`); and
+  `python3 -I testing/fixtures/pdfprobe/summarize.py
+  build/device-checks/<run>/pdfprobe` writes the summary. Engine CI ran
+  only these methods on the probe branch.
+
+`TestUtils.gc()` needs the `dom_testutils_enabled` preference. Only the
+probe branch set it (`native/src/engine.rs` there); main does not.
+
+pdf.js draws the corpus correctly in Servo, in a real module worker under
+the strict CSP: embedded Type1, CID TrueType right to left, a JPEG photo,
+JPEG 2000 and JBIG2 through its wasm decoders, and the shadings. Its ink
+ratios are close to the same build in local headless Chromium (for
+example 0.0024 against 0.0026 for `fixture.pdf`, 0.0689 against 0.0717
+for `bitmap-symbol`), except for `cjk.pdf`. PDFium-wasm draws nothing for `cjk.pdf` without a font of
+its own (ink 0).
+
+Engine findings:
+
+- **ReadableStream is not async iterable.** Servo's `ReadableStream.webidl`
+  comments out `async iterable`, so in run 1 pdf.js text extraction failed
+  for every document with `TypeError: readableStream is not iterable`. A
+  small polyfill in the page fixes it (runs 2 and 3): 950,904 characters
+  from the 300-page document.
+- **No OffscreenCanvas or ImageDecoder, and no FontFace in workers.**
+  Neither the page nor a module worker had `OffscreenCanvas` or
+  `ImageDecoder`, and workers had no `FontFace`. Servo has no
+  ImageDecoder interface and exposes FontFace to windows only.
+  OffscreenCanvas is behind `dom_offscreen_canvas_enabled`, which is off by
+  default and which Combray does not set; the probe did not try it on.
+  pdf.js falls back to decoding images in JavaScript. FontFace from bytes
+  works in the page, and canvas text uses the loaded face.
+- **Canvas text has no CJK fallback.** `fillText` of Japanese in
+  `48px sans-serif` draws empty boxes on the emulator image (the
+  `canvas-cjk` snapshot), so pdf.js also draws `cjk.pdf`'s non-embedded
+  Japanese font as empty boxes.
+- **pdf.js memory grows on a second pass.** Run 3, app PSS after
+  `TestUtils.gc()`, legacy build: 755.0 MiB after the first corpus pass and
+  1,224.6 MiB after the second, +469.6 MiB, of which libc malloc +311.6 MiB
+  (355.2 to 666.8 MiB). Closing three open documents released little
+  (1,491.3 to 1,478.9 MiB), and after leaving the page PSS was 1,378.5 MiB
+  against a 174.1 MiB baseline, with libc malloc at 776.3 MiB. With FontFace
+  off the second pass still kept +464.3 MiB (libc malloc +319.1 MiB), so web
+  fonts do not explain it. Where the memory is kept is not localized:
+  most of the growth is libc malloc, while Servo's Rust code, its canvas
+  included, allocates through jemalloc (unnamed mappings). SpiderMonkey's
+  malloc-backed buffers in the page or in pdf.js's workers, and pdf.js's
+  own retention, are not ruled out; `TestUtils.gc()` ran only on the page.
+  Whether canvas-heavy sites hit it is not measured. Figures are MiB
+  (`Debug.MemoryInfo` kB divided by 1024).
+- **PDFium-wasm memory is stable.** Same run: 525.6 MiB after the first
+  pass and 496.3 MiB after the second (-29.3 MiB; libc malloc 122.3 to
+  120.7 MiB). Three open documents at 558.2 MiB dropped to 384.7 MiB after
+  closing, and to 335.9 MiB after leaving the page (baseline 171.9 MiB).
+
+Speed on the emulator, across the three runs: the median time for 50
+pages of the 300-page document was 76 to 99 ms per page for pdf.js with
+FontFace on (63 ms with it off) and 50 to 57 ms for PDFium-wasm. pdf.js
+opened a document in 160 to 270 ms, PDFium-wasm in 523 to 918 ms, because
+each document starts its own worker and compiles the 4.6 MB module again;
+starting one instance alone took 510 to 660 ms.
+
+The owner chose PDFium-wasm on 28 October 2026 ([PDF.md](PDF.md#owner-decisions)).
+
+Phase 0a came first: [L-K-M/Combray#141](https://github.com/L-K-M/Combray/pull/141)
+(merged) keeps the one-line page Servo commits for a file it cannot show
+out of Hister and Reader (`native/src/stand_in.js`). Failure first: on
+the checks-only commit `d928753`,
+[Engine run 40483083824](https://github.com/L-K-M/Combray/actions/runs/40483083824)
+attempt 2 failed `HisterTest.aFileServoCannotShowIsNotSentAsItsStandInPage`
+(the fake Hister received the PDF's address; assertion at
+`HisterTest.kt:96`) and `ReaderTest.aFileServoCannotShowHasNoArticle`
+(reader view was Ready with one paragraph, "Unknown content type
+(application/pdf)."). The other 127 device checks passed. On the final
+head `739d66e` all 129 device checks passed.
+
+Not verified: no run on an arm64 phone, so speed, memory and canvas CJK
+text on a real device are unknown. The after-leave samples may include a
+document Servo keeps in session history. The leak's cause, and whether
+canvas-heavy sites hit it, are open.
