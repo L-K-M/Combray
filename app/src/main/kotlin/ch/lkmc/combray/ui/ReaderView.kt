@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -156,6 +157,7 @@ private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose:
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var edge by remember(article) { mutableStateOf<ScrollEdge?>(null) }
+    var scrollActivity by remember(article) { mutableIntStateOf(0) }
     LaunchedEffect(list, article) {
         var previous = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
         snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { position ->
@@ -165,6 +167,7 @@ private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose:
                 } else {
                     ScrollEdge.TOP
                 }
+                scrollActivity++
             }
             previous = position
         }
@@ -191,6 +194,7 @@ private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose:
         edge?.takeIf { if (it == ScrollEdge.TOP) list.canScrollBackward else list.canScrollForward }?.let { target ->
             ScrollEdgeButton(
                 edge = target,
+                scrollActivity = scrollActivity,
                 onClick = {
                     edge = null
                     scope.launch { list.scrollToItem(if (target == ScrollEdge.TOP) 0 else list.layoutInfo.totalItemsCount - 1) }

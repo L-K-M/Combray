@@ -137,6 +137,7 @@ fun BrowserScreen(
         if (!home) homeMode = AddressEditorMode.IDLE
     }
     var scrollEdge by remember(tab?.id, page, state.reader) { mutableStateOf<ScrollEdge?>(null) }
+    var scrollActivity by remember(tab?.id, page, state.reader) { mutableIntStateOf(0) }
     // Tagged with its address: until the new page's status arrives, the bar keeps the last one.
     val saveStatus by remember(tab?.url) {
         val url = tab?.url
@@ -350,7 +351,12 @@ fun BrowserScreen(
                         EngineSurfaceView(viewContext) { graph.engineRunning() }.also { surfaceView = it }
                     },
                     modifier = Modifier.fillMaxSize(),
-                    update = { view -> view.observeScroll(page) { scrollEdge = it } },
+                    update = { view ->
+                        view.observeScroll(page) {
+                            scrollEdge = it
+                            scrollActivity++
+                        }
+                    },
                 )
                 PageOverlay(
                     state = state,
@@ -384,6 +390,7 @@ fun BrowserScreen(
                     scrollEdge?.let { edge ->
                         ScrollEdgeButton(
                             edge = edge,
+                            scrollActivity = scrollActivity,
                             onClick = {
                                 scrollEdge = null
                                 browser.scrollToEdge(page, edge)

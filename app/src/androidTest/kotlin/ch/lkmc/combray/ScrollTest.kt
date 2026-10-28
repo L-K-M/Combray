@@ -84,6 +84,33 @@ class ScrollTest {
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
     }
 
+    @Test
+    fun scrollingRenewsTheButtonAndIdleFadesItInBothDirections() {
+        compose.mainClock.autoAdvance = false
+        swipe(0.65f, 0.35f)
+        awaitTitle("SCROLL-MIDDLE")
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
+
+        repeat(3) {
+            compose.mainClock.advanceTimeBy(SCROLL_INTERVAL_MS)
+            swipe(0.65f, 0.35f)
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
+        }
+
+        compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
+        compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
+
+        swipe(0.35f, 0.65f)
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(SCROLL_INTERVAL_MS)
+        compose.onNodeWithContentDescription(TOP).assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
+        compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
+    }
+
     private fun swipe(start: Float, end: Float) {
         device.dismissSystemDialogs()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -117,5 +144,7 @@ class ScrollTest {
         const val BOTTOM = "Scroll to bottom"
         const val SWIPE_STEPS = 20
         const val SWIPE_STEP_MS = 30L
+        const val SCROLL_INTERVAL_MS = 1_000L
+        const val IDLE_WAIT_MS = 3_000L
     }
 }

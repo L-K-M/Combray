@@ -441,6 +441,36 @@ scripts/check-app.sh emulator-5560 ch.lkmc.combray.ScrollTest ch.lkmc.combray.Re
 
 `ScrollTest` uses only `testing/fixtures/server.py`'s long page: real touch input selects each action, then screen-color checks establish that Servo painted the corresponding viewport-high endpoint section. Position titles corroborate touch scrolling, not programmatic jumps. It also checks same-address reload reset. `ReaderScrollTest` checks both ends and left placement in an RTL article. The accessibility check verifies labels and uncrowded 48dp targets at large font scale. Physical-device and live-site checks are not run.
 
+### Scroll-button idle fade, 28 October 2026
+
+The shared page/Reader button fades out over 200 ms after two seconds without
+scroll movement. Each movement renews the timeout, including unchanged
+direction; scrolling again reveals the button. Android's recommended
+accessibility timeout can extend the delay. Page activity uses the existing
+touch-intent callback, so page flings and scripted scrolling remain unobserved;
+Reader activity includes its list's fling movement. The engine pin is unchanged:
+`294580813ceb0ee579601781d2454a655dd26c9a`. No native or upstream files changed.
+
+`ScrollEdgeButtonTest.theButtonDisappearsAfterScrollingStops` failed before
+the fix because the button remained in the semantics tree after three idle
+seconds. All four Compose/Robolectric regressions now pass, covering idle
+removal, same-direction renewal, reappearance/clicks and an extended
+accessibility timeout:
+
+```sh
+ANDROID_HOME=/home/paseo/android-sdk ./gradlew :app:testDebugUnitTest \
+  --tests ch.lkmc.combray.ui.ScrollEdgeButtonTest
+```
+
+Local Linux x86_64/JDK 21 checks passed: `testDebugUnitTest lintDebug
+assembleDebug assembleDebugAndroidTest`, documentation links, whitespace and
+all 89 native host tests (`cargo test --lib`). The focused device classes
+above now also cover idle hiding, repeated scrolling and both directions.
+They compile; no device was connected. `scripts/build-native.sh` prepared
+the pinned source and began compilation but hit the caller's two-minute
+deadline. Native builds and emulator validation run through the PR's Engine
+workflow; local APK assembly did not include a native engine.
+
 ## Downstream engine maintenance, 23 October 2026
 
 Owner-approved migration to [L-K-M/servo](https://github.com/L-K-M/servo/tree/combray/0.6), an independent downstream repository preserving upstream Git history. `servo/servo` is source pulls only. No contributions, reports, comments, fork API calls or outreach are permitted. The rule is in both repositories' `AGENTS.md` and global agent instructions.
