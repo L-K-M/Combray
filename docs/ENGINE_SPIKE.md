@@ -475,9 +475,13 @@ Initial [Engine CI](https://github.com/L-K-M/Combray/actions/runs/40714581326)
 passed both native ABI builds and 130/131 API-30 x86_64 emulator checks,
 including both new idle-fade checks, Reader endpoints and accessibility.
 The existing page endpoint check failed when its top button was no longer
-displayed after an engine wait. `ScrollTest` now freezes Compose's clock
-outside explicit timeout steps and drives a frame/layout after each raw
-swipe. This keeps engine waiting independent of the button's idle deadline.
+displayed after an engine wait. `ScrollTest` drives a frame/layout after
+each raw swipe. Its endpoint and idle checks freeze Compose's clock, with
+the latter advancing timeout steps explicitly. Reload and snackbar checks
+keep automatic advancement for their recomposition and transitions.
+An intermediate [run](https://github.com/L-K-M/Combray/actions/runs/40722224056)
+passed the endpoint check but exposed those two dependencies when freezing
+the whole class; clock control is now scoped to the checks that need it.
 The follow-up run is tracked in [PR #147](https://github.com/L-K-M/Combray/pull/147).
 
 ## Downstream engine maintenance, 23 October 2026

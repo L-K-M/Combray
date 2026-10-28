@@ -30,12 +30,12 @@ class ScrollTest {
         device.browser.openUrl(URL, Placement.CURRENT_TAB)
         awaitTitle("SCROLL-TOP")
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
-        // Engine waits use wall time; only the idle-fade check should advance the button's clock.
-        compose.mainClock.autoAdvance = false
     }
 
     @Test
     fun verticalSwipesOfferTheMatchingEdgeAndTheButtonJumpsThere() {
+        // Keep the button available while waiting for Servo to paint each endpoint.
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
@@ -88,6 +88,7 @@ class ScrollTest {
 
     @Test
     fun scrollingRenewsTheButtonAndIdleFadesItInBothDirections() {
+        compose.mainClock.autoAdvance = false
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
         compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
