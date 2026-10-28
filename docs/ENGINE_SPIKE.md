@@ -1026,3 +1026,25 @@ new pin.
 This host has no Android SDK: both native ABI builds, packaging and the
 emulator checks are the Engine workflow's evidence, recorded in the pin
 PR.
+
+## 26. SVG path length methods (28 October 2026)
+
+The pin moves to `combray/0.7` tip
+`294580813ceb0ee579601781d2454a655dd26c9a` (upstream base still v0.7.0).
+[Servo PR #13](https://github.com/L-K-M/servo/pull/13) implements
+`SVGGeometryElement.getTotalLength()` and `getPointAtLength()`, which
+Servo (and upstream) lacked, so scripts that measure a shape's outline
+threw `TypeError`. The path comes from the element's geometry attributes
+(path data through Stylo's SVG path parser; `rect`, `circle`, `ellipse`,
+`line`, `polyline`, `polygon`); percentages, font-relative units and the
+CSS `d` property are not supported yet. The PR adds a WPT regression test
+(0/10 before, 10/10 after); 139 upstream `svg/` subtests now pass, with no
+regressions in that directory or in a servoshell site-check sweep.
+
+The `script` crate now depends on `kurbo`, which Servo already locked, so
+`native/Cargo.lock` only adds that dependency edge; no crate version
+changes. The notices were regenerated for the new pin.
+
+This host has no Android SDK: both native ABI builds, packaging and the
+emulator checks are the Engine workflow's evidence, recorded in the pin
+PR.

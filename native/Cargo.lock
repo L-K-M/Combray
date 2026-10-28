@@ -6947,6 +6947,7 @@ dependencies = [
  "k12",
  "keccak",
  "keyboard-types",
+ "kurbo",
  "libc",
  "log",
  "malloc_size_of_derive",
