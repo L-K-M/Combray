@@ -471,6 +471,15 @@ the pinned source and began compilation but hit the caller's two-minute
 deadline. Native builds and emulator validation run through the PR's Engine
 workflow; local APK assembly did not include a native engine.
 
+Initial [Engine CI](https://github.com/L-K-M/Combray/actions/runs/40714581326)
+passed both native ABI builds and 130/131 API-30 x86_64 emulator checks,
+including both new idle-fade checks, Reader endpoints and accessibility.
+The existing page endpoint check failed when its top button was no longer
+displayed after an engine wait. `ScrollTest` now freezes Compose's clock
+outside explicit timeout steps and drives a frame/layout after each raw
+swipe. This keeps engine waiting independent of the button's idle deadline.
+The follow-up run is tracked in [PR #147](https://github.com/L-K-M/Combray/pull/147).
+
 ## Downstream engine maintenance, 23 October 2026
 
 Owner-approved migration to [L-K-M/servo](https://github.com/L-K-M/servo/tree/combray/0.6), an independent downstream repository preserving upstream Git history. `servo/servo` is source pulls only. No contributions, reports, comments, fork API calls or outreach are permitted. The rule is in both repositories' `AGENTS.md` and global agent instructions.

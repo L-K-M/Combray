@@ -30,6 +30,8 @@ class ScrollTest {
         device.browser.openUrl(URL, Placement.CURRENT_TAB)
         awaitTitle("SCROLL-TOP")
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        // Engine waits use wall time; only the idle-fade check should advance the button's clock.
+        compose.mainClock.autoAdvance = false
     }
 
     @Test
@@ -86,16 +88,13 @@ class ScrollTest {
 
     @Test
     fun scrollingRenewsTheButtonAndIdleFadesItInBothDirections() {
-        compose.mainClock.autoAdvance = false
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
-        compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
 
         repeat(3) {
             compose.mainClock.advanceTimeBy(SCROLL_INTERVAL_MS)
             swipe(0.65f, 0.35f)
-            compose.mainClock.advanceTimeByFrame()
             compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
         }
 
@@ -103,8 +102,6 @@ class ScrollTest {
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
 
         swipe(0.35f, 0.65f)
-        compose.mainClock.advanceTimeByFrame()
-        compose.waitForIdle()
         compose.mainClock.advanceTimeBy(SCROLL_INTERVAL_MS)
         compose.onNodeWithContentDescription(TOP).assertIsDisplayed()
         compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
@@ -127,6 +124,8 @@ class ScrollTest {
             send(MotionEvent.ACTION_MOVE, start + (end - start) * step / SWIPE_STEPS)
         }
         send(MotionEvent.ACTION_UP, end)
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
     }
 
     private fun awaitTitle(expected: String) {
