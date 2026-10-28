@@ -184,6 +184,8 @@ class PlayerActivity : ComponentActivity() {
     internal fun showControls() = playerView.showController()
 
     private fun startPlayer() {
+        // A frame the released player drew is not this one's.
+        state.update { it.copy(firstFrameRendered = false) }
         val content = if (request.kind == MediaKind.VIDEO) C.AUDIO_CONTENT_TYPE_MOVIE else C.AUDIO_CONTENT_TYPE_MUSIC
         val attributes = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(content).build()
         // Decoder fallback: a decoder that fails to start gives way to the next, a software one included.
@@ -214,7 +216,7 @@ class PlayerActivity : ComponentActivity() {
         player = null
         playerView.player = null
         playerView.keepScreenOn = false
-        state.update { it.copy(phase = PlaybackPhase.RELEASED) }
+        state.update { it.copy(phase = PlaybackPhase.RELEASED, positionMs = positionMs) }
     }
 
     private fun startTicker() {

@@ -28,11 +28,12 @@ import java.net.Proxy
 class MediaNetwork(
     private val base: OkHttpClient = baseClient(),
     private val isLocal: (InetAddress) -> Boolean = MediaPolicy::isLocalAddress,
+    private val isDeviceOrLink: (InetAddress) -> Boolean = MediaPolicy::isDeviceOrLinkAddress,
 ) {
     /** The [Call.Factory] Media3 fetches [request] with. */
     fun callFactory(request: PlaybackRequest): Call.Factory = base.newBuilder()
         .addInterceptor(FirstRequestCheck(request.origin))
-        .addNetworkInterceptor(HopPolicy(request, isLocal))
+        .addNetworkInterceptor(HopPolicy(request, isLocal, isDeviceOrLink))
         .build()
 
     companion object {
@@ -82,6 +83,7 @@ private class FirstRequestCheck(private val origin: MediaOrigin) : Interceptor {
 internal class HopPolicy(
     private val request: PlaybackRequest,
     private val isLocal: (InetAddress) -> Boolean,
+    private val isDeviceOrLink: (InetAddress) -> Boolean = MediaPolicy::isDeviceOrLinkAddress,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val hop = chain.request()
@@ -89,7 +91,7 @@ internal class HopPolicy(
         MediaPolicy.check(origin, hop.url)?.let { throw MediaRefusedException(it) }
         // Whatever name or literal led there: the address OkHttp connected to.
         val connection = checkNotNull(chain.connection()) { "a network interceptor runs on a connection" }
-        MediaPolicy.checkAddress(origin, hop.url.host, connection.route().socketAddress.address, isLocal)
+        MediaPolicy.checkAddress(origin, hop.url.host, connection.route().socketAddress.address, isLocal, isDeviceOrLink)
             ?.let { throw MediaRefusedException(it) }
 
         val referer = MediaPolicy.referer(origin, hop.url)

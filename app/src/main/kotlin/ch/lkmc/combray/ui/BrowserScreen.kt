@@ -153,6 +153,7 @@ fun BrowserScreen(
     val mediaUnsupported = stringResource(R.string.notice_media_unsupported)
     val mediaPlayable = stringResource(R.string.notice_media_playable)
     val play = stringResource(R.string.action_play)
+    val mediaPageLeft = stringResource(R.string.notice_media_page_left)
     val popupBlocked = stringResource(R.string.notice_popup_blocked)
     val undo = stringResource(R.string.action_undo)
     val openedInBackground = stringResource(R.string.notice_opened_in_background)
@@ -164,11 +165,11 @@ fun BrowserScreen(
             context.startActivity(PlayerActivity.intent(context, graph.playback.offer(request)))
         }
     }
-    // One entry plays at once; several open a choice. Only for the page the tab still shows.
+    // One entry plays at once; several open a choice. Only for the page the tab still shows: a notice that outlived its page says so.
     val playMedia = { page: MediaPageRef ->
         val shown = browser.browserState.value.activeTab?.takeIf { it.mediaPage == page }
         when (shown?.media?.size ?: 0) {
-            0 -> Unit
+            0 -> notify(mediaPageLeft)
             1 -> openPlayer(page, shown!!.media.single().id)
             else -> sheet = Sheet.MEDIA
         }

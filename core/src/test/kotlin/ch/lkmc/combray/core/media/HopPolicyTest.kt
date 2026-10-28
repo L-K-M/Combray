@@ -54,7 +54,7 @@ class HopPolicyTest {
 
     @Test
     fun thePagesOwnHostMayBeLocal() {
-        val chain = FakeChain("http://media.example.org:8096/a.mp4", loopback) { ok(it) }
+        val chain = FakeChain("http://media.example.org:8096/a.mp4", InetAddress.getByName("100.101.102.103")) { ok(it) }
         val media = request("http://media.example.org:8096/web/", "http://media.example.org:8096", "http://media.example.org:8096/a.mp4")
         assertEquals(200, HopPolicy(media, everythingLocal).intercept(chain).code)
         assertEquals(1, chain.sent.size)

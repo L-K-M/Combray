@@ -144,6 +144,31 @@ class MediaPolicyTest {
         assertNull(MediaPolicy.checkAddress(plainPage, "example.org", InetAddress.getByName("93.184.215.14"), everythingLocal))
     }
 
+    /** DNS rebinding of the page's own host: never to this device or the link; still to a tailnet or home address. */
+    @Test
+    fun thePagesOwnHostIsNeverThisDeviceOrTheLink() {
+        val page = MediaPolicy.origin("https://attacker.test/", "https://attacker.test")
+        for (address in listOf("127.0.0.1", "127.1.2.3", "::1", "169.254.169.254", "fe80::1", "0.0.0.0", "::", "::ffff:127.0.0.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe")) {
+            assertEquals(address, MediaRefusal.PRIVATE_NETWORK, MediaPolicy.checkAddress(page, "attacker.test", InetAddress.getByName(address)))
+        }
+        for (address in listOf("100.64.1.2", "192.168.1.1", "10.0.0.5", "fd7a:115c:a1e0::1")) {
+            assertNull(address, MediaPolicy.checkAddress(page, "attacker.test", InetAddress.getByName(address)))
+        }
+        assertNull(MediaPolicy.checkAddress(localPage, "localhost", InetAddress.getByName("127.0.0.1")))
+    }
+
+    /** Servo judges a blob: page by the origin that made it, and its loads carry no referrer. */
+    @Test
+    fun aBlobPageIsAsSecureAsThePageThatMadeIt() {
+        val blob = MediaPolicy.origin("blob:https://example.org/7f0c", null)
+        assertTrue(blob.secure)
+        assertNull(blob.pageHost)
+        assertFalse(blob.local)
+        assertEquals(MediaRefusal.MIXED_CONTENT, check(blob, "http://93.184.215.14/a.mp4"))
+        assertNull(check(blob, "https://cdn.example.org/a.mp4"))
+        assertFalse(MediaPolicy.origin("blob:http://example.org/7f0c", null).secure)
+    }
+
     @Test
     fun localAddressesIncludeTheMediaOnlyRanges() {
         for (address in listOf("0.0.0.0", "0.1.2.3", "100.64.0.0", "100.127.255.255", "::", "::1", "64:ff9b::c0a8:101", "::ffff:10.0.0.1", "fc00::1")) {

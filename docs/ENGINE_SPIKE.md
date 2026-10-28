@@ -1276,4 +1276,10 @@ page's media report was credited to it (the load overtook the commit),
 where the policy refuses local media from a public page. The fix holds
 such reports while a page the app asked for is pending (section 13,
 "No audio or video"); `BrowserCoordinatorTest` covers it, and both new
-cases fail without it.
+cases fail without it. [Engine run 40757033391](https://github.com/L-K-M/Combray/actions/runs/40757033391)
+at `6e2e35f` then passed all 140 fixture checks, the redirect check
+included. The first review round's changes after it (the own-host
+exception never reaching this device or the local link, a `blob:` page
+as secure as its maker, the player's snapshot on stop and start, and a
+notice when Play outlives its page) go through the PR's next Engine
+run.

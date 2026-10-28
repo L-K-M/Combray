@@ -56,7 +56,11 @@ class MediaNetworkTest {
 
     private fun MockWebServer.at(host: String, path: String = "/a.mp4"): HttpUrl = url(path).newBuilder().host(host).build()
 
-    private fun network(isLocal: (InetAddress) -> Boolean = { false }, client: (OkHttpClient.Builder) -> Unit = {}): MediaNetwork {
+    private fun network(
+        isLocal: (InetAddress) -> Boolean = { false },
+        isDeviceOrLink: (InetAddress) -> Boolean = { false },
+        client: (OkHttpClient.Builder) -> Unit = {},
+    ): MediaNetwork {
         val base = MediaNetwork.baseClient(dns).newBuilder()
             .eventListener(
                 object : EventListener() {
@@ -67,7 +71,7 @@ class MediaNetworkTest {
             )
             .also(client)
             .build()
-        return MediaNetwork(base, isLocal)
+        return MediaNetwork(base, isLocal, isDeviceOrLink)
     }
 
     private fun request(url: HttpUrl, origin: MediaOrigin = PUBLIC_PAGE) =
@@ -150,6 +154,25 @@ class MediaNetworkTest {
         assertEquals(200, network.fetch(request(media.at("nas.test"), origin)))
         assertEquals(MediaRefusal.PRIVATE_NETWORK, network.refusal(request(media.at("other.test"), origin)))
         assertEquals(1, media.requestCount)
+    }
+
+    @Test
+    fun thePagesOwnHostRebindingToThisDeviceIsRefused() {
+        val media = server()
+        media.enqueue(MockResponse().setBody("media"))
+        val origin = MediaPolicy.origin("http://nas.test/web/", "http://nas.test")
+        val network = network(isLocal = MediaPolicy::isLocalAddress, isDeviceOrLink = MediaPolicy::isDeviceOrLinkAddress)
+        assertEquals(MediaRefusal.PRIVATE_NETWORK, network.refusal(request(media.at("nas.test"), origin)))
+        assertEquals(0, media.requestCount)
+    }
+
+    @Test
+    fun aRedirectToAnIpv6LoopbackLiteralIsRefusedBeforeConnecting() {
+        val media = server()
+        media.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "http://[::1]:${media.port}/a.mp4"))
+        assertEquals(MediaRefusal.PRIVATE_NETWORK, network().refusal(request(media.at("cdn.test"))))
+        assertEquals(1, media.requestCount)
+        assertEquals("only the first hop connected", 1, connects.size)
     }
 
     @Test

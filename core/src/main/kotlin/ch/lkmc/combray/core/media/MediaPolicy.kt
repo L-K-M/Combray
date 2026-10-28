@@ -11,9 +11,9 @@ import java.net.UnknownHostException
  * The page a media load came from, as far as the player's network rules need it.
  *
  * [pageHost] is the page's host, or null for a page without one (`data:`, `about:`, `blob:`).
- * [secure]: the page or the referrer is https. [local]: the page is on a local host and the
- * referrer is present and local too. [referrer] is the origin of the referrer Servo computed for
- * the load (`https://example.org`), or null.
+ * [secure]: the page (for a `blob:` page, the page that made it) or the referrer is https.
+ * [local]: the page is on a local host and the referrer is present and local too. [referrer] is
+ * the origin of the referrer Servo computed for the load (`https://example.org`), or null.
  */
 data class MediaOrigin(val pageHost: String?, val secure: Boolean, val local: Boolean, val referrer: String?) {
     /** Hosts and referrers stay out of logs. */
@@ -66,6 +66,7 @@ object MediaPolicy {
 
     private const val HTTPS = "https"
     private const val LOCALHOST_SUFFIX = ".localhost"
+    private const val BLOB_PREFIX = "blob:"
     private const val HEX_PREFIX = "0x"
     private const val IPV4_BYTES = 4
     private const val IPV6_BYTES = 16
@@ -86,16 +87,22 @@ object MediaPolicy {
      */
     private val MEDIA_LOCAL_IPV4 = listOf(listOf(0, 0, 0, 0) to 8, listOf(100, 64, 0, 0) to 10)
 
+    /** IPv4 networks of this device and the local link, as (bytes, prefix length): 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16. No tailnet or home name resolves into them. */
+    private val DEVICE_OR_LINK_IPV4 = listOf(listOf(0, 0, 0, 0) to 8, listOf(127, 0, 0, 0) to 8, listOf(169, 254, 0, 0) to 16)
+
     /** The page context of a media load on [pageUrl], whose referrer Servo gave as [referrer]. */
     fun origin(pageUrl: String, referrer: String?): MediaOrigin {
         val page = pageUrl.toHttpUrlOrNull()
+        // A blob: page is as secure as the page that made it, as Servo's mixed content check judges it by its
+        // origin. It keeps no host, so the own-host exception does not reach it.
+        val maker = pageUrl.takeIf { it.startsWith(BLOB_PREFIX, ignoreCase = true) }?.substring(BLOB_PREFIX.length)?.toHttpUrlOrNull()
         val from = referrer?.toHttpUrlOrNull()
         // A null referrer counts as public: a late load of the previous page can be attributed
         // to a local one (docs/VIDEO.md).
         val local = page != null && from != null && isLocalHost(page.host) && isLocalHost(from.host)
         return MediaOrigin(
             pageHost = page?.host,
-            secure = page?.isHttps == true || from?.isHttps == true,
+            secure = page?.isHttps == true || maker?.isHttps == true || from?.isHttps == true,
             local = local,
             referrer = from?.let(::originOf),
         )
@@ -121,17 +128,21 @@ object MediaPolicy {
 
     /**
      * The private network rule for [address], which a hop to [host] connected to. A local page
-     * may reach local addresses, and any page its own host: Servo already connected there, and
-     * a tailnet or home name resolves to a local address.
+     * may reach local addresses, and any page its own host, except at this device or the local
+     * link ([isDeviceOrLinkAddress]): Servo already connected there, and a tailnet or home name
+     * resolves to a local address.
      */
     fun checkAddress(
         origin: MediaOrigin,
         host: String,
         address: InetAddress,
         isLocal: (InetAddress) -> Boolean = ::isLocalAddress,
+        isDeviceOrLink: (InetAddress) -> Boolean = ::isDeviceOrLinkAddress,
     ): MediaRefusal? {
-        if (origin.local || host.equals(origin.pageHost, ignoreCase = true)) return null
-        return if (isLocal(address)) MediaRefusal.PRIVATE_NETWORK else null
+        if (origin.local || !isLocal(address)) return null
+        // A rebound name of the page's own host can resolve to this device; a tailnet or home name never does.
+        if (host.equals(origin.pageHost, ignoreCase = true) && !isDeviceOrLink(address)) return null
+        return MediaRefusal.PRIVATE_NETWORK
     }
 
     /**
@@ -151,14 +162,23 @@ object MediaPolicy {
      */
     fun isLocalAddress(address: InetAddress): Boolean {
         val bytes = address.address.map { it.toInt() and 0xFF }
-        val ipv4 = when {
-            bytes.size == IPV4_BYTES -> bytes
-            bytes.size == IPV6_BYTES && (bytes.startsWith(IPV4_MAPPED_PREFIX) || bytes.startsWith(NAT64_PREFIX)) ->
-                bytes.takeLast(IPV4_BYTES)
-            else -> null
-        }
+        val ipv4 = reachedIpv4(bytes)
         if (ipv4 == null) return bytes.all { it == 0 } || AddressPolicy.isLocalAddress(bytes)
         return AddressPolicy.isLocalAddress(ipv4) || MEDIA_LOCAL_IPV4.any { (network, length) -> inNetwork(ipv4, network, length) }
+    }
+
+    /** Whether [address] is this device or the local link: loopback, link-local or unspecified; IPv4 ones also in IPv4-mapped or NAT64 form. */
+    fun isDeviceOrLinkAddress(address: InetAddress): Boolean {
+        val ipv4 = reachedIpv4(address.address.map { it.toInt() and 0xFF })
+            ?: return address.isLoopbackAddress || address.isLinkLocalAddress || address.isAnyLocalAddress
+        return DEVICE_OR_LINK_IPV4.any { (network, length) -> inNetwork(ipv4, network, length) }
+    }
+
+    /** The IPv4 address [bytes] reach: an IPv4 address itself, or an IPv4-mapped or NAT64 address's last four bytes; null for other IPv6. */
+    private fun reachedIpv4(bytes: List<Int>): List<Int>? = when {
+        bytes.size == IPV4_BYTES -> bytes
+        bytes.size == IPV6_BYTES && (bytes.startsWith(IPV4_MAPPED_PREFIX) || bytes.startsWith(NAT64_PREFIX)) -> bytes.takeLast(IPV4_BYTES)
+        else -> null
     }
 
     /**

@@ -155,6 +155,7 @@
     <string name="action_show">Show</string>
     <string name="notice_media_unsupported">This page’s audio or video can’t play in Combray.</string>
     <string name="notice_media_playable">This page’s audio or video opens in a separate player.</string>
+    <string name="notice_media_page_left">That audio or video is on a page no longer shown. Return to the page to play it.</string>
     <string name="action_play">Play</string>
     <string name="action_play_media">Play audio or video</string>
     <string name="media_sheet_title">Audio and video on this page</string>

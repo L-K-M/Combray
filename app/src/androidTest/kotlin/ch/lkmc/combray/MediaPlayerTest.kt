@@ -1,6 +1,7 @@
 package ch.lkmc.combray
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.os.SystemClock
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import ch.lkmc.combray.core.browser.Placement
@@ -31,12 +33,14 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The fullscreen media player on the real engine (docs/VIDEO.md, phase C1): a page's cancelled
@@ -211,6 +215,52 @@ class MediaPlayerTest {
         assertEquals("clip requests", 0, clip().getInt("requests"))
     }
 
+    /** Play on a notice that outlived its page opens nothing and says so. */
+    @Test
+    fun playAfterLeavingThePageSaysSo() {
+        open(Fixtures.video(key))
+        device.browser.newTab()
+        device.awaitState { it.activeTab?.isHome == true }
+        tapPlay()
+        compose.waitUntilAtLeastOneExists(hasText(PAGE_LEFT_NOTICE), Device.LOAD_TIMEOUT_MS)
+        assertNull("no player", onMain { resumed() } as? PlayerActivity)
+        assertEquals("clip requests", 0, clip().getInt("requests"))
+    }
+
+    /**
+     * (report) A player stopped while playing is released at its exact position, and its restart
+     * starts there without the released player's first frame. The task is moved, not relaunched:
+     * MainActivity is singleTask, and an intent for it would clear the player.
+     */
+    @Test
+    fun aStoppedPlayerIsReleasedAndResumesWhereItStopped() = report("stop and start") {
+        open(Fixtures.video(key))
+        tapPlay()
+        val player = awaitPlayer()
+        awaitSnapshot(player, "playback") { it.firstFrameRendered && it.phase in PLAYED && it.positionMs > PLAYING_MS }
+
+        // Runs on the main thread right after onStart, before the new player delivers any event.
+        val started = AtomicReference<PlaybackSnapshot>()
+        val callback = ActivityLifecycleCallback { activity, stage ->
+            if (activity === player && stage == Stage.STARTED) started.set(player.snapshot.value)
+        }
+        val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+        monitor.addLifecycleCallback(callback)
+        try {
+            instrumentation.runOnMainSync { player.moveTaskToBack(true) }
+            val released = awaitSnapshot(player, "the release") { it.phase == PlaybackPhase.RELEASED }
+            player.getSystemService(ActivityManager::class.java).appTasks
+                .first { it.taskInfo?.taskId == player.taskId }
+                .moveToFront()
+            val restarted = poll("the restart") { started.get() }
+            assertFalse("no frame drawn by the new player yet", restarted.firstFrameRendered)
+            assertEquals("starts where it was released", released.positionMs, restarted.positionMs)
+            awaitSnapshot(player, "the new first frame") { it.firstFrameRendered }
+        } finally {
+            monitor.removeLifecycleCallback(callback)
+        }
+    }
+
     /** Check 7 (report): audio reaches READY; whether its position advances without an audio device is unverified. */
     @Test
     fun audioPlays() = report("audio") {
@@ -361,6 +411,7 @@ class MediaPlayerTest {
         const val LOG_TAG = "MediaPlayerTest"
         const val PLAYABLE_NOTICE = "This page’s audio or video opens in a separate player."
         const val PLAIN_NOTICE = "This page’s audio or video can’t play in Combray."
+        const val PAGE_LEFT_NOTICE = "That audio or video is on a page no longer shown. Return to the page to play it."
         const val PLAY = "Play"
         const val VIDEO_ROW = "Video · slow.bin"
         const val AUDIO_ROW = "Audio · slow.bin"
@@ -371,6 +422,8 @@ class MediaPlayerTest {
         const val SLOW_MEDIA_MS = 20_000L
         const val TAP_OUTCOME_MS = 5_000L
         const val POLL_MS = 100L
+        /** Far enough into the clip that a stop lands between position ticks. */
+        const val PLAYING_MS = 500L
         /** The clip turns from green to blue at 3 s. */
         const val HALF_MS = 3_000L
         const val SECOND_HALF_MS = 3_200L
