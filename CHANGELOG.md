@@ -140,6 +140,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Pages built from deeply nested flex containers no longer freeze while
+  laying out: the engine takes upstream's flex layout reuse.
 - Update the engine to the latest downstream `combray/0.7` commit: patched
   zstd crates, `console.table` and `console.dirxml`, inline SVG attribute
   names that scripts can read again, and `performance.measure()` from

@@ -1002,3 +1002,27 @@ LLVM section is the same text.
 This host has no Android SDK: both native ABI builds, packaging and the
 emulator checks are the Engine workflow's evidence, recorded in the pin
 PR.
+
+## 25. Flex layout reuse backport (28 October 2026)
+
+The pin moves to `combray/0.7` tip
+`724524f0c2b6fe10c8f5d5ad3d9e40227460095d` (upstream base still v0.7.0).
+[Servo PR #12](https://github.com/L-K-M/servo/pull/12) backports upstream
+`b0c20e94ae2` (lay out flex items once when their cross size is known
+upfront) and `f07470d3911` (cache the default content block size in column
+flex layout). In v0.7.0 each level of nested flex containers laid out its
+items again without reusing the result, so layout time doubled per level:
+a synthetic chain of 20 nested column flex containers took about 11 s to
+lay out and 40 levels never finished, which froze apps built from deeply
+nested flex containers. After the backport 60 levels take about 1 ms. The
+PR adds a WPT regression test (hangs before, passes after); css-flexbox
+WPT, a servoshell site-check sweep and an independent review found no
+regressions.
+
+No embedder API or dependency changed: Servo's lockfile is the same, so
+`native/Cargo.lock` does not change. The notices were regenerated for the
+new pin.
+
+This host has no Android SDK: both native ABI builds, packaging and the
+emulator checks are the Engine workflow's evidence, recorded in the pin
+PR.
