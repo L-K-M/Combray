@@ -17,7 +17,7 @@ use servo::{
 use url::Url;
 
 use crate::events::{LoadPhase, ViewKey};
-use crate::media;
+use crate::media::{self, MediaKind};
 
 pub enum DelegateEvent {
     /// Kept whole: the engine builds the new view after the spin, outside this callback.
@@ -95,6 +95,11 @@ pub enum DelegateEvent {
     /// The delegate cancelled an audio, video or text-track load (see `media`).
     MediaBlocked {
         view: ViewKey,
+        kind: MediaKind,
+        /// The load's URL when the engine reports it (`media::reportable_url`).
+        url: Option<String>,
+        /// The origin of the referrer Servo computed for the load, when http(s).
+        referrer: Option<String>,
     },
     Crashed {
         view: ViewKey,
@@ -286,12 +291,25 @@ impl WebViewDelegate for TabDelegate {
     fn load_web_resource(&self, _webview: WebView, load: WebResourceLoad) {
         // Servo's fetch waits for this answer, so it is given here; answering only sends on the
         // fetch's channel and does not re-enter the WebView. Dropping `load` lets it continue.
-        if !media::is_unplayable_media(load.request().destination.as_str()) {
+        let request = load.request();
+        let Some(kind) = media::cancelled_kind(request.destination.as_str()) else {
             return;
-        }
+        };
+        let reported = media::reportable_url(kind, request.url.as_str()).map(String::from);
+        // Servo applied the page's referrer policy already; only the origin leaves the engine.
+        let referrer = request
+            .referrer_url
+            .as_ref()
+            .filter(|referrer| matches!(referrer.scheme(), "http" | "https"))
+            .map(|referrer| referrer.origin().ascii_serialization());
         // A cancelled load is a network error: the element fires `error` without any download.
-        let url = load.request().url.clone();
+        let url = request.url.clone();
         load.intercept(WebResourceResponse::new(url)).cancel();
-        self.push(DelegateEvent::MediaBlocked { view: self.view });
+        self.push(DelegateEvent::MediaBlocked {
+            view: self.view,
+            kind,
+            url: reported,
+            referrer,
+        });
     }
 }

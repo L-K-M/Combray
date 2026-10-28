@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.browser
 
+import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.PageRef
 
@@ -45,10 +46,30 @@ data class ActiveTab(
 
     /** Ephemeral identity for actions on the document shown now; never persisted. */
     val page: PageRef? = null,
+
+    /** Media the engine cancelled on the page shown, newest first. */
+    val media: List<PlayableMedia> = emptyList(),
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView
 }
+
+/**
+ * Audio or video the engine cancelled on a page, which a player outside Servo may play. Its
+ * address stays in the coordinator: page media addresses are not shown or logged.
+ */
+data class PlayableMedia(
+    /** Opaque; names the entry within its page. */
+    val id: Long,
+    val kind: MediaKind,
+    /** The file name from the address (its last path segment), or the host when there is none. */
+    val name: String,
+    /** Display host of the media. */
+    val site: String,
+)
+
+/** Opaque reference to one page's media in one tab, valid while that page is the tab's. */
+data class MediaPageRef(val tabId: String, val pageId: Long)
 
 /** A short notice the UI shows once, optionally with an action. */
 sealed interface Notice {
@@ -66,8 +87,11 @@ sealed interface Notice {
     /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
     data class OpenedInBackground(val tabId: String) : Notice
 
-    /** The shown page has audio or video, which Combray cannot play; its media was not downloaded. */
-    data object MediaUnsupported : Notice
+    /** The shown page has audio or video that nothing can play; its media was not downloaded. */
+    data object MediaUnplayable : Notice
+
+    /** The shown page has audio or video at a web address ([ActiveTab.media]); it was not downloaded. */
+    data class MediaPlayable(val page: MediaPageRef) : Notice
 
     /** The shown page asked for a window without the user's tap, and it was not opened. */
     data object PopupBlocked : Notice

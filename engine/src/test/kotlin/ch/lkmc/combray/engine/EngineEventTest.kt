@@ -64,10 +64,54 @@ class EngineEventTest {
     }
 
     @Test
-    fun parsesMediaBlockedWithItsDocument() {
-        val event = EngineEvent.parse("""{"type":"media_blocked","document":4294967331,"tab":2,"generation":5,"schema":1}""")
+    fun parsesMediaBlockedWithItsDocumentKindUrlAndReferrer() {
+        val event = EngineEvent.parse(
+            """{"type":"media_blocked","document":4294967331,"kind":"video","url":"https://cdn.example.org/a.mp4",""" +
+                """"referrer":"https://example.org","tab":2,"generation":5,"schema":1}""",
+        )
 
-        assertEquals(EngineEvent.MediaBlocked(ViewRef(2, 5), 4294967331L), event)
+        assertEquals(
+            EngineEvent.MediaBlocked(ViewRef(2, 5), 4294967331L, MediaKind.VIDEO, "https://cdn.example.org/a.mp4", "https://example.org"),
+            event,
+        )
+    }
+
+    @Test
+    fun parsesMediaBlockedWithoutUrlOrReferrer() {
+        val event = EngineEvent.parse(
+            """{"type":"media_blocked","document":7,"kind":"track","url":null,"referrer":null,"tab":2,"generation":5,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.MediaBlocked(ViewRef(2, 5), 7, MediaKind.TRACK, null, null), event)
+    }
+
+    @Test
+    fun mediaBlockedWithAnUnknownKindIsRejected() {
+        val failure = runCatching {
+            EngineEvent.parse("""{"schema":1,"type":"media_blocked","document":7,"kind":"image","url":null,"referrer":null,"tab":2,"generation":5}""")
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals("unknown media kind image", failure?.message)
+    }
+
+    @Test
+    fun mediaBlockedLeavesItsAddressesOutOfItsDescription() {
+        val event = EngineEvent.MediaBlocked(ViewRef(2, 5), 7, MediaKind.AUDIO, "https://cdn.example.org/secret-token.mp3", "https://example.org")
+
+        val text = event.toString()
+        assertFalse(text, "example.org" in text)
+        assertTrue(text, "AUDIO" in text)
+    }
+
+    @Test
+    fun parsesEngineReadyWithTheUserAgent() {
+        val event = EngineEvent.parse(
+            """{"type":"engine_ready","width":720,"height":1280,""" +
+                """"user_agent":"Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0","schema":1}""",
+        )
+
+        assertEquals(EngineEvent.EngineReady(720, 1280, "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0"), event)
     }
 
     @Test

@@ -19,6 +19,7 @@ import ch.lkmc.combray.engine.EngineStart
 import ch.lkmc.combray.engine.FindStatus
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
+import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.PageRef
 import ch.lkmc.combray.engine.ScrollEdge
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.net.URLDecoder
 import java.util.UUID
 
 enum class Placement {
@@ -98,6 +100,12 @@ class BrowserCoordinator(
     private var nextRequest = 1L
     private var selectedNative: Long? = null
     private var engineReady = false
+
+    /** The `User-Agent` Servo sends (`engine_ready`), for the media player's own requests. */
+    private var userAgent: String? = null
+
+    /** Opaque IDs of media pages and their entries. */
+    private var nextMediaId = 1L
 
     /** Process visibility; conservatively backgrounded until Android reports onStart. */
     private var visibility = AppVisibility.BACKGROUND
@@ -686,6 +694,7 @@ class BrowserCoordinator(
         when (event) {
             is EngineEvent.EngineReady -> {
                 engineReady = true
+                userAgent = event.userAgent
                 // Before any view exists, so the first page lays out at the chosen size.
                 engine.setPageZoom(textSize().zoom)
                 state.update { it.copy(engine = EngineStatus.READY) }
@@ -700,7 +709,10 @@ class BrowserCoordinator(
             is EngineEvent.LoadStatus -> view(event.view)?.let {
                 if (event.document == it.currentDocument && event.attribution != Attribution.STALE) {
                     it.loading = event.phase != LoadPhase.COMPLETE
-                    if (event.phase == LoadPhase.COMPLETE) scheduleCapture(it, event.document, captureTiming.settleMs)
+                    if (event.phase == LoadPhase.COMPLETE) {
+                        scheduleCapture(it, event.document, captureTiming.settleMs)
+                        showPendingMediaNotice(it, event.document)
+                    }
                 }
             }
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
@@ -793,10 +805,55 @@ class BrowserCoordinator(
         view.controls.addLast(ShownControl(event.control, event.content, offerBlocking = dialog && view.dialogCount > 1))
     }
 
-    /** The engine reports each document once. Only the page on screen gets a notice: for a hidden tab or a replaced page it would name the wrong page. */
+    /**
+     * Records cancelled media for the page shown in [view]. The engine reports each address once
+     * per page, and media without one once. A report for a replaced document is dropped: it would
+     * name the wrong page.
+     *
+     * Only the tab on screen gets notices, at most two per page: the plain one, then the playable
+     * one if an address arrives later. The first address gives the playable notice at once. Media
+     * without an address gives the plain notice only once the page has loaded and still has none,
+     * so a `<track>` cancelled just before its video does not give a notice of its own.
+     */
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
-        if (view.nativeTab != selectedNative || view.currentDocument != event.document) return
-        state.update { it.copy(notice = Notice.MediaUnsupported) }
+        val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
+        val page = view.pages.getOrPut(key) { PageMediaState(nextMediaId++) }
+        val shown = view.nativeTab == selectedNative
+        val url = event.url
+        if (url != null) {
+            page.record(MediaEntry(nextMediaId++, event.kind, url, event.referrer))
+            if (!shown || page.playableShown) return
+            page.playableShown = true
+            page.plainPending = false
+            // Overwrites any notice the UI has not taken yet, as every notice does; that includes this page's plain one.
+            state.update { it.copy(notice = Notice.MediaPlayable(MediaPageRef(view.tabId, page.id))) }
+            return
+        }
+        if (!shown || page.entries.isNotEmpty() || page.plainShown || page.playableShown) return
+        if (view.loading) {
+            page.plainPending = true
+            return
+        }
+        showPlainMediaNotice(page)
+    }
+
+    /** The plain media notice a page deferred until it loaded, if it is still on screen and found no address. */
+    private fun showPendingMediaNotice(view: LiveView, document: Long) {
+        // Per document: the page may have moved to another address (replaceState, pushState) while it loaded.
+        // Collected first, because a lookup reorders the access-ordered map.
+        val pending = view.pages.filter { (key, page) -> key.document == document && page.plainPending }
+        if (pending.isEmpty()) return
+        pending.values.forEach { it.plainPending = false }
+        val key = view.currentPage?.takeIf { it.document == document } ?: return
+        if (view.nativeTab != selectedNative) return
+        val page = view.pages.getOrPut(key) { PageMediaState(nextMediaId++) }
+        if (page.entries.isNotEmpty() || page.plainShown || page.playableShown) return
+        showPlainMediaNotice(page)
+    }
+
+    private fun showPlainMediaNotice(page: PageMediaState) {
+        page.plainShown = true
+        state.update { it.copy(notice = Notice.MediaUnplayable) }
     }
 
     private suspend fun onHistory(view: LiveView, reported: EngineEvent.HistoryChanged) {
@@ -804,6 +861,8 @@ class BrowserCoordinator(
         val event = reported.copy(url = HostNames.withoutCredentials(reported.url))
         view.canGoBack = event.canGoBack
         view.canGoForward = event.canGoForward
+        // The page media is recorded for; another fragment is the same page (native/src/media.rs).
+        view.currentPage = PageKey(event.document, event.url.substringBefore('#'))
         // Servo hides nothing when a navigation replaces the field's document (a form sent with
         // Enter). A field of the new document may have asked for the keyboard before its commit.
         val owner = keyboardOwner
@@ -1445,6 +1504,7 @@ class BrowserCoordinator(
                             val generation = live.generation ?: return@let null
                             live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
                         },
+                        media = view?.takeIf { !it.crashed }?.shownPageMedia()?.entries?.map { it.playable() }.orEmpty(),
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->
@@ -1499,6 +1559,50 @@ class BrowserCoordinator(
 
         /** The document a blocked window was last reported for. */
         var popupNoticeDocument: Long? = null
+
+        /** The page shown, from the last history change. */
+        var currentPage: PageKey? = null
+
+        /**
+         * Cancelled media by page, least recently used first. Returning to a cached document or
+         * an earlier address of the same document finds its media again: the elements failed
+         * and will not load it again.
+         */
+        val pages = object : LinkedHashMap<PageKey, PageMediaState>(MAX_MEDIA_PAGES, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PageKey, PageMediaState>) = size > MAX_MEDIA_PAGES
+        }
+
+        /** Media of the page shown, if its document is still the current one. */
+        fun shownPageMedia(): PageMediaState? = currentPage?.takeIf { it.document == currentDocument }?.let { pages[it] }
+    }
+
+    /** One page: a document at one address, without the fragment. */
+    private data class PageKey(val document: Long, val address: String)
+
+    /** Media the engine cancelled on one page, newest first, and the notices it gave. */
+    private class PageMediaState(val id: Long) {
+        val entries = ArrayDeque<MediaEntry>()
+
+        /** The plain notice waits for the page to finish loading. */
+        var plainPending = false
+        var plainShown = false
+        var playableShown = false
+
+        /** Adds [entry] first; an address already listed (another fragment included) moves first instead. */
+        fun record(entry: MediaEntry) {
+            val address = entry.url.substringBefore('#')
+            val known = entries.indexOfFirst { it.url.substringBefore('#') == address }
+            entries.addFirst(if (known >= 0) entries.removeAt(known) else entry)
+            while (entries.size > MAX_MEDIA_ENTRIES) entries.removeAt(entries.lastIndex)
+        }
+    }
+
+    /** A cancelled load the page asked for; [url] and [referrer] never leave the coordinator. */
+    private class MediaEntry(val id: Long, val kind: MediaKind, val url: String, val referrer: String?) {
+        fun playable(): PlayableMedia {
+            val site = HostNames.of(url)?.let(HostNames::forDisplay).orEmpty()
+            return PlayableMedia(id, kind, mediaName(url) ?: site, site)
+        }
     }
 
     private class ShownControl(val id: Long, val content: PageControlContent, val offerBlocking: Boolean)
@@ -1579,6 +1683,64 @@ class BrowserCoordinator(
          * per pushState, and every new visit makes an open search read its rows again.
          */
         const val RETAINED_HISTORY_LIMIT = 5_000
+
+        /** Pages per view whose cancelled media is kept, so Back finds it again. */
+        const val MAX_MEDIA_PAGES = 16
+
+        /** Media entries kept per page, newest first. */
+        const val MAX_MEDIA_ENTRIES = 8
+
+        /** Longest media name shown, in characters. */
+        const val MAX_MEDIA_NAME = 64
+
+        /** The last path segment of [url], percent-decoded and shortened, or null when the path names none. */
+        fun mediaName(url: String): String? {
+            // Sliced from the string: java.net.URI rejects characters a WHATWG URL leaves unescaped (`|`, `^`, `{`).
+            // The engine reports only http(s) addresses without credentials.
+            val path = url.substringAfter("://", "")
+                .dropWhile { it != '/' && it != '?' && it != '#' }
+                .takeWhile { it != '?' && it != '#' }
+            val segment = path.split('/').lastOrNull { it.isNotEmpty() } ?: return null
+            val decoded = try {
+                // A path's "+" is a plus sign, not a space. The String overload: the Charset one needs API 33.
+                URLDecoder.decode(segment.replace("+", "%2B"), "UTF-8")
+            } catch (malformed: IllegalArgumentException) {
+                segment
+            }
+            val name = plainLine(decoded).takeIf { it.isNotEmpty() } ?: return null
+            if (name.length <= MAX_MEDIA_NAME) return name
+            // Never end on half a surrogate pair.
+            val end = if (name[MAX_MEDIA_NAME - 1].isHighSurrogate()) MAX_MEDIA_NAME - 1 else MAX_MEDIA_NAME
+            // A cut can land just after a space.
+            return name.substring(0, end).trimEnd()
+        }
+
+        /**
+         * [text] on one line: line breaks, other control characters and whitespace runs become one space, and
+         * format characters (bidi overrides and isolates among them) are dropped, so a name cannot pose as
+         * the site shown beside it.
+         */
+        private fun plainLine(text: String): String {
+            val line = StringBuilder(text.length)
+            var space = false
+            var i = 0
+            while (i < text.length) {
+                val c = text.codePointAt(i)
+                i += Character.charCount(c)
+                val type = Character.getType(c)
+                if (type == Character.FORMAT.toInt()) continue
+                val breaks = type == Character.CONTROL.toInt() || type == Character.LINE_SEPARATOR.toInt() ||
+                    type == Character.PARAGRAPH_SEPARATOR.toInt() || Character.isWhitespace(c) || Character.isSpaceChar(c)
+                if (breaks) {
+                    if (!space) line.append(' ')
+                    space = true
+                    continue
+                }
+                line.appendCodePoint(c)
+                space = false
+            }
+            return line.toString().trim()
+        }
     }
 }
 

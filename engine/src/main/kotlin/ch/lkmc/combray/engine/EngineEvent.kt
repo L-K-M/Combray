@@ -63,6 +63,9 @@ enum class FindStatus {
     FAILED,
 }
 
+/** What a cancelled media load was for: its fetch destination (native/src/media.rs). */
+enum class MediaKind { AUDIO, VIDEO, TRACK }
+
 data class CapturedContent(
     val url: String,
     val title: String,
@@ -74,7 +77,8 @@ data class CapturedContent(
 
 /** Typed form of the JSON events `libcombray_engine.so` emits (native/src/events.rs). */
 sealed interface EngineEvent {
-    data class EngineReady(val width: Int, val height: Int) : EngineEvent
+    /** [userAgent] is the `User-Agent` Servo sends, for the app's own fetches of page media. */
+    data class EngineReady(val width: Int, val height: Int, val userAgent: String) : EngineEvent
 
     data class SurfaceBound(val width: Int, val height: Int) : EngineEvent
 
@@ -180,8 +184,22 @@ sealed interface EngineEvent {
 
     data class Crashed(val view: ViewRef, val reason: String) : EngineEvent
 
-    /** The engine cancelled [document]'s audio, video or text-track loads (it cannot play media); once per document. */
-    data class MediaBlocked(val view: ViewRef, val document: Long) : EngineEvent
+    /**
+     * The engine cancelled an audio, video or text-track load of [document] (it cannot play
+     * media). Reported per page: each [url] once, and media without a reportable URL (null
+     * [url]) once. [url] is http(s) without credentials and never set for [MediaKind.TRACK];
+     * [referrer] is the origin of the referrer Servo computed for the load, or null.
+     */
+    data class MediaBlocked(
+        val view: ViewRef,
+        val document: Long,
+        val kind: MediaKind,
+        val url: String?,
+        val referrer: String?,
+    ) : EngineEvent {
+        /** Page media addresses stay out of logs. */
+        override fun toString() = "MediaBlocked(view=$view, document=$document, kind=$kind, hasUrl=${url != null})"
+    }
 
     /** A page control waits for [EnginePort.respondToControl] with [control]. */
     data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
@@ -214,7 +232,7 @@ sealed interface EngineEvent {
         fun parse(text: String): EngineEvent {
             val event = json.parseToJsonElement(text).jsonObject
             return when (val type = event.string("type")) {
-                "engine_ready" -> EngineReady(event.int("width"), event.int("height"))
+                "engine_ready" -> EngineReady(event.int("width"), event.int("height"), event.string("user_agent"))
                 "surface_bound" -> SurfaceBound(event.int("width"), event.int("height"))
                 "surface_unbound" -> SurfaceUnbound
                 "tab_created" -> TabCreated(event.view())
@@ -268,7 +286,13 @@ sealed interface EngineEvent {
                 )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
-                "media_blocked" -> MediaBlocked(event.view(), event.long("document"))
+                "media_blocked" -> MediaBlocked(
+                    event.view(),
+                    event.long("document"),
+                    mediaKind(event.string("kind")),
+                    event.optionalString("url"),
+                    event.optionalString("referrer"),
+                )
                 "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
                 "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))
@@ -290,6 +314,13 @@ sealed interface EngineEvent {
             "held_until_commit" -> Attribution.HELD_UNTIL_COMMIT
             "stale" -> Attribution.STALE
             else -> throw IllegalArgumentException("unknown attribution $name")
+        }
+
+        private fun mediaKind(name: String) = when (name) {
+            "audio" -> MediaKind.AUDIO
+            "video" -> MediaKind.VIDEO
+            "track" -> MediaKind.TRACK
+            else -> throw IllegalArgumentException("unknown media kind $name")
         }
 
         private fun captureStatus(name: String) =

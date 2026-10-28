@@ -173,7 +173,12 @@ fun BrowserScreen(
                     val result = snackbar.showSnackbar(openedInBackground, actionLabel = show, duration = SnackbarDuration.Short)
                     if (result == SnackbarResult.ActionPerformed) browser.selectTab(notice.tabId)
                 }
-                Notice.MediaUnsupported -> snackbar.showSnackbar(mediaUnsupported)
+                Notice.MediaUnplayable -> snackbar.showSnackbar(mediaUnsupported)
+                is Notice.MediaPlayable -> {
+                    // Replaces the page's plain notice if it still shows: one page, one message.
+                    snackbar.currentSnackbarData?.takeIf { it.visuals.message == mediaUnsupported }?.dismiss()
+                    snackbar.showSnackbar(mediaUnsupported)
+                }
                 Notice.PopupBlocked -> snackbar.showSnackbar(popupBlocked)
             }
         }

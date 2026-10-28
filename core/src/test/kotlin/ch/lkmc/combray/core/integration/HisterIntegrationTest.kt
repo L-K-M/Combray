@@ -245,7 +245,7 @@ class HisterIntegrationTest {
             clock = { now }, capture = sink,
         )
         browser.start()
-        engine.emit(EngineEvent.EngineReady(720, 1280))
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
         browser.awaitIdle()
         browser.openUrl(urls.first(), Placement.CURRENT_TAB)
         browser.awaitIdle()

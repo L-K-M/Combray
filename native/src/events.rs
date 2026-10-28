@@ -192,6 +192,8 @@ pub enum EngineEvent {
     EngineReady {
         width: u32,
         height: u32,
+        /// The `User-Agent` Servo sends, for the application's own fetches of page media.
+        user_agent: String,
     },
     SurfaceBound {
         width: u32,
@@ -303,11 +305,18 @@ pub enum EngineEvent {
         view: ViewKey,
         reason: String,
     },
-    /// The engine cancelled the document's audio, video or text-track loads: Combray cannot play
-    /// media. Reported once per document, for the tab's committed document.
+    /// The engine cancelled an audio, video or text-track load of the tab's committed document:
+    /// Servo cannot play media. Reported per page (see `media`): each reportable `url` once, and
+    /// media without one (`url` null) once.
     MediaBlocked {
         view: ViewKey,
         document: u64,
+        /// The load's fetch destination: `audio`, `video` or `track`.
+        kind: &'static str,
+        /// http(s) without credentials (`media::reportable_url`), never for `track`.
+        url: Option<String>,
+        /// The origin of the referrer Servo computed for the load, when http(s).
+        referrer: Option<String>,
     },
     /// A page control waits for an answer; `control` names it in `respondToControl`.
     ControlShown {
@@ -337,9 +346,16 @@ pub enum EngineEvent {
 impl EngineEvent {
     pub fn to_json(&self) -> String {
         let mut value = match self {
-            EngineEvent::EngineReady { width, height } => {
-                json!({ "type": "engine_ready", "width": width, "height": height })
-            },
+            EngineEvent::EngineReady {
+                width,
+                height,
+                user_agent,
+            } => json!({
+                "type": "engine_ready",
+                "width": width,
+                "height": height,
+                "user_agent": user_agent,
+            }),
             EngineEvent::SurfaceBound { width, height } => {
                 json!({ "type": "surface_bound", "width": width, "height": height })
             },
@@ -506,9 +522,21 @@ impl EngineEvent {
             EngineEvent::Crashed { view, reason } => {
                 with_view(view, json!({ "type": "crashed", "reason": reason }))
             },
-            EngineEvent::MediaBlocked { view, document } => with_view(
+            EngineEvent::MediaBlocked {
                 view,
-                json!({ "type": "media_blocked", "document": document }),
+                document,
+                kind,
+                url,
+                referrer,
+            } => with_view(
+                view,
+                json!({
+                    "type": "media_blocked",
+                    "document": document,
+                    "kind": kind,
+                    "url": url,
+                    "referrer": referrer,
+                }),
             ),
             EngineEvent::ControlShown {
                 view,
@@ -668,13 +696,16 @@ mod tests {
     }
 
     #[test]
-    fn media_blocked_names_its_document() {
+    fn media_blocked_names_its_document_kind_url_and_referrer() {
         let event = EngineEvent::MediaBlocked {
             view: ViewKey {
                 tab: 2,
                 generation: 5,
             },
             document: 4294967331,
+            kind: "video",
+            url: Some("https://cdn.example.org/a.mp4".into()),
+            referrer: Some("https://example.org".into()),
         };
         let json: Value = serde_json::from_str(&event.to_json()).unwrap();
 
@@ -684,8 +715,54 @@ mod tests {
                 "schema": 1,
                 "type": "media_blocked",
                 "document": 4294967331u64,
+                "kind": "video",
+                "url": "https://cdn.example.org/a.mp4",
+                "referrer": "https://example.org",
                 "tab": 2,
                 "generation": 5,
+            })
+        );
+    }
+
+    #[test]
+    fn media_blocked_without_a_url_or_referrer_says_null() {
+        let event = EngineEvent::MediaBlocked {
+            view: ViewKey {
+                tab: 2,
+                generation: 5,
+            },
+            document: 7,
+            kind: "track",
+            url: None,
+            referrer: None,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(json["kind"], "track");
+        assert_eq!(json["url"], Value::Null);
+        assert_eq!(json["referrer"], Value::Null);
+        // Present, so the application can tell "no URL" from an older engine.
+        assert!(json.as_object().unwrap().contains_key("url"));
+    }
+
+    #[test]
+    fn engine_ready_carries_the_user_agent() {
+        let event = EngineEvent::EngineReady {
+            width: 720,
+            height: 1280,
+            user_agent: "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0"
+                .into(),
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "engine_ready",
+                "width": 720,
+                "height": 1280,
+                "user_agent": "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0",
             })
         );
     }
