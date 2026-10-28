@@ -576,7 +576,6 @@ class PageScriptTests(unittest.TestCase):
         self.assertIn('addEventListener("error"', source)
         self.assertIn('addEventListener("unhandledrejection"', source)
 
-
     def test_app_page_script_embeds_the_polyfill_once(self) -> None:
         source_dir = Path(__file__).resolve().parents[3] / "native" / "src"
         template = (source_dir / "animations.js").read_text(encoding="utf-8")
@@ -594,9 +593,11 @@ class PageScriptTests(unittest.TestCase):
         self.addCleanup(servo.app_page_script.cache_clear)
         missing = Path(__file__).resolve().parent / "no-such-animations.js"
 
-        with mock.patch.object(servo, "_APP_PAGE_SCRIPT_TEMPLATE", missing):
-            with self.assertRaisesRegex(config.ConfigError, "no-such-animations.js"):
-                servo.app_page_script()
+        with (
+            mock.patch.object(servo, "_APP_PAGE_SCRIPT_TEMPLATE", missing),
+            self.assertRaisesRegex(config.ConfigError, "no-such-animations.js"),
+        ):
+            servo.app_page_script()
 
     def test_error_capture_runs_before_the_app_page_script(self) -> None:
         self.assertLess(servo.ERRORS_USERSCRIPT_PATH.name, servo.APP_PAGE_SCRIPT_NAME)
