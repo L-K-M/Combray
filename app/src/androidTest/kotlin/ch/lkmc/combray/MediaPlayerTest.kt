@@ -223,7 +223,7 @@ class MediaPlayerTest {
         device.awaitState { it.activeTab?.isHome == true }
         tapPlay()
         compose.waitUntilAtLeastOneExists(hasText(PAGE_LEFT_NOTICE), Device.LOAD_TIMEOUT_MS)
-        assertNull("no player", onMain { resumed() } as? PlayerActivity)
+        assertNull("no player", resumed() as? PlayerActivity)
         assertEquals("clip requests", 0, clip().getInt("requests"))
     }
 
@@ -255,7 +255,7 @@ class MediaPlayerTest {
             val restarted = poll("the restart") { started.get() }
             assertFalse("no frame drawn by the new player yet", restarted.firstFrameRendered)
             assertEquals("starts where it was released", released.positionMs, restarted.positionMs)
-            awaitSnapshot(player, "the new first frame") { it.firstFrameRendered }
+            awaitSnapshot(player, "the new first frame there") { it.firstFrameRendered && it.positionMs >= released.positionMs }
         } finally {
             monitor.removeLifecycleCallback(callback)
         }

@@ -16,7 +16,8 @@
 //! ([`reportable_url`]). Reports are per page ([`PageMedia`]): a URL already reported for the
 //! page is not reported again, and a page whose media has no reportable URL is reported once. A
 //! budget per tab and document ([`MediaBudget`]) bounds the reports of a page that keeps changing
-//! its media URL or its address.
+//! its media URL or its address. A load names no document, so the engine credits it to the
+//! committed one, except while a new document is about to commit ([`PendingMedia`]).
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
@@ -33,6 +34,12 @@ const MAX_MEDIA_RECENT: usize = 32;
 const MEDIA_REPORT_BURST: u32 = 8;
 const MEDIA_REPORTS_PER_SECOND: u64 = 1;
 const MEDIA_REFILL_INTERVAL_MS: u64 = 1000 / MEDIA_REPORTS_PER_SECOND;
+/// How long a document that reported its start may take to commit before loads stop waiting
+/// for it. Servo reports the start and asks for the commit at the same moment, so a commit later
+/// than this means the document will not commit (another navigation replaced it).
+const PENDING_COMMIT_MS: u64 = 5_000;
+/// Loads held per tab for a document about to commit.
+const MAX_HELD_MEDIA: usize = 16;
 
 /// What a cancelled load was for, from its fetch destination.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,9 +202,139 @@ impl PageMedia {
     }
 }
 
+/// A cancelled load the engine has not credited to a document yet.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct UnattributedMedia {
+    pub(crate) kind: MediaKind,
+    pub(crate) url: Option<String>,
+    pub(crate) referrer: Option<String>,
+}
+
+/// Loads that arrive while a tab's next document is about to commit. Servo delivers a load
+/// (network), a document's start (script) and its commit (constellation) on three channels and
+/// takes from them in no fixed order, so a new document's first loads can arrive before its
+/// commit and would be credited to the page it replaces. Its start, though, is sent when the
+/// document is created, before it parses anything that loads media. Loads arriving between a
+/// document's start and its commit are held and given to that document when it commits; those
+/// of a document that never commits go to the committed one after [`PENDING_COMMIT_MS`].
+/// A late load of the replaced page in that window is credited to the new one.
+#[derive(Default)]
+pub(crate) struct PendingMedia {
+    /// The document that reported its start but has not committed, and when.
+    pending: Option<(u64, u64)>,
+    held: VecDeque<UnattributedMedia>,
+}
+
+impl PendingMedia {
+    /// `document`, not committed yet, reported its start. A document started later replaces it:
+    /// the loads held for the earlier one are dropped with it.
+    pub(crate) fn document_started(&mut self, document: u64, now_ms: u64) {
+        if self.pending.is_some_and(|(pending, _)| pending != document) {
+            self.held.clear();
+        }
+        self.pending = Some((document, now_ms));
+    }
+
+    /// Holds `media` for the document about to commit, or returns the loads to credit to the
+    /// committed document now: `media`, after any held for a document that did not commit.
+    pub(crate) fn admit(
+        &mut self,
+        media: UnattributedMedia,
+        now_ms: u64,
+    ) -> Vec<UnattributedMedia> {
+        if let Some((_, since)) = self.pending {
+            if now_ms.saturating_sub(since) <= PENDING_COMMIT_MS {
+                if self.held.len() == MAX_HELD_MEDIA {
+                    self.held.pop_front();
+                }
+                self.held.push_back(media);
+                return Vec::new();
+            }
+            self.pending = None;
+        }
+        let mut admitted: Vec<_> = self.held.drain(..).collect();
+        admitted.push(media);
+        admitted
+    }
+
+    /// `document` committed: the loads held for it, in arrival order. Loads held for another
+    /// document are dropped.
+    pub(crate) fn committed(&mut self, document: u64) -> Vec<UnattributedMedia> {
+        let pending = self.pending.take();
+        let held = std::mem::take(&mut self.held);
+        match pending {
+            Some((pending, _)) if pending == document => held.into(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load(name: &str) -> UnattributedMedia {
+        UnattributedMedia {
+            kind: MediaKind::Video,
+            url: Some(format!("https://example.org/{name}.mp4")),
+            referrer: Some("https://example.org".to_owned()),
+        }
+    }
+
+    #[test]
+    fn loads_without_a_pending_document_are_credited_now() {
+        let mut pending = PendingMedia::default();
+        assert_eq!(pending.admit(load("a"), 1_000), vec![load("a")]);
+        assert_eq!(pending.committed(7), Vec::new());
+    }
+
+    #[test]
+    fn loads_that_overtake_a_commit_go_to_the_document_that_commits() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        assert_eq!(pending.admit(load("a"), 1_010), Vec::new());
+        assert_eq!(pending.admit(load("b"), 1_020), Vec::new());
+        assert_eq!(pending.committed(7), vec![load("a"), load("b")]);
+        // Committed: later loads are the new page's at once.
+        assert_eq!(pending.admit(load("c"), 1_030), vec![load("c")]);
+    }
+
+    #[test]
+    fn loads_held_for_a_document_that_did_not_commit_are_dropped_or_returned() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        pending.admit(load("a"), 1_010);
+        // Another document commits (a traversal to a cached page): the held load is not its.
+        assert_eq!(pending.committed(8), Vec::new());
+
+        pending.document_started(9, 2_000);
+        pending.admit(load("b"), 2_010);
+        // Another start replaces the first; its loads go with it.
+        pending.document_started(10, 2_020);
+        assert_eq!(pending.committed(10), Vec::new());
+
+        // A start that never commits stops holding loads after the window, and gives back
+        // what it held to the committed document.
+        pending.document_started(11, 3_000);
+        assert_eq!(pending.admit(load("c"), 3_100), Vec::new());
+        assert_eq!(
+            pending.admit(load("d"), 3_000 + PENDING_COMMIT_MS + 1),
+            vec![load("c"), load("d")]
+        );
+        assert_eq!(pending.committed(11), Vec::new());
+    }
+
+    #[test]
+    fn a_pending_document_holds_a_bounded_number_of_loads() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        for n in 0..MAX_HELD_MEDIA + 4 {
+            pending.admit(load(&n.to_string()), 1_000);
+        }
+        let held = pending.committed(7);
+        assert_eq!(held.len(), MAX_HELD_MEDIA);
+        assert_eq!(held.first(), Some(&load("4")));
+    }
 
     #[test]
     fn media_element_and_text_track_loads_are_cancelled() {
