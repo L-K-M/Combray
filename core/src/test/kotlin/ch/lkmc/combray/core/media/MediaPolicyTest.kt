@@ -13,6 +13,18 @@ class MediaPolicyTest {
     private val plainPage = MediaPolicy.origin("http://example.org/watch", "http://example.org")
     private val localPage = MediaPolicy.origin("http://192.168.1.10:8096/web/", "http://192.168.1.10:8096")
 
+    @Test
+    fun anAddressIsAtTheOriginOfItsSchemeHostAndPort() {
+        assertTrue(MediaPolicy.isAt("https://example.org/watch?v=1#t=3", "https://example.org"))
+        assertTrue(MediaPolicy.isAt("http://localhost:8766/media.html", "http://localhost:8766"))
+        assertTrue(MediaPolicy.isAt("https://example.org:443/", "https://example.org"))
+        assertFalse(MediaPolicy.isAt("http://example.org/", "https://example.org"))
+        assertFalse(MediaPolicy.isAt("https://cdn.example.org/", "https://example.org"))
+        assertFalse(MediaPolicy.isAt("http://localhost:8767/", "http://localhost:8766"))
+        assertFalse(MediaPolicy.isAt("data:text/html,a", "http://localhost:8766"))
+        assertFalse(MediaPolicy.isAt("https://example.org/", "null"))
+    }
+
     private fun check(origin: MediaOrigin, url: String) = MediaPolicy.check(origin, url)
 
     @Test

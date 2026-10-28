@@ -832,6 +832,31 @@ class BrowserCoordinator(
      */
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
+        // A load names no document, so the engine credits it to the committed one. While a page the app asked
+        // for is pending, a load whose referrer is another origin than the committed page's is most likely the
+        // pending page's, overtaking its commit (a data: page leaving for a fixture page did so on the emulator):
+        // it waits for that commit. Without a pending navigation (a cross-origin frame's media, a late load of
+        // a replaced page) it is the committed page's, as before.
+        val referrer = event.referrer
+        if (view.awaitingCommit && referrer != null && !MediaPolicy.isAt(key.address, referrer)) {
+            if (view.heldMedia.size == MAX_HELD_MEDIA) view.heldMedia.removeFirst()
+            view.heldMedia.addLast(HeldMedia(event, view.commitRequests))
+            return
+        }
+        recordMedia(view, key, event)
+    }
+
+    /** The reports held for the page that just committed, if they came from its origin; the rest are dropped. */
+    private fun releaseHeldMedia(view: LiveView, document: Long) {
+        if (view.heldMedia.isEmpty()) return
+        val held = view.heldMedia.toList()
+        view.heldMedia.clear()
+        val key = view.currentPage?.takeIf { it.document == document } ?: return
+        held.filter { it.request == view.commitRequests && MediaPolicy.isAt(key.address, checkNotNull(it.event.referrer)) }
+            .forEach { recordMedia(view, key, it.event) }
+    }
+
+    private fun recordMedia(view: LiveView, key: PageKey, event: EngineEvent.MediaBlocked) {
         val page = view.pages.getOrPut(key) { PageMediaState(nextMediaId++) }
         val shown = view.nativeTab == selectedNative
         val url = event.url?.takeIf {
@@ -953,6 +978,7 @@ class BrowserCoordinator(
                 tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
             )
         }
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) releaseHeldMedia(view, event.document)
     }
 
     /**
@@ -1603,12 +1629,18 @@ class BrowserCoordinator(
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PageKey, PageMediaState>) = size > MAX_MEDIA_PAGES
         }
 
+        /** Media reports held for the page the app asked for, until it commits (see onMediaBlocked). */
+        val heldMedia = ArrayDeque<HeldMedia>()
+
         /** Media of the page shown, if its document is still the current one. */
         fun shownPageMedia(): PageMediaState? = currentPage?.takeIf { it.document == currentDocument }?.let { pages[it] }
     }
 
     /** One page: a document at one address, without the fragment. */
     private data class PageKey(val document: Long, val address: String)
+
+    /** A media report held while the app's navigation [request] was pending. */
+    private class HeldMedia(val event: EngineEvent.MediaBlocked, val request: Long)
 
     /** Media the engine cancelled on one page, newest first, and the notices it gave. */
     private class PageMediaState(val id: Long) {
@@ -1720,6 +1752,9 @@ class BrowserCoordinator(
 
         /** Media entries kept per page, newest first. */
         const val MAX_MEDIA_ENTRIES = 8
+
+        /** Media reports held per view for a pending page; a page's own count is bounded by the engine. */
+        const val MAX_HELD_MEDIA = 8
 
         /** Longest media name shown, in characters. */
         const val MAX_MEDIA_NAME = 64

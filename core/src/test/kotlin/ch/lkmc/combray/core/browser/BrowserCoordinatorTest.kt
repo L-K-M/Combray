@@ -2118,6 +2118,46 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun mediaThatOvertakesThePendingPagesCommitIsOfferedOnThatPage() {
+        ready()
+        browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.example/")
+        browser.openUrl("https://b.example/watch", Placement.CURRENT_TAB); idle()
+
+        // The engine credits the load to the page still committed; its referrer names the pending one.
+        media(1, 10, "https://cdn.b.example/clip.mp4", referrer = "https://b.example")
+        assertNull(state().notice)
+        commit(1, 11, "https://b.example/watch")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
+    }
+
+    @Test
+    fun aHeldReportFromAnotherOriginIsDroppedWhenThePendingPageCommits() {
+        ready()
+        browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.example/")
+        browser.openUrl("https://b.example/", Placement.CURRENT_TAB); idle()
+
+        media(1, 10, "https://cdn.c.example/clip.mp4", referrer = "https://c.example")
+        commit(1, 11, "https://b.example/")
+        assertNull(state().notice)
+        assertTrue(state().activeTab!!.media.isEmpty())
+    }
+
+    @Test
+    fun aCrossOriginFramesMediaIsOfferedWhenNoPageIsPending() {
+        ready()
+        browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.example/")
+
+        // An embedded player's frame is another origin; nothing is pending, so it is this page's.
+        media(1, 10, "https://video.embed.example/clip.mp4", referrer = "https://embed.example")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
+    }
+
+    @Test
     fun aLatePlayableAddressFollowsThePlainNotice() {
         ready()
         browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()

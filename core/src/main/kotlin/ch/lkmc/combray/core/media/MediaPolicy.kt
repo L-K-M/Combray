@@ -192,6 +192,13 @@ object MediaPolicy {
         return last.startsWith(HEX_PREFIX, ignoreCase = true) && HEX_DIGITS.matches(last.substring(HEX_PREFIX.length))
     }
 
+    /** Whether [address] is a web address at [origin], a serialized origin such as `https://example.org:8443`. */
+    internal fun isAt(address: String, origin: String): Boolean {
+        val page = address.toHttpUrlOrNull() ?: return false
+        val other = origin.toHttpUrlOrNull() ?: return false
+        return page.scheme == other.scheme && page.host == other.host && page.port == other.port
+    }
+
     /** The origin of [url] (`https://example.org`, with a port only when it is not the default). */
     private fun originOf(url: HttpUrl): String =
         HttpUrl.Builder().scheme(url.scheme).host(url.host).port(url.port).build().toString().removeSuffix("/")
