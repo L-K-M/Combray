@@ -2,7 +2,7 @@
 
 Research date: 27 October 2026; probe results and the renderer decision added 28 October 2026. Engine: Servo v0.7.0, downstream `L-K-M/servo` `combray/0.7` at 6e49369. Sources: Servo and Combray source, pdf.js 6.4.299, `@embedpdf/pdfium` 2.15.1, Android and androidx.pdf documentation, and the PDF viewers of Firefox, Chromium, Ladybird and WebKit. A second pass re-checked the load-bearing claims; its corrections are folded in below.
 
-Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Next is phase 1 with PDFium-wasm. The renderer is an owner decision; the rest of the design is a proposal.
+Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Next is phase 1 with PDFium-wasm. The renderer and the Hister rule for PDF text are owner decisions ([below](#owner-decisions)); the rest of the design is a proposal.
 
 ## Owner decisions
 
@@ -39,16 +39,16 @@ Emulator figures across the three runs. Memory is the app's PSS, from run 3, wit
 | Text, 300 pages | With the polyfill only, 950,904 characters in 552 to 873 ms | 962,604 characters in 370 to 465 ms |
 | Page time, median of 50 pages | 76 to 99 ms (63 ms with FontFace off) | 50 to 57 ms |
 | Open, per document | 160 to 270 ms | 523 to 918 ms |
-| Growth on a second corpus pass, after GC | +469.6 MB (libc malloc +311.6 MB) | -29.3 MB (libc malloc -1.6 MB) |
-| Three documents open, then closed, after GC | 1,491.3 MB, then 1,478.9 MB | 558.2 MB, then 384.7 MB |
-| After leaving the page | 1,378.5 MB (baseline 174.1 MB) | 335.9 MB (baseline 171.9 MB) |
+| Growth on a second corpus pass, after GC | +469.6 MiB (libc malloc +311.6 MiB) | -29.3 MiB (libc malloc -1.6 MiB) |
+| Three documents open, then closed, after GC | 1,491.3 MiB, then 1,478.9 MiB | 558.2 MiB, then 384.7 MiB |
+| After leaving the page | 1,378.5 MiB (baseline 174.1 MiB) | 335.9 MiB (baseline 171.9 MiB) |
 | Non-embedded Japanese | Empty boxes | Nothing drawn (no font) |
 
-- **pdf.js renders correctly in Servo.** Both builds run in a real module worker under the strict viewer CSP (`'wasm-unsafe-eval'`, no eval), with the same results without the CSP. Embedded Type1, CID TrueType right to left, the JPEG photo, JPEG 2000 and JBIG2 through its wasm decoders, and the shadings all draw.
+- **pdf.js renders correctly in Servo.** Both builds run in a real module worker under the strict viewer CSP (`'wasm-unsafe-eval'`, no eval); the legacy build gave the same results without the CSP. Embedded Type1, CID TrueType right to left, the JPEG photo, JPEG 2000 and JBIG2 through its wasm decoders, and the shadings all draw.
 - **pdf.js text extraction fails in Servo 0.7** with "readableStream is not iterable": Servo's ReadableStream lacks async iteration (its WebIDL comments it out). A small polyfill fixes it (runs 2 and 3).
 - **No OffscreenCanvas or ImageDecoder** in the page and in workers, and no FontFace in workers. Servo's OffscreenCanvas sits behind the `dom_offscreen_canvas_enabled` preference, which is off by default and which Combray does not set; the probe did not try it. pdf.js falls back to decoding images in JavaScript. FontFace from bytes works in the page.
 - **Japanese without an embedded font fails in both.** pdf.js draws empty boxes. Canvas `fillText` with Japanese in a generic family draws boxes too, so Servo's canvas text found no CJK fallback on the emulator image. PDFium draws nothing for `cjk.pdf` without a font of its own. Both extract the Japanese text.
-- **pdf.js leaks memory in Servo.** A second pass over the same corpus kept 469.6 MB more after GC, 311.6 MB of it in libc malloc; closing the documents and leaving the page released little. With FontFace off the second pass still kept 464.3 MB (libc malloc +319.1 MB), so web fonts are not the cause. The cause is not yet localized. pdf.js's canvas drawing calls are the likeliest place, since PDFium-wasm, which draws only through `putImageData`, stayed flat; canvas-heavy sites may be affected too.
+- **pdf.js leaks memory in Servo.** A second pass over the same corpus kept 469.6 MiB more after GC, 311.6 MiB of it in libc malloc; closing the documents and leaving the page released little. With FontFace off the second pass still kept 464.3 MiB (libc malloc +319.1 MiB), so web fonts are not the cause. The cause is not yet localized: PDFium-wasm, which keeps its state in wasm memory and draws only through `putImageData`, stayed flat, but the probe does not tell canvas drawing apart from JavaScript memory kept in the page or its workers. Whether canvas-heavy sites are affected is unknown.
 - **PDFium-wasm holds memory flat.** It did not grow between passes and dropped back after closing its documents.
 - **Open time.** pdf.js opened a document in about 0.2 s. PDFium took longer because each document started its own worker and compiled the 4.6 MB module again: starting one instance alone took 510 to 660 ms.
 
@@ -63,7 +63,7 @@ Firefox (desktop, and Android since version 111) and Ladybird (since April 2026)
    - Size: about 130 to 180 production lines in `servoparser/mod.rs`, `document.rs` and `prefs.rs`, plus webview tests and a DOWNSTREAM.md row.
 2. **PDFium-wasm (`@embedpdf/pdfium` 2.15.1) as a library, in one module worker per viewer.** Only the engine package is used; Combray draws its own controls at the bottom.
    - Its files are served from a `combray-pdf:` scheme that Combray registers. The scheme serves static, allowlisted files only; PDF bytes never pass through it.
-   - The worker renders each page to RGBA in wasm memory, and the page draws it with `putImageData`. `putImageData` is the only canvas call; the drawing calls pdf.js makes, the likeliest place of its leak, are not used.
+   - The worker renders each page to RGBA in wasm memory, and the page draws it with `putImageData`. `putImageData` is the only canvas call; the drawing calls pdf.js makes are not used.
    - Text comes from PDFium's text API (`FPDFText_*`) for capture, Find and Read as text.
    - The viewer compiles the module once per document, starting while the PDF still downloads, and reuses that instance for every page and for text. Starting an instance (worker, fetch and compile) took 510 to 660 ms in the probe, most of PDFium's open time. Whether Servo can cache the compiled module across viewer documents is unverified.
    - No PDF scripting or form environment, no eval, and no network access. The viewer CSP allows `'wasm-unsafe-eval'` for the module.
@@ -99,9 +99,9 @@ Settled on the emulator:
 Still unknown:
 
 - **Speed on a phone.** Every figure comes from the x86_64 emulator with a software GPU; no run on the owner's arm64 phone has happened.
-- **Memory on a real arm64 device,** including how much of PDFium's 164.1 MB above baseline after leaving the page is the document Servo keeps in session history.
+- **Memory on a real arm64 device,** including how much of PDFium's 164.1 MiB above baseline after leaving the page is the document Servo keeps in session history.
 - **The CJK font path:** whether PDFium-wasm can use the phone's Noto CJK font served by `combray-pdf:`, and what loading it costs in time and memory.
-- **The Servo canvas leak:** where it is, and whether canvas-heavy web pages hit it too (unverified).
+- **The pdf.js leak in Servo:** where it is, and whether canvas-heavy web pages hit it too (unverified).
 - **Open time:** whether starting the worker during the download, or caching the compiled module, brings PDFium's open time close to pdf.js's.
 
 ## Phases
@@ -116,7 +116,7 @@ Still unknown:
    - the PDFium worker: one instance per document, pages rendered to RGBA, the document closed and the worker ended on `pagehide`;
    - font serving: the phone's Noto CJK font from `/system/fonts` through the scheme, with a device check that `cjk.pdf` draws its glyphs;
    - notices: the package's own code is MIT (`LICENSE`). PDFium is BSD-3-Clause, and its licence file (`LICENSE.pdfium`) also carries the Apache License 2.0 text. `pdfium.wasm` also builds in FreeType, OpenJPEG, libpng and zlib (their strings are in the binary), whose notices the package does not ship;
-   - APK size: about 2.2 MB compressed (`pdfium.wasm` is 4,646,932 bytes, about 2.1 MB with `gzip -9`; `index.browser.js` is 293,211 bytes, about 63 KB);
+   - APK size: about 4.9 MB if the files are embedded in the native library, as Combray's other vendored scripts are, because the APK stores native libraries uncompressed (`pdfium.wasm` is 4,646,932 bytes, `index.browser.js` 293,211); about 2.2 MB if they are stored compressed (`gzip -9` gives about 2.1 MB and 63 KB), in the binary or as deflated APK assets;
    - `PdfTest`: cookie-gated and HTTP-sign-in PDFs, one request only, a CSP-sandbox PDF, a corrupt PDF, one that is too large, Back, and restore after process death.
 2. **Text (about 1 week):** Hister capture of PDF text, Find across pages, and Read as text, each through PDFium's text API and with a device check.
 3. **Polish:**
@@ -132,7 +132,7 @@ Still unknown:
 
 1. **The downstream engine change:** about 130 to 180 lines, never offered upstream.
 2. **Size cap:** 32 MiB to start. Above it, "too large to show here", with Save to Karakeep.
-3. **APK contents:** about 2.2 MB compressed for PDFium-wasm. The earlier question about pdf.js's Liberation fonts no longer applies.
+3. **APK contents:** about 4.9 MB for PDFium-wasm embedded uncompressed in the native library, or about 2.2 MB stored compressed. The earlier question about pdf.js's Liberation fonts no longer applies.
 4. **CJK fonts:** the plan uses the phone's own Noto CJK font. If that does not work, bundle a CJK font (a large addition to the APK), or leave such text undrawn while it stays searchable?
 5. **Attachments and octet-stream:** Servo ignores `Content-Disposition`, so the viewer would show PDFs sent as attachments inline, as Firefox for Android does. Keep that, or honour `attachment` once a download hook exists? Treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF?
 6. **Phase 4 scope.**
@@ -140,7 +140,7 @@ Still unknown:
 
 ## Rejected options, with reasons
 
-- **pdf.js, for now:** it rendered the corpus correctly and opens faster, but it leaks in Servo 0.7. In the probe the second pass over the corpus kept 469.6 MB more after GC (311.6 MB of it in libc malloc), and leaving the page released little. It is also larger, uncompressed: the build is 3.1 MB (3.5 MB legacy), the CJK CMaps 1.2 MB, the standard fonts 0.8 MB and `wasm/` 1.5 MB (image and colour decoders, their JavaScript fallbacks and QuickJS), against 4.9 MB for PDFium-wasm. Revisit if the leak in Servo is found and fixed.
+- **pdf.js, for now:** it rendered the corpus correctly and opens faster, but it leaks in Servo 0.7. In the probe the second pass over the corpus kept 469.6 MiB more after GC (311.6 MiB of it in libc malloc), and leaving the page released little. It is also larger, uncompressed: the build is 3.1 MB (3.5 MB legacy), the CJK CMaps 1.2 MB, the standard fonts 0.8 MB and `wasm/` 1.5 MB (image and colour decoders, their JavaScript fallbacks and QuickJS), against 4.9 MB for PDFium-wasm. Revisit if the leak in Servo is found and fixed.
 - **Injecting a viewer into today's synthesized page:** the bytes are dropped and the origin is opaque, so a fetch with cookies is impossible.
 - **Serving the viewer under the PDF URL by request interception:**
   - The viewer would run in the site's real origin, so viewer bugs become cross-site scripting.

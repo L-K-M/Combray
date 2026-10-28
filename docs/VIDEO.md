@@ -88,7 +88,7 @@ X's player logic and Vimeo's row come from their live, minified JavaScript, read
 - **What plays.** Progressive files inline with sound through OpenSL ES, plus X GIFs and embeds.
 - **X posts still fail.** On Android, Servo passes no plugin list (`servo.rs:145-147`, `components/media/backends/gstreamer/lib.rs:361-364`), so plugins are whatever the GStreamer Android build registers. Even with an HLS demuxer, a playlist fed through `servosrc://` (`gstreamer/source.rs:370-371`) has no base URL, so segment URLs cannot be resolved. GStreamer's own HTTP source would bypass Servo's network stack.
 - **Effort.** Estimates disagree: 9 to 16 engineer-days by one investigation; 2 to 4 weeks for build, packaging, notices and CI alone by another. A first emulator playback is plausible in 3 to 5 days. Keeping it past the next pin bump adds a downstream patch.
-- **APK, per ABI.** Estimated from the measured libraries: at least +15.1 MB (arm64) and +15.8 MB (x86_64) for the recommended set, the stripped `libgstreamer_android.so` stored uncompressed (about a tenth of today's 134 to 142 MB); about +27 to 30 MB with FFmpeg (libraries of 26.5 and 29.5 MB); about 1 to 3 MB more in the engine library (unmeasured).
+- **APK, per ABI.** Estimated from the measured libraries: at least +15.1 MB (arm64) and +15.8 MB (x86_64) for the recommended set, the stripped `libgstreamer_android.so` stored uncompressed (about a tenth of the roughly 174 MB x86_64 debug APK the Engine workflow installs today; the arm64 APK size is not measured); about +27 to 30 MB with FFmpeg (libraries of 26.5 and 29.5 MB); about 1 to 3 MB more in the engine library (unmeasured).
 - **Maintenance.**
   - Upstream main compiles the backend out on Android. After the next pin bump, `media-gstreamer` silently yields the dummy unless L-K-M/servo carries a patch.
   - Servo turns off progressive download on Android because it "breaks playback" (`gstreamer/player.rs:512-513`).
@@ -187,7 +187,7 @@ C first, in two phases, then B when you want inline playback. C's Media3 code an
 - **Flow.**
   1. The delegate keeps cancelling `audio`, `video` and `track` loads. For `audio` and `video` it also hands the app the load's URL and the referrer Servo computed for it (`WebResourceRequest::referrer_url`), tied to the document the engine attributes the load to, as today's `media_blocked` event is.
   2. The page's notice offers Play. With several loads on one page it lists them (proposed default). The offer ends when that document is replaced.
-  3. Play opens a fullscreen player activity on `androidx.media3:media3-exoplayer` and `media3-ui` 1.11.1, pinned in `gradle/libs.versions.toml`. Nothing plays without that tap.
+  3. Play opens a fullscreen player activity on `androidx.media3:media3-exoplayer`, `media3-exoplayer-hls` and `media3-ui` 1.11.1, pinned in `gradle/libs.versions.toml`. Nothing plays without that tap.
 - **Lifecycle (proposed defaults).** Take audio focus; pause when the player leaves the foreground; release the player on close. No picture-in-picture or background audio in C1.
 - **Failure.** A refused URL or a playback error says so in the player. Nothing falls back silently.
 - **Tests.**
@@ -204,7 +204,7 @@ C first, in two phases, then B when you want inline playback. C's Media3 code an
 - **What it does.** Combray installs its own backend before Servo starts, through the installation described under [option B](#b-a-combray-backend-on-androids-media-apis-later). It is Servo's `DummyBackend` except that `canPlayType` answers "maybe" for `application/vnd.apple.mpegurl` and `application/x-mpegurl`, case-insensitively, and `""` for everything else as today. X then sets `video.src` to the playlist; the delegate cancels that load and C1 offers it; Media3's HLS source plays it after a tap. X's in-page player would still show an error state (unverified).
 - **Side effects while it is on.** X embeds, Video.js and Brightcove players also choose HLS over MP4. Their playlists reach the native player after a tap, as X posts do.
 - **Firm rule.** The shim goes when inline playback lands (B). From then on, claim HLS only if inline HLS plays (B's phase 2b). A false claim beside inline MP4 makes X embeds and Video.js choose HLS and fail instead of playing MP4 inline. Proposed: land B's phases 1 and 2 together, so that X posts move from the native player to inline playback without a gap.
-- **Tests.** Host tests for the `canPlayType` parser. A synthetic HLS v6 fixture from ffmpeg in X's shape (fMP4 segments, root-relative segment URIs, a separate audio playlist), on a page that picks HLS through `canPlayType` as X's player does. Then a manual check with X posts on your phone.
+- **Tests.** Host tests for the `canPlayType` parser. A synthetic fMP4 HLS fixture from ffmpeg, edited into X's shape (version 6, where ffmpeg itself writes version 7; fMP4 segments, root-relative segment URIs, a separate audio playlist), on a page that picks HLS through `canPlayType` as X's player does. Then a manual check with X posts on your phone.
 - **Effort.** 1 to 2 days on top of C1, plus the risk that the backend installation does not take effect (then the 20-line downstream patch).
 
 ### Network rules for the native player
@@ -213,10 +213,10 @@ Proposed defaults, pending your confirmation. Media3 fetches outside Servo, with
 
 - **http(s) only, on every hop.** Media3's `DefaultDataSource` also opens `file:`, `content:` and `data:` URIs. Use an http(s)-only source and check each redirect, playlist and segment URL.
 - **No Servo cookies in v1.** Media behind a sign-in fails in the player. Static cookie headers would leak across redirects and segment hosts; per-request cookie forwarding is about 2 to 3 days of later work.
-- **Referer and User-Agent set:** the referrer Servo computed for the load, and the user agent Servo sends.
+- **Referer and User-Agent set:** the user agent Servo sends, and the referrer Servo computed for the load. That referrer goes as computed only to the media URL's origin; requests to any other origin (redirect targets, playlist and segment hosts) carry only the referrer's origin, as the default `strict-origin-when-cross-origin` policy would, and none if Servo computed none.
 - **Loads Servo blocked.** The delegate also sees loads that CSP, bad-port or mixed-content rules blocked: interception runs after those checks set a network error (`components/net/fetch/methods.rs:484-547`), and the reported request does not say so. The player re-applies mixed content (from an https page, every hop is https) and the fetch bad-port list. A load blocked only by the page's CSP cannot be recognised from the URL; a downstream patch that marks blocked loads would close that gap.
 - **Private networks.** A page on a public address cannot send the player to a loopback, link-local or private address. Servo has no such rule (none found in `components/net`), so this one is Combray's. A page on a private address may use them, which keeps the fixtures working.
-- **No URLs in logs.** Errors log the scheme and the failure class only.
+- **No URLs in logs.** Combray's errors log the scheme and the failure class only. Media3's own logging is turned off (`androidx.media3.common.util.Log.setLogLevel(Log.LOG_LEVEL_OFF)`) or routed through a `Log.Logger` that keeps only those, because its playback-error log includes exception messages that can name hosts and playlist lines.
 
 ### Later: option B, inline playback
 
@@ -257,9 +257,10 @@ Why B1 rather than A, when inline playback is wanted:
   - **`count_frames.py`:** counts the distinct frame codes in a screen recording.
 
   Each clip has a page that reports `playing`, `currentTime`, `videoWidth`, `videoHeight`, `ended` and errors in its title and to the fixture server.
-- **`testing/fixtures/server.py`.** Range support as in phase C1, and request and byte counts.
+- **`testing/fixtures/server.py`.** Range support as in phase C1, request and byte counts, and a report endpoint that saves the pages' and the test's results to an output directory.
+- **`scripts/check-app.sh`.** Passes the fixture server an output directory under its results directory, as the PDF probe did.
 - **`app/src/androidTest/kotlin/ch/lkmc/combray/MediaProbeTest.kt`.**
-  - One test per colour clip and frame route. It waits for `playing`, then `Device.awaitScreen(colour)` for each held colour (it polls about once a second), then `ended`. It writes the timings to `COMBRAY_RESULTS`.
+  - One test per colour clip and frame route. It waits for `playing`, then `Device.awaitScreen(colour)` for each held colour (it polls about once a second), then `ended`. It posts the timings to the fixture server, which writes them to that output directory.
   - The crop test samples the video's bottom edge and checks `videoHeight` is 1080.
   - One test per motion clip plays it to the end and writes the per-stage and per-thread timings. On the emulator it only checks that the clip ends; on the phone it runs under the screen recording.
   - One more test plays 2 seconds of PCM through `AudioTrack` and records whether the playback head advances.
@@ -302,7 +303,7 @@ Why B1 rather than A, when inline playback is wanted:
      - **A downstream patch in L-K-M/servo.** It gives the player its resource URL, for example through a `Player` method with a default no-op. It also stops the element's own fetch and push of the playlist, never lets `NeedData` follow `EnoughData` without a `SeekData` (or the page sees `seeking` and `seeked`), and marks HLS-mode players as not origin-clean, so `drawImage` plus `getImageData` cannot read cross-origin frames. Size unmeasured, larger than passing a URL.
      - **HLS playback.** Media3's HLS source plays the URL under the same [network rules](#network-rules-for-the-native-player) as C.
      - **`canPlayType`** answers "maybe" for `application/vnd.apple.mpegurl` and `application/x-mpegurl`, case-insensitively, only from this point.
-     - **Device check.** C2's synthetic HLS v6 fixture, then a manual check with X posts on your phone.
+     - **Device check.** C2's synthetic HLS fixture in X's shape, then a manual check with X posts on your phone.
 3. **Polish, as you decide.** Fullscreen through `notify_fullscreen_state_changed`; picture-in-picture and background audio through a Media3 session; the zero-copy or overlay route, if the probe or phase 1 shows a need; a Web Audio output sink.
 
 **Time to X posts playing inline:** about 7 to 12 weeks through native HLS, probe included. Through E, phase 1 plus days, if X's data allows it.

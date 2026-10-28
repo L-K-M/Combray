@@ -1123,20 +1123,24 @@ Engine findings:
   `48px sans-serif` draws empty boxes on the emulator image (the
   `canvas-cjk` snapshot), so pdf.js also draws `cjk.pdf`'s non-embedded
   Japanese font as empty boxes.
-- **pdf.js memory grows with every pass.** Run 3, app PSS after
-  `TestUtils.gc()`, legacy build: 755.0 MB after the first corpus pass and
-  1,224.6 MB after the second, +469.6 MB, of which libc malloc +311.6 MB
-  (355.2 to 666.8 MB). Closing three open documents released little
-  (1,491.3 to 1,478.9 MB), and after leaving the page PSS was 1,378.5 MB
-  against a 174.1 MB baseline, with libc malloc at 776.3 MB. With FontFace
-  off the second pass still kept +464.3 MB (libc malloc +319.1 MB), so web
-  fonts do not explain it. The leak is somewhere in Servo's handling of
-  pdf.js's canvas drawing; the cause is not localized. Sites that draw
-  heavily on canvas may hit it too; that is not measured.
-- **PDFium-wasm memory is stable.** Same run: 525.6 MB after the first
-  pass and 496.3 MB after the second (-29.3 MB; libc malloc 122.3 to
-  120.7 MB). Three open documents at 558.2 MB dropped to 384.7 MB after
-  closing, and to 335.9 MB after leaving the page (baseline 171.9 MB).
+- **pdf.js memory grows on a second pass.** Run 3, app PSS after
+  `TestUtils.gc()`, legacy build: 755.0 MiB after the first corpus pass and
+  1,224.6 MiB after the second, +469.6 MiB, of which libc malloc +311.6 MiB
+  (355.2 to 666.8 MiB). Closing three open documents released little
+  (1,491.3 to 1,478.9 MiB), and after leaving the page PSS was 1,378.5 MiB
+  against a 174.1 MiB baseline, with libc malloc at 776.3 MiB. With FontFace
+  off the second pass still kept +464.3 MiB (libc malloc +319.1 MiB), so web
+  fonts do not explain it. Where the memory is kept is not localized:
+  most of the growth is libc malloc, while Servo's Rust code, its canvas
+  included, allocates through jemalloc (unnamed mappings). SpiderMonkey's
+  malloc-backed buffers in the page or in pdf.js's workers, and pdf.js's
+  own retention, are not ruled out; `TestUtils.gc()` ran only on the page.
+  Whether canvas-heavy sites hit it is not measured. Figures are MiB
+  (`Debug.MemoryInfo` kB divided by 1024).
+- **PDFium-wasm memory is stable.** Same run: 525.6 MiB after the first
+  pass and 496.3 MiB after the second (-29.3 MiB; libc malloc 122.3 to
+  120.7 MiB). Three open documents at 558.2 MiB dropped to 384.7 MiB after
+  closing, and to 335.9 MiB after leaving the page (baseline 171.9 MiB).
 
 Speed on the emulator, across the three runs: the median time for 50
 pages of the 300-page document was 76 to 99 ms per page for pdf.js with
