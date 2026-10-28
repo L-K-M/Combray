@@ -39,7 +39,7 @@ Emulator figures across the three runs. Memory is the app's PSS, from run 3, wit
 | Text, 300 pages | With the polyfill only, 950,904 characters in 552 to 873 ms | 962,604 characters in 370 to 465 ms |
 | Page time, median of 50 pages | 76 to 99 ms (63 ms with FontFace off) | 50 to 57 ms |
 | Open, per document | 160 to 270 ms | 523 to 918 ms |
-| Growth per corpus pass, after GC | +469.6 MB (libc malloc +311.6 MB) | -29.3 MB (libc malloc -1.6 MB) |
+| Growth on a second corpus pass, after GC | +469.6 MB (libc malloc +311.6 MB) | -29.3 MB (libc malloc -1.6 MB) |
 | Three documents open, then closed, after GC | 1,491.3 MB, then 1,478.9 MB | 558.2 MB, then 384.7 MB |
 | After leaving the page | 1,378.5 MB (baseline 174.1 MB) | 335.9 MB (baseline 171.9 MB) |
 | Non-embedded Japanese | Empty boxes | Nothing drawn (no font) |
@@ -140,7 +140,7 @@ Still unknown:
 
 ## Rejected options, with reasons
 
-- **pdf.js, for now:** it rendered the corpus correctly and opens faster, but it leaks in Servo 0.7. In the probe the second pass over the corpus kept 469.6 MB more after GC (311.6 MB of it in libc malloc), and leaving the page released little. It is also larger: the build is 3.0 MB, CJK CMaps 1.7 MB, standard fonts 0.8 MB and the wasm image decoders 1.6 MB. Revisit if the leak in Servo is found and fixed.
+- **pdf.js, for now:** it rendered the corpus correctly and opens faster, but it leaks in Servo 0.7. In the probe the second pass over the corpus kept 469.6 MB more after GC (311.6 MB of it in libc malloc), and leaving the page released little. It is also larger, uncompressed: the build is 3.1 MB (3.5 MB legacy), the CJK CMaps 1.2 MB, the standard fonts 0.8 MB and `wasm/` 1.5 MB (image and colour decoders, their JavaScript fallbacks and QuickJS), against 4.9 MB for PDFium-wasm. Revisit if the leak in Servo is found and fixed.
 - **Injecting a viewer into today's synthesized page:** the bytes are dropped and the origin is opaque, so a fetch with cookies is impossible.
 - **Serving the viewer under the PDF URL by request interception:**
   - The viewer would run in the site's real origin, so viewer bugs become cross-site scripting.
