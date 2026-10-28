@@ -1,7 +1,7 @@
 # Verified together on the reference host (docs/BUILDING.md). Update deliberately, then re-run
 # the unit tests, lint and the device checks.
 [versions]
-agp = "9.4.1"
+agp = "9.5.0"
 kotlin = "2.4.21"
 ksp = "2.3.12"
 composeBom = "2026.09.00"
