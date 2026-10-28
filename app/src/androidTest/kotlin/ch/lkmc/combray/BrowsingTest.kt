@@ -564,7 +564,8 @@ class BrowsingTest {
         const val SCREEN_PREFIX = "SCREEN:"
         const val SCREEN_WIDTHS = 4
         const val MEDIA_FAILED = "MEDIA:errors:2"
-        const val MEDIA_NOTICE = "This page’s audio or video can’t play in Combray."
+        /** Both elements' addresses are on the fixture's own (local) host: the player may fetch them. */
+        const val MEDIA_NOTICE = "This page’s audio or video opens in a separate player."
         const val HAS_PREFIX = "HAS:"
         const val HAS_WAITING = "HAS:waiting"
         const val HAS_OK = "HAS:ok"

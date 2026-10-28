@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -40,10 +41,11 @@ fun MoreSheet(
     onReader: () -> Unit,
     onTextSize: () -> Unit,
     onFind: () -> Unit,
+    onPlayMedia: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        MoreActions(tab, onForward, onReload, onCloseTab, onPageInfo, onSettings, readerOpen, onReader, onTextSize, onFind)
+        MoreActions(tab, onForward, onReload, onCloseTab, onPageInfo, onSettings, readerOpen, onReader, onTextSize, onFind, onPlayMedia)
     }
 }
 
@@ -61,6 +63,8 @@ internal fun MoreActions(
     onReader: () -> Unit,
     onTextSize: () -> Unit,
     onFind: () -> Unit,
+    /** The page's cancelled audio or video ([ActiveTab.media]): the player, or a choice of several. */
+    onPlayMedia: () -> Unit,
 ) {
     // Scrolls when the rows are taller than the window, as in landscape, so Settings stays reachable.
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
@@ -73,6 +77,7 @@ internal fun MoreActions(
                 MoreAction.READER ->
                     MoreRow(ReaderIcon, if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view, onReader)
                 MoreAction.FIND -> MoreRow(Icons.Filled.Search, R.string.action_find_in_page, onFind)
+                MoreAction.PLAY_MEDIA -> MoreRow(Icons.Filled.PlayArrow, R.string.action_play_media, onPlayMedia)
                 MoreAction.TEXT_SIZE -> MoreRow(TextSizeIcon, R.string.action_text_size, onTextSize)
                 MoreAction.SETTINGS -> MoreRow(Icons.Filled.Settings, R.string.action_settings, onSettings)
             }
@@ -81,7 +86,7 @@ internal fun MoreActions(
 }
 
 /** A row of the More sheet. */
-internal enum class MoreAction { FORWARD, RELOAD, CLOSE_TAB, PAGE_INFO, READER, FIND, TEXT_SIZE, SETTINGS }
+internal enum class MoreAction { FORWARD, RELOAD, CLOSE_TAB, PAGE_INFO, READER, FIND, PLAY_MEDIA, TEXT_SIZE, SETTINGS }
 
 /** The rows More offers for [tab], in order. */
 internal fun moreActions(tab: ActiveTab?, readerOpen: Boolean): List<MoreAction> = buildList {
@@ -98,6 +103,8 @@ internal fun moreActions(tab: ActiveTab?, readerOpen: Boolean): List<MoreAction>
         // Find searches the page itself, which reader view covers.
         if (!readerOpen) add(MoreAction.FIND)
     }
+    // The page notice's Play, once the notice has gone or for a tab that was hidden when its media loaded.
+    if (tab?.media?.isNotEmpty() == true) add(MoreAction.PLAY_MEDIA)
     // Every page, not just this one: offered on the home screen too.
     add(MoreAction.TEXT_SIZE)
     // Hister capture is switched in Settings (owner decision, 23 October 2026).

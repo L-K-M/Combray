@@ -43,6 +43,12 @@ on:
       - "!testing/sitecheck/**"
       - app/src/androidTest/**
       - app/build.gradle.kts
+      # The media player and its network rules: only the device job plays media.
+      - core/src/main/kotlin/ch/lkmc/combray/core/media/**
+      - core/build.gradle.kts
+      - app/src/main/kotlin/ch/lkmc/combray/player/**
+      - app/src/main/AndroidManifest.xml
+      - app/src/main/res/xml/network_security_config.xml
       - build.gradle.kts
       - settings.gradle.kts
       - gradle/**

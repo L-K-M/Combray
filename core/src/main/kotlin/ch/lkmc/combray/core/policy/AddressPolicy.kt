@@ -7,6 +7,12 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.text.Normalizer
 
+/** Names that only resolve on a home network (RFC 6762 .local, RFC 8375 .home.arpa, and common ones). */
+private val LOCAL_SUFFIXES = listOf(".lan", ".local", ".home.arpa", ".internal", ".localdomain")
+
+/** The name of this device's own loopback address. */
+private const val LOCALHOST = "localhost"
+
 /** What submitting the address field does. */
 sealed interface AddressDecision {
     /** Load [url] in the browser. */
@@ -80,9 +86,6 @@ object AddressPolicy {
     private const val IPV6_BYTES = 16
     /** ::ffff:0:0/96, the prefix of IPv4-mapped IPv6 addresses (RFC 4291). */
     private val IPV4_MAPPED_PREFIX = List(10) { 0 } + listOf(0xFF, 0xFF)
-
-    /** Names that only resolve on a home network (RFC 6762 .local, RFC 8375 .home.arpa, and common ones). */
-    private val LOCAL_SUFFIXES = listOf(".lan", ".local", ".home.arpa", ".internal", ".localdomain")
 
     /** Private (RFC 1918, IPv6 unique local), loopback and link-local networks, as (bytes, prefix length). */
     private val LOCAL_NETWORKS = listOf(
@@ -275,7 +278,7 @@ object AddressPolicy {
             IPV4.matches(host) -> (ipv4Bytes(host) ?: return null).let { bytes ->
                 if (host.split('.').any { it.length > 1 && it.startsWith('0') }) HostShape.ADDRESS else addressShape(bytes)
             }
-            host.equals("localhost", ignoreCase = true) -> HostShape.LOCAL_ADDRESS
+            host.equals(LOCALHOST, ignoreCase = true) -> HostShape.LOCAL_ADDRESS
             '.' in host -> if (isDomain(host)) domainShape(host) else return null
             LABEL.matches(host) -> HostShape.SINGLE_LABEL
             else -> return null
@@ -287,12 +290,19 @@ object AddressPolicy {
     }
 
     /** [bytes] is null for a bracketed host that is not plain IPv6, which is treated as public. */
-    private fun addressShape(bytes: List<Int>?): HostShape {
+    private fun addressShape(bytes: List<Int>?): HostShape =
+        if (bytes != null && isLocalAddress(bytes)) HostShape.LOCAL_ADDRESS else HostShape.ADDRESS
+
+    /**
+     * Whether the IPv4 or IPv6 address [bytes] (4 or 16 values of 0 to 255) is private (RFC 1918,
+     * IPv6 unique local), loopback or link-local. Typed addresses and the media player's private
+     * network rule share it (ch.lkmc.combray.core.media.MediaPolicy).
+     */
+    fun isLocalAddress(bytes: List<Int>): Boolean {
         // An IPv4-mapped IPv6 address ("::ffff:192.168.1.1") is that IPv4 address.
-        val address = bytes?.takeIf { it.size == IPV6_BYTES && it.take(IPV4_MAPPED_PREFIX.size) == IPV4_MAPPED_PREFIX }
+        val address = bytes.takeIf { it.size == IPV6_BYTES && it.take(IPV4_MAPPED_PREFIX.size) == IPV4_MAPPED_PREFIX }
             ?.takeLast(IPV4_BYTES) ?: bytes
-        val local = address != null && LOCAL_NETWORKS.any { (network, prefixLength) -> inNetwork(address, network, prefixLength) }
-        return if (local) HostShape.LOCAL_ADDRESS else HostShape.ADDRESS
+        return LOCAL_NETWORKS.any { (network, prefixLength) -> inNetwork(address, network, prefixLength) }
     }
 
     private fun domainShape(host: String): HostShape {
@@ -492,6 +502,16 @@ object HostNames {
         setOf(Character.UnicodeScript.THAI),
         setOf(Character.UnicodeScript.DEVANAGARI),
     )
+
+    /**
+     * Whether [host] names this device or a home network: localhost, or a name under a home
+     * network suffix such as ".lan" or ".local". The address field's rule; the media player adds
+     * more names (ch.lkmc.combray.core.media.MediaPolicy).
+     */
+    fun isLocalHost(host: String): Boolean {
+        val name = host.trimEnd('.')
+        return name.equals(LOCALHOST, ignoreCase = true) || LOCAL_SUFFIXES.any { name.endsWith(it, ignoreCase = true) }
+    }
 
     /** Exact host match, or a subdomain of [site] when [includeSubdomains]; never a suffix string test. */
     fun matches(host: String, site: String, includeSubdomains: Boolean): Boolean =

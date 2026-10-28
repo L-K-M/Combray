@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Applies to Combray's own HTTP clients (Karakeep, Hister), not to web pages: Servo has its
-    own network stack. A service address may be plain HTTP (a home server without a
-    certificate); Settings says what that exposes. HTTPS uses system-trusted certificates.
+    Applies to Combray's own HTTP clients (Karakeep, Hister, and the media player's OkHttp
+    client), not to web pages: Servo has its own network stack. A service address may be plain
+    HTTP (a home server without a certificate); Settings says what that exposes. The player
+    needs cleartext for a page's http media; its own rules (core/media/MediaPolicy.kt) refuse
+    http media from an https page. HTTPS uses system-trusted certificates.
 -->
 <network-security-config xmlns:tools="http://schemas.android.com/tools">
     <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">

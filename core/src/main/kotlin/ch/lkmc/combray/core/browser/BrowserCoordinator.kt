@@ -8,6 +8,8 @@ import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
+import ch.lkmc.combray.core.media.MediaPolicy
+import ch.lkmc.combray.core.media.PlaybackRequest
 import ch.lkmc.combray.core.policy.HostNames
 import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URLDecoder
 import java.util.UUID
 
@@ -688,6 +691,17 @@ class BrowserCoordinator(
     /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
     fun externalLinkHandled(link: ExternalLink) = state.update { if (it.externalLink == link) it.copy(externalLink = null) else it }
 
+    /**
+     * What the player needs to play [entry] of [page]'s media ([ActiveTab.media]), or null when
+     * that page is no longer its tab's page, the entry is gone, or the media's address no longer
+     * passes [MediaPolicy]. Checked again here: the player gets only what the offer rules allow.
+     */
+    suspend fun playbackRequest(page: MediaPageRef, entry: Long): PlaybackRequest? {
+        val request = CompletableDeferred<PlaybackRequest?>()
+        submit { request.complete(findPlayback(page, entry)) }
+        return request.await()
+    }
+
     // --- Engine events ----------------------------------------------------------------------------
 
     private fun onEngineEvent(event: EngineEvent) = submit {
@@ -808,7 +822,8 @@ class BrowserCoordinator(
     /**
      * Records cancelled media for the page shown in [view]. The engine reports each address once
      * per page, and media without one once. A report for a replaced document is dropped: it would
-     * name the wrong page.
+     * name the wrong page. An address the player may not fetch from this page ([MediaPolicy])
+     * counts as media without one.
      *
      * Only the tab on screen gets notices, at most two per page: the plain one, then the playable
      * one if an address arrives later. The first address gives the playable notice at once. Media
@@ -817,9 +832,36 @@ class BrowserCoordinator(
      */
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
+        // A load names no document, so the engine credits it to the committed one. While a page the app asked
+        // for is pending, a load whose referrer is another origin than the committed page's is most likely the
+        // pending page's, overtaking its commit (a data: page leaving for a fixture page did so on the emulator):
+        // it waits for that commit. Without a pending navigation (a cross-origin frame's media, a late load of
+        // a replaced page) it is the committed page's, as before.
+        val referrer = event.referrer
+        if (view.awaitingCommit && referrer != null && !MediaPolicy.isAt(key.address, referrer)) {
+            if (view.heldMedia.size == MAX_HELD_MEDIA) view.heldMedia.removeFirst()
+            view.heldMedia.addLast(HeldMedia(event, view.commitRequests))
+            return
+        }
+        recordMedia(view, key, event)
+    }
+
+    /** The reports held for the page that just committed, if they came from its origin; the rest are dropped. */
+    private fun releaseHeldMedia(view: LiveView, document: Long) {
+        if (view.heldMedia.isEmpty()) return
+        val held = view.heldMedia.toList()
+        view.heldMedia.clear()
+        val key = view.currentPage?.takeIf { it.document == document } ?: return
+        held.filter { it.request == view.commitRequests && MediaPolicy.isAt(key.address, checkNotNull(it.event.referrer)) }
+            .forEach { recordMedia(view, key, it.event) }
+    }
+
+    private fun recordMedia(view: LiveView, key: PageKey, event: EngineEvent.MediaBlocked) {
         val page = view.pages.getOrPut(key) { PageMediaState(nextMediaId++) }
         val shown = view.nativeTab == selectedNative
-        val url = event.url
+        val url = event.url?.takeIf {
+            event.kind != MediaKind.TRACK && MediaPolicy.check(MediaPolicy.origin(key.address, event.referrer), it) == null
+        }
         if (url != null) {
             page.record(MediaEntry(nextMediaId++, event.kind, url, event.referrer))
             if (!shown || page.playableShown) return
@@ -854,6 +896,18 @@ class BrowserCoordinator(
     private fun showPlainMediaNotice(page: PageMediaState) {
         page.plainShown = true
         state.update { it.copy(notice = Notice.MediaUnplayable) }
+    }
+
+    private fun findPlayback(ref: MediaPageRef, entryId: Long): PlaybackRequest? {
+        val view = liveByTab[ref.tabId]?.takeIf { !it.crashed } ?: return null
+        val key = view.currentPage?.takeIf { it.document == view.currentDocument } ?: return null
+        val page = view.pages[key]?.takeIf { it.id == ref.pageId } ?: return null
+        val entry = page.entries.firstOrNull { it.id == entryId } ?: return null
+        val agent = userAgent ?: return null
+        val origin = MediaPolicy.origin(key.address, entry.referrer)
+        val url = entry.url.toHttpUrlOrNull()?.takeIf { MediaPolicy.check(origin, it) == null } ?: return null
+        val shown = entry.playable()
+        return PlaybackRequest(url, entry.kind, origin, agent, shown.name, shown.site)
     }
 
     private suspend fun onHistory(view: LiveView, reported: EngineEvent.HistoryChanged) {
@@ -924,6 +978,7 @@ class BrowserCoordinator(
                 tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
             )
         }
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) releaseHeldMedia(view, event.document)
     }
 
     /**
@@ -1485,6 +1540,7 @@ class BrowserCoordinator(
         val loadFailed = view?.currentDocument?.let { it in view.errorDocuments }
             ?: tab?.currentVisitId?.let { dao.visit(it)?.failed }
             ?: false
+        val shownMedia = view?.takeIf { !it.crashed }?.shownPageMedia()?.takeIf { it.entries.isNotEmpty() }
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -1504,7 +1560,8 @@ class BrowserCoordinator(
                             val generation = live.generation ?: return@let null
                             live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
                         },
-                        media = view?.takeIf { !it.crashed }?.shownPageMedia()?.entries?.map { it.playable() }.orEmpty(),
+                        media = shownMedia?.entries?.map { it.playable() }.orEmpty(),
+                        mediaPage = shownMedia?.let { MediaPageRef(active.id, it.id) },
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->
@@ -1572,12 +1629,18 @@ class BrowserCoordinator(
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PageKey, PageMediaState>) = size > MAX_MEDIA_PAGES
         }
 
+        /** Media reports held for the page the app asked for, until it commits (see onMediaBlocked). */
+        val heldMedia = ArrayDeque<HeldMedia>()
+
         /** Media of the page shown, if its document is still the current one. */
         fun shownPageMedia(): PageMediaState? = currentPage?.takeIf { it.document == currentDocument }?.let { pages[it] }
     }
 
     /** One page: a document at one address, without the fragment. */
     private data class PageKey(val document: Long, val address: String)
+
+    /** A media report held while the app's navigation [request] was pending. */
+    private class HeldMedia(val event: EngineEvent.MediaBlocked, val request: Long)
 
     /** Media the engine cancelled on one page, newest first, and the notices it gave. */
     private class PageMediaState(val id: Long) {
@@ -1689,6 +1752,9 @@ class BrowserCoordinator(
 
         /** Media entries kept per page, newest first. */
         const val MAX_MEDIA_ENTRIES = 8
+
+        /** Media reports held per view for a pending page; a page's own count is bounded by the engine. */
+        const val MAX_HELD_MEDIA = 8
 
         /** Longest media name shown, in characters. */
         const val MAX_MEDIA_NAME = 64

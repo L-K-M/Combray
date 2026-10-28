@@ -124,6 +124,17 @@ dependencies {
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.datasource.okhttp)
+    constraints {
+        implementation(libs.guava) {
+            because(
+                "Media3 asks for 33.3.1-android, whose Android runtime also needs checker-qual (MIT) and jsr305; " +
+                    "from 33.4.8-android it needs only Apache-2.0 libraries, which licensee allows",
+            )
+        }
+    }
 
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)

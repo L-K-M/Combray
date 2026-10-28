@@ -2118,6 +2118,46 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun mediaThatOvertakesThePendingPagesCommitIsOfferedOnThatPage() {
+        ready()
+        browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.example/")
+        browser.openUrl("https://b.example/watch", Placement.CURRENT_TAB); idle()
+
+        // The engine credits the load to the page still committed; its referrer names the pending one.
+        media(1, 10, "https://cdn.b.example/clip.mp4", referrer = "https://b.example")
+        assertNull(state().notice)
+        commit(1, 11, "https://b.example/watch")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
+    }
+
+    @Test
+    fun aHeldReportFromAnotherOriginIsDroppedWhenThePendingPageCommits() {
+        ready()
+        browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.example/")
+        browser.openUrl("https://b.example/", Placement.CURRENT_TAB); idle()
+
+        media(1, 10, "https://cdn.c.example/clip.mp4", referrer = "https://c.example")
+        commit(1, 11, "https://b.example/")
+        assertNull(state().notice)
+        assertTrue(state().activeTab!!.media.isEmpty())
+    }
+
+    @Test
+    fun aCrossOriginFramesMediaIsOfferedWhenNoPageIsPending() {
+        ready()
+        browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.example/")
+
+        // An embedded player's frame is another origin; nothing is pending, so it is this page's.
+        media(1, 10, "https://video.embed.example/clip.mp4", referrer = "https://embed.example")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
+    }
+
+    @Test
     fun aLatePlayableAddressFollowsThePlainNotice() {
         ready()
         browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
@@ -2315,6 +2355,82 @@ class BrowserCoordinatorTest {
         val (long, bare) = state().activeTab!!.media
         assertEquals("media.example.org", bare.name)
         assertEquals("x".repeat(64), long.name)
+    }
+
+    @Test
+    fun mediaThePlayerMayNotFetchIsNotOfferedAndCountsAsUnplayable() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        // Mixed content, a local name from a public page, a host InetAddress reads as an address.
+        media(1, 10, "http://cdn.example.org/a.mp4", referrer = "https://example.org")
+        media(1, 10, "https://localhost/b.mp4", referrer = "https://example.org")
+        media(1, 10, "https://2130706433/c.mp4", referrer = "https://example.org")
+        assertTrue(state().activeTab!!.media.isEmpty())
+        assertNull(state().activeTab!!.mediaPage)
+        assertNull(state().notice)
+        loaded(1, 10)
+        assertEquals(Notice.MediaUnplayable, state().notice)
+    }
+
+    @Test
+    fun aLocalPageOffersItsLocalMedia() {
+        ready()
+        browser.openUrl("http://192.168.1.10:8096/web/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "http://192.168.1.10:8096/web/")
+
+        media(1, 10, "http://192.168.1.10:8096/videos/1/stream.mp4", referrer = "http://192.168.1.10:8096")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("stream.mp4"), mediaNames())
+    }
+
+    @Test
+    fun aPlaybackRequestCarriesTheAddressServosUserAgentAndThePage() {
+        ready()
+        browser.openUrl("https://example.org/watch", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/watch")
+        media(1, 10, "https://cdn.example.org/v/clip.mp4?sig=1", referrer = "https://example.org")
+        val page = (state().notice as Notice.MediaPlayable).page
+        assertEquals(page, state().activeTab!!.mediaPage)
+        val entry = state().activeTab!!.media.single()
+
+        val request = runBlocking { browser.playbackRequest(page, entry.id) }!!
+        assertEquals("https://cdn.example.org/v/clip.mp4?sig=1", request.url.toString())
+        assertEquals(MediaKind.VIDEO, request.kind)
+        assertEquals(FakeEngine.USER_AGENT, request.userAgent)
+        assertEquals("https://example.org", request.origin.referrer)
+        assertEquals("example.org", request.origin.pageHost)
+        assertTrue(request.origin.secure)
+        assertEquals("clip.mp4", request.name)
+        assertEquals("cdn.example.org", request.site)
+        // An entry the page does not have.
+        assertNull(runBlocking { browser.playbackRequest(page, entry.id + 1_000) })
+    }
+
+    @Test
+    fun aPlaybackRequestEndsWithItsPage() {
+        ready()
+        browser.openUrl("https://example.org/a", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/a")
+        media(1, 10, "https://cdn.example.org/a.mp4")
+        val page = state().activeTab!!.mediaPage!!
+        val entry = state().activeTab!!.media.single().id
+
+        // Another path of the same document is another page.
+        commit(1, 10, "https://example.org/b", kind = HistoryKind.SAME_DOCUMENT)
+        assertNull(runBlocking { browser.playbackRequest(page, entry) })
+
+        // Back on the first path, the entry is offered again.
+        commit(1, 10, "https://example.org/a", kind = HistoryKind.SAME_DOCUMENT)
+        assertEquals(page, state().activeTab!!.mediaPage)
+        assertTrue(runBlocking { browser.playbackRequest(page, entry) } != null)
+
+        // A new document replaces the page for good.
+        commit(1, 11, "https://example.org/a", index = 0, length = 1)
+        assertNull(runBlocking { browser.playbackRequest(page, entry) })
+        // So does another tab's reference.
+        assertNull(runBlocking { browser.playbackRequest(page.copy(tabId = "another tab"), entry) })
     }
 
     @Test

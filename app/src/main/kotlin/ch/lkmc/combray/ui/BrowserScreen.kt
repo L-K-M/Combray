@@ -70,6 +70,7 @@ import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.KeyboardRequest
+import ch.lkmc.combray.core.browser.MediaPageRef
 import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.SessionState
@@ -84,13 +85,14 @@ import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import ch.lkmc.combray.engine.ScrollEdge
+import ch.lkmc.combray.player.PlayerActivity
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
-private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT }
+private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -149,10 +151,29 @@ fun BrowserScreen(
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
     val mediaUnsupported = stringResource(R.string.notice_media_unsupported)
+    val mediaPlayable = stringResource(R.string.notice_media_playable)
+    val play = stringResource(R.string.action_play)
+    val mediaPageLeft = stringResource(R.string.notice_media_page_left)
     val popupBlocked = stringResource(R.string.notice_popup_blocked)
     val undo = stringResource(R.string.action_undo)
     val openedInBackground = stringResource(R.string.notice_opened_in_background)
     val show = stringResource(R.string.action_show)
+    // The player gets an id for a request the coordinator built and checked; nothing opens if the page has changed.
+    val openPlayer = { page: MediaPageRef, entry: Long ->
+        scope.launch {
+            val request = browser.playbackRequest(page, entry) ?: return@launch
+            context.startActivity(PlayerActivity.intent(context, graph.playback.offer(request)))
+        }
+    }
+    // One entry plays at once; several open a choice. Only for the page the tab still shows: a notice that outlived its page says so.
+    val playMedia = { page: MediaPageRef ->
+        val shown = browser.browserState.value.activeTab?.takeIf { it.mediaPage == page }
+        when (shown?.media?.size ?: 0) {
+            0 -> notify(mediaPageLeft)
+            1 -> openPlayer(page, shown!!.media.single().id)
+            else -> sheet = Sheet.MEDIA
+        }
+    }
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
         browser.noticeShown(notice)
@@ -177,7 +198,9 @@ fun BrowserScreen(
                 is Notice.MediaPlayable -> {
                     // Replaces the page's plain notice if it still shows: one page, one message.
                     snackbar.currentSnackbarData?.takeIf { it.visuals.message == mediaUnsupported }?.dismiss()
-                    snackbar.showSnackbar(mediaUnsupported)
+                    // Long: with an action, Material extends it to the accessibility timeout.
+                    val result = snackbar.showSnackbar(mediaPlayable, actionLabel = play, duration = SnackbarDuration.Long)
+                    if (result == SnackbarResult.ActionPerformed) playMedia(notice.page)
                 }
                 Notice.PopupBlocked -> snackbar.showSnackbar(popupBlocked)
             }
@@ -558,8 +581,29 @@ fun BrowserScreen(
                 dismiss()
                 browser.openFind()
             },
+            onPlayMedia = {
+                dismiss()
+                tab?.mediaPage?.let(playMedia)
+            },
             onDismiss = dismiss,
         )
+        Sheet.MEDIA -> {
+            val page = tab?.mediaPage
+            if (page != null && tab.media.isNotEmpty()) {
+                MediaSheet(
+                    media = tab.media,
+                    onPlay = { entry ->
+                        dismiss()
+                        openPlayer(page, entry.id)
+                    },
+                    onDismiss = dismiss,
+                )
+            } else {
+                // The page changed under the sheet (another page, another tab): close it from an
+                // effect, as Page info does.
+                LaunchedEffect(Unit) { dismiss() }
+            }
+        }
         Sheet.SETTINGS -> SettingsSheet(
             integrations = graph.integrations,
             settings = graph.settings,

@@ -286,7 +286,7 @@ Limitations found while building the app:
 
 - **Servo error lines can contain page URLs.** The log filter keeps Servo's `error` level because engine failures must stay diagnosable; some of those lines name the page. Combray's own log lines carry no page text or addresses.
 - **Screen density is read once.** The HiDPI factor passed to Servo at startup is not updated when the density changes in the same process (display size setting, moving between screens); pages then render at the old scale until the app restarts.
-- **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A cancelled load can be reported for the wrong page: one that overtakes its document's commit or a `pushState` counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
+- **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A load names no document, and Servo delivers loads, document starts and commits on three channels taken in no fixed order, so a new document's first loads can arrive before its commit. The engine holds a load that arrives after a new document reported its start and before its commit, and gives it to that document when it commits (`media::PendingMedia`; a start that does not commit within 5 s gives its loads back to the committed page). The app also holds, while a page it asked for is pending, a report whose referrer is another origin than the committed page's. What stays wrong: a load that overtakes both its document's start and its commit, or a `pushState`, counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
 - **Leave-page questions cover page navigations only.** Servo 0.6.0 runs `beforeunload` for navigations the page starts (links, forms, `location`), for reloads and for `window.close()`. The constellation loads embedder URLs (`LoadUrl`) and traverses history without it, so a typed address, a link from another app, Back/Forward and closing a tab still discard unsaved form text without asking. Covering them needs a Servo change.
 - **A refused or handed-off link still stops the page's loading.** Servo's `navigate()` queues `abort_a_document_and_its_descendants` on the script thread before it asks the embedder (`components/script/navigation.rs`, step 24.4, lines 546-565 of the patched tree), and `NavigationRequest::deny()` does not undo it. The page stays on screen, but its in-flight fetches, EventSources and parser are aborted. If the link was tapped before the load event, the page never reports load complete: the address bar can keep showing it loading, and capture skips it. The fix needs a Servo patch: skip the abort for schemes the embedder will not load, as Chromium does for external protocols, or queue it only once the embedder allows the navigation.
 - **The tap check ignores pinch-zoom panning.** Servo 0.6.0 exposes the pinch-zoom factor but not the zoomed area's offset, so on a pinch-zoomed page a tap on a field focused before the user touched the page can miss it (no keyboard; tapping elsewhere and then the field works) or count a nearby tap.
@@ -1235,4 +1235,51 @@ at `77796d7` built the native engine for x86_64 and arm64 and passed all
 `BrowsingTest#mediaIsCancelledBeforeDownloadingAndThePageIsTold`, which
 now expects two media entries for its fixture page. Review changes after
 that run (local names in `history_changed`, an empty authority refused
-in `reportable_url`, tests) go through the PR's next Engine run.
+in `reportable_url`, tests) then passed [Engine run 40741266445](https://github.com/L-K-M/Combray/actions/runs/40741266445)
+at `b9b57bc`: both native builds and all emulator fixture checks.
+
+## 29. Media player, local checks (28 October 2026)
+
+Slice C1 PR 2 of [VIDEO.md](VIDEO.md#plan): the media player and its
+network rules, all in Kotlin. No native or engine change: the
+`media_blocked` and `engine_ready` shapes of section 28 stay, and the
+Servo pin does not change.
+
+Checks run on Linux x86_64 with no emulator:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest assembleRelease`: passed; 562 unit tests, 0
+  failed. `MediaNetworkTest` runs OkHttp against local MockWebServer
+  instances (https through okhttp-tls) with an injected resolver. Lint's
+  only new findings are the expected "newer version available" warnings
+  for OkHttp 4.12.0, which Media3 1.11.1 is built against.
+- `./gradlew :app:dependencies --configuration releaseRuntimeClasspath`:
+  Media3 1.11.1, OkHttp 4.12.0, Okio 3.6.0 and Guava 33.4.8-android
+  (raised from Media3's 33.3.1-android by the constraint) with
+  failureaccess 1.0.3 and jspecify 1.0.0; no checker-qual or jsr305.
+  Licensee reports every library in the release APK as Apache-2.0.
+- APK size, built without the native engine before and after the
+  change: debug 35,247,662 to 43,842,237 bytes (+8.6 MB), unsigned
+  release 27,255,370 to 34,189,899 bytes (+6.9 MB), nearly all of it
+  dex (R8 is off). That is about twice VIDEO.md's estimate.
+- `python3 scripts/check_docs.py` and `git diff --check`: clean.
+
+[Engine run 40748590962](https://github.com/L-K-M/Combray/actions/runs/40748590962)
+at `d95d8f9` on the API 30 x86_64 emulator: 139 of 140 fixture checks
+passed. Media3 decoded and drew the clip (the green and blue pixel
+checks of `aPageVideoPlaysAfterATapWithoutServosCookie`), the sheet,
+format error, direct link, audio (its position advanced under
+`-no-audio`), refusals and the accessibility checks passed.
+`aRedirectIsFollowedOnlyToAWebAddress` failed: no Play notice in 240 s.
+The tab still showed the previous check's `data:` page, and the new
+page's media report was credited to it (the load overtook the commit),
+where the policy refuses local media from a public page. The fix holds
+such reports while a page the app asked for is pending (section 13,
+"No audio or video"); `BrowserCoordinatorTest` covers it, and both new
+cases fail without it. [Engine run 40757033391](https://github.com/L-K-M/Combray/actions/runs/40757033391)
+at `6e2e35f` then passed all 140 fixture checks, the redirect check
+included. The first review round's changes after it (the own-host
+exception never reaching this device or the local link, a `blob:` page
+as secure as its maker, the player's snapshot on stop and start, and a
+notice when Play outlives its page) go through the PR's next Engine
+run.

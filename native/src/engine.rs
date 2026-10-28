@@ -52,7 +52,9 @@ use crate::events::{
 };
 use crate::find::{self, FindAction};
 use crate::keyboard::{self, TapTracker};
-use crate::media::{self, MediaBudget, MediaKind, MediaReport, PageMedia};
+use crate::media::{
+    self, MediaBudget, MediaKind, MediaReport, PageMedia, PendingMedia, UnattributedMedia,
+};
 use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
@@ -191,6 +193,8 @@ struct Tab {
     /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
     /// pushState loop stays bounded; restarts when another document commits.
     media_budget: MediaBudget,
+    /// Loads waiting for the document about to commit (see `media::PendingMedia`).
+    pending_media: PendingMedia,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
     /// The document the user last touched or typed into. A page may ask to confirm leaving only
@@ -225,6 +229,36 @@ impl Tab {
             self.held.pop_front();
         }
         self.held.push_back(report);
+    }
+
+    /// The `media_blocked` reports for `media`, credited to `document`, the committed one: each
+    /// URL once per page, within the tab's budget.
+    fn credit_media(
+        &mut self,
+        document: PipelineId,
+        media: Vec<UnattributedMedia>,
+        now_ms: u64,
+    ) -> Vec<EngineEvent> {
+        let mut reports = Vec::new();
+        for load in media {
+            let url =
+                match self
+                    .page_media
+                    .note(load.url.as_deref(), &mut self.media_budget, now_ms)
+                {
+                    MediaReport::Playable(url) => Some(url),
+                    MediaReport::Unplayable => None,
+                    MediaReport::Nothing => continue,
+                };
+            reports.push(EngineEvent::MediaBlocked {
+                view: self.view,
+                document: u64::from(document),
+                kind: load.kind.as_str(),
+                url,
+                referrer: load.referrer,
+            });
+        }
+        reports
     }
 }
 
@@ -837,6 +871,7 @@ impl Engine {
                 held: VecDeque::new(),
                 page_media: PageMedia::default(),
                 media_budget: MediaBudget::default(),
+                pending_media: PendingMedia::default(),
                 frames_painted: 0,
                 last_paint_report: None,
                 interacted_document: None,
@@ -1778,13 +1813,16 @@ impl Engine {
     /// that keeps retrying, does not flood the application.
     ///
     /// A load names its view but not its document, so it is attributed to the tab's committed
-    /// document at the time the delegate sees it. Servo delivers load interceptions (net thread)
-    /// and history changes (constellation) on separate channels in no fixed order, so attribution
-    /// can be wrong in both directions: a load that overtook its document's commit counts for the
-    /// page before it, and a late load of the replaced document, or of the previous pushState
-    /// route, counts for the new page. The application's document check cannot tell, because the
-    /// event carries the document stamped here. Before the tab's first commit there is no document
-    /// to name: nothing is reported (the load is still cancelled).
+    /// document at the time the delegate sees it. Servo delivers load interceptions (net thread),
+    /// document starts (script) and history changes (constellation) on separate channels in no
+    /// fixed order. A load that arrives after a new document reported its start and before its
+    /// commit is held and given to that document when it commits (`media::PendingMedia`). What
+    /// remains: a load that overtakes both its document's start and commit, or a `pushState`,
+    /// counts for the page before it, and a late load of the replaced document, or of the
+    /// previous route, counts for the new page. The application's document check cannot tell,
+    /// because the event carries the document stamped here. A load before the tab's first
+    /// commit is held for its first document once that reported its start; without a start,
+    /// there is no document to name and nothing is reported (the load is still cancelled).
     fn media_blocked(
         &mut self,
         view: ViewKey,
@@ -1792,28 +1830,28 @@ impl Engine {
         url: Option<String>,
         referrer: Option<String>,
     ) {
-        let now_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let now_ms = self.now_ms();
         let Some(tab) = self.live_tab(view) else {
             return;
         };
+        let load = UnattributedMedia {
+            kind,
+            url,
+            referrer,
+        };
+        // Held first: a tab's first document starts before any document has committed.
+        let admitted = tab.pending_media.admit(load, now_ms);
         let Some(document) = tab.current_document else {
             return;
         };
-        let url = match tab
-            .page_media
-            .note(url.as_deref(), &mut tab.media_budget, now_ms)
-        {
-            MediaReport::Playable(url) => Some(url),
-            MediaReport::Unplayable => None,
-            MediaReport::Nothing => return,
-        };
-        self.emit(EngineEvent::MediaBlocked {
-            view,
-            document: u64::from(document),
-            kind: kind.as_str(),
-            url,
-            referrer,
-        });
+        for report in tab.credit_media(document, admitted, now_ms) {
+            self.emit(report);
+        }
+    }
+
+    /// Milliseconds since the engine started, the clock of the media budgets and holds.
+    fn now_ms(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
     /// Web addresses load. A link for another app goes to the application only right after the
@@ -2117,6 +2155,7 @@ impl Engine {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
         let shown = self.active == Some(view.tab);
+        let now_ms = self.now_ms();
         let Some(tab) = self.live_tab(view) else {
             return;
         };
@@ -2186,6 +2225,13 @@ impl Engine {
                 }
             }
         }
+        // Media loads that overtook this commit, credited to this document's new page.
+        let released_media = if change == HistoryChange::NewDocument {
+            let held = tab.pending_media.committed(u64::from(document));
+            tab.credit_media(document, held, now_ms)
+        } else {
+            Vec::new()
+        };
 
         if change == HistoryChange::NewDocument {
             // Another document replaced the one asking (a load the application started): its
@@ -2210,9 +2256,13 @@ impl Engine {
         for report in released {
             self.emit_document_report(view, report, Attribution::HeldUntilCommit);
         }
+        for report in released_media {
+            self.emit(report);
+        }
     }
 
     fn document_report(&mut self, view: ViewKey, report: HeldReport) {
+        let now_ms = self.now_ms();
         let Some(tab) = self.live_tab(view) else {
             return;
         };
@@ -2222,6 +2272,11 @@ impl Engine {
         tab.documents.insert(u64::from(document), document);
         let attribution = tab.attribution(document);
         if attribution == Attribution::HeldUntilCommit {
+            if matches!(report, HeldReport::Load(_, LoadPhase::Started)) {
+                // Its media loads can now overtake its commit.
+                tab.pending_media
+                    .document_started(u64::from(document), now_ms);
+            }
             tab.hold(report);
             return;
         }

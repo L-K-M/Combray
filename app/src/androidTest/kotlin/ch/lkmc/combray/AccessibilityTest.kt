@@ -40,9 +40,12 @@ import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TextSize
 import ch.lkmc.combray.core.browser.HomeLink
+import ch.lkmc.combray.core.browser.MediaPageRef
+import ch.lkmc.combray.core.browser.PlayableMedia
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.integration.SaveStatus
+import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
 import ch.lkmc.combray.engine.ScrollEdge
@@ -50,6 +53,7 @@ import ch.lkmc.combray.ui.BottomBar
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.HomeContent
+import ch.lkmc.combray.ui.MediaEntries
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
@@ -205,18 +209,33 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true), {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {})
+                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {}, {})
             }
         }
 
         assertTargetsAreAccessible()
         // The rows scroll when they outgrow the window: bring each into view before checking it.
-        for (label in listOf("Close tab", "Settings")) {
+        for (label in listOf("Close tab", "Play audio or video", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
         // New tab is the bar's +, no longer a More row.
         compose.onNodeWithText("New tab").assertDoesNotExist()
         compose.onNodeWithText("Pause history capture").assertDoesNotExist()
+    }
+
+    /** The page's media, as the sheet lists it: rows named by kind, file and site. */
+    @Test
+    fun theMediaSheetIsAccessible() {
+        show(LARGE_FONT) {
+            Column(Modifier.width(NARROW_WIDTH)) {
+                MediaEntries(MEDIA, onPlay = {})
+            }
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Play video clip.mp4 from example.org").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Play audio tone.wav from cdn.example.org").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Audio and video on this page").assertIsDisplayed()
     }
 
     @Test
@@ -498,6 +517,12 @@ class AccessibilityTest {
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp
+
+        val MEDIA = listOf(
+            PlayableMedia(2, MediaKind.VIDEO, "clip.mp4", "example.org"),
+            PlayableMedia(1, MediaKind.AUDIO, "tone.wav", "cdn.example.org"),
+        )
+        val MEDIA_PAGE = MediaPageRef("tab", 1)
 
         val SMALL_TARGET = 40.dp
 
