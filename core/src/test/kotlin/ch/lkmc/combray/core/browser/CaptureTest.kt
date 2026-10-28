@@ -50,7 +50,7 @@ class CaptureTest {
             captureTiming = CaptureTiming(settleMs = 50, fallbackMs = 400, debounceMs = 50),
         )
         browser.start()
-        engine.emit(EngineEvent.EngineReady(720, 1280))
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
         idle()
     }
 

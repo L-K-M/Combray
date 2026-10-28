@@ -140,6 +140,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The media notice waits until the page has loaded when none of the
+  page's audio or video has a web address, and a page that moves to
+  another address (a single-page app's route change) and loads media
+  there gives a new notice.
 - Pages can measure SVG shapes: the engine implements `getTotalLength()`
   and `getPointAtLength()`, which stroke drawing and motion-path
   animations call.

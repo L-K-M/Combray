@@ -52,6 +52,7 @@ use crate::events::{
 };
 use crate::find::{self, FindAction};
 use crate::keyboard::{self, TapTracker};
+use crate::media::{self, MediaBudget, MediaKind, MediaReport, PageMedia};
 use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
@@ -185,8 +186,11 @@ struct Tab {
     retired: HashSet<PipelineId>,
     /// Reports from documents that have not committed yet (they can overtake the commit).
     held: VecDeque<HeldReport>,
-    /// Documents already reported in `media_blocked`, so each is reported once.
-    media_blocked: HashSet<PipelineId>,
+    /// Media the current page loaded, so each URL is reported once per page (see `media`).
+    page_media: PageMedia,
+    /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
+    /// pushState loop stays bounded; restarts when another document commits.
+    media_budget: MediaBudget,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
     /// The document the user last touched or typed into. A page may ask to confirm leaving only
@@ -361,6 +365,8 @@ struct Engine {
     /// Page-text captures of the page on screen waiting for a quiet moment, with when each
     /// first had to wait.
     deferred_captures: Vec<(CaptureRequest, Instant)>,
+    /// Origin of the millisecond clock the media budgets read.
+    started: Instant,
 }
 
 impl Engine {
@@ -396,6 +402,7 @@ impl Engine {
             appearance: Appearance::Light,
             touches: Default::default(),
             deferred_captures: Vec::new(),
+            started: Instant::now(),
         }
     }
 
@@ -682,6 +689,8 @@ impl Engine {
         preferences.set_value("dom_fontface_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_adoptedstylesheet_enabled", PrefValue::Bool(true));
+        // The application's own fetches (the media player) send what Servo sends.
+        let user_agent = preferences.user_agent.clone();
 
         let servo = ServoBuilder::default()
             .opts(opts)
@@ -702,6 +711,7 @@ impl Engine {
         self.emit(EngineEvent::EngineReady {
             width: size.width,
             height: size.height,
+            user_agent,
         });
         true
     }
@@ -825,7 +835,8 @@ impl Engine {
                 documents: HashMap::new(),
                 retired: HashSet::new(),
                 held: VecDeque::new(),
-                media_blocked: HashSet::new(),
+                page_media: PageMedia::default(),
+                media_budget: MediaBudget::default(),
                 frames_painted: 0,
                 last_paint_report: None,
                 interacted_document: None,
@@ -1749,7 +1760,12 @@ impl Engine {
             DelegateEvent::DefaultHandled { view, request } => {
                 self.emit(EngineEvent::DefaultHandled { view, request })
             },
-            DelegateEvent::MediaBlocked { view } => self.media_blocked(view),
+            DelegateEvent::MediaBlocked {
+                view,
+                kind,
+                url,
+                referrer,
+            } => self.media_blocked(view, kind, url, referrer),
             DelegateEvent::Crashed { view, reason } => {
                 error!("view {view:?} crashed: {reason}");
                 self.emit(EngineEvent::Crashed { view, reason });
@@ -1757,27 +1773,46 @@ impl Engine {
         }
     }
 
-    /// Reports cancelled media once per document, so a page with many media elements, or one
-    /// that keeps retrying, yields one notice.
+    /// Reports cancelled media per page (`media::PageMedia`): each reportable URL once, and
+    /// media without one once, within the tab's budget. A page with many media elements, or one
+    /// that keeps retrying, does not flood the application.
     ///
     /// A load names its view but not its document, so it is attributed to the tab's committed
-    /// document. A load that overtook its document's commit would count for the previous one;
-    /// Servo announces a document before parsing it and media loads start during parsing, so that
-    /// is unlikely. Before the tab's first commit there is no document to name: nothing is
-    /// reported (the load is still cancelled).
-    fn media_blocked(&mut self, view: ViewKey) {
+    /// document at the time the delegate sees it. Servo delivers load interceptions (net thread)
+    /// and history changes (constellation) on separate channels in no fixed order, so attribution
+    /// can be wrong in both directions: a load that overtook its document's commit counts for the
+    /// page before it, and a late load of the replaced document, or of the previous pushState
+    /// route, counts for the new page. The application's document check cannot tell, because the
+    /// event carries the document stamped here. Before the tab's first commit there is no document
+    /// to name: nothing is reported (the load is still cancelled).
+    fn media_blocked(
+        &mut self,
+        view: ViewKey,
+        kind: MediaKind,
+        url: Option<String>,
+        referrer: Option<String>,
+    ) {
+        let now_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let Some(tab) = self.live_tab(view) else {
             return;
         };
         let Some(document) = tab.current_document else {
             return;
         };
-        if !tab.media_blocked.insert(document) {
-            return;
-        }
+        let url = match tab
+            .page_media
+            .note(url.as_deref(), &mut tab.media_budget, now_ms)
+        {
+            MediaReport::Playable(url) => Some(url),
+            MediaReport::Unplayable => None,
+            MediaReport::Nothing => return,
+        };
         self.emit(EngineEvent::MediaBlocked {
             view,
             document: u64::from(document),
+            kind: kind.as_str(),
+            url,
+            referrer,
         });
     }
 
@@ -2102,6 +2137,26 @@ impl Engine {
         } else {
             HistoryChange::ListOnly
         };
+        // Media reports are per page: a new document, or another address within the document
+        // (`pushState`), starts again; a fragment or an unchanged address does not.
+        let page_changed = match change {
+            HistoryChange::NewDocument => true,
+            HistoryChange::SameDocumentUrl => {
+                tab.current_url
+                    .as_ref()
+                    .map(|url| media::page_key(url.as_str()))
+                    != url.as_ref().map(|url| media::page_key(url.as_str()))
+            },
+            HistoryChange::ListOnly => false,
+        };
+        if page_changed {
+            tab.page_media = PageMedia::default();
+        }
+        if change == HistoryChange::NewDocument {
+            // A new document costs a fetch or a traversal, so it cannot flood; a page that spent
+            // the budget must not leave the next document without its report.
+            tab.media_budget = MediaBudget::default();
+        }
         tab.current_url = url.clone();
 
         // Servo hides no input method when a navigation replaces the field's document (a form

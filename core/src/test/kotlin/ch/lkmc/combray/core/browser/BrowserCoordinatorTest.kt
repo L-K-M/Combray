@@ -19,6 +19,7 @@ import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LeavePageChoice
+import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.CoroutineScope
@@ -86,7 +87,7 @@ class BrowserCoordinatorTest {
     private fun idle() = runBlocking { browser.awaitIdle() }
 
     private fun ready() {
-        engine.emit(EngineEvent.EngineReady(720, 1280))
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
         idle()
     }
 
@@ -2007,32 +2008,306 @@ class BrowserCoordinatorTest {
         assertEquals(NONE, engine.selected.last())
     }
 
-    @Test
-    fun mediaBlockedOnTheShownPageGivesANotice() {
-        ready()
-        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
-        commit(1, 10, "https://a.test/")
+    /** The engine cancelled a load on [document]: [url] null is media without a reportable address. */
+    private fun media(native: Long, document: Long, url: String?, kind: MediaKind = MediaKind.VIDEO, referrer: String? = null) {
+        engine.emit(EngineEvent.MediaBlocked(engine.view(native), document, kind, url, referrer))
+        idle()
+    }
 
-        engine.emit(EngineEvent.MediaBlocked(engine.view(1), 10)); idle()
-        assertEquals(Notice.MediaUnsupported, state().notice)
+    /** Clears the notice as the UI does once it showed it. */
+    private fun shown(notice: Notice?) {
+        notice?.let(browser::noticeShown)
+    }
+
+    private fun mediaNames() = state().activeTab!!.media.map { it.name }
+
+    @Test
+    fun theFirstMediaAddressOfThePageShownOffersItAtOnce() {
+        ready()
+        browser.openUrl("https://example.org/watch", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/watch")
+
+        // While the page still loads.
+        media(1, 10, "https://cdn.example.org/videos/Caf%C3%A9+clip.mp4?sig=1", referrer = "https://example.org")
+        val notice = state().notice as Notice.MediaPlayable
+        assertEquals(state().activeTab!!.id, notice.page.tabId)
+        val entry = state().activeTab!!.media.single()
+        assertEquals(MediaKind.VIDEO, entry.kind)
+        assertEquals("Café+clip.mp4", entry.name)
+        assertEquals("cdn.example.org", entry.site)
+        // The address stays in the coordinator.
+        assertFalse(entry.toString().contains("sig="))
     }
 
     @Test
-    fun mediaBlockedInAHiddenTabOrAReplacedPageGivesNoNotice() {
+    fun aPageGetsOneNoticeHoweverMuchMediaItHas() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        media(1, 10, "https://example.org/a.mp4")
+        val first = state().notice
+        assertTrue(first is Notice.MediaPlayable)
+        shown(first)
+        media(1, 10, "https://example.org/b.mp3", MediaKind.AUDIO)
+        media(1, 10, null, MediaKind.TRACK)
+        loaded(1, 10)
+        assertNull(state().notice)
+        assertEquals(listOf("b.mp3", "a.mp4"), mediaNames())
+        assertEquals(listOf(MediaKind.AUDIO, MediaKind.VIDEO), state().activeTab!!.media.map { it.kind })
+    }
+
+    @Test
+    fun mediaWithoutAnAddressIsToldOnceThePageHasLoaded() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        media(1, 10, null)
+        assertNull(state().notice)
+        loaded(1, 10)
+        assertEquals(Notice.MediaUnplayable, state().notice)
+        shown(state().notice)
+        assertTrue(state().activeTab!!.media.isEmpty())
+
+        // Once per page, also after loading.
+        media(1, 10, null)
+        loaded(1, 10)
+        assertNull(state().notice)
+    }
+
+    @Test
+    fun mediaWithoutAnAddressOnALoadedPageIsToldAtOnce() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+        loaded(1, 10)
+
+        media(1, 10, null)
+        assertEquals(Notice.MediaUnplayable, state().notice)
+    }
+
+    @Test
+    fun captionsCancelledBeforeTheirVideoGiveOnlyThePlayableNotice() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        media(1, 10, null, MediaKind.TRACK)
+        assertNull(state().notice)
+        media(1, 10, "https://example.org/a.mp4")
+        val notice = state().notice
+        assertTrue(notice is Notice.MediaPlayable)
+        shown(notice)
+        loaded(1, 10)
+        assertNull(state().notice)
+    }
+
+    @Test
+    fun mediaWithoutAnAddressIsToldWhenThePageMovedWhileLoading() {
+        ready()
+        browser.openUrl("https://example.org/watch?ref=feed", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/watch?ref=feed")
+
+        media(1, 10, null)
+        assertNull(state().notice)
+        // The page drops its tracking parameter before it has loaded.
+        commit(1, 10, "https://example.org/watch", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
+        loaded(1, 10)
+        assertEquals(Notice.MediaUnplayable, state().notice)
+    }
+
+    @Test
+    fun aLatePlayableAddressFollowsThePlainNotice() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+        loaded(1, 10)
+
+        media(1, 10, null)
+        assertEquals(Notice.MediaUnplayable, state().notice)
+        // The playable notice replaces the plain one, shown or not.
+        media(1, 10, "https://example.org/a.mp4")
+        val notice = state().notice
+        assertTrue(notice is Notice.MediaPlayable)
+        shown(notice)
+
+        // Two notices at most for the page.
+        media(1, 10, "https://example.org/b.mp4")
+        media(1, 10, null)
+        assertNull(state().notice)
+    }
+
+    @Test
+    fun aHiddenTabRecordsMediaWithoutANotice() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
         commit(1, 10, "https://a.test/")
+        loaded(1, 10)
         browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
         commit(2, 20, "https://b.test/")
 
         // The first tab is hidden behind the second.
-        engine.emit(EngineEvent.MediaBlocked(engine.view(1), 10)); idle()
+        media(1, 10, "https://a.test/a.mp4")
+        media(1, 10, null)
+        assertNull(state().notice)
+        assertTrue(state().activeTab!!.media.isEmpty())
+
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
+        browser.selectTab(tabA); idle()
+        assertEquals(listOf("a.mp4"), mediaNames())
+        assertNull(state().notice)
+    }
+
+    @Test
+    fun aReportForAReplacedDocumentIsIgnored() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        commit(1, 11, "https://c.test/", index = 1, length = 2)
+
+        media(1, 10, "https://a.test/a.mp4")
+        assertNull(state().notice)
+        assertTrue(state().activeTab!!.media.isEmpty())
+    }
+
+    @Test
+    fun eachDocumentHasItsOwnMediaAndBackFindsItAgain() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        media(1, 10, "https://a.test/a.mp4")
+        shown(state().notice)
+
+        commit(1, 11, "https://b.test/", index = 1, length = 2)
+        assertTrue(state().activeTab!!.media.isEmpty())
+        media(1, 11, "https://a.test/a.mp4")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        shown(state().notice)
+
+        // Back to the cached first document: its elements failed already and will not report again.
+        commit(1, 10, "https://a.test/", index = 0, length = 2)
+        assertEquals(listOf("a.mp4"), mediaNames())
         assertNull(state().notice)
 
-        // The report arrives after the shown tab moved on to another page.
-        commit(2, 21, "https://c.test/", index = 1, length = 2)
-        engine.emit(EngineEvent.MediaBlocked(engine.view(2), 20)); idle()
+        // The same address in a new document (a reload) is a new page.
+        commit(1, 12, "https://a.test/", index = 0, length = 2)
+        assertTrue(state().activeTab!!.media.isEmpty())
+    }
+
+    @Test
+    fun anotherFragmentKeepsThePageAndAnotherPathStartsOne() {
+        ready()
+        browser.openUrl("https://app.test/feed", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://app.test/feed")
+        media(1, 10, "https://cdn.test/1.mp4")
+        shown(state().notice)
+
+        commit(1, 10, "https://app.test/feed#top", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
+        assertEquals(listOf("1.mp4"), mediaNames())
+
+        // A route change in a single-page app is a new page, with its own notice.
+        commit(1, 10, "https://app.test/post/2", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
+        assertTrue(state().activeTab!!.media.isEmpty())
+        media(1, 10, "https://cdn.test/2.mp4")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        shown(state().notice)
+
+        commit(1, 10, "https://app.test/feed", HistoryKind.SAME_DOCUMENT, index = 0, length = 3)
+        assertEquals(listOf("1.mp4"), mediaNames())
         assertNull(state().notice)
+    }
+
+    @Test
+    fun aPageKeepsItsNewestEightAddressesOnceEach() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        for (n in 1..9) media(1, 10, "https://example.org/$n.mp4")
+        assertEquals((9 downTo 2).map { "$it.mp4" }, mediaNames())
+
+        // Another fragment is the same media: it moves to the front, once.
+        media(1, 10, "https://example.org/5.mp4#t=10")
+        assertEquals(listOf("5.mp4", "9.mp4", "8.mp4", "7.mp4", "6.mp4", "4.mp4", "3.mp4", "2.mp4"), mediaNames())
+    }
+
+    @Test
+    fun aViewKeepsTheMediaOfItsSixteenMostRecentPages() {
+        ready()
+        browser.openUrl("https://app.test/0", Placement.CURRENT_TAB); idle()
+        for (n in 0..16) {
+            commit(1, 10, "https://app.test/$n", if (n == 0) HistoryKind.DOCUMENT_COMMITTED else HistoryKind.SAME_DOCUMENT, index = n, length = n + 1)
+            media(1, 10, "https://cdn.test/$n.mp4")
+        }
+
+        // The seventeenth page evicted the first; the second is kept.
+        commit(1, 10, "https://app.test/1", HistoryKind.SAME_DOCUMENT, index = 1, length = 17)
+        assertEquals(listOf("1.mp4"), mediaNames())
+        commit(1, 10, "https://app.test/0", HistoryKind.SAME_DOCUMENT, index = 0, length = 17)
+        assertTrue(state().activeTab!!.media.isEmpty())
+    }
+
+    @Test
+    fun revisitingAPageKeepsItsMediaAmongTheSixteenMostRecent() {
+        ready()
+        browser.openUrl("https://app.test/0", Placement.CURRENT_TAB); idle()
+        for (n in 0..15) {
+            commit(1, 10, "https://app.test/$n", if (n == 0) HistoryKind.DOCUMENT_COMMITTED else HistoryKind.SAME_DOCUMENT, index = n, length = n + 1)
+            media(1, 10, "https://cdn.test/$n.mp4")
+        }
+        commit(1, 10, "https://app.test/0", HistoryKind.SAME_DOCUMENT, index = 0, length = 16)
+        assertEquals(listOf("0.mp4"), mediaNames())
+        commit(1, 10, "https://app.test/16", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
+        media(1, 10, "https://cdn.test/16.mp4")
+
+        // The seventeenth page evicted the least recently shown one, not the first.
+        commit(1, 10, "https://app.test/0", HistoryKind.SAME_DOCUMENT, index = 0, length = 2)
+        assertEquals(listOf("0.mp4"), mediaNames())
+        commit(1, 10, "https://app.test/1", HistoryKind.SAME_DOCUMENT, index = 0, length = 2)
+        assertTrue(state().activeTab!!.media.isEmpty())
+    }
+
+    @Test
+    fun aMediaNameIsTheLastPathSegmentOfAnyEngineAddress() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        // Characters a WHATWG URL leaves unescaped and java.net.URI rejects.
+        media(1, 10, "https://cdn.example.org/clip.mp4?sig=a|b")
+        media(1, 10, "https://cdn.example.org/v/clip.mp4?range={0}")
+        media(1, 10, "https://cdn.example.org/a|b/clip.mp4?x=^1")
+        media(1, 10, "https://cdn.example.org/v/a|b.mp4")
+        assertEquals(listOf("a|b.mp4", "clip.mp4", "clip.mp4", "clip.mp4"), mediaNames())
+    }
+
+    @Test
+    fun aMediaNameStaysOnOneLineInReadingOrder() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        media(1, 10, "https://cdn.example.org/clip.mp4%0Abank.example.com")
+        media(1, 10, "https://cdn.example.org/%E2%80%AEclip.mp4")
+        media(1, 10, "https://cdn.example.org/v/%E2%80%AE%0A")
+        val (bare, reversed, split) = state().activeTab!!.media
+        assertEquals("clip.mp4 bank.example.com", split.name)
+        assertEquals("clip.mp4", reversed.name)
+        assertEquals("cdn.example.org", bare.name)
+    }
+
+    @Test
+    fun aMediaAddressWithoutAFileNameIsNamedByItsHost() {
+        ready()
+        browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/")
+
+        media(1, 10, "https://media.example.org/?id=7")
+        media(1, 10, "https://example.org/${"x".repeat(80)}.mp4")
+        val (long, bare) = state().activeTab!!.media
+        assertEquals("media.example.org", bare.name)
+        assertEquals("x".repeat(64), long.name)
     }
 
     @Test

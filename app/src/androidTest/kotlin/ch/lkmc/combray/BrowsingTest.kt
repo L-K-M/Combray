@@ -365,7 +365,10 @@ class BrowsingTest {
 
         // Both elements fired `error`, and they no longer hold back the page's load event.
         device.awaitState { it.activeTab?.title == MEDIA_FAILED }
-        device.awaitPage(Fixtures.MEDIA)
+        val loaded = device.awaitPage(Fixtures.MEDIA)
+        // Reported before the elements' `error` handlers ran: the video's and the audio's address
+        // (they differ in their query).
+        assertEquals("media entries", 2, loaded.activeTab?.media?.size)
         val media = Fixtures.state().getJSONObject("media")
         assertEquals("media requests that reached the server", 0, media.getInt("requests"))
         assertEquals("media responses sent in full", 0, media.getInt("completed"))

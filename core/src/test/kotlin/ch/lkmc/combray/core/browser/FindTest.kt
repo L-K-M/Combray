@@ -41,7 +41,7 @@ class FindTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         engine = FakeEngine()
         browser = BrowserCoordinator(database, engine, scope, clock = { START }, newId = { "id${ids++}" }).also { it.start() }
-        engine.emit(EngineEvent.EngineReady(720, 1280))
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
         idle()
     }
 
