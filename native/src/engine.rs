@@ -1820,8 +1820,9 @@ impl Engine {
     /// remains: a load that overtakes both its document's start and commit, or a `pushState`,
     /// counts for the page before it, and a late load of the replaced document, or of the
     /// previous route, counts for the new page. The application's document check cannot tell,
-    /// because the event carries the document stamped here. Before the tab's first commit there
-    /// is no document to name: nothing is reported (the load is still cancelled).
+    /// because the event carries the document stamped here. A load before the tab's first
+    /// commit is held for its first document once that reported its start; without a start,
+    /// there is no document to name and nothing is reported (the load is still cancelled).
     fn media_blocked(
         &mut self,
         view: ViewKey,
@@ -1833,15 +1834,16 @@ impl Engine {
         let Some(tab) = self.live_tab(view) else {
             return;
         };
-        let Some(document) = tab.current_document else {
-            return;
-        };
         let load = UnattributedMedia {
             kind,
             url,
             referrer,
         };
+        // Held first: a tab's first document starts before any document has committed.
         let admitted = tab.pending_media.admit(load, now_ms);
+        let Some(document) = tab.current_document else {
+            return;
+        };
         for report in tab.credit_media(document, admitted, now_ms) {
             self.emit(report);
         }

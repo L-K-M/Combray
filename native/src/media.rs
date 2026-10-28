@@ -215,9 +215,12 @@ pub(crate) struct UnattributedMedia {
 /// takes from them in no fixed order, so a new document's first loads can arrive before its
 /// commit and would be credited to the page it replaces. Its start, though, is sent when the
 /// document is created, before it parses anything that loads media. Loads arriving between a
-/// document's start and its commit are held and given to that document when it commits; those
-/// of a document that never commits go to the committed one after [`PENDING_COMMIT_MS`].
-/// A late load of the replaced page in that window is credited to the new one.
+/// document's start and its commit are held and given to that document when it commits. A
+/// document that reported its start commits even when a traversal commits another document
+/// first (Servo sends its activation before its start and does not override a pending change),
+/// so another commit leaves the hold in place; loads held for a document that never commits go
+/// to the committed one after [`PENDING_COMMIT_MS`]. A late load of the replaced page in that
+/// window is credited to the new one.
 #[derive(Default)]
 pub(crate) struct PendingMedia {
     /// The document that reported its start but has not committed, and when.
@@ -257,15 +260,14 @@ impl PendingMedia {
         admitted
     }
 
-    /// `document` committed: the loads held for it, in arrival order. Loads held for another
-    /// document are dropped.
+    /// `document` committed: the loads held for it, in arrival order. Another document's commit
+    /// keeps them for the pending one.
     pub(crate) fn committed(&mut self, document: u64) -> Vec<UnattributedMedia> {
-        let pending = self.pending.take();
-        let held = std::mem::take(&mut self.held);
-        match pending {
-            Some((pending, _)) if pending == document => held.into(),
-            _ => Vec::new(),
+        if self.pending.is_none_or(|(pending, _)| pending != document) {
+            return Vec::new();
         }
+        self.pending = None;
+        std::mem::take(&mut self.held).into()
     }
 }
 
@@ -304,8 +306,9 @@ mod tests {
         let mut pending = PendingMedia::default();
         pending.document_started(7, 1_000);
         pending.admit(load("a"), 1_010);
-        // Another document commits (a traversal to a cached page): the held load is not its.
+        // A traversal commits a cached page first: the load stays held for the pending document.
         assert_eq!(pending.committed(8), Vec::new());
+        assert_eq!(pending.committed(7), vec![load("a")]);
 
         pending.document_started(9, 2_000);
         pending.admit(load("b"), 2_010);
