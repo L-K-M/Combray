@@ -50,6 +50,15 @@
             </intent-filter>
         </activity>
 
+        <!-- The fullscreen media player, opened only by the app (an id from AppGraph.playback,
+             never an address). It handles rotation itself, so playback keeps running. -->
+        <activity
+            android:name=".player.PlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:exported="false"
+            android:label="@string/player_title"
+            android:theme="@style/Theme.Combray.Player" />
+
         <!-- "Search with Kagi" in other apps' text selection menu: chosen there, so it searches at once. -->
         <activity-alias
             android:name=".SearchWithKagi"

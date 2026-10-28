@@ -9,7 +9,7 @@ Research date: 27 October 2026. Engine: Servo v0.7.0 from downstream `L-K-M/serv
 
 A second pass checked the claims against source and corrected them. Servo paths (`components/`, `python/`) are relative to the Servo checkout (`servo-checkout/servo` in a Combray build); other paths are Combray's. The pin has since moved to 2945808 on the same line. Its two changes (flex layout reuse, SVG path length; [ENGINE_SPIKE.md](ENGINE_SPIKE.md) sections 25 and 26) are not media changes, but the Servo line numbers below were not rechecked against it.
 
-Status: you chose option C, a fullscreen tap-to-play native player, first (28 October 2026). Option B, an inline backend on the device's decoders, is acceptable later. Leaving MSE out is a proposed default, as are the network rules for C, until you confirm them. Nothing is implemented yet.
+Status: you chose option C, a fullscreen tap-to-play native player, first (28 October 2026). Option B, an inline backend on the device's decoders, is acceptable later. Leaving MSE out is a proposed default, as are the network rules for C, Media3 with OkHttp, and the notice and Play wording, until you confirm them. Phase C1 is implemented in two PRs, pending its device evidence (see [phase C1](#phase-c1-a-fullscreen-player-for-media-combray-cancels)).
 
 ## Owner decisions
 
@@ -183,6 +183,13 @@ C first, in two phases, then B when you want inline playback. C's Media3 code an
 
 ### Phase C1: a fullscreen player for media Combray cancels
 
+**Status: implemented, pending device evidence.** PR 1 (the engine's per-page report and the app's media model) and PR 2 (network rules, client, player and Play UI) follow the C1 plan. Unit tests pass locally; the device checks (`MediaPlayerTest`, the updated `BrowsingTest` and `AccessibilityTest` checks) run in the Engine workflow on the API 30 emulator, and their results are not in yet. What was built:
+
+- **Offer.** The coordinator offers only addresses the [network rules](#network-rules-for-the-native-player) accept; a refused address counts as media without one. The playable notice reads "This page’s audio or video opens in a separate player." with **Play** (proposed wording). Play opens the player for one entry, or a sheet of up to 8 for several; More › "Play audio or video" offers the same while the page has media.
+- **Player.** `PlayerActivity`, a separate activity on `media3-exoplayer`, `media3-ui` and `media3-datasource-okhttp` 1.11.1, with OkHttp 4.12.0 (proposed). The Intent carries only an id for a request kept in the app's memory. The player takes audio focus, pauses when headphones go, is released when the activity stops, and lays out by the tracks it finds: immersive for video, controls always on for audio. Errors show as text with Close.
+- **Source.** `mediaSource(request, factory)` builds a progressive source, so a playlist fails as a format error. A refused address fails at once instead of being retried.
+- **Not covered.** Typed `<source type=...>` children, media a page fetches by script, captions, cookies, picture-in-picture and background audio.
+
 - **What it covers.** The `audio` and `video` loads the delegate already cancels: `src=` attributes, untyped `<source>` children, and media documents (a direct link to a media file, which Servo shows as a `<video>` or `<audio>` in a synthesized document, `load_media_document` in `servoparser/mod.rs`). Servo keeps reading such a navigation response and drops its body (`process_response_chunk` returns early for a synthesized document; nothing cancels the fetch), so under C1 a direct link is fetched twice: once by Servo, once by the player. Typed `<source type=...>` children never reach the delegate, because the dummy's empty `canPlayType` makes Servo skip them before any fetch.
 - **Flow.**
   1. The delegate keeps cancelling `audio`, `video` and `track` loads. For `audio` and `video` it also hands the app the load's URL and the referrer Servo computed for it (`WebResourceRequest::referrer_url`), tied to the document the engine attributes the load to, as today's `media_blocked` event is.
@@ -196,11 +203,12 @@ C first, in two phases, then B when you want inline playback. C's Media3 code an
   - Whether Media3 decodes and draws on the API 30 SwiftShader emulator is unverified.
 - **Records.** Plan [section 7](IMPLEMENTATION_PLAN.md#7-privacy-security-and-platform-behavior) and its status row, the delegate change in [ENGINE_SPIKE.md](ENGINE_SPIKE.md#13-after-m0-engine-changes-for-the-app), `THIRD_PARTY_NOTICES.md` and `CHANGELOG.md`.
 - **Effort.** About 1 week minimal; 2 to 4 weeks with a page scan, picture-in-picture and background audio. Estimates.
-- **APK.** +2.3 to 2.6 MB of dex, measured with d8 and R8 off, plus 0.3 to 0.8 MB of UI resources. Dex is the same in every ABI's APK.
+- **APK.** +2.3 to 2.6 MB of dex, measured with d8 and R8 off, plus 0.3 to 0.8 MB of UI resources. Dex is the same in every ABI's APK. Measured on the built C1 app (28 October 2026, R8 off, without the native engine): the unsigned release APK grew by 6.9 MB and the debug APK by 8.6 MB, nearly all of it dex from Media3, OkHttp, Okio and Guava together ([ENGINE_SPIKE.md](ENGINE_SPIKE.md#29-media-player-local-checks-28-october-2026)).
 
 ### Phase C2: X posts through an HLS claim
 
 - **First check.** Open an X post with a video and confirm the page renders and mounts its player in Servo 0.7. C2 is useless if it does not.
+- **Where it plugs in.** `mediaSource(request, factory)` in `app/.../player/PlayerActivity.kt` gains an HLS branch, and `gradle/libs.versions.toml` gains `media3-exoplayer-hls` at the Media3 version. The HLS playlist and its segments go through the same client, so every request passes the same per-hop rules.
 - **What it does.** Combray installs its own backend before Servo starts, through the installation described under [option B](#b-a-combray-backend-on-androids-media-apis-later). It is Servo's `DummyBackend` except that `canPlayType` answers "maybe" for `application/vnd.apple.mpegurl` and `application/x-mpegurl`, case-insensitively, and `""` for everything else as today. X then sets `video.src` to the playlist; the delegate cancels that load and C1 offers it; Media3's HLS source (`media3-exoplayer-hls`, added here) plays it after a tap. X's in-page player would still show an error state (unverified).
 - **Side effects while it is on.** X embeds, Video.js and Brightcove players also choose HLS over MP4. Their playlists reach the native player after a tap, as X posts do.
 - **Firm rule.** The shim goes when inline playback lands (B). From then on, claim HLS only if inline HLS plays (B's phase 2b). A false claim beside inline MP4 makes X embeds and Video.js choose HLS and fail instead of playing MP4 inline. Proposed: land B's phases 1 and 2 together, so that X posts move from the native player to inline playback without a gap.
@@ -209,14 +217,21 @@ C first, in two phases, then B when you want inline playback. C's Media3 code an
 
 ### Network rules for the native player
 
-Proposed defaults, pending your confirmation. Media3 fetches outside Servo, with its own TLS trust store and without Servo's HSTS list.
+Proposed defaults, pending your confirmation; C1 implements them. Media3 fetches outside Servo through its own OkHttp client (`core/.../media/MediaNetwork.kt`), with the system trust store and without Servo's HSTS list. The rules are in `core/.../media/MediaPolicy.kt`.
 
-- **http(s) only, on every hop.** Media3's `DefaultDataSource` also opens `file:`, `content:` and `data:` URIs. Use an http(s)-only source and check each redirect, playlist and segment URL.
-- **No Servo cookies in v1.** Media behind a sign-in fails in the player. Static cookie headers would leak across redirects and segment hosts; per-request cookie forwarding is about 2 to 3 days of later work.
-- **Referer and User-Agent set:** the user agent Servo sends, and only the origin of the referrer Servo computed for the load, on every hop. Servo applies the page's referrer policy first, so a `no-referrer` page sends none; an http hop from an https referrer sends none either. A full page URL never reaches a redirect target or a segment host.
-- **Loads Servo blocked.** The delegate also sees loads that CSP, bad-port or mixed-content rules blocked: interception runs after those checks set a network error (`components/net/fetch/methods.rs:484-547`), and the reported request does not say so. The player re-applies mixed content (from an https page, every hop is https) and the fetch bad-port list. A load blocked only by the page's CSP cannot be recognised from the URL; a downstream patch that marks blocked loads would close that gap.
-- **Private networks.** A page on a public address cannot send the player to a loopback, link-local or private address. Servo has no such rule (none found in `components/net`), so this one is Combray's. A page on a private address may use them, which keeps the fixtures working.
-- **No URLs in logs.** Combray's errors log the scheme and the failure class only. Media3 logs playback errors itself, and with stack traces on, the cause chain can name hosts. Its stack traces are turned off (`Log.setLogStackTraces(false)`), so it logs only the top exception's message, which for `ExoPlaybackException` carries no URL. A device check searches logcat for a media URL token.
+- **Where they apply.** The app offers only addresses the URL rules accept. The client checks the first request before connecting, then every hop after connecting (for https, after the TLS handshake) and before sending the request, and each redirect's target before OkHttp follows it. OkHttp follows redirects itself, at most 20. A refusal is final: OkHttp does not retry it on another address, and the player does not retry it either.
+- **http(s) only, on every hop.** A redirect to `file:`, `content:`, `data:` or `intent:` is refused.
+- **No credentials** in an address or a redirect target.
+- **Numeric hosts.** A host that ends in a number but is no dotted quad (`127.1`, `2130706433`, `0177.0.0.1`, `0x7f.1`) is refused: OkHttp would hand it to the system as an address without asking its resolver.
+- **Bad ports.** The Fetch standard's bad-port list, as Servo blocks it.
+- **Mixed content.** From an https page, or a page whose referrer is https, every hop must be https.
+- **No Servo cookies.** Media behind a sign-in fails in the player. Static cookie headers would leak across redirects and segment hosts; per-request cookie forwarding is about 2 to 3 days of later work. No cache, no authenticator (a 401 is an error), no proxy.
+- **Referer and User-Agent set:** the user agent Servo sends (from `engine_ready`), and only the origin of the referrer Servo computed for the load, as `https://example.org/`, on every hop. Servo applies the page's referrer policy first, so a `no-referrer` page sends none; an http hop from an https referrer sends none either. A full page URL never reaches a redirect target or a segment host. The page's referrer policy applies to the first address only. The engine does not report the policy, so the player cannot tell `same-origin` from the default `strict-origin-when-cross-origin`: when a `same-origin` page's own server redirects its media to another host, that host receives the page's origin, where a browser would send none.
+- **No platform diagnostics from Media3.** Media3's platform diagnostics are off (`setUsePlatformDiagnostics(false)`): the player reports no playback, format, network or error events to Android's media metrics service. Android's own decoder metrics, kept for every app, are outside Combray's control.
+- **Private networks.** A public page cannot send the player to this device or the home network: loopback, private and link-local addresses, `localhost` and its subdomains, home names (`.lan`, `.local` and the other suffixes the address field knows), and single-label names such as `nas`. For media only, `0.0.0.0/8` and `::`, `100.64.0.0/10` (carrier NAT, which Tailscale uses) and NAT64 addresses of local IPv4 addresses count as local too. Names are checked against the address OkHttp actually connected to, so a name that resolves to a local address is refused after the connection (and, for https, the TLS handshake) opens but before any request byte. A page counts as local only when its host is local and its referrer is present and local too: a report can land on the wrong page, so a local page without a referrer is judged as public. A LAN page sent with `Referrer-Policy: no-referrer` therefore cannot play its own media (a known limit, [open question 1](#open-questions)).
+- **The page's own host.** The exception covers only the address that a name on the page's own host connects to: a tailnet name (`*.ts.net`) resolving to a Tailscale address, or a split-DNS name resolving to a LAN address. Without it, media on such a page's own server would be refused. A local name or literal in the address itself (`nas.lan`, `192.168.1.10`) is refused from any page judged public, its own host included. Servo already connected there, and a page can already make Servo reach any address, so this gives a page nothing it lacks. What remains is DNS rebinding of the page's own host.
+- **Loads Servo blocked.** The delegate also sees loads that CSP, bad-port or mixed-content rules blocked: interception runs after those checks set a network error (`components/net/fetch/methods.rs:484-547`), and the reported request does not say so. The rules above re-apply the scheme, bad-port and mixed-content checks. A load blocked only by the page's CSP `media-src` cannot be recognised from the URL and can still be offered; a downstream patch that marks blocked loads would close that gap.
+- **No URLs in logs.** Combray logs Media3's error code name and a refusal's name only. Media3 logs warnings and errors only, with stack traces off, so it logs only the top exception's message, which for `ExoPlaybackException` carries no URL. Every refused redirect is closed, so OkHttp's leaked-connection warning, which names the host, does not fire. A device check searches logcat for a media URL token.
 
 ### Later: option B, inline playback
 
@@ -310,10 +325,10 @@ Why B1 rather than A, when inline playback is wanted:
 
 ## Open questions
 
-1. **Network outside Servo.** Confirm the proposed [network rules](#network-rules-for-the-native-player) for C (and later 2b), or name others: cookies, private networks, and whether to patch Servo so CSP-blocked loads are marked.
+1. **Network outside Servo.** Confirm the proposed [network rules](#network-rules-for-the-native-player) for C (and later 2b), or name others: cookies, private networks (including whether a LAN page that withholds its referrer should play its own media), and whether to patch Servo so CSP-blocked loads are marked.
 2. **Autoplay and background.** For C: picture-in-picture and background audio in the player, later or never? For B: autoplay with sound, or muted only? Pause hidden tabs and pause in the background? Take audio focus?
 3. **Where a later backend lives.** In `native/` with no Servo patch, adapted at each pin bump, as proposed to start? Or as a backend crate in L-K-M/servo, as OHOS does?
-4. **APK size.** C adds about +2.6 to 3.4 MB per APK while R8 is off. B would reuse the same Media3 libraries; its Rust backend is unmeasured.
+4. **APK size.** C adds 6.9 MB to the release APK while R8 is off (measured; estimated at +2.6 to 3.4 MB before). B would reuse the same Media3 libraries; its Rust backend is unmeasured.
 5. **The probe run on your arm64 phone,** for B's speed gate, when B starts.
 6. **`<track>` loads.** Keep them cancelled until WebVTT is checked? C1 shows no captions.
 7. **An X page adapter (B's phase 2a).** Acceptable as site-specific code that breaks when X changes, or embed only?
@@ -342,7 +357,7 @@ Proposed, pending your confirmation:
 ## Not verified
 
 - **Backend installation.** The pre-installed backend and the panic-safe factory (C2, B) were read from source, not compiled or run.
-- **The native player (C).** Media3 decoding and drawing on the API 30 SwiftShader emulator; X's in-page state with the HLS claim; that X's playlist load reaches the delegate on the current bundles.
+- **The native player (C).** C1's device checks (`MediaPlayerTest`) have not run yet: Media3 decoding and drawing on the API 30 SwiftShader emulator, audio under `-no-audio`, whether Servo reports `data:` and `file:` media loads to the delegate, whether it follows a link to a `data:` page, and how much of a direct link's body Servo reads as well. Also X's in-page state with the HLS claim, and that X's playlist load reaches the delegate on the current bundles.
 - **Emulator and phone behaviour for B.** Decoder output into `ImageReader` on the API 30 emulator; frames displayed, thread time, battery use and heat on the phone; whether `AudioTrack` advances under `-no-audio`; whether `screenrecord` itself drops frames.
 - **X.**
   - X's behaviour comes from logged-out bundles fetched on 27 October 2026; nothing was run on a device. The logged-in bundle may differ.

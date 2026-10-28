@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Play a page's audio or video in a fullscreen player after a tap.
 - Settings › About links the engine's exact source: the `L-K-M/servo`
   commit in `scripts/m0/servo-pin.sh`.
 - Third-party notices for the Rust standard library (also shipped as
@@ -140,6 +141,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The media notice offers Play.
 - The media notice waits until the page has loaded when none of the
   page's audio or video has a web address, and a page that moves to
   another address (a single-page app's route change) and loads media

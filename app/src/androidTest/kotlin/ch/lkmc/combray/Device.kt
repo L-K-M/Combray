@@ -95,6 +95,30 @@ object Fixtures {
     /** A `<video>` and an `<audio>` element; titled `MEDIA:errors:2` once both failed. */
     const val MEDIA = "$BASE/media.html"
 
+    /** 512 KiB served over about eight seconds as `video/mp4`; "media" in [state] counts its requests. */
+    const val SLOW_MEDIA = "$BASE/media/slow.bin"
+
+    /** Sets the fixture's cookie in Servo's profile. */
+    fun cookieSet(value: String) = "$BASE/cookie-set?v=$value"
+
+    /** A `<video>` playing [clip] with [key]; titled `VIDEO:errors:<n>`. */
+    fun video(key: String) = "$BASE/video.html?k=$key"
+
+    /** The 6 s fixture clip, [Device.GREEN] then [Device.BLUE]; "media" › "clip" in [state] records its requests. */
+    fun clip(key: String) = "$BASE/media/clip.mp4?k=$key"
+
+    /** An `<audio>` playing a 3 s tone; titled `AUDIO:errors:<n>`. */
+    const val AUDIO = "$BASE/audio.html"
+
+    /** A `<video>` whose address redirects to the clip ([to] `clip`) or to a `file:` address ([to] `file`). */
+    fun mediaRedirect(to: String, key: String) = "$BASE/media-redirect.html?to=$to&k=$key"
+
+    /** A `data:` and a `file:` `<video>`: media without a web address. */
+    const val MEDIA_LOCAL = "$BASE/media-local.html"
+
+    /** A page-filling link to a `data:` page whose `<video>` is the clip with [key]. */
+    fun mediaDataLink(key: String) = "$BASE/media-data-link.html?k=$key"
+
     /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
     const val ZOOM = "$BASE/zoom.html"
 
@@ -185,6 +209,16 @@ class Device(private val frame: () -> Unit = {}) {
     /** RGB at a point of the page area (fractions of the screen), from a real screenshot. */
     fun screenColor(xFraction: Float = 0.5f, yFraction: Float = 0.35f): Int? {
         frame()
+        return sample(xFraction, yFraction)
+    }
+
+    /**
+     * RGB at a point of the screen (fractions of it) while the media player shows: a View
+     * activity, so there is no Compose frame to advance first. The middle is in the video band.
+     */
+    fun playerScreenColor(xFraction: Float = 0.5f, yFraction: Float = 0.5f): Int? = sample(xFraction, yFraction)
+
+    private fun sample(xFraction: Float, yFraction: Float): Int? {
         val screenshot = instrumentation.uiAutomation.takeScreenshot() ?: return null
         val pixel = screenshot.getPixel((screenshot.width * xFraction).toInt(), (screenshot.height * yFraction).toInt())
         screenshot.recycle()

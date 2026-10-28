@@ -15,3 +15,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Media3's modules move as one, and OkHttp moves with the version Media3's OkHttp data
+    # source is built against: a major OkHttp update waits for Media3.
+    groups:
+      media3:
+        patterns:
+          - "androidx.media3:*"
+    ignore:
+      - dependency-name: "com.squareup.okhttp3:*"
+        update-types: ["version-update:semver-major"]

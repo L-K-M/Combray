@@ -1235,4 +1235,36 @@ at `77796d7` built the native engine for x86_64 and arm64 and passed all
 `BrowsingTest#mediaIsCancelledBeforeDownloadingAndThePageIsTold`, which
 now expects two media entries for its fixture page. Review changes after
 that run (local names in `history_changed`, an empty authority refused
-in `reportable_url`, tests) go through the PR's next Engine run.
+in `reportable_url`, tests) then passed [Engine run 40741266445](https://github.com/L-K-M/Combray/actions/runs/40741266445)
+at `b9b57bc`: both native builds and all emulator fixture checks.
+
+## 29. Media player, local checks (28 October 2026)
+
+Slice C1 PR 2 of [VIDEO.md](VIDEO.md#plan): the media player and its
+network rules, all in Kotlin. No native or engine change: the
+`media_blocked` and `engine_ready` shapes of section 28 stay, and the
+Servo pin does not change.
+
+Checks run on Linux x86_64 with no emulator:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest assembleRelease`: passed; 562 unit tests, 0
+  failed. `MediaNetworkTest` runs OkHttp against local MockWebServer
+  instances (https through okhttp-tls) with an injected resolver. Lint's
+  only new findings are the expected "newer version available" warnings
+  for OkHttp 4.12.0, which Media3 1.11.1 is built against.
+- `./gradlew :app:dependencies --configuration releaseRuntimeClasspath`:
+  Media3 1.11.1, OkHttp 4.12.0, Okio 3.6.0 and Guava 33.4.8-android
+  (raised from Media3's 33.3.1-android by the constraint) with
+  failureaccess 1.0.3 and jspecify 1.0.0; no checker-qual or jsr305.
+  Licensee reports every library in the release APK as Apache-2.0.
+- APK size, built without the native engine before and after the
+  change: debug 35,247,662 to 43,842,237 bytes (+8.6 MB), unsigned
+  release 27,255,370 to 34,189,899 bytes (+6.9 MB), nearly all of it
+  dex (R8 is off). That is about twice VIDEO.md's estimate.
+- `python3 scripts/check_docs.py` and `git diff --check`: clean.
+
+Not run here: `MediaPlayerTest`, `BrowsingTest` and `AccessibilityTest`
+on the emulator, which the Engine workflow runs once the PR is pushed.
+Whether Media3 decodes and draws on the API 30 SwiftShader emulator is
+unverified until then.

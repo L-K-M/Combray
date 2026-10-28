@@ -38,6 +38,9 @@ ksp {
 
 dependencies {
     api(project(":engine"))
+    // The media player's HTTP client (ch.lkmc.combray.core.media): its requests and policy types
+    // are part of this module's API.
+    api(libs.okhttp)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
@@ -51,4 +54,6 @@ dependencies {
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.okhttp.tls)
 }

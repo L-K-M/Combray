@@ -49,6 +49,9 @@ data class ActiveTab(
 
     /** Media the engine cancelled on the page shown, newest first. */
     val media: List<PlayableMedia> = emptyList(),
+
+    /** The page [media] belongs to, for [BrowserCoordinator.playbackRequest]; null while [media] is empty. */
+    val mediaPage: MediaPageRef? = null,
 ) {
     /** The internal new-tab state: no page, nothing for the engine to show. */
     val isHome get() = url == null && !hasView

@@ -38,6 +38,21 @@ Pages
                              error events
   /media/slow.bin            512 KiB served over about eight seconds; /_admin/state "media" counts the
                              requests that arrived and the responses sent in full
+  /video.html?k=<alnum>      <video src=/media/clip.mp4?k=...>; title VIDEO:errors:<n>
+  /audio.html                <audio src=/media/tone.wav>; title AUDIO:errors:<n>
+  /media-redirect.html?to=clip|file[&k=<alnum>]
+                             <video> from /media/redirect; title REDIRECT:errors:<n>
+  /media-local.html          a data: and a file: <video>, neither of them a web address; title LOCAL:errors:<n>
+  /media-data-link.html?k=<alnum>
+                             page-filling link to a data: page whose <video> is /media/clip.mp4?k=...
+  /media/clip.mp4            testing/fixtures/media/clip.mp4 (6 s, green then blue; see its README),
+                             with byte ranges (206, 416)
+  /media/tone.wav            3 s of a 440 Hz tone, with byte ranges
+  /media/redirect?to=clip|file[&k=<alnum>]
+                             302 to /media/clip.mp4?k=..., or to file:///system/etc/hosts
+                             /_admin/state "media" also has, for "clip" and "tone": requests, bytes sent
+                             and the newest MEDIA_SEEN_LIMIT requests' Cookie, Referer and whether the
+                             User-Agent names Servo ("servo_agent"); and "redirects", the redirects sent
   /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
                              (page zoom checks)
   /fixed-scroll.html         transparent fixed scroll box over a red/green page
@@ -60,9 +75,15 @@ Admin (for the checks)
 
 import argparse
 import base64
+import hashlib
 import html
 import http.server
 import json
+import math
+import pathlib
+import re
+import struct
+import sys
 import threading
 import time
 import urllib.parse
@@ -82,6 +103,18 @@ FAULTS = {"none", "store_then_hang", "too_many_requests", "server_error", "unaut
 MEDIA_CHUNK_BYTES = 16 * 1024
 MEDIA_CHUNKS = 32
 MEDIA_CHUNK_DELAY_SECONDS = 0.25
+# The committed clip (testing/fixtures/media/README.md): checked at start-up, as another encoder
+# would make other bytes and the device checks' colours rely on these.
+CLIP_PATH = pathlib.Path(__file__).resolve().parent / "media" / "clip.mp4"
+CLIP_SHA256 = "ec7875cf658a2ea68bd825088fe8a09d30cc7090fbc5d0561f726aead61488f5"
+# Requests whose headers /_admin/state keeps per media file, newest last.
+MEDIA_SEEN_LIMIT = 20
+TONE_HZ = 440
+TONE_RATE = 8000
+TONE_SECONDS = 3
+TONE_AMPLITUDE = 8000
+FILE_TARGET = "file:///system/etc/hosts"
+RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 lock = threading.Lock()
 def fresh_lists():
@@ -89,9 +122,14 @@ def fresh_lists():
     return {"reading": []}
 
 
+def fresh_served():
+    """One media file's requests, bytes sent and the newest requests' headers."""
+    return {"requests": 0, "bytes": 0, "seen": []}
+
+
 def fresh_media():
-    """Requests for /media/slow.bin that arrived, and responses sent to the end."""
-    return {"requests": 0, "completed": 0}
+    """Requests for /media/slow.bin that arrived and responses sent to the end; the player's files and redirects."""
+    return {"requests": 0, "completed": 0, "clip": fresh_served(), "tone": fresh_served(), "redirects": 0}
 
 
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
@@ -124,6 +162,34 @@ def pdf_document(text):
 
 
 PDF_DOCUMENT = pdf_document("PDF-FIXTURE-TEXT")
+
+
+def tone_wav():
+    """A 440 Hz tone as 16-bit mono PCM WAV, built without ffmpeg."""
+    frames = b"".join(
+        struct.pack("<h", int(TONE_AMPLITUDE * math.sin(2 * math.pi * TONE_HZ * n / TONE_RATE)))
+        for n in range(TONE_RATE * TONE_SECONDS)
+    )
+    header = struct.pack("<4sI4s4sIHHIIHH4sI", b"RIFF", 36 + len(frames), b"WAVE", b"fmt ", 16, 1, 1,
+                         TONE_RATE, TONE_RATE * 2, 2, 16, b"data", len(frames))
+    return header + frames
+
+
+TONE_WAV = tone_wav()
+
+
+def media_key(query):
+    """The `k` parameter, letters and digits only."""
+    return "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:64]
+
+
+def media_page(title, element, src):
+    """One media element that fails in Combray; the title counts its error events."""
+    return page(
+        title,
+        f"<{element} src='{html.escape(src, quote=True)}' controls onerror='failed()'></{element}>",
+        f"<script>var errors = 0; function failed() {{ errors++; document.title = '{title}:errors:' + errors; }}</script>",
+    )
 
 
 def page(title, body, head=""):
@@ -538,6 +604,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, MEDIA_PAGE)
         if path == "/media/slow.bin":
             return self.send_slow_media()
+        if path == "/video.html":
+            return self.send(200, media_page("VIDEO", "video", f"/media/clip.mp4?k={media_key(query)}"))
+        if path == "/audio.html":
+            return self.send(200, media_page("AUDIO", "audio", "/media/tone.wav"))
+        if path == "/media-redirect.html":
+            to = query.get("to", ["clip"])[0]
+            return self.send(200, media_page("REDIRECT", "video", f"/media/redirect?to={urllib.parse.quote(to)}&k={media_key(query)}"))
+        if path == "/media-local.html":
+            return self.send(200, page(
+                "LOCAL",
+                "<video src='data:video/mp4;base64,AAAAAA==' onerror='failed()'></video>"
+                "<video src='file:///sdcard/clip.mp4' onerror='failed()'></video>",
+                "<script>var errors = 0; function failed() { errors++; document.title = 'LOCAL:errors:' + errors; }</script>",
+            ))
+        if path == "/media-data-link.html":
+            # Absolute: a data: page has no base address of its own.
+            inner = page("DATA-MEDIA", f"<video src='http://localhost:{self.server.server_port}/media/clip.mp4?k={media_key(query)}'></video>")
+            target = "data:text/html," + urllib.parse.quote(inner)
+            return self.send(200, page("DATA-LINK", f"<a href='{html.escape(target, quote=True)}' style='display:block;height:100vh;"
+                                                    "font-size:48px;background:#8a5a2b;color:#fff'>data page</a>",
+                                       "<style>html,body{margin:0}</style>"))
+        if path == "/media/clip.mp4":
+            return self.send_media("clip", CLIP_PATH.read_bytes(), "video/mp4")
+        if path == "/media/tone.wav":
+            return self.send_media("tone", TONE_WAV, "audio/wav")
+        if path == "/media/redirect":
+            to = query.get("to", ["clip"])[0]
+            with lock:
+                state["media"]["redirects"] += 1
+            location = FILE_TARGET if to == "file" else f"/media/clip.mp4?k={media_key(query)}"
+            return self.send(302, b"", headers=[("Location", location)])
         if path == "/zoom.html":
             return self.send(200, ZOOM_PAGE)
         if path == "/fixed-scroll.html":
@@ -731,6 +828,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
             time.sleep(HANG_SECONDS)
         return self.send_json(status, existing)
 
+    def send_media(self, name, data, content_type):
+        """`data` with byte ranges (one range per request: 206, or 416 past the end), recording the request."""
+        total = len(data)
+        status, start, end = 200, 0, total - 1
+        requested = RANGE.match(self.headers.get("Range", ""))
+        if requested:
+            first, last = requested.groups()
+            if first:
+                start = int(first)
+                end = min(int(last), total - 1) if last else total - 1
+            elif last:
+                start = max(total - int(last), 0)
+            if start >= total or start > end or (not first and not last):
+                self.record_media(name, 0)
+                return self.send(416, b"", "text/plain", headers=[("Content-Range", f"bytes */{total}"), ("Accept-Ranges", "bytes")])
+            status = 206
+        body = data[start:end + 1]
+        self.record_media(name, len(body))
+        headers = [("Accept-Ranges", "bytes")]
+        if status == 206:
+            headers.append(("Content-Range", f"bytes {start}-{end}/{total}"))
+        return self.send(status, body, content_type, headers=headers)
+
+    def record_media(self, name, sent):
+        with lock:
+            served = state["media"][name]
+            served["requests"] += 1
+            served["bytes"] += sent
+            served["seen"].append({
+                "cookie": self.headers.get("Cookie", ""),
+                "referer": self.headers.get("Referer", ""),
+                "servo_agent": "Servo/" in self.headers.get("User-Agent", ""),
+            })
+            del served["seen"][:-MEDIA_SEEN_LIMIT]
+
     def send_slow_media(self):
         with lock:
             state["media"]["requests"] += 1
@@ -781,10 +913,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.send(201)
 
 
+def check_clip():
+    """Exits when the committed clip is missing or not the one its README describes."""
+    try:
+        digest = hashlib.sha256(CLIP_PATH.read_bytes()).hexdigest()
+    except OSError as error:
+        sys.exit(f"!! {CLIP_PATH} cannot be read: {error}")
+    if digest != CLIP_SHA256:
+        sys.exit(f"!! {CLIP_PATH} has SHA-256 {digest}, expected {CLIP_SHA256} (see testing/fixtures/media/README.md)")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
+    check_clip()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"serving Combray fixtures on http://127.0.0.1:{args.port}", flush=True)
     server.serve_forever()

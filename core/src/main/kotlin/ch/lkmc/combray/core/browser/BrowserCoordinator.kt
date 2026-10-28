@@ -8,6 +8,8 @@ import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
 import ch.lkmc.combray.core.data.VisitKind
+import ch.lkmc.combray.core.media.MediaPolicy
+import ch.lkmc.combray.core.media.PlaybackRequest
 import ch.lkmc.combray.core.policy.HostNames
 import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URLDecoder
 import java.util.UUID
 
@@ -688,6 +691,17 @@ class BrowserCoordinator(
     /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
     fun externalLinkHandled(link: ExternalLink) = state.update { if (it.externalLink == link) it.copy(externalLink = null) else it }
 
+    /**
+     * What the player needs to play [entry] of [page]'s media ([ActiveTab.media]), or null when
+     * that page is no longer its tab's page, the entry is gone, or the media's address no longer
+     * passes [MediaPolicy]. Checked again here: the player gets only what the offer rules allow.
+     */
+    suspend fun playbackRequest(page: MediaPageRef, entry: Long): PlaybackRequest? {
+        val request = CompletableDeferred<PlaybackRequest?>()
+        submit { request.complete(findPlayback(page, entry)) }
+        return request.await()
+    }
+
     // --- Engine events ----------------------------------------------------------------------------
 
     private fun onEngineEvent(event: EngineEvent) = submit {
@@ -808,7 +822,8 @@ class BrowserCoordinator(
     /**
      * Records cancelled media for the page shown in [view]. The engine reports each address once
      * per page, and media without one once. A report for a replaced document is dropped: it would
-     * name the wrong page.
+     * name the wrong page. An address the player may not fetch from this page ([MediaPolicy])
+     * counts as media without one.
      *
      * Only the tab on screen gets notices, at most two per page: the plain one, then the playable
      * one if an address arrives later. The first address gives the playable notice at once. Media
@@ -819,7 +834,9 @@ class BrowserCoordinator(
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
         val page = view.pages.getOrPut(key) { PageMediaState(nextMediaId++) }
         val shown = view.nativeTab == selectedNative
-        val url = event.url
+        val url = event.url?.takeIf {
+            event.kind != MediaKind.TRACK && MediaPolicy.check(MediaPolicy.origin(key.address, event.referrer), it) == null
+        }
         if (url != null) {
             page.record(MediaEntry(nextMediaId++, event.kind, url, event.referrer))
             if (!shown || page.playableShown) return
@@ -854,6 +871,18 @@ class BrowserCoordinator(
     private fun showPlainMediaNotice(page: PageMediaState) {
         page.plainShown = true
         state.update { it.copy(notice = Notice.MediaUnplayable) }
+    }
+
+    private fun findPlayback(ref: MediaPageRef, entryId: Long): PlaybackRequest? {
+        val view = liveByTab[ref.tabId]?.takeIf { !it.crashed } ?: return null
+        val key = view.currentPage?.takeIf { it.document == view.currentDocument } ?: return null
+        val page = view.pages[key]?.takeIf { it.id == ref.pageId } ?: return null
+        val entry = page.entries.firstOrNull { it.id == entryId } ?: return null
+        val agent = userAgent ?: return null
+        val origin = MediaPolicy.origin(key.address, entry.referrer)
+        val url = entry.url.toHttpUrlOrNull()?.takeIf { MediaPolicy.check(origin, it) == null } ?: return null
+        val shown = entry.playable()
+        return PlaybackRequest(url, entry.kind, origin, agent, shown.name, shown.site)
     }
 
     private suspend fun onHistory(view: LiveView, reported: EngineEvent.HistoryChanged) {
@@ -1485,6 +1514,7 @@ class BrowserCoordinator(
         val loadFailed = view?.currentDocument?.let { it in view.errorDocuments }
             ?: tab?.currentVisitId?.let { dao.visit(it)?.failed }
             ?: false
+        val shownMedia = view?.takeIf { !it.crashed }?.shownPageMedia()?.takeIf { it.entries.isNotEmpty() }
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -1504,7 +1534,8 @@ class BrowserCoordinator(
                             val generation = live.generation ?: return@let null
                             live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
                         },
-                        media = view?.takeIf { !it.crashed }?.shownPageMedia()?.entries?.map { it.playable() }.orEmpty(),
+                        media = shownMedia?.entries?.map { it.playable() }.orEmpty(),
+                        mediaPage = shownMedia?.let { MediaPageRef(active.id, it.id) },
                     )
                 },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->

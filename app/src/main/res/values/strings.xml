@@ -154,6 +154,27 @@
     <string name="notice_opened_in_background">Opened in background</string>
     <string name="action_show">Show</string>
     <string name="notice_media_unsupported">This page’s audio or video can’t play in Combray.</string>
+    <string name="notice_media_playable">This page’s audio or video opens in a separate player.</string>
+    <string name="action_play">Play</string>
+    <string name="action_play_media">Play audio or video</string>
+    <string name="media_sheet_title">Audio and video on this page</string>
+    <!-- A row of the media sheet: kind and file name, with the site below it. -->
+    <string name="media_entry_video">Video · %1$s</string>
+    <string name="media_entry_audio">Audio · %1$s</string>
+    <!-- What TalkBack reads for a row: file name, then site. -->
+    <string name="media_entry_label_video">Play video %1$s from %2$s</string>
+    <string name="media_entry_label_audio">Play audio %1$s from %2$s</string>
+    <string name="player_title">Player</string>
+    <!-- The player window's title, which TalkBack announces: the file name. -->
+    <string name="player_playing">Playing %1$s</string>
+    <string name="player_audio_info">%1$s\n%2$s</string>
+    <string name="player_close">Close player</string>
+    <string name="player_error_refused">Combray didn’t open this media: its address isn’t allowed from this page.</string>
+    <string name="player_error_network">The media couldn’t be loaded. Check the connection and try again.</string>
+    <string name="player_error_http">The media’s server refused to send it.</string>
+    <string name="player_error_format">This media’s format isn’t supported.</string>
+    <string name="player_error_decoder">This device can’t decode this media.</string>
+    <string name="player_error_other">This media couldn’t be played.</string>
     <string name="notice_popup_blocked">Pop-up blocked: a page can open one window per tap.</string>
     <string name="engine_missing">This build has no browser engine. Build it with scripts/build-native.sh, then rebuild the app.</string>
     <string name="engine_failed">The browser engine could not start.</string>
