@@ -39,7 +39,7 @@ class MediaNetworkTest {
 
     private val dns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> = when {
-            hostname == MULTI_HOST -> listOf(loopback, InetAddress.getByName("127.0.0.2"))
+            hostname == MULTI_HOST -> listOf(loopback, SECOND_LOOPBACK)
             hostname.endsWith(".test") -> listOf(loopback)
             else -> throw java.net.UnknownHostException("no test address for this host")
         }
@@ -142,6 +142,20 @@ class MediaNetworkTest {
         val media = server()
         assertEquals(MediaRefusal.DEVICE_OR_LINK, network(zoneOf = { if (it.isLoopbackAddress) AddressZone.DEVICE else AddressZone.ELSEWHERE }).refusal(request(media.at("cdn.test"))))
         assertEquals(0, media.requestCount)
+        assertTrue("refused before connecting", connects.isEmpty())
+    }
+
+    /** The closed address is dropped from the name's addresses, so OkHttp connects to the open one instead of failing. */
+    @Test
+    fun aNameWithAClosedAndAnOpenAddressReachesTheOpenOne() {
+        val open = MockWebServer().also { it.start(SECOND_LOOPBACK, 0); servers += it }
+        val closed = MockWebServer().also { it.start(loopback, open.port); servers += it }
+        open.enqueue(MockResponse().setBody("media"))
+        val network = network(zoneOf = { if (it == loopback) AddressZone.DEVICE else AddressZone.ELSEWHERE })
+        assertEquals(200, network.fetch(request(open.at(MULTI_HOST))))
+        assertEquals(1, open.requestCount)
+        assertEquals(0, closed.requestCount)
+        assertEquals(listOf(SECOND_LOOPBACK), connects.map { it.address })
     }
 
     @Test
@@ -226,10 +240,10 @@ class MediaNetworkTest {
     }
 
     @Test
-    fun aRefusedHopIsNotRetriedOnAnotherAddress() {
+    fun aNameWithOnlyClosedAddressesIsRefusedBeforeConnecting() {
         val media = server()
         assertEquals(MediaRefusal.DEVICE_OR_LINK, network(zoneOf = { AddressZone.DEVICE }).refusal(request(media.at(MULTI_HOST))))
-        assertEquals(1, connects.size)
+        assertTrue(connects.isEmpty())
         assertEquals(0, media.requestCount)
     }
 
@@ -253,6 +267,7 @@ class MediaNetworkTest {
         const val USER_AGENT = "Mozilla/5.0 (Android 11; Mobile) Servo/0.7.0 Firefox/140.0"
         const val SECURE_HOST = "secure.test"
         const val MULTI_HOST = "two.test"
+        val SECOND_LOOPBACK: InetAddress = InetAddress.getByName("127.0.0.2")
         /** OkHttp's limit (RetryAndFollowUpInterceptor.MAX_FOLLOW_UPS). */
         const val MAX_FOLLOW_UPS = 20
         val PUBLIC_PAGE = MediaPolicy.origin("http://example.org/watch", "http://example.org")

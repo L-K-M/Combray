@@ -132,12 +132,12 @@ class MediaPolicyTest {
         assertFalse(camera.onDevice)
         assertNull(check(camera, "http://169.254.10.20/stream.mp4"))
         assertNull(check(camera, "http://[::ffff:169.254.10.20]/stream.mp4"))
-        assertNull(MediaPolicy.checkAddress(camera, InetAddress.getByName("169.254.10.20")))
-        assertNull(MediaPolicy.checkAddress(camera, InetAddress.getByName("64:ff9b::a9fe:a14")))
+        assertNull(MediaPolicy.checkAddress(camera, "169.254.10.20", InetAddress.getByName("169.254.10.20")))
+        assertNull(MediaPolicy.checkAddress(camera, "camera.test", InetAddress.getByName("64:ff9b::a9fe:a14")))
         for (host in listOf("169.254.10.21", "169.254.169.254", "127.0.0.1", "localhost", "[fe80::1]")) {
             assertEquals(host, MediaRefusal.DEVICE_OR_LINK, check(camera, "http://$host/a.mp4"))
         }
-        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(camera, InetAddress.getByName("127.0.0.1")))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(camera, "localhost", InetAddress.getByName("127.0.0.1")))
         assertNull(check(camera, "http://192.168.1.10/a.mp4"))
 
         val ipv6 = MediaPolicy.origin("http://[fe80::2]/", "http://[fe80::2]")
@@ -147,6 +147,29 @@ class MediaPolicyTest {
         assertNull(MediaPolicy.origin("http://169.254.10.20/", "http://169.254.10.21").linkHost)
         assertNull(MediaPolicy.origin("http://169.254.10.20/", null).linkHost)
         assertNull(MediaPolicy.origin("http://localhost/", "http://localhost").linkHost)
+    }
+
+    /** Only the local link answers an mDNS `.local` name, so a page there is on the host its own name reaches. */
+    @Test
+    fun anMdnsPageMayReachTheLinkLocalAddressesOfItsOwnName() {
+        val printer = MediaPolicy.origin("http://printer.local/status.html", "http://printer.local")
+        assertEquals("printer.local", printer.linkHost)
+        assertNull(MediaPolicy.checkAddress(printer, "printer.local", InetAddress.getByName("169.254.7.7")))
+        assertNull(MediaPolicy.checkAddress(printer, "PRINTER.local.", InetAddress.getByName("fe80::7")))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(printer, "other.local", InetAddress.getByName("169.254.7.7")))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(printer, "printer.local", InetAddress.getByName("127.0.0.1")))
+        // A literal is not known to be the page's own host.
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, check(printer, "http://169.254.7.7/a.mp4"))
+
+        // A name outside .local is not link-scoped: its own name rebinding to the link stays closed.
+        val public = MediaPolicy.origin("https://media.example.org/", "https://media.example.org")
+        assertNull(public.linkHost)
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(public, "media.example.org", InetAddress.getByName("169.254.7.7")))
+        assertNull(MediaPolicy.origin("http://nas.lan/", "http://nas.lan").linkHost)
+        // The referrer must be on the same host.
+        assertNull(MediaPolicy.origin("http://printer.local/", "http://other.local").linkHost)
+        assertNull(MediaPolicy.origin("http://printer.local/", "http://169.254.7.7").linkHost)
+        assertNull(MediaPolicy.origin("http://printer.local/", null).linkHost)
     }
 
     /** A report can land on the wrong page; without a referrer there too, a page on this device is judged as elsewhere. */
@@ -177,10 +200,10 @@ class MediaPolicyTest {
     fun theAddressRuleUsesTheInjectedClassification() {
         val everythingOnDevice = { _: InetAddress -> AddressZone.DEVICE }
         val address = InetAddress.getByName("93.184.215.14")
-        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(plainPage, address, everythingOnDevice))
-        assertNull(MediaPolicy.checkAddress(devicePage, address, everythingOnDevice))
-        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(devicePage, address) { AddressZone.LINK })
-        assertNull(MediaPolicy.checkAddress(plainPage, InetAddress.getByName("127.0.0.1")) { AddressZone.ELSEWHERE })
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(plainPage, "cdn.test", address, everythingOnDevice))
+        assertNull(MediaPolicy.checkAddress(devicePage, "cdn.test", address, everythingOnDevice))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(devicePage, "cdn.test", address) { AddressZone.LINK })
+        assertNull(MediaPolicy.checkAddress(plainPage, "cdn.test", InetAddress.getByName("127.0.0.1")) { AddressZone.ELSEWHERE })
     }
 
     /** A name, the page's own included, that resolves or rebinds to this device or the link; a home or tailnet address is fine. */
@@ -188,13 +211,13 @@ class MediaPolicyTest {
     fun aConnectionElsewhereNeverReachesThisDeviceOrTheLink() {
         val page = MediaPolicy.origin("https://attacker.test/", "https://attacker.test")
         for (address in listOf("127.0.0.1", "127.1.2.3", "::1", "169.254.169.254", "fe80::1", "0.0.0.0", "::", "::ffff:127.0.0.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe")) {
-            assertEquals(address, MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(page, InetAddress.getByName(address)))
+            assertEquals(address, MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(page, "attacker.test", InetAddress.getByName(address)))
         }
         for (address in listOf("127.0.0.1", "127.1.2.3", "::1", "0.0.0.0", "::", "::ffff:127.0.0.1", "64:ff9b::7f00:1")) {
-            assertNull(address, MediaPolicy.checkAddress(devicePage, InetAddress.getByName(address)))
+            assertNull(address, MediaPolicy.checkAddress(devicePage, "localhost", InetAddress.getByName(address)))
         }
         for (address in listOf("100.64.1.2", "100.101.102.103", "192.168.1.1", "10.0.0.5", "fd7a:115c:a1e0::1", "93.184.215.14")) {
-            assertNull(address, MediaPolicy.checkAddress(page, InetAddress.getByName(address)))
+            assertNull(address, MediaPolicy.checkAddress(page, "attacker.test", InetAddress.getByName(address)))
         }
     }
 
