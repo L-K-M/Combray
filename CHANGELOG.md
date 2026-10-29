@@ -223,6 +223,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Charts and other inline SVG styled from their page now render in their
+  real colors and text: the engine resolves the page's class rules,
+  custom properties and `var()` references when it rasterizes SVG.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
