@@ -1284,9 +1284,14 @@ as secure as its maker, the player's snapshot on stop and start, and a
 notice when Play outlives its page) go through the PR's next Engine
 run. [Engine run 40780880291](https://github.com/L-K-M/Combray/actions/runs/40780880291)
 at `ee3cab6`, the head that merged, built both native ABIs and passed all
-142 fixture checks.
+142 fixture checks. In the C1 runs, `aDirectLinkPlays` reported
+`direct link body: requests=1 read in full=1`: Servo's navigation read
+the 512 KiB slow fixture to the end without the player, so a direct link
+is fetched twice.
 
 On 29 October 2026 the owner confirmed the rules with one change: home
-networks and tailnets are open to any page, and only this device and the
-local link stay closed to pages that are not there themselves. The
-own-host exception went with it.
+networks and tailnets are open to any page, and this device and
+link-local hosts stay closed to pages that are not on that host
+themselves. The own-host exception went with it. The change's unit tests
+and Engine run are recorded in
+[L-K-M/Combray#156](https://github.com/L-K-M/Combray/pull/156).

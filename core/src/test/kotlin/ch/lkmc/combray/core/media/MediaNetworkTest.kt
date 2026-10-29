@@ -27,8 +27,8 @@ import java.util.Collections
 
 /**
  * The player's client against local servers. Test hosts (`*.test`) resolve to this machine's
- * loopback through an injected [Dns]; whether an address counts as local is injected too, so
- * loopback can stand for a public server.
+ * loopback through an injected [Dns]; the address's [AddressZone] is injected too, so loopback can
+ * stand for a server elsewhere.
  */
 class MediaNetworkTest {
     private val loopback = InetAddress.getByName("127.0.0.1")
@@ -58,7 +58,7 @@ class MediaNetworkTest {
 
     /** The servers listen on loopback, so by default no address counts as this device. */
     private fun network(
-        isDeviceOrLink: (InetAddress) -> Boolean = { false },
+        zoneOf: (InetAddress) -> AddressZone = { AddressZone.ELSEWHERE },
         client: (OkHttpClient.Builder) -> Unit = {},
     ): MediaNetwork {
         val base = MediaNetwork.baseClient(dns).newBuilder()
@@ -71,7 +71,7 @@ class MediaNetworkTest {
             )
             .also(client)
             .build()
-        return MediaNetwork(base, isDeviceOrLink)
+        return MediaNetwork(base, zoneOf)
     }
 
     private fun request(url: HttpUrl, origin: MediaOrigin = PUBLIC_PAGE) =
@@ -140,7 +140,7 @@ class MediaNetworkTest {
     @Test
     fun aPageElsewhereCannotReachANameThatResolvesToThisDevice() {
         val media = server()
-        assertEquals(MediaRefusal.DEVICE_OR_LINK, network(isDeviceOrLink = { it.isLoopbackAddress }).refusal(request(media.at("cdn.test"))))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, network(zoneOf = { if (it.isLoopbackAddress) AddressZone.DEVICE else AddressZone.ELSEWHERE }).refusal(request(media.at("cdn.test"))))
         assertEquals(0, media.requestCount)
     }
 
@@ -149,7 +149,7 @@ class MediaNetworkTest {
         val media = server()
         media.enqueue(MockResponse().setBody("media"))
         val origin = MediaPolicy.origin("http://nas.test/web/", "http://nas.test")
-        val network = network(isDeviceOrLink = MediaPolicy::isDeviceOrLinkAddress)
+        val network = network(zoneOf = MediaPolicy::zoneOf)
         assertEquals(MediaRefusal.DEVICE_OR_LINK, network.refusal(request(media.at("nas.test"), origin)))
         assertEquals(0, media.requestCount)
     }
@@ -159,7 +159,7 @@ class MediaNetworkTest {
         val media = server()
         media.enqueue(MockResponse().setBody("media"))
         val origin = MediaPolicy.origin("http://localhost:8766/video.html", "http://localhost:8766")
-        assertEquals(200, network(isDeviceOrLink = MediaPolicy::isDeviceOrLinkAddress).fetch(request(media.at("cdn.test"), origin)))
+        assertEquals(200, network(zoneOf = MediaPolicy::zoneOf).fetch(request(media.at("cdn.test"), origin)))
     }
 
     @Test
@@ -228,7 +228,7 @@ class MediaNetworkTest {
     @Test
     fun aRefusedHopIsNotRetriedOnAnotherAddress() {
         val media = server()
-        assertEquals(MediaRefusal.DEVICE_OR_LINK, network(isDeviceOrLink = { true }).refusal(request(media.at(MULTI_HOST))))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, network(zoneOf = { AddressZone.DEVICE }).refusal(request(media.at(MULTI_HOST))))
         assertEquals(1, connects.size)
         assertEquals(0, media.requestCount)
     }

@@ -33,7 +33,8 @@ import javax.net.SocketFactory
 /** [HopPolicy] on one hop, with the connection OkHttp would have made faked. */
 class HopPolicyTest {
     private val loopback = InetAddress.getByName("127.0.0.1")
-    private val everythingOnDevice = { _: InetAddress -> true }
+    private val everythingOnDevice = { _: InetAddress -> AddressZone.DEVICE }
+    private val nothingOnDevice = { _: InetAddress -> AddressZone.ELSEWHERE }
 
     private fun request(page: String, referrer: String?, media: String) = PlaybackRequest(
         media.toHttpUrl(),
@@ -72,14 +73,14 @@ class HopPolicyTest {
     fun theHopGetsServosUserAgentAndTheReferrersOrigin() {
         val chain = FakeChain("https://cdn.test/a.mp4", loopback) { ok(it) }
         val withHeaders = Request.Builder().url("https://cdn.test/a.mp4").header("Referer", "https://example.org/watch?v=1").build()
-        HopPolicy(request("https://example.org/watch", "https://example.org", "https://cdn.test/a.mp4"), { false })
+        HopPolicy(request("https://example.org/watch", "https://example.org", "https://cdn.test/a.mp4"), nothingOnDevice)
             .intercept(chain.copy(withHeaders))
         val sent = chain.sent.single()
         assertEquals("Servo/0.7 test", sent.header("User-Agent"))
         assertEquals("https://example.org/", sent.header("Referer"))
 
         val noReferrer = FakeChain("https://cdn.test/a.mp4", loopback) { ok(it) }
-        HopPolicy(request("https://example.org/watch", null, "https://cdn.test/a.mp4"), { false }).intercept(noReferrer.copy(withHeaders))
+        HopPolicy(request("https://example.org/watch", null, "https://cdn.test/a.mp4"), nothingOnDevice).intercept(noReferrer.copy(withHeaders))
         assertNull(noReferrer.sent.single().header("Referer"))
     }
 
@@ -95,7 +96,7 @@ class HopPolicyTest {
             val chain = FakeChain("http://cdn.test/a.mp4", loopback) { sent ->
                 ClosingBody().let { body = it; it.redirect(sent, location) }
             }
-            val refusal = refusalOf { HopPolicy(request("http://example.org/", null, "http://cdn.test/a.mp4"), { false }).intercept(chain) }
+            val refusal = refusalOf { HopPolicy(request("http://example.org/", null, "http://cdn.test/a.mp4"), nothingOnDevice).intercept(chain) }
             assertEquals(location, reason, refusal)
             assertTrue("$location: the redirect response was closed", body!!.closed)
         }
@@ -104,7 +105,7 @@ class HopPolicyTest {
     @Test
     fun anAllowedRedirectIsReturnedForOkHttpToFollow() {
         val chain = FakeChain("http://cdn.test/a.mp4", loopback) { ClosingBody().redirect(it, "/b.mp4") }
-        val response = HopPolicy(request("http://example.org/", null, "http://cdn.test/a.mp4"), { false }).intercept(chain)
+        val response = HopPolicy(request("http://example.org/", null, "http://cdn.test/a.mp4"), nothingOnDevice).intercept(chain)
         assertEquals(302, response.code)
         response.close()
     }

@@ -97,16 +97,56 @@ class MediaPolicyTest {
     }
 
     @Test
-    fun aPageOnThisDeviceOrTheLinkMayUseIt() {
+    fun aPageOnThisDeviceMayUseIt() {
         assertTrue(devicePage.onDevice)
         assertNull(check(devicePage, "http://localhost:8766/media/clip.mp4"))
         assertNull(check(devicePage, "http://127.0.0.1:8766/media/clip.mp4"))
         assertNull(check(devicePage, "http://[::1]:8766/media/clip.mp4"))
         assertTrue(MediaPolicy.origin("http://127.0.0.1:8080/", "http://127.0.0.1:8080").onDevice)
         assertTrue(MediaPolicy.origin("http://[::1]/", "http://[::1]").onDevice)
-        assertTrue(MediaPolicy.origin("http://169.254.10.20/", "http://169.254.10.20").onDevice)
+        assertTrue(MediaPolicy.origin("http://127.0.0.1:8080/", "http://localhost:8080").onDevice)
         assertFalse(lanPage.onDevice)
         assertFalse(MediaPolicy.origin("http://nas/", "http://nas").onDevice)
+        // This device is one host; a link-local host is another.
+        for (host in listOf("169.254.169.254", "[fe80::1]", "[::ffff:169.254.1.1]")) {
+            assertEquals(host, MediaRefusal.DEVICE_OR_LINK, check(devicePage, "http://$host/a.mp4"))
+        }
+    }
+
+    /** `localhost.` and `*.localhost` miss Android's hosts file and resolve through DNS, so a page there is elsewhere. */
+    @Test
+    fun onlyExactlyLocalhostIsAPageOnThisDevice() {
+        for (host in listOf("media.localhost", "localhost.", "media.localhost.")) {
+            val origin = MediaPolicy.origin("http://$host/v.html", "http://$host")
+            assertFalse(host, origin.onDevice)
+            assertEquals(host, MediaRefusal.DEVICE_OR_LINK, check(origin, "http://127.0.0.1:8766/a.mp4"))
+            assertEquals(host, MediaRefusal.DEVICE_OR_LINK, check(origin, "http://$host/a.mp4"))
+        }
+        assertTrue(MediaPolicy.origin("http://LOCALHOST:8766/", "http://localhost:8766").onDevice)
+    }
+
+    /** Owner decision, 29 October 2026: a link-local host only from a page at that same address. */
+    @Test
+    fun aPageOnALinkLocalHostMayReachThatHostOnly() {
+        val camera = MediaPolicy.origin("http://169.254.10.20/live.html", "http://169.254.10.20")
+        assertFalse(camera.onDevice)
+        assertNull(check(camera, "http://169.254.10.20/stream.mp4"))
+        assertNull(check(camera, "http://[::ffff:169.254.10.20]/stream.mp4"))
+        assertNull(MediaPolicy.checkAddress(camera, InetAddress.getByName("169.254.10.20")))
+        assertNull(MediaPolicy.checkAddress(camera, InetAddress.getByName("64:ff9b::a9fe:a14")))
+        for (host in listOf("169.254.10.21", "169.254.169.254", "127.0.0.1", "localhost", "[fe80::1]")) {
+            assertEquals(host, MediaRefusal.DEVICE_OR_LINK, check(camera, "http://$host/a.mp4"))
+        }
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(camera, InetAddress.getByName("127.0.0.1")))
+        assertNull(check(camera, "http://192.168.1.10/a.mp4"))
+
+        val ipv6 = MediaPolicy.origin("http://[fe80::2]/", "http://[fe80::2]")
+        assertNull(check(ipv6, "http://[fe80::2]/a.mp4"))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, check(ipv6, "http://[fe80::3]/a.mp4"))
+        // The referrer must be at the same address.
+        assertNull(MediaPolicy.origin("http://169.254.10.20/", "http://169.254.10.21").linkHost)
+        assertNull(MediaPolicy.origin("http://169.254.10.20/", null).linkHost)
+        assertNull(MediaPolicy.origin("http://localhost/", "http://localhost").linkHost)
     }
 
     /** A report can land on the wrong page; without a referrer there too, a page on this device is judged as elsewhere. */
@@ -135,11 +175,12 @@ class MediaPolicyTest {
 
     @Test
     fun theAddressRuleUsesTheInjectedClassification() {
-        val everythingOnDevice = { _: InetAddress -> true }
+        val everythingOnDevice = { _: InetAddress -> AddressZone.DEVICE }
         val address = InetAddress.getByName("93.184.215.14")
         assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(plainPage, address, everythingOnDevice))
         assertNull(MediaPolicy.checkAddress(devicePage, address, everythingOnDevice))
-        assertNull(MediaPolicy.checkAddress(plainPage, InetAddress.getByName("127.0.0.1")) { false })
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(devicePage, address) { AddressZone.LINK })
+        assertNull(MediaPolicy.checkAddress(plainPage, InetAddress.getByName("127.0.0.1")) { AddressZone.ELSEWHERE })
     }
 
     /** A name, the page's own included, that resolves or rebinds to this device or the link; a home or tailnet address is fine. */
@@ -148,6 +189,8 @@ class MediaPolicyTest {
         val page = MediaPolicy.origin("https://attacker.test/", "https://attacker.test")
         for (address in listOf("127.0.0.1", "127.1.2.3", "::1", "169.254.169.254", "fe80::1", "0.0.0.0", "::", "::ffff:127.0.0.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe")) {
             assertEquals(address, MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(page, InetAddress.getByName(address)))
+        }
+        for (address in listOf("127.0.0.1", "127.1.2.3", "::1", "0.0.0.0", "::", "::ffff:127.0.0.1", "64:ff9b::7f00:1")) {
             assertNull(address, MediaPolicy.checkAddress(devicePage, InetAddress.getByName(address)))
         }
         for (address in listOf("100.64.1.2", "100.101.102.103", "192.168.1.1", "10.0.0.5", "fd7a:115c:a1e0::1", "93.184.215.14")) {
@@ -167,20 +210,23 @@ class MediaPolicyTest {
     }
 
     @Test
-    fun deviceAndLinkAddressesIncludeMappedAndNat64Forms() {
-        val deviceOrLink = listOf(
-            "0.0.0.0", "0.1.2.3", "127.0.0.1", "127.255.255.255", "169.254.0.0", "169.254.255.255",
-            "::", "::1", "fe80::1", "febf::1", "::ffff:127.0.0.1", "::ffff:169.254.1.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe",
+    fun zonesIncludeMappedAndNat64Forms() {
+        val zones = mapOf(
+            AddressZone.DEVICE to listOf(
+                "0.0.0.0", "0.1.2.3", "127.0.0.1", "127.255.255.255", "::", "::1", "::ffff:127.0.0.1", "64:ff9b::7f00:1",
+            ),
+            AddressZone.LINK to listOf(
+                "169.254.0.0", "169.254.255.255", "fe80::1", "febf::1", "::ffff:169.254.1.1", "64:ff9b::a9fe:a9fe",
+            ),
+            AddressZone.ELSEWHERE to listOf(
+                "1.0.0.0", "126.255.255.255", "128.0.0.0", "169.253.255.255", "169.255.0.0", "10.0.0.1", "100.64.0.1", "192.168.1.1",
+                "fc00::1", "fe7f::1", "fec0::1", "2001:db8::1", "64:ff9b::808:808", "::ffff:10.0.0.1", "::7f00:1",
+            ),
         )
-        for (address in deviceOrLink) {
-            assertTrue(address, MediaPolicy.isDeviceOrLinkAddress(InetAddress.getByName(address)))
-        }
-        val elsewhere = listOf(
-            "1.0.0.0", "126.255.255.255", "128.0.0.0", "169.253.255.255", "169.255.0.0", "10.0.0.1", "100.64.0.1", "192.168.1.1",
-            "fc00::1", "fe7f::1", "fec0::1", "2001:db8::1", "64:ff9b::808:808", "::ffff:10.0.0.1", "::7f00:1",
-        )
-        for (address in elsewhere) {
-            assertFalse(address, MediaPolicy.isDeviceOrLinkAddress(InetAddress.getByName(address)))
+        for ((zone, addresses) in zones) {
+            for (address in addresses) {
+                assertEquals(address, zone, MediaPolicy.zoneOf(InetAddress.getByName(address)))
+            }
         }
     }
 

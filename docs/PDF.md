@@ -70,7 +70,7 @@ Firefox (desktop, and Android since version 111) and Ladybird (since April 2026)
    - It is committed at the PDF's own URL, so Back, Recent, titles and restore work unchanged.
    - It gets a fresh opaque origin, so the viewer never runs as the site. The response's CSP and its CSP-derived sandbox flags are replaced by Combray's strict viewer CSP.
    - It is fed the bytes of the original response, so there is no second request. Cookies (HttpOnly too), HTTP sign-in, POST results and one-time links all work, and nothing leaves Servo's profile.
-   - Size: about 130 to 180 production lines in `servoparser/mod.rs`, `document.rs` and `prefs.rs`, plus webview tests and a DOWNSTREAM.md row.
+   - Size: about 230 to 280 production lines, mostly in `servoparser/mod.rs`, `document.rs` and `prefs.rs`, plus webview tests and a DOWNSTREAM.md row (estimate of 29 October 2026, up from 130 to 180).
 2. **PDFium-wasm (`@embedpdf/pdfium` 2.15.1) as a library, in one module worker per viewer.** Only the engine package is used; Combray draws its own controls at the bottom.
    - Its files are served from a `combray-pdf:` scheme that Combray registers. The scheme serves static, allowlisted files only; PDF bytes never pass through it.
    - The worker renders each page to RGBA in wasm memory, and the page draws it with `putImageData`. `putImageData` is the only canvas call; the drawing calls pdf.js makes are not used.
@@ -95,9 +95,9 @@ Why this one, now that another renderer is allowed:
 - Push the viewer markup through the parser, as the JSON viewer does (`load_json_document`). A parser-created script appended through DOM calls never runs.
 - Clear the CSP-derived sandbox flags too. Otherwise a PDF sent with `Content-Security-Policy: sandbox` never runs its viewer, as with some raw-file hosts that send PDFs as octet-stream with `nosniff`.
 - When Content-Length is above the cap, refuse at the headers. Ideally stream chunks to the viewer as Ladybird does, rather than buffering them in Rust.
-- Memory peaks at several copies of the file during load: the net layer's copy, the buffer, the copy sent to the worker, and PDFium's copy in wasm memory, which it reads for the document's life. Start with a 32 MiB cap until it is measured on a phone.
+- Memory peaks at several copies of the file during load: the net layer's copy, the buffer, the copy sent to the worker, and PDFium's copy in wasm memory, which it reads for the document's life. The cap is 64 MiB ([owner decision](#owner-decisions)); the phone run may adjust it.
 - Servo keeps up to 20 past documents per tab. On `pagehide` the viewer must close its PDFium document, end its worker and free its canvases. WebAssembly memory never shrinks while its instance lives, so ending the worker is what returns it.
-- Extract text lazily and within a budget (on capture, Find or Read as text), and return partial text marked as truncated. Capture then needs a new "pending/partial" status through Rust, JNI and Kotlin.
+- Extract text right after the first page is drawn ([owner decision](#owner-decisions)), stopping at 4 MiB per PDF, and return partial text marked as truncated. A capture, Find or Read as text request can arrive before extraction ends, so capture needs a new "pending/partial" status through Rust, JNI and Kotlin.
 
 ## What the probe settled, and what is still unknown
 

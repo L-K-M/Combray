@@ -10,13 +10,26 @@ import java.net.UnknownHostException
  * The page a media load came from, as far as the player's network rules need it.
  *
  * [secure]: the page (for a `blob:` page, the page that made it) or the referrer is https.
- * [onDevice]: the page is on this device or the local link, and the referrer is present and there
- * too. [referrer] is the origin of the referrer Servo computed for the load (`https://example.org`),
- * or null.
+ * [onDevice]: the page is on this device, and the referrer is present and there too.
+ * [linkHost]: the link-local address the page is at, when the referrer is present and at that same
+ * address. [referrer] is the origin of the referrer Servo computed for the load
+ * (`https://example.org`), or null.
  */
-data class MediaOrigin(val secure: Boolean, val onDevice: Boolean, val referrer: String?) {
-    /** Referrers stay out of logs. */
-    override fun toString() = "MediaOrigin(secure=$secure, onDevice=$onDevice)"
+data class MediaOrigin(val secure: Boolean, val onDevice: Boolean, val referrer: String?, val linkHost: InetAddress? = null) {
+    /** Referrers and addresses stay out of logs. */
+    override fun toString() = "MediaOrigin(secure=$secure, onDevice=$onDevice, onLink=${linkHost != null})"
+}
+
+/** Where an address leads, for the device rule. */
+enum class AddressZone {
+    /** This device: loopback and unspecified addresses. */
+    DEVICE,
+
+    /** A host on the local link: link-local addresses. */
+    LINK,
+
+    /** Anywhere else: public, home network and tailnet addresses. */
+    ELSEWHERE,
 }
 
 /** Why the player does not fetch an address. The names are logged; the address never is. */
@@ -39,15 +52,15 @@ enum class MediaRefusal {
     /** An http address from an https page or referrer. */
     MIXED_CONTENT,
 
-    /** This device or the local link (`localhost`, loopback, link-local or unspecified addresses) from a page that is not there itself. */
+    /** This device (`localhost`, loopback or unspecified addresses) or a link-local host, from a page that is not on that host itself. */
     DEVICE_OR_LINK,
 }
 
 /**
  * The network rules for the native media player (docs/VIDEO.md, "Network rules for the native
  * player"): a page may send the player only where Servo itself would go, and never to this device
- * or the local link unless the page is there too. Home networks and tailnets are open to any page
- * (owner decision, 29 October 2026). Pure; addresses are parsed with OkHttp's [HttpUrl], the
+ * or a link-local host unless the page is on that host itself. Home networks and tailnets are open
+ * to any page (owner decision, 29 October 2026). Pure; addresses are parsed with OkHttp's [HttpUrl], the
  * parser that also issues the player's requests, so the check and the request cannot disagree.
  *
  * Where the rules apply: the coordinator offers only addresses [check] accepts; the player's
@@ -81,8 +94,11 @@ object MediaPolicy {
     /** 64:ff9b::/96, the NAT64 well-known prefix (RFC 6052): such an address reaches the IPv4 address it ends in. */
     private val NAT64_PREFIX = listOf(0x00, 0x64, 0xFF, 0x9B) + List(8) { 0 }
 
-    /** IPv4 networks of this device and the local link, as (bytes, prefix length): 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16. */
-    private val DEVICE_OR_LINK_IPV4 = listOf(listOf(0, 0, 0, 0) to 8, listOf(127, 0, 0, 0) to 8, listOf(169, 254, 0, 0) to 16)
+    /** IPv4 networks of this device, as (bytes, prefix length): 0.0.0.0/8 and 127.0.0.0/8. */
+    private val DEVICE_IPV4 = listOf(listOf(0, 0, 0, 0) to 8, listOf(127, 0, 0, 0) to 8)
+
+    /** The IPv4 link-local network, 169.254.0.0/16, as (bytes, prefix length). */
+    private val LINK_IPV4 = listOf(169, 254, 0, 0) to 16
 
     /** The page context of a media load on [pageUrl], whose referrer Servo gave as [referrer]. */
     fun origin(pageUrl: String, referrer: String?): MediaOrigin {
@@ -93,11 +109,14 @@ object MediaPolicy {
         val from = referrer?.toHttpUrlOrNull()
         // Without a referrer the page counts as elsewhere: a late load of the previous page can be
         // attributed to one on this device (docs/VIDEO.md).
-        val onDevice = page != null && from != null && isDeviceOrLinkHost(page.host) && isDeviceOrLinkHost(from.host)
+        val onDevice = page != null && from != null && isDevicePageHost(page.host) && isDevicePageHost(from.host)
+        val pageLink = page?.let { literal(it.host) }?.takeIf { zoneOf(it) == AddressZone.LINK }
+        val referrerLink = from?.let { literal(it.host) }
         return MediaOrigin(
             secure = page?.isHttps == true || maker?.isHttps == true || from?.isHttps == true,
             onDevice = onDevice,
             referrer = from?.let(::originOf),
+            linkHost = pageLink?.takeIf { referrerLink != null && sameAddress(it, referrerLink) },
         )
     }
 
@@ -115,20 +134,34 @@ object MediaPolicy {
         endsInNumber(url.host) && !DOTTED_QUAD.matches(url.host) -> MediaRefusal.NUMERIC_HOST
         url.port in BAD_PORTS -> MediaRefusal.BAD_PORT
         origin.secure && !url.isHttps -> MediaRefusal.MIXED_CONTENT
-        !origin.onDevice && isDeviceOrLinkHost(url.host) -> MediaRefusal.DEVICE_OR_LINK
+        !mayReachHost(origin, url.host) -> MediaRefusal.DEVICE_OR_LINK
         else -> null
     }
 
     /**
-     * The device rule for [address], the address a hop connected to, whatever name led there: only
-     * a page on this device or the local link may reach them ([isDeviceOrLinkAddress]). Any other
-     * address, home network and tailnet included, is open to every page.
+     * The device rule for [address], the address a hop connected to, whatever name led there: this
+     * device only from a page on it, a link-local host only from a page at that address
+     * ([zoneOf]). Any other address, home network and tailnet included, is open to every page.
      */
     fun checkAddress(
         origin: MediaOrigin,
         address: InetAddress,
-        isDeviceOrLink: (InetAddress) -> Boolean = ::isDeviceOrLinkAddress,
-    ): MediaRefusal? = if (origin.onDevice || !isDeviceOrLink(address)) null else MediaRefusal.DEVICE_OR_LINK
+        zoneOf: (InetAddress) -> AddressZone = ::zoneOf,
+    ): MediaRefusal? = if (mayReach(origin, address, zoneOf(address))) null else MediaRefusal.DEVICE_OR_LINK
+
+    private fun mayReach(origin: MediaOrigin, address: InetAddress, zone: AddressZone): Boolean = when (zone) {
+        AddressZone.DEVICE -> origin.onDevice
+        AddressZone.LINK -> origin.linkHost?.let { sameAddress(it, address) } == true
+        AddressZone.ELSEWHERE -> true
+    }
+
+    /** The device rule for an address's host, before any DNS: literals by their zone, `localhost` names as this device. */
+    private fun mayReachHost(origin: MediaOrigin, host: String): Boolean {
+        literal(host)?.let { return mayReach(origin, it, zoneOf(it)) }
+        val name = host.trimEnd('.')
+        val isLocalhost = name.equals(LOCALHOST, ignoreCase = true) || name.endsWith(LOCALHOST_SUFFIX, ignoreCase = true)
+        return !isLocalhost || origin.onDevice
+    }
 
     /**
      * The `Referer` for a request to [hop]: the referrer's origin with a slash, or null. An http
@@ -140,12 +173,23 @@ object MediaPolicy {
         return "$referrer/"
     }
 
-    /** Whether [address] is this device or the local link: loopback, link-local or unspecified; IPv4 ones also in IPv4-mapped or NAT64 form. */
-    fun isDeviceOrLinkAddress(address: InetAddress): Boolean {
+    /** Where [address] leads; IPv4 addresses count the same in IPv4-mapped and NAT64 form. */
+    fun zoneOf(address: InetAddress): AddressZone {
         val ipv4 = reachedIpv4(address.address.map { it.toInt() and 0xFF })
-            ?: return address.isLoopbackAddress || address.isLinkLocalAddress || address.isAnyLocalAddress
-        return DEVICE_OR_LINK_IPV4.any { (network, length) -> inNetwork(ipv4, network, length) }
+        return when {
+            ipv4 == null && (address.isLoopbackAddress || address.isAnyLocalAddress) -> AddressZone.DEVICE
+            ipv4 == null && address.isLinkLocalAddress -> AddressZone.LINK
+            ipv4 == null -> AddressZone.ELSEWHERE
+            DEVICE_IPV4.any { (network, length) -> inNetwork(ipv4, network, length) } -> AddressZone.DEVICE
+            inNetwork(ipv4, LINK_IPV4.first, LINK_IPV4.second) -> AddressZone.LINK
+            else -> AddressZone.ELSEWHERE
+        }
     }
+
+    /** Whether [a] and [b] are one host: equal, with IPv4 addresses compared in any of their forms. */
+    private fun sameAddress(a: InetAddress, b: InetAddress): Boolean = hostKey(a) == hostKey(b)
+
+    private fun hostKey(address: InetAddress): List<Int> = address.address.map { it.toInt() and 0xFF }.let { reachedIpv4(it) ?: it }
 
     /** The IPv4 address [bytes] reach: an IPv4 address itself, or an IPv4-mapped or NAT64 address's last four bytes; null for other IPv6. */
     private fun reachedIpv4(bytes: List<Int>): List<Int>? = when {
@@ -155,13 +199,13 @@ object MediaPolicy {
     }
 
     /**
-     * A name or literal on this device or the local link: `localhost` and its subdomains, and
-     * [isDeviceOrLinkAddress] literals. Other names are judged by the address they connect to.
+     * A page host on this device without asking DNS: exactly `localhost`, which Android's hosts file
+     * answers, or a loopback or unspecified literal. `localhost.` and `*.localhost` miss the hosts
+     * file and go to DNS, so a page there counts as elsewhere.
      */
-    private fun isDeviceOrLinkHost(host: String): Boolean {
-        literal(host)?.let { return isDeviceOrLinkAddress(it) }
-        val name = host.trimEnd('.')
-        return name.equals(LOCALHOST, ignoreCase = true) || name.endsWith(LOCALHOST_SUFFIX, ignoreCase = true)
+    private fun isDevicePageHost(host: String): Boolean {
+        literal(host)?.let { return zoneOf(it) == AddressZone.DEVICE }
+        return host.equals(LOCALHOST, ignoreCase = true)
     }
 
     /** [host] as an address when it is an IPv6 literal or a dotted quad; never a DNS lookup. */
