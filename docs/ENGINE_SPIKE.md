@@ -1282,4 +1282,11 @@ included. The first review round's changes after it (the own-host
 exception never reaching this device or the local link, a `blob:` page
 as secure as its maker, the player's snapshot on stop and start, and a
 notice when Play outlives its page) go through the PR's next Engine
-run.
+run. [Engine run 40780880291](https://github.com/L-K-M/Combray/actions/runs/40780880291)
+at `ee3cab6`, the head that merged, built both native ABIs and passed all
+142 fixture checks.
+
+On 29 October 2026 the owner confirmed the rules with one change: home
+networks and tailnets are open to any page, and only this device and the
+local link stay closed to pages that are not there themselves. The
+own-host exception went with it.

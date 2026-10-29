@@ -11,7 +11,8 @@ import java.net.InetAddress
 class MediaPolicyTest {
     private val publicPage = MediaPolicy.origin("https://example.org/watch?v=1", "https://example.org")
     private val plainPage = MediaPolicy.origin("http://example.org/watch", "http://example.org")
-    private val localPage = MediaPolicy.origin("http://192.168.1.10:8096/web/", "http://192.168.1.10:8096")
+    private val lanPage = MediaPolicy.origin("http://192.168.1.10:8096/web/", "http://192.168.1.10:8096")
+    private val devicePage = MediaPolicy.origin("http://localhost:8766/video.html", "http://localhost:8766")
 
     @Test
     fun anAddressIsAtTheOriginOfItsSchemeHostAndPort() {
@@ -73,88 +74,85 @@ class MediaPolicyTest {
         assertNull(check(plainPage, "https://cdn.example.org/a.mp4"))
     }
 
+    /** Owner decision, 29 October 2026: home networks and tailnets are open to any page; this device and the link are not. */
     @Test
-    fun aPublicPageCannotReachLocalAddressesOrNames() {
-        val local = listOf(
-            "127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.1.1", "0.0.0.0", "100.64.0.1", "100.127.255.254",
-            "[::1]", "[::]", "[fd7a:115c:a1e0::1]", "[fe80::1]", "[::ffff:192.168.1.1]", "[64:ff9b::7f00:1]", "[64:ff9b::a00:1]",
-            "localhost", "media.localhost", "nas.local", "nas.lan", "router.home.arpa", "nas", "nas.",
+    fun aPageElsewhereCannotReachThisDeviceOrTheLink() {
+        val deviceOrLink = listOf(
+            "127.0.0.1", "127.1.2.3", "169.254.1.1", "169.254.169.254", "0.0.0.0", "[::1]", "[::]", "[fe80::1]",
+            "[::ffff:127.0.0.1]", "[64:ff9b::7f00:1]", "[64:ff9b::a9fe:a9fe]", "localhost", "LOCALHOST.", "media.localhost",
         )
-        for (host in local) {
-            assertEquals(host, MediaRefusal.PRIVATE_NETWORK, check(plainPage, "http://$host/a.mp4"))
+        for (page in listOf(plainPage, lanPage)) {
+            for (host in deviceOrLink) {
+                assertEquals(host, MediaRefusal.DEVICE_OR_LINK, check(page, "http://$host/a.mp4"))
+            }
         }
-        for (host in listOf("93.184.215.14", "100.128.0.1", "[2001:db8::1]", "[64:ff9b::5db8:d70e]", "cdn.example.org", "nas.test")) {
+        val elsewhere = listOf(
+            "10.1.2.3", "172.16.0.1", "192.168.1.1", "100.64.0.1", "100.127.255.254", "[fd7a:115c:a1e0::1]", "[::ffff:192.168.1.1]",
+            "[64:ff9b::a00:1]", "nas.local", "nas.lan", "router.home.arpa", "nas", "nas.", "media.tail1234.ts.net",
+            "93.184.215.14", "[2001:db8::1]", "cdn.example.org",
+        )
+        for (host in elsewhere) {
             assertNull(host, check(plainPage, "http://$host/a.mp4"))
         }
     }
 
     @Test
-    fun aLocalPageMayUseLocalAddresses() {
-        assertTrue(localPage.local)
-        assertNull(check(localPage, "http://192.168.1.10:8096/videos/1/stream.mp4"))
-        assertNull(check(localPage, "http://nas.lan/a.mp4"))
-        assertNull(check(MediaPolicy.origin("http://localhost:8766/video.html", "http://localhost:8766"), "http://localhost:8766/media/clip.mp4"))
-        assertTrue(MediaPolicy.origin("http://nas/", "http://nas").local)
-        assertTrue(MediaPolicy.origin("http://[fd7a:115c:a1e0::5]/", "http://[fd7a:115c:a1e0::5]").local)
+    fun aPageOnThisDeviceOrTheLinkMayUseIt() {
+        assertTrue(devicePage.onDevice)
+        assertNull(check(devicePage, "http://localhost:8766/media/clip.mp4"))
+        assertNull(check(devicePage, "http://127.0.0.1:8766/media/clip.mp4"))
+        assertNull(check(devicePage, "http://[::1]:8766/media/clip.mp4"))
+        assertTrue(MediaPolicy.origin("http://127.0.0.1:8080/", "http://127.0.0.1:8080").onDevice)
+        assertTrue(MediaPolicy.origin("http://[::1]/", "http://[::1]").onDevice)
+        assertTrue(MediaPolicy.origin("http://169.254.10.20/", "http://169.254.10.20").onDevice)
+        assertFalse(lanPage.onDevice)
+        assertFalse(MediaPolicy.origin("http://nas/", "http://nas").onDevice)
     }
 
-    /** A report can land on the wrong page; without a local referrer a local page is judged as public. */
+    /** A report can land on the wrong page; without a referrer there too, a page on this device is judged as elsewhere. */
     @Test
-    fun aLocalPageNeedsALocalReferrer() {
-        assertFalse(MediaPolicy.origin("http://192.168.1.10/", null).local)
-        assertFalse(MediaPolicy.origin("http://192.168.1.10/", "https://example.org").local)
-        assertFalse(MediaPolicy.origin("https://example.org/", "http://192.168.1.10").local)
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, check(MediaPolicy.origin("http://192.168.1.10/", null), "http://192.168.1.10/a.mp4"))
+    fun aPageOnThisDeviceNeedsAReferrerThere() {
+        assertFalse(MediaPolicy.origin("http://localhost:8766/", null).onDevice)
+        assertFalse(MediaPolicy.origin("http://localhost:8766/", "https://example.org").onDevice)
+        assertFalse(MediaPolicy.origin("http://localhost:8766/", "http://192.168.1.10").onDevice)
+        assertFalse(MediaPolicy.origin("https://example.org/", "http://localhost:8766").onDevice)
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, check(MediaPolicy.origin("http://localhost:8766/", null), "http://localhost:8766/a.mp4"))
+        // A home network page that withholds its referrer still plays its own media.
+        assertNull(check(MediaPolicy.origin("http://192.168.1.10/", null), "http://192.168.1.10/a.mp4"))
     }
 
     @Test
-    fun pagesWithoutAHostArePublic() {
+    fun pagesWithoutAHostAreElsewhere() {
         for (page in listOf("data:text/html,<video src=x>", "about:blank", "blob:http://localhost:8766/1")) {
             val origin = MediaPolicy.origin(page, null)
-            assertNull(origin.pageHost)
-            assertFalse(page, origin.local)
+            assertFalse(page, origin.onDevice)
             assertFalse(page, origin.secure)
-            assertEquals(page, MediaRefusal.PRIVATE_NETWORK, check(origin, "http://localhost:8766/media/clip.mp4"))
+            assertEquals(page, MediaRefusal.DEVICE_OR_LINK, check(origin, "http://localhost:8766/media/clip.mp4"))
+            assertNull(page, check(origin, "http://192.168.1.10/a.mp4"))
         }
-        assertFalse(MediaPolicy.origin("data:text/html,x", "http://localhost:8766").local)
-    }
-
-    @Test
-    fun theSameHostExceptionAppliesToTheConnectedAddressOnly() {
-        val tailnet = MediaPolicy.origin("https://media.tail1234.ts.net/web/", "https://media.tail1234.ts.net")
-        val tailscale = InetAddress.getByName("100.101.102.103")
-        assertNull(MediaPolicy.checkAddress(tailnet, "media.tail1234.ts.net", tailscale))
-        assertNull(MediaPolicy.checkAddress(tailnet, "MEDIA.tail1234.ts.net", tailscale))
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, MediaPolicy.checkAddress(tailnet, "other.tail1234.ts.net", tailscale))
-        assertNull(MediaPolicy.checkAddress(tailnet, "cdn.example.org", InetAddress.getByName("93.184.215.14")))
-        // The URL rules have no such exception: a local name is refused from a public page, its own included.
-        val publicOnLocalName = MediaPolicy.origin("http://nas.lan/", null)
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, check(publicOnLocalName, "http://nas.lan/a.mp4"))
-        // A local page reaches local addresses on any host.
-        assertNull(MediaPolicy.checkAddress(localPage, "other.lan", InetAddress.getByName("192.168.1.20")))
+        assertFalse(MediaPolicy.origin("data:text/html,x", "http://localhost:8766").onDevice)
     }
 
     @Test
     fun theAddressRuleUsesTheInjectedClassification() {
-        val everythingLocal = { _: InetAddress -> true }
-        assertEquals(
-            MediaRefusal.PRIVATE_NETWORK,
-            MediaPolicy.checkAddress(plainPage, "cdn.test", InetAddress.getByName("93.184.215.14"), everythingLocal),
-        )
-        assertNull(MediaPolicy.checkAddress(plainPage, "example.org", InetAddress.getByName("93.184.215.14"), everythingLocal))
+        val everythingOnDevice = { _: InetAddress -> true }
+        val address = InetAddress.getByName("93.184.215.14")
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(plainPage, address, everythingOnDevice))
+        assertNull(MediaPolicy.checkAddress(devicePage, address, everythingOnDevice))
+        assertNull(MediaPolicy.checkAddress(plainPage, InetAddress.getByName("127.0.0.1")) { false })
     }
 
-    /** DNS rebinding of the page's own host: never to this device or the link; still to a tailnet or home address. */
+    /** A name, the page's own included, that resolves or rebinds to this device or the link; a home or tailnet address is fine. */
     @Test
-    fun thePagesOwnHostIsNeverThisDeviceOrTheLink() {
+    fun aConnectionElsewhereNeverReachesThisDeviceOrTheLink() {
         val page = MediaPolicy.origin("https://attacker.test/", "https://attacker.test")
         for (address in listOf("127.0.0.1", "127.1.2.3", "::1", "169.254.169.254", "fe80::1", "0.0.0.0", "::", "::ffff:127.0.0.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe")) {
-            assertEquals(address, MediaRefusal.PRIVATE_NETWORK, MediaPolicy.checkAddress(page, "attacker.test", InetAddress.getByName(address)))
+            assertEquals(address, MediaRefusal.DEVICE_OR_LINK, MediaPolicy.checkAddress(page, InetAddress.getByName(address)))
+            assertNull(address, MediaPolicy.checkAddress(devicePage, InetAddress.getByName(address)))
         }
-        for (address in listOf("100.64.1.2", "192.168.1.1", "10.0.0.5", "fd7a:115c:a1e0::1")) {
-            assertNull(address, MediaPolicy.checkAddress(page, "attacker.test", InetAddress.getByName(address)))
+        for (address in listOf("100.64.1.2", "100.101.102.103", "192.168.1.1", "10.0.0.5", "fd7a:115c:a1e0::1", "93.184.215.14")) {
+            assertNull(address, MediaPolicy.checkAddress(page, InetAddress.getByName(address)))
         }
-        assertNull(MediaPolicy.checkAddress(localPage, "localhost", InetAddress.getByName("127.0.0.1")))
     }
 
     /** Servo judges a blob: page by the origin that made it, and its loads carry no referrer. */
@@ -162,20 +160,27 @@ class MediaPolicyTest {
     fun aBlobPageIsAsSecureAsThePageThatMadeIt() {
         val blob = MediaPolicy.origin("blob:https://example.org/7f0c", null)
         assertTrue(blob.secure)
-        assertNull(blob.pageHost)
-        assertFalse(blob.local)
+        assertFalse(blob.onDevice)
         assertEquals(MediaRefusal.MIXED_CONTENT, check(blob, "http://93.184.215.14/a.mp4"))
         assertNull(check(blob, "https://cdn.example.org/a.mp4"))
         assertFalse(MediaPolicy.origin("blob:http://example.org/7f0c", null).secure)
     }
 
     @Test
-    fun localAddressesIncludeTheMediaOnlyRanges() {
-        for (address in listOf("0.0.0.0", "0.1.2.3", "100.64.0.0", "100.127.255.255", "::", "::1", "64:ff9b::c0a8:101", "::ffff:10.0.0.1", "fc00::1")) {
-            assertTrue(address, MediaPolicy.isLocalAddress(InetAddress.getByName(address)))
+    fun deviceAndLinkAddressesIncludeMappedAndNat64Forms() {
+        val deviceOrLink = listOf(
+            "0.0.0.0", "0.1.2.3", "127.0.0.1", "127.255.255.255", "169.254.0.0", "169.254.255.255",
+            "::", "::1", "fe80::1", "febf::1", "::ffff:127.0.0.1", "::ffff:169.254.1.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe",
+        )
+        for (address in deviceOrLink) {
+            assertTrue(address, MediaPolicy.isDeviceOrLinkAddress(InetAddress.getByName(address)))
         }
-        for (address in listOf("1.0.0.0", "100.63.255.255", "100.128.0.0", "64:ff9b::808:808", "2001:db8::1", "::7f00:1")) {
-            assertFalse(address, MediaPolicy.isLocalAddress(InetAddress.getByName(address)))
+        val elsewhere = listOf(
+            "1.0.0.0", "126.255.255.255", "128.0.0.0", "169.253.255.255", "169.255.0.0", "10.0.0.1", "100.64.0.1", "192.168.1.1",
+            "fc00::1", "fe7f::1", "fec0::1", "2001:db8::1", "64:ff9b::808:808", "::ffff:10.0.0.1", "::7f00:1",
+        )
+        for (address in elsewhere) {
+            assertFalse(address, MediaPolicy.isDeviceOrLinkAddress(InetAddress.getByName(address)))
         }
     }
 
@@ -188,7 +193,7 @@ class MediaPolicyTest {
         assertEquals("http://[::1]:8766/", MediaPolicy.referer(MediaPolicy.origin("http://[::1]:8766/", "http://[::1]:8766"), "http://[::1]:8766/a".toHttpUrl()))
 
         // An https referrer sends none to an http hop, as strict-origin-when-cross-origin does.
-        val downgrade = MediaOrigin(pageHost = "example.org", secure = false, local = false, referrer = "https://example.org")
+        val downgrade = MediaOrigin(secure = false, onDevice = false, referrer = "https://example.org")
         assertNull(MediaPolicy.referer(downgrade, "http://cdn.example.org/a.mp4".toHttpUrl()))
         assertNull(MediaPolicy.referer(MediaPolicy.origin("https://example.org/", null), "https://cdn.example.org/a.mp4".toHttpUrl()))
     }

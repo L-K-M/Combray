@@ -8,7 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- Play a page's audio or video in a fullscreen player after a tap.
+- Play a page's audio or video in a fullscreen player after a tap. Media
+  on your home network or tailnet plays from any page; only this phone
+  and its local link stay closed to pages elsewhere.
 - Settings › About links the engine's exact source: the `L-K-M/servo`
   commit in `scripts/m0/servo-pin.sh`.
 - Third-party notices for the Rust standard library (also shipped as

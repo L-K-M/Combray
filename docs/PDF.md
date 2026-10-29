@@ -2,7 +2,7 @@
 
 Research date: 27 October 2026; probe results and the renderer decision added 28 October 2026. Engine: Servo v0.7.0, downstream `L-K-M/servo` `combray/0.7` at 6e49369. Sources: Servo and Combray source, pdf.js 6.4.299, `@embedpdf/pdfium` 2.15.1, Android and androidx.pdf documentation, and the PDF viewers of Firefox, Chromium, Ladybird and WebKit. A second pass re-checked the load-bearing claims; its corrections are folded in below.
 
-Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Next is phase 1 with PDFium-wasm. The renderer and the Hister rule for PDF text are owner decisions ([below](#owner-decisions)); the rest of the design is a proposal.
+Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Phase 1 with PDFium-wasm is next, starting with the engine change in L-K-M/servo. The renderer, the Hister rule for PDF text, and the phase 1 choices of 29 October 2026 are owner decisions ([below](#owner-decisions)); the rest of the design is a proposal.
 
 ## Owner decisions
 
@@ -10,6 +10,16 @@ Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Next is p
 - **PDF text in Hister** (27 October 2026): same opt-in and exclusions as pages, no separate switch.
 - **Next steps** (27 October 2026): fix the stand-in page capture (phase 0a), then run the probe (phase 0b). Both are done.
 - **Renderer** (28 October 2026, after the probe results): PDFium compiled to WebAssembly (`@embedpdf/pdfium` 2.15.1) inside the planned Servo viewer document, instead of pdf.js. pdf.js stays a later option if the Servo memory leak the probe found is located and fixed.
+- **Phase 1 choices** (29 October 2026):
+  - **Engine change:** push a branch to L-K-M/servo and open a PR against `combray/0.7`. The change is now estimated at 230 to 280 production lines and is never offered upstream. Its required independent review is Combray's GLM review workflow, added to L-K-M/servo in that PR; the owner adds its API key secret there.
+  - **Size cap:** 64 MiB. The engine cancels the download at the cap, and the viewer says the file is too large.
+  - **Packaging:** `pdfium.wasm` and `index.browser.js` gzip-compressed in the native library (about 2.2 MB), with the compressed files committed.
+  - **CJK text:** the phone's own CJK font, loaded only for PDFs that need it (up to about 20 MB of memory while one is open). If that route fails, bundle a CJK font.
+  - **Attachments:** PDFs sent with `Content-Disposition: attachment` open in the viewer until Combray has downloads.
+  - **Viewer address:** the private `combray-pdf:` scheme carries a random token chosen per app process, so sites cannot detect Combray or reach its font files.
+  - **Text extraction:** right after the first page is drawn, not on the first Find, Reader or Hister request.
+  - **Viewer defaults:** a PDF in a frame keeps the stand-in page; links work for http, https, mailto and tel only; the PDF's own title, when it has one, replaces the file name; a PDF reopened after Android ends the app starts on page 1; text extraction stops at 4 MiB per PDF; the viewer's labels are in English.
+  - **Phone run:** the owner runs the device checks on their phone once the viewer is ready, and the cap and memory budget follow from that measurement.
 
 ## What happens today
 
@@ -116,9 +126,9 @@ Still unknown:
    - the PDFium worker: one instance per document, pages rendered to RGBA, the document closed and the worker ended on `pagehide`;
    - font serving: the phone's Noto CJK font from `/system/fonts` through the scheme, with a device check that `cjk.pdf` draws its glyphs;
    - notices: the package's own code is MIT (`LICENSE`). PDFium is BSD-3-Clause, and its licence file (`LICENSE.pdfium`) also carries the Apache License 2.0 text. `pdfium.wasm` also builds in FreeType, OpenJPEG, libpng and zlib (their strings are in the binary), whose notices the package does not ship;
-   - APK size: about 4.9 MB if the files are embedded in the native library, as Combray's other vendored scripts are, because the APK stores native libraries uncompressed (`pdfium.wasm` is 4,646,932 bytes, `index.browser.js` 293,211); about 2.2 MB if they are stored compressed (`gzip -9` gives about 2.1 MB and 63 KB), in the binary or as deflated APK assets;
+   - APK size: about 2.2 MB, with the files gzip-compressed in the native library (owner decision, 29 October 2026; `pdfium.wasm` is 4,646,932 bytes and `index.browser.js` 293,211, which `gzip -9` makes about 2.1 MB and 63 KB). Uncompressed they would add about 4.9 MB, because the APK stores native libraries uncompressed;
    - `PdfTest`: cookie-gated and HTTP-sign-in PDFs, one request only, a CSP-sandbox PDF, a corrupt PDF, one that is too large, Back, and restore after process death.
-2. **Text (about 1 week):** Hister capture of PDF text, Find across pages, and Read as text, each through PDFium's text API and with a device check.
+2. **Text (about 1 week):** Hister capture of PDF text, Find across pages, and Read as text, each through PDFium's text API and with a device check. The viewer extracts the text right after the first page is drawn (owner decision, 29 October 2026).
 3. **Polish:**
    - zoom (Servo pinch or viewer pinch) and the text size mapping;
    - password PDFs (a native sheet);
@@ -130,13 +140,10 @@ Still unknown:
 
 ## Open questions for the owner
 
-1. **The downstream engine change:** about 130 to 180 lines, never offered upstream.
-2. **Size cap:** 32 MiB to start. Above it, "too large to show here", with Save to Karakeep.
-3. **APK contents:** about 4.9 MB for PDFium-wasm embedded uncompressed in the native library, or about 2.2 MB stored compressed. The earlier question about pdf.js's Liberation fonts no longer applies.
-4. **CJK fonts:** the plan uses the phone's own Noto CJK font. If that does not work, bundle a CJK font (a large addition to the APK), or leave such text undrawn while it stays searchable?
-5. **Attachments and octet-stream:** Servo ignores `Content-Disposition`, so the viewer would show PDFs sent as attachments inline, as Firefox for Android does. Keep that, or honour `attachment` once a download hook exists? Treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF?
-6. **Phase 4 scope.**
-7. **A run on the owner's arm64 phone** for speed and memory. The probe ran only on the emulator; phase 1's viewer can be measured on the phone instead.
+1. **Octet-stream PDFs:** treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF (phase 3)?
+2. **Phase 4 scope.**
+
+The other earlier questions (the engine change, size cap, APK contents, CJK fonts, attachments and the phone run) were answered on 29 October 2026 ([owner decisions](#owner-decisions)).
 
 ## Rejected options, with reasons
 

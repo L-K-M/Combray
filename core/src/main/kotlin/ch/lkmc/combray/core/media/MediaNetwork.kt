@@ -27,13 +27,12 @@ import java.net.Proxy
  */
 class MediaNetwork(
     private val base: OkHttpClient = baseClient(),
-    private val isLocal: (InetAddress) -> Boolean = MediaPolicy::isLocalAddress,
     private val isDeviceOrLink: (InetAddress) -> Boolean = MediaPolicy::isDeviceOrLinkAddress,
 ) {
     /** The [Call.Factory] Media3 fetches [request] with. */
     fun callFactory(request: PlaybackRequest): Call.Factory = base.newBuilder()
         .addInterceptor(FirstRequestCheck(request.origin))
-        .addNetworkInterceptor(HopPolicy(request, isLocal, isDeviceOrLink))
+        .addNetworkInterceptor(HopPolicy(request, isDeviceOrLink))
         .build()
 
     companion object {
@@ -76,13 +75,12 @@ private class FirstRequestCheck(private val origin: MediaOrigin) : Interceptor {
 
 /**
  * A network interceptor: OkHttp calls it once per hop, after connecting and before sending. It
- * applies the URL rules again, the private network rule to the address actually connected to,
+ * applies the URL rules again, the device rule to the address actually connected to,
  * sets the headers, and checks a redirect's target before OkHttp follows it, so a target the URL
  * rules refuse is never connected to.
  */
 internal class HopPolicy(
     private val request: PlaybackRequest,
-    private val isLocal: (InetAddress) -> Boolean,
     private val isDeviceOrLink: (InetAddress) -> Boolean = MediaPolicy::isDeviceOrLinkAddress,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -91,8 +89,7 @@ internal class HopPolicy(
         MediaPolicy.check(origin, hop.url)?.let { throw MediaRefusedException(it) }
         // Whatever name or literal led there: the address OkHttp connected to.
         val connection = checkNotNull(chain.connection()) { "a network interceptor runs on a connection" }
-        MediaPolicy.checkAddress(origin, hop.url.host, connection.route().socketAddress.address, isLocal, isDeviceOrLink)
-            ?.let { throw MediaRefusedException(it) }
+        MediaPolicy.checkAddress(origin, connection.route().socketAddress.address, isDeviceOrLink)?.let { throw MediaRefusedException(it) }
 
         val referer = MediaPolicy.referer(origin, hop.url)
         val sent = hop.newBuilder()

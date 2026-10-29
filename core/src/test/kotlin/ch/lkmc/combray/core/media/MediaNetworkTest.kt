@@ -56,8 +56,8 @@ class MediaNetworkTest {
 
     private fun MockWebServer.at(host: String, path: String = "/a.mp4"): HttpUrl = url(path).newBuilder().host(host).build()
 
+    /** The servers listen on loopback, so by default no address counts as this device. */
     private fun network(
-        isLocal: (InetAddress) -> Boolean = { false },
         isDeviceOrLink: (InetAddress) -> Boolean = { false },
         client: (OkHttpClient.Builder) -> Unit = {},
     ): MediaNetwork {
@@ -71,7 +71,7 @@ class MediaNetworkTest {
             )
             .also(client)
             .build()
-        return MediaNetwork(base, isLocal, isDeviceOrLink)
+        return MediaNetwork(base, isDeviceOrLink)
     }
 
     private fun request(url: HttpUrl, origin: MediaOrigin = PUBLIC_PAGE) =
@@ -138,22 +138,10 @@ class MediaNetworkTest {
     }
 
     @Test
-    fun aPublicPageCannotReachANameThatResolvesToALocalAddress() {
+    fun aPageElsewhereCannotReachANameThatResolvesToThisDevice() {
         val media = server()
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, network(isLocal = { it.isLoopbackAddress }).refusal(request(media.at("cdn.test"))))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, network(isDeviceOrLink = { it.isLoopbackAddress }).refusal(request(media.at("cdn.test"))))
         assertEquals(0, media.requestCount)
-    }
-
-    /** The owner's tailnet: a page on a host whose name resolves to a private address plays its own media. */
-    @Test
-    fun aPageMayReachItsOwnHostAtALocalAddressButNoOtherHost() {
-        val media = server()
-        val origin = MediaPolicy.origin("http://nas.test/web/", "http://nas.test")
-        val network = network(isLocal = { true })
-        media.enqueue(MockResponse().setBody("media"))
-        assertEquals(200, network.fetch(request(media.at("nas.test"), origin)))
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, network.refusal(request(media.at("other.test"), origin)))
-        assertEquals(1, media.requestCount)
     }
 
     @Test
@@ -161,16 +149,24 @@ class MediaNetworkTest {
         val media = server()
         media.enqueue(MockResponse().setBody("media"))
         val origin = MediaPolicy.origin("http://nas.test/web/", "http://nas.test")
-        val network = network(isLocal = MediaPolicy::isLocalAddress, isDeviceOrLink = MediaPolicy::isDeviceOrLinkAddress)
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, network.refusal(request(media.at("nas.test"), origin)))
+        val network = network(isDeviceOrLink = MediaPolicy::isDeviceOrLinkAddress)
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, network.refusal(request(media.at("nas.test"), origin)))
         assertEquals(0, media.requestCount)
+    }
+
+    @Test
+    fun aPageOnThisDeviceMayReachIt() {
+        val media = server()
+        media.enqueue(MockResponse().setBody("media"))
+        val origin = MediaPolicy.origin("http://localhost:8766/video.html", "http://localhost:8766")
+        assertEquals(200, network(isDeviceOrLink = MediaPolicy::isDeviceOrLinkAddress).fetch(request(media.at("cdn.test"), origin)))
     }
 
     @Test
     fun aRedirectToAnIpv6LoopbackLiteralIsRefusedBeforeConnecting() {
         val media = server()
         media.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "http://[::1]:${media.port}/a.mp4"))
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, network().refusal(request(media.at("cdn.test"))))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, network().refusal(request(media.at("cdn.test"))))
         assertEquals(1, media.requestCount)
         assertEquals("only the first hop connected", 1, connects.size)
     }
@@ -209,7 +205,7 @@ class MediaNetworkTest {
     fun anHttpsReferrerSendsNoRefererToAnHttpHop() {
         val media = server()
         media.enqueue(MockResponse().setBody("media"))
-        val origin = MediaOrigin(pageHost = "example.org", secure = false, local = false, referrer = "https://example.org")
+        val origin = MediaOrigin(secure = false, onDevice = false, referrer = "https://example.org")
         assertEquals(200, network().fetch(request(media.at("cdn.test"), origin)))
         assertNull(media.takeRequest().getHeader("Referer"))
     }
@@ -232,7 +228,7 @@ class MediaNetworkTest {
     @Test
     fun aRefusedHopIsNotRetriedOnAnotherAddress() {
         val media = server()
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, network(isLocal = { true }).refusal(request(media.at(MULTI_HOST))))
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, network(isDeviceOrLink = { true }).refusal(request(media.at(MULTI_HOST))))
         assertEquals(1, connects.size)
         assertEquals(0, media.requestCount)
     }

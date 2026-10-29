@@ -33,7 +33,7 @@ import javax.net.SocketFactory
 /** [HopPolicy] on one hop, with the connection OkHttp would have made faked. */
 class HopPolicyTest {
     private val loopback = InetAddress.getByName("127.0.0.1")
-    private val everythingLocal = { _: InetAddress -> true }
+    private val everythingOnDevice = { _: InetAddress -> true }
 
     private fun request(page: String, referrer: String?, media: String) = PlaybackRequest(
         media.toHttpUrl(),
@@ -45,26 +45,27 @@ class HopPolicyTest {
     )
 
     @Test
-    fun aPublicPageCannotReachALocalAddressOnAnotherHost() {
+    fun aPageElsewhereCannotReachThisDevice() {
         val chain = FakeChain("http://cdn.test/a.mp4", loopback) { ok(it) }
-        val refusal = refusalOf { HopPolicy(request("http://example.org/", "http://example.org", "http://cdn.test/a.mp4"), everythingLocal).intercept(chain) }
-        assertEquals(MediaRefusal.PRIVATE_NETWORK, refusal)
+        val refusal = refusalOf { HopPolicy(request("http://example.org/", "http://example.org", "http://cdn.test/a.mp4"), everythingOnDevice).intercept(chain) }
+        assertEquals(MediaRefusal.DEVICE_OR_LINK, refusal)
         assertTrue("nothing was sent", chain.sent.isEmpty())
     }
 
     @Test
-    fun thePagesOwnHostMayBeLocal() {
-        val chain = FakeChain("http://media.example.org:8096/a.mp4", InetAddress.getByName("100.101.102.103")) { ok(it) }
-        val media = request("http://media.example.org:8096/web/", "http://media.example.org:8096", "http://media.example.org:8096/a.mp4")
-        assertEquals(200, HopPolicy(media, everythingLocal).intercept(chain).code)
-        assertEquals(1, chain.sent.size)
+    fun anyPageMayReachAHomeOrTailnetAddress() {
+        for ((media, address) in listOf("http://media.tail1234.ts.net/a.mp4" to "100.101.102.103", "http://other.lan/a.mp4" to "192.168.1.20")) {
+            val chain = FakeChain(media, InetAddress.getByName(address)) { ok(it) }
+            assertEquals(media, 200, HopPolicy(request("http://example.org/", "http://example.org", media)).intercept(chain).code)
+            assertEquals(1, chain.sent.size)
+        }
     }
 
     @Test
-    fun aLocalPageMayReachLocalAddresses() {
-        val chain = FakeChain("http://other.lan/a.mp4", InetAddress.getByName("192.168.1.20")) { ok(it) }
-        val media = request("http://192.168.1.10/", "http://192.168.1.10", "http://other.lan/a.mp4")
-        assertEquals(200, HopPolicy(media, MediaPolicy::isLocalAddress).intercept(chain).code)
+    fun aPageOnThisDeviceMayReachIt() {
+        val chain = FakeChain("http://localhost:8766/a.mp4", loopback) { ok(it) }
+        val media = request("http://localhost:8766/video.html", "http://localhost:8766", "http://localhost:8766/a.mp4")
+        assertEquals(200, HopPolicy(media).intercept(chain).code)
     }
 
     @Test
@@ -88,7 +89,7 @@ class HopPolicyTest {
             "file:///system/etc/hosts" to MediaRefusal.NOT_WEB,
             "http://127.1/" to MediaRefusal.NUMERIC_HOST,
             "http://cdn.test:25/" to MediaRefusal.BAD_PORT,
-            "http://localhost/" to MediaRefusal.PRIVATE_NETWORK,
+            "http://localhost/" to MediaRefusal.DEVICE_OR_LINK,
         )) {
             var body: ClosingBody? = null
             val chain = FakeChain("http://cdn.test/a.mp4", loopback) { sent ->

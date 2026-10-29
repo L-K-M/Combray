@@ -505,8 +505,7 @@ object HostNames {
 
     /**
      * Whether [host] names this device or a home network: localhost, or a name under a home
-     * network suffix such as ".lan" or ".local". The address field's rule; the media player adds
-     * more names (ch.lkmc.combray.core.media.MediaPolicy).
+     * network suffix such as ".lan" or ".local". The address field's rule.
      */
     fun isLocalHost(host: String): Boolean {
         val name = host.trimEnd('.')
