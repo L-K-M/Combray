@@ -223,6 +223,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A tab selected while Combray is in the background, for example when a
+  page closes its own window, stays hidden and unfocused, so it stays
+  throttled until you return to the app.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as

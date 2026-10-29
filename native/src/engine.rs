@@ -211,6 +211,9 @@ struct Tab {
     /// The field that has Servo's input method. Servo keeps focus per document, so a hidden
     /// tab keeps its field; only the selected tab's field gets the keyboard.
     ime_field: Option<ImeField>,
+    /// The application's last `SetThrottling` for this tab. A throttled tab stays hidden and
+    /// unfocused even when selected, until the application lifts the throttling.
+    throttling: Throttling,
 }
 
 impl Tab {
@@ -531,26 +534,7 @@ impl Engine {
                 document,
                 edge,
             } => self.scroll_to_edge(view, document, edge),
-            // Servo throttles exactly the hidden views, so throttling hides a view and
-            // lifting it shows the view again only if it is the selected one.
-            Command::SetThrottling {
-                tab: id,
-                throttling,
-            } => {
-                if let Some(tab) = self.tab(id) {
-                    match throttling {
-                        Throttling::Throttled => {
-                            tab.webview.set_focused(false);
-                            tab.webview.hide();
-                        },
-                        Throttling::Normal if self.active == Some(id) => {
-                            tab.webview.show();
-                            tab.webview.set_focused(true);
-                        },
-                        Throttling::Normal => {},
-                    }
-                }
-            },
+            Command::SetThrottling { tab, throttling } => self.set_throttling(tab, throttling),
             Command::SetPageZoom { zoom } => self.set_page_zoom(zoom),
             Command::Touch {
                 phase,
@@ -878,6 +862,7 @@ impl Engine {
                 opener,
                 shown: Shown::InitialBlank,
                 opening_tap,
+                throttling: Throttling::Normal,
                 ime_field: None,
             },
         );
@@ -920,6 +905,28 @@ impl Engine {
         // The window's first navigation is still the tap's: a target=_blank app link opens its app.
         self.insert_tab(view, webview, Some(opener), OpeningTap::at(tapped_at));
         self.emit(EngineEvent::TabOpened { view, opener });
+    }
+
+    /// Servo throttles exactly the hidden views, so throttling hides a view and lifting it
+    /// shows the view again only if it is the selected one.
+    fn set_throttling(&mut self, id: i64, throttling: Throttling) {
+        let active = self.active == Some(id);
+        let Some(tab) = self.tabs.get_mut(&id) else {
+            self.refuse(format!("no tab {id}"), Some(id), None);
+            return;
+        };
+        tab.throttling = throttling;
+        match throttling {
+            Throttling::Throttled => {
+                tab.webview.set_focused(false);
+                tab.webview.hide();
+            },
+            Throttling::Normal if active => {
+                tab.webview.show();
+                tab.webview.set_focused(true);
+            },
+            Throttling::Normal => {},
+        }
     }
 
     /// Hides every view; the surface shows no page until a tab is selected again.
@@ -986,8 +993,12 @@ impl Engine {
                 other.webview.hide();
             }
         }
-        selected.webview.show();
-        selected.webview.set_focused(true);
+        // The application may throttle a view before selecting it (while it is in the
+        // background): it stays hidden until the throttling is lifted.
+        if selected.throttling == Throttling::Normal {
+            selected.webview.show();
+            selected.webview.set_focused(true);
+        }
 
         if self.active != Some(tab) {
             self.withhold_keyboard();
