@@ -1283,3 +1283,30 @@ exception never reaching this device or the local link, a `blob:` page
 as secure as its maker, the player's snapshot on stop and start, and a
 notice when Play outlives its page) go through the PR's next Engine
 run.
+
+## 30. Module top-level await errors and SVG points (29 October 2026)
+
+The pin moves to `combray/0.7` tip
+`634843fca29ba6ce05e8249073d790a4ecb08dca` (upstream base still v0.7.0).
+
+- [Servo PR #15](https://github.com/L-K-M/servo/pull/15): a module script
+  that awaits at the top level made Servo report an uncaught exception
+  `undefined`, without a location, as soon as it started awaiting, and an
+  error it threw after the await was never reported. Servo read the
+  still-pending evaluation promise synchronously; it now reports the
+  evaluation's error when the promise rejects, as HTML's "run a module
+  script" requires (upstream has the same bug). New WPT test 0/1 before,
+  1/1 after; upstream `module-import-referrer.html` now passes.
+- [Servo PR #14](https://github.com/L-K-M/servo/pull/14): polyline and
+  polygon `points` are read with the path data parser, so lengths stop at
+  a malformed list (a doubled or leading comma) and a sign separates
+  coordinates. Follow-up to section 26.
+
+Neither PR changes the embedder API or `Cargo.lock`. Both were validated
+on servoshell (WPT directories of the area, tidy, a site-check sweep
+without regressions) and independently reviewed. The notices were
+regenerated for the new pin.
+
+This host has no Android SDK: both native ABI builds, packaging and the
+emulator checks are the Engine workflow's evidence, recorded in the pin
+PR.
