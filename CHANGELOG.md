@@ -146,6 +146,10 @@ All notable changes to this project are documented here. The format follows
   page's audio or video has a web address, and a page that moves to
   another address (a single-page app's route change) and loads media
   there gives a new notice.
+- Pages whose module scripts use top-level `await` no longer report a
+  spurious script error, and errors those modules throw after awaiting
+  are reported. SVG polylines and polygons stop measuring at a malformed
+  point list, as the SVG grammar requires.
 - Pages can measure SVG shapes: the engine implements `getTotalLength()`
   and `getPointAtLength()`, which stroke drawing and motion-path
   animations call.

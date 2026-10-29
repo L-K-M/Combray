@@ -5,7 +5,7 @@ export COMBRAY_ROOT
 
 # Update these with docs/ENGINE_SPIKE.md and docs/BUILDING.md after native validation.
 export COMBRAY_SERVO_REPOSITORY="https://github.com/L-K-M/servo.git"
-export COMBRAY_SERVO_GIT_REVISION="294580813ceb0ee579601781d2454a655dd26c9a"
+export COMBRAY_SERVO_GIT_REVISION="634843fca29ba6ce05e8249073d790a4ecb08dca"
 export COMBRAY_SERVO_UPSTREAM_REVISION="aac43a3f31a259f04a574f5ec4e959c943ad7cc7"
 
 export COMBRAY_WORK="$COMBRAY_ROOT/servo-checkout"
