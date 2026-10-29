@@ -7,7 +7,7 @@ Research date: 27 October 2026. Engine: Servo v0.7.0 from downstream `L-K-M/serv
 - GStreamer 1.28.8 Android binaries, downloaded and linked in a scratch build.
 - The live JavaScript of X's logged-out web app and its embeds, fetched on 27 October 2026.
 
-A second pass checked the claims against source and corrected them. Servo paths (`components/`, `python/`) are relative to the Servo checkout (`servo-checkout/servo` in a Combray build); other paths are Combray's. The pin has since moved to 2945808 on the same line. Its two changes (flex layout reuse, SVG path length; [ENGINE_SPIKE.md](ENGINE_SPIKE.md) sections 25 and 26) are not media changes, but the Servo line numbers below were not rechecked against it.
+A second pass checked the claims against source and corrected them. Servo paths (`components/`, `python/`) are relative to the Servo checkout (`servo-checkout/servo` in a Combray build); other paths are Combray's. The pin has moved along the same line since. Its two changes (flex layout reuse, SVG path length; [ENGINE_SPIKE.md](ENGINE_SPIKE.md) sections 25 and 26) are not media changes, but the Servo line numbers below were not rechecked against it.
 
 Status: you chose option C, a fullscreen tap-to-play native player, first (28 October 2026). Option B, an inline backend on the device's decoders, is acceptable later. On 29 October 2026 you confirmed C's network rules, with home networks and tailnets open to any page, and accepted Media3 with OkHttp at its APK size and the notice and Play wording. Leaving MSE out is still a proposed default. Phase C1 is implemented and passes its checks on the emulator, not yet on a phone (see [phase C1](#phase-c1-a-fullscreen-player-for-media-combray-cancels)).
 

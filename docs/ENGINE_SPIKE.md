@@ -1295,3 +1295,57 @@ link-local hosts stay closed to pages that are not on that host
 themselves. The own-host exception went with it. The change's unit tests
 and Engine run are recorded in
 [L-K-M/Combray#156](https://github.com/L-K-M/Combray/pull/156).
+
+### SVG chart rendering (29 October 2026)
+
+The owner reported an inline SVG bar chart on a dark card rendering as
+black shapes with no labels, axes or gridlines. A synthetic case
+(a chart whose fills, strokes, text and one geometry attribute come
+from the page's stylesheets through class rules and custom properties)
+reproduced it in the engine tests.
+
+Root cause: Servo rasterizes inline SVG subtrees as images from their
+serialized XML, and that serialization carries no document styles.
+`var()` in presentation attributes did not parse into presentational
+hints at all (the property's value parser rejects it), and class rules,
+custom properties and case transforms from the page's stylesheets never
+reached the rasterizer, so every paint fell back to the initial black
+and the text was invisible on the dark card.
+
+Downstream change in `L-K-M/servo` (PR
+[#16](https://github.com/L-K-M/servo/pull/16), commits `fb51aca9dae`,
+`3e5952a5ebb`, `a4e02b4d65a`), pin `6d3218a2a94`:
+
+- Presentation attributes parse as CSS declarations (SVG 2 §Styling),
+  with the SVG 2 attribute mapping completed for the properties Servo's
+  style system implements.
+- Each serialization resolves the document's cascade into the clone:
+  computed paint, font, text and geometry values (the geometry onto the
+  shapes' attributes, which is where the rasterizer reads it), and
+  `text-transform` applied to each element's own text.
+
+Evidence (Debian 12 x86_64 host, Rust 1.97.1):
+
+- `cargo test --profile medium -p servo --test webview
+  test_svg_presentation_attribute_var_resolves`: passed. Fails on the
+  pre-change engine (the hints are dropped and the computed values fall
+  back to black).
+- `cargo test --profile medium -p servo --test webview
+  test_svg_document_styles_paint`: passed. Fails on the pre-change
+  engine (bars in initial black, labels invisible) and without the
+  on-demand style resolution for `display: none` subtrees (grouped
+  marks and labels unstyled).
+- `./mach test-tidy`: no new findings (the co-author findings on older
+  history commits remain).
+- Not run: `./mach test-wpt tests/wpt/tests/svg/` (no desktop build on
+  the development host) and device checks (this is a pin-candidate
+  record; the Engine workflow's native builds and fixture checks run on
+  the pin PR).
+
+Limitations recorded in `L-K-M/servo`'s `DOWNSTREAM.md`: document CSS
+for `transform`, `overflow`, `filter`, `mask`, `clip-path`, `marker-*`,
+`font-variant` and `text-decoration` is not resolved into the raster; a
+`display: none` from a class rule on a direct child of an `<svg>` stays
+unresolved; substituted geometry values must carry units; deeper
+subtree mutations still do not invalidate the cached serialization
+(pre-existing).
