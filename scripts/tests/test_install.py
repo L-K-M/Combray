@@ -99,7 +99,14 @@ class InstallTest(unittest.TestCase):
     def test_without_adb_the_device_check_claims_nothing(self):
         (self.root / "local.properties").write_text("")
         self.adb.unlink()
-        self.env["PATH"] = f"{self.path}{os.pathsep}/usr/bin{os.pathsep}/bin"
+        # Only the tools the script needs, so an adb installed on this machine cannot be found.
+        tools = self.root / "tools"
+        tools.mkdir()
+        for tool in ("bash", "sed", "tail", "dirname", "basename", "awk", "grep", "cat", "sort", "paste"):
+            found = shutil.which(tool)
+            if found:
+                (tools / tool).symlink_to(found)
+        self.env["PATH"] = str(tools)
         result = self.run_script("install.sh", "--device-check")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("adb not found", result.stdout)
