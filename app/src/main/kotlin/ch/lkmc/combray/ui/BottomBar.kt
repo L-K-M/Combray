@@ -7,9 +7,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -52,13 +51,14 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
@@ -75,6 +75,7 @@ import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TabStep
 import ch.lkmc.combray.core.integration.SaveStatus
+import kotlin.math.abs
 
 /**
  * Back, address, Save, Share, New tab, Recent and More: every routine action within thumb
@@ -113,26 +114,46 @@ fun BottomBar(
     homeMode: AddressEditorMode = AddressEditorMode.IDLE,
     modifier: Modifier = Modifier,
 ) {
-    // A drag along the bar is a swipe once it covers TAB_SWIPE_DISTANCE; shorter drags and taps
-    // keep their meaning, and a drag that starts on a button cancels that button's click. A
-    // swipe from the screen edge never arrives: Android keeps it for its Back gesture.
     val swipeDistance = with(LocalDensity.current) { TAB_SWIPE_DISTANCE.toPx() }
-    var dragged by remember { mutableFloatStateOf(0f) }
-    val swipe = Modifier.draggable(
-        orientation = Orientation.Horizontal,
-        // Horizontal drags in the input move its cursor, not the active tab.
-        enabled = tab?.url != null || homeMode == AddressEditorMode.IDLE,
-        state = rememberDraggableState { delta -> dragged += delta },
-        onDragStarted = { dragged = 0f },
-        onDragStopped = {
-            // Physical directions, like going back and forward: right is the older tab.
-            when {
-                dragged >= swipeDistance -> onSwipeTab(TabStep.OLDER)
-                dragged <= -swipeDistance -> onSwipeTab(TabStep.NEWER)
+    // Editing keeps horizontal drags for the cursor. Otherwise the whole bar shares one gesture.
+    val swipeEnabled = tab?.url != null || homeMode == AddressEditorMode.IDLE
+    val swipeTab by rememberUpdatedState(onSwipeTab)
+    val swipe = Modifier.pointerInput(tab?.id, swipeDistance, swipeEnabled) {
+        if (!swipeEnabled) return@pointerInput
+
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var dragging = false
+            while (true) {
+                val event = awaitPointerEvent()
+                // Multi-touch and a child's claimed gesture cannot select another tab.
+                if (event.changes.size != 1) return@awaitEachGesture
+                val change = event.changes.single()
+                if (change.id != down.id || change.isConsumed) return@awaitEachGesture
+
+                val distance = change.position - down.position
+                if (!dragging) {
+                    if (distance.getDistance() <= viewConfiguration.touchSlop) {
+                        if (!change.pressed) return@awaitEachGesture
+                        continue
+                    }
+                    // Lock intent at the first drag, so a vertical gesture stays vertical.
+                    if (abs(distance.x) <= abs(distance.y)) return@awaitEachGesture
+                    dragging = true
+                }
+
+                // Cancel the button's click, but switch only on release, never cancellation.
+                change.consume()
+                if (change.pressed) continue
+
+                when {
+                    distance.x >= swipeDistance -> swipeTab(TabStep.OLDER)
+                    distance.x <= -swipeDistance -> swipeTab(TabStep.NEWER)
+                }
+                break
             }
-            dragged = 0f
-        },
-    )
+        }
+    }
     // The bar's color runs under the navigation bar and, in landscape, a cutout; only its
     // actions keep clear of them. A hairline along its top edge separates it from the page.
     // Explicit content colours: contentColorFor matches by value, and a role sharing a tier's
