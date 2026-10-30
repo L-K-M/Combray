@@ -225,6 +225,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages retain their scroll position when embedded frames load or close,
+  preventing brief flashes of an earlier position while scrolling.
 - A tab selected while Combray is in the background, for example when a
   page closes its own window, stays hidden and unfocused, so it stays
   throttled until you return to the app.

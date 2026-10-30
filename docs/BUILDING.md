@@ -18,9 +18,10 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `6d3218a2a949c433d5445fe2c9eb7b66ba0a1081` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `e284adf9fe3d47b71faeb3c0e8bcb6730113b8c8` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
 | Upstream base | v0.7.0, git `aac43a3f31a259f04a574f5ec4e959c943ad7cc7` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
 | Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, and resolved styles and `var()` in rasterized SVG subtrees | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Scroll repaint fix | Restore scroll offsets when iframe pipelines start or exit and when a shared-context view closes | [Regression and validation](ENGINE_SPIKE.md#31-scroll-position-flicker-30-october-2026) |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-1`, downloaded by its build script | Servo's lockfile |

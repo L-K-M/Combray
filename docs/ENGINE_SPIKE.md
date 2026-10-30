@@ -1349,3 +1349,43 @@ for `transform`, `overflow`, `filter`, `mask`, `clip-path`, `marker-*`,
 unresolved; substituted geometry values must carry units; deeper
 subtree mutations still do not invalidate the cached serialization
 (pre-existing).
+
+## 31. Scroll-position flicker (30 October 2026)
+
+The owner's recording showed brief returns to an earlier scroll position
+while the browser controls stayed steady. A synthetic page reproduced it:
+scroll from a red section into green, then create and remove an offscreen
+iframe. The regression records the center pixel after every paint, not
+only the settled screenshot. Before the fix, one frame was red, followed
+by green frames, without another scroll request.
+
+WebRender resets its scroll tree when a scene changes. Servo restored the
+offsets for ordinary display lists, but omitted initial empty iframe
+scenes and pipeline removals. Downstream [PR #17](https://github.com/L-K-M/servo/pull/17),
+code `aaab47173cd`, restores surviving pipelines' offsets in those three
+transactions. Pin: `e284adf9fe3d47b71faeb3c0e8bcb6730113b8c8`.
+
+Changed engine files: `components/paint/painter.rs`,
+`components/servo/tests/webview.rs`, `DOWNSTREAM.md`. No site-specific code.
+
+Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
+
+- `cargo rustc --locked --profile medium -p servo --no-default-features
+  --features bundled,js_jit --test webview -- -C link-arg=-fuse-ld=lld`:
+  built with the host's conda clang, zlib headers and linker libraries.
+- `test_iframe_changes_preserve_every_scrolled_frame --exact`: failed
+  before the fix with a red intermediate frame; passed after it.
+- All 34 WebView tests passed, each in a separate test-binary process.
+  A single-process run is invalid here: Servo's global options initialize
+  once, so its later tests fail with `Already initialized`.
+- Independent MiMo V2.6 Pro review: no important defects. The new regression
+  covers iframe creation/removal; whole-view removal also passed its
+  existing pipeline-release check, which does not check transient pixels.
+- Changed-file whitespace check passes. Whole-file rustfmt reports
+  pre-existing operator formatting differences outside the changed hunks.
+- Android validation pending. The local API-30 software emulator booted
+  once, then crashed during the reproduction setup; a second boot also
+  crashed. Neither attempt establishes an Android rendering result.
+
+The phone and live example have not been rechecked. The regression proves
+this pipeline-change flicker; other causes remain possible.
