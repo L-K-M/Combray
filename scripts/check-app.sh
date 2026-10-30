@@ -9,8 +9,9 @@
 #
 # Build first: scripts/build-native.sh, then ./gradlew assembleDebug assembleDebugAndroidTest.
 # Results: build/device-checks/<UTC time>/ (or $COMBRAY_RESULTS): raw instrumentation output per
-# run, logcat and summary.md. Exits 1 when any check failed, a run produced no results or a run
-# stopped early.
+# run, logcat, the fixture server's request log (fixtures.log) and summary.md, which also lists
+# every failed report-only check and every check slower than 30 s. Exits 1 when any check failed,
+# a run produced no results or a run stopped early; a failed report or a slow check does not.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
