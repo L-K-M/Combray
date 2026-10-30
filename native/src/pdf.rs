@@ -30,6 +30,7 @@ use std::io::{self, Read};
 use std::sync::OnceLock;
 
 use flate2::read::GzDecoder;
+use log::error;
 use url::Url;
 
 pub const SCHEME: &str = "combray-pdf";
@@ -211,7 +212,7 @@ fn inflate(compressed: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 /// Why the scheme answered with a network error.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// Anything but GET.
     Method,
@@ -219,8 +220,14 @@ pub enum Refusal {
     Address,
     /// A path outside the allowlist.
     NotServed,
-    /// An embedded file did not inflate.
-    Unreadable,
+    /// An embedded file did not inflate: its path and the decoder's error.
+    Unreadable(String),
+}
+
+impl Refusal {
+    fn unreadable(file: ViewerFile, error: io::Error) -> Refusal {
+        Refusal::Unreadable(format!("{} did not inflate: {error}", file.path()))
+    }
 }
 
 /// The scheme's answer to one request, before it becomes a Servo response.
@@ -249,7 +256,12 @@ impl ViewerScheme {
     pub fn respond(&self, method: &str, url: &Url) -> SchemeResponse {
         let mut headers = vec![(CSP_HEADER, self.csp.clone())];
         let body = self.file(method, url).and_then(|file| {
-            let contents = file.contents().map_err(|_| Refusal::Unreadable)?;
+            let contents = file.contents().map_err(|error| {
+                let refusal = Refusal::unreadable(file, error);
+                // Only a damaged build can get here; the network error alone would hide why.
+                error!("{SCHEME}: {refusal:?}");
+                refusal
+            })?;
             headers.push((CONTENT_TYPE_HEADER, file.content_type().to_owned()));
             Ok(contents)
         });
@@ -510,6 +522,20 @@ mod tests {
 
         assert!(inflate(&damaged).is_err());
         assert!(inflate(b"not gzip").is_err());
+    }
+
+    #[test]
+    fn an_unreadable_file_keeps_the_reason() {
+        let error = inflate(b"not gzip").unwrap_err();
+
+        let Refusal::Unreadable(reason) = Refusal::unreadable(ViewerFile::PdfiumWasm, error) else {
+            panic!("not an unreadable file");
+        };
+        assert!(
+            reason.starts_with("/pdfium/pdfium.wasm did not inflate: "),
+            "{reason}"
+        );
+        assert!(reason.len() > "/pdfium/pdfium.wasm did not inflate: ".len());
     }
 
     #[test]

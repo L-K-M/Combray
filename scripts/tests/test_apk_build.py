@@ -34,7 +34,7 @@ NOTICES = {
             "Mozilla Public License Version 2.0",
             "---- LLVM Exceptions to the Apache 2.0 License ----",
             "The Rust Standard Library is dual-licensed under Apache 2.0 and MIT terms.",
-            "Copyright 2014 PDFium Authors.\n\nApache License\nVersion 2.0, January 2004",
+            "Copyright 2014 PDFium Authors. All rights reserved.\n\nApache License\nVersion 2.0, January 2004",
             "MIT License",
             "This software is based in part on the work of the Independent JPEG Group.",
             "Copyright (C) 2002-2005 Maxim Shemanarev (McSeem)",
@@ -202,6 +202,15 @@ class ApkBuildTest(unittest.TestCase):
                 result = self.build("--debug")
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(name, result.stderr)
+
+    def test_pdfium_without_its_own_notice_is_rejected(self):
+        # The Apache License alone is not PDFium's BSD notice.
+        native = json.loads(NOTICES["assets/notices/native.json"])
+        native["texts"][3] = "Apache License\nVersion 2.0, January 2004"
+        self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps(native)})
+        result = self.build("--debug")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PDFium", result.stderr)
 
     def test_malformed_notices_are_rejected(self):
         self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps({"components": [{}]})})
