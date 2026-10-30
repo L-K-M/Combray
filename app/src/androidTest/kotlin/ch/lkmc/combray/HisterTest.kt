@@ -84,17 +84,32 @@ class HisterTest {
 
     @Test
     fun aFileServoCannotShowIsNotSentAsItsStandInPage() {
-        // Servo shows the PDF as a page of its own at the PDF's address, saying "Unknown content
-        // type (application/pdf).": that sentence is not the file's text.
-        device.browser.openUrl(Fixtures.PDF, Placement.CURRENT_TAB)
+        // Servo shows the file as a page of its own at the file's address, saying "Unknown content
+        // type (application/octet-stream).": that sentence is not the file's text.
+        device.browser.openUrl(Fixtures.UNSHOWN_FILE, Placement.CURRENT_TAB)
         // The stand-in page has committed: a Servo that stopped showing one would not pass for this.
-        device.awaitState { it.activeTab?.url == Fixtures.PDF && it.activeTab?.page != null && it.activeTab?.loading == false }
+        device.awaitState { it.activeTab?.url == Fixtures.UNSHOWN_FILE && it.activeTab?.page != null && it.activeTab?.loading == false }
 
         // A page loaded after it is captured, so capture was running meanwhile.
+        val later = "${Fixtures.BASE}/rendered.html?p=afterfile${System.currentTimeMillis()}"
+        device.browser.openUrl(later, Placement.NEW_TAB)
+        awaitDocument(later)
+        assertFalse(documents().has(Fixtures.UNSHOWN_FILE))
+    }
+
+    @Test
+    fun aPdfInTheViewerIsNotSentAsTheViewersLabels() {
+        // The viewer shows the pages as images and only its own labels as text; the PDF's text
+        // reaches Hister in a later step (docs/PDF.md).
+        val pdf = Fixtures.pdf("plain.pdf", "hister${System.currentTimeMillis()}")
+        device.browser.openUrl(pdf, Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.url == pdf && it.activeTab?.title == Fixtures.PDF_PLAIN_TITLE && it.activeTab?.loading == false }
+        assertTrue(device.matches(device.awaitScreen(Device.PDF_PLUM), Device.PDF_PLUM))
+
         val later = "${Fixtures.BASE}/rendered.html?p=afterpdf${System.currentTimeMillis()}"
         device.browser.openUrl(later, Placement.NEW_TAB)
         awaitDocument(later)
-        assertFalse(documents().has(Fixtures.PDF))
+        assertFalse(documents().has(pdf))
     }
 
     @Test

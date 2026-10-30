@@ -84,10 +84,31 @@ object Fixtures {
     const val EMPTY = "$BASE/empty.html"
 
     /**
-     * A one-page PDF (`application/pdf`) reading PDF-FIXTURE-TEXT. Servo cannot show it: it
-     * commits a stand-in page, "Unknown content type (application/pdf).", with no title.
+     * A one-page PDF sent as `application/octet-stream` with `nosniff`. Servo cannot show it: it
+     * commits a stand-in page, "Unknown content type (application/octet-stream).", with no title.
      */
-    const val PDF = "$BASE/document.pdf"
+    const val UNSHOWN_FILE = "$BASE/document.bin"
+
+    /**
+     * A generated PDF of testing/fixtures/server.py ([name] under `/pdf/`): each page is a band of
+     * one colour (`Device.PDF_*`) over its top 65%, and most have a metadata title. `plain.pdf`
+     * ([Device.PDF_PLUM], [PDF_PLAIN_TITLE]) and `large.pdf` are counted per [key] in [pdfServed].
+     */
+    fun pdf(name: String, key: String? = null) = "$BASE/pdf/$name" + (key?.let { "?k=$it" } ?: "")
+
+    const val PDF_PLAIN_TITLE = "PDF-PLAIN-TITLE"
+
+    /** A page-filling [Device.PDF_LINK_PAGE] link to `plain.pdf` with [key]. */
+    fun pdfLink(key: String) = "$BASE/pdf/link.html?k=$key"
+
+    /** A page-filling frame of `plain.pdf` with [key]; titled `PDF-FRAME:loaded` once the frame loaded. */
+    fun pdfFrame(key: String) = "$BASE/pdf/frame.html?k=$key"
+
+    /** What the server sent for the counted PDF with [key]: requests, bytesSent and ended, or null. */
+    fun pdfServed(key: String): JSONObject? = state().optJSONObject("pdf")?.optJSONObject(key)
+
+    /** `large.pdf`'s Content-Length: over the viewer's 64 MiB cap. */
+    const val PDF_TOO_LARGE_BYTES = 65L * 1024 * 1024
 
     /** A page the server answers only after several seconds. */
     const val SLOW = "$BASE/slow.html"
@@ -267,5 +288,14 @@ class Device(private val frame: () -> Unit = {}) {
         const val OCHRE = 0x8a5a2b
         /** opener.html's background: no other screen of the app or the fixtures uses it. */
         const val VIOLET = 0x5b2a86
+        /** Bands of the generated PDFs ([Fixtures.pdf]); nothing else uses these colours. */
+        const val PDF_PLUM = 0x7a2e64
+        const val PDF_TEAL = 0x2a8a8a
+        const val PDF_SAND = 0xa08a3a
+        const val PDF_NAVY = 0x24306e
+        /** The PDF viewer's background in the light appearance (native/src/pdf/viewer.css). */
+        const val PDF_VIEWER_LIGHT = 0xe4e4e7
+        /** The background of [Fixtures.pdfLink]. */
+        const val PDF_LINK_PAGE = 0x6b4a2e
     }
 }
