@@ -1615,8 +1615,12 @@ Evidence on Linux x86_64, Rust 1.97.1, NDK r29 and API-30 x86_64 emulators
   incremental). Final both-ABI CI and full device results are tracked in
   [PR #166](https://github.com/L-K-M/Combray/pull/166).
 - `PasteMenuBackTest` fails without the menu's Back handler and passes with
-  it. The additional device Back check compiles; the local emulator crashed
-  before it ran, so its runtime proof comes from CI.
+  it. The device Back check passes in CI at `52cae22`; the local emulator
+  crashed before that additional case ran.
+- That full CI run passes 149 of 150 checks, including every keyboard/paste
+  case. `SaveTest` looked up Save before the bar's merged semantics were
+  ready. Its shared tap helper now waits for that node, like other UI checks,
+  before clicking. Saving and server-acknowledgment assertions are unchanged.
 
 Reproduction uses `testing/fixtures/server.py`'s nested closed-shadow password
 field. `KeyboardTest` checks tap acknowledgement, keyboard opening, IME text,
