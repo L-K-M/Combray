@@ -22,11 +22,15 @@ NOTICES = {
             {"name": "servo", "texts": [0]},
             {"name": "LLVM libc++", "texts": [1]},
             {"name": "Rust standard library", "texts": [2]},
+            {"name": "PDFium", "texts": [3]},
+            {"name": "@embedpdf/pdfium", "texts": [4]},
         ],
         "texts": [
             "Mozilla Public License Version 2.0",
             "---- LLVM Exceptions to the Apache 2.0 License ----",
             "The Rust Standard Library is dual-licensed under Apache 2.0 and MIT terms.",
+            "Copyright 2014 PDFium Authors.\n\nApache License\nVersion 2.0, January 2004",
+            "MIT License",
         ],
     }),
     "assets/notices/Rust-Licenses.html": "<title>Copyright notices for The Rust Standard Library</title>",
@@ -174,6 +178,16 @@ class ApkBuildTest(unittest.TestCase):
         result = self.build("--debug")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("LLVM libc++", result.stderr)
+
+    def test_the_pdf_renderers_notices_are_required(self):
+        for name in ("PDFium", "@embedpdf/pdfium"):
+            with self.subTest(name):
+                native = json.loads(NOTICES["assets/notices/native.json"])
+                native["components"] = [c for c in native["components"] if c["name"] != name]
+                self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps(native)})
+                result = self.build("--debug")
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(name, result.stderr)
 
     def test_malformed_notices_are_rejected(self):
         self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps({"components": [{}]})})

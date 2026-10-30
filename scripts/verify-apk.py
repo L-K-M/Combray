@@ -36,6 +36,10 @@ REQUIRED_NOTICES = {
     "servo": "Mozilla Public License",
     "LLVM libc++": "LLVM Exceptions to the Apache 2.0 License",
     "Rust standard library": "The Rust Standard Library is dual-licensed",
+    # The PDF viewer's renderer, embedded in the engine library (native/src/pdf.rs). PDFium's
+    # text ends with the Apache License the package's LICENSE.pdfium appends to it.
+    "PDFium": "Apache License",
+    "@embedpdf/pdfium": "MIT License",
 }
 
 

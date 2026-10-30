@@ -7,7 +7,8 @@
 #
 # Found by listing the members and symbols of the linked static archives (SpiderMonkey's
 # prebuilt libjs_static.a, the build-script outputs under target/<abi>/release/build). Recheck
-# after changing the Servo pin or Cargo.lock. zlib is not listed: Android provides libz.so.
+# after changing the Servo pin or Cargo.lock. The engine's zlib is not listed: Android provides
+# libz.so (pdfium.wasm builds in its own, listed below).
 
 [[library]]
 name = "SpiderMonkey"
@@ -191,6 +192,58 @@ name = "Web Bluetooth GATT blocklist"
 license = "Apache-2.0"
 # gatt_blocklist.txt, from https://github.com/WebBluetoothCG/registries
 spdx-text = "Apache-2.0"
+
+# The PDF viewer's renderer (native/src/pdf.rs): pdfium.wasm and index.browser.js of the
+# @embedpdf/pdfium package, embedded gzip-compressed in the engine library. The package ships
+# the licenses of its own code and of PDFium, but not those of the libraries PDFium builds into
+# pdfium.wasm; those were identified from the binary's strings and their texts taken from the
+# libraries' own releases (native/licenses/README.md). Recheck after updating PDFium
+# (docs/BUILDING.md, "Updating PDFium").
+[[library]]
+name = "@embedpdf/pdfium"
+version = "2.15.1"
+license = "MIT"
+repo-files = ["native/src/pdf/vendor/embedpdf-pdfium.LICENSE"]
+requires-text = ["MIT License"]
+
+[[library]]
+name = "PDFium"
+license = "BSD-3-Clause AND Apache-2.0"
+# The package's LICENSE.pdfium: PDFium's BSD license followed by the Apache License 2.0.
+repo-files = ["native/src/pdf/vendor/pdfium.LICENSE"]
+requires-text = ["Copyright 2014 PDFium Authors", "Apache License"]
+
+[[library]]
+name = "FreeType (PDFium)"
+license = "FTL"
+repo-files = ["native/licenses/pdfium-wasm/freetype/LICENSE.TXT", "native/licenses/pdfium-wasm/freetype/FTL.TXT"]
+requires-text = ["The FreeType Project LICENSE"]
+
+[[library]]
+name = "libpng (PDFium)"
+version = "1.6.43"
+license = "libpng-2.0"
+repo-files = ["native/licenses/pdfium-wasm/libpng/LICENSE"]
+requires-text = ["PNG Reference Library License version 2"]
+
+[[library]]
+name = "zlib (PDFium)"
+version = "1.3.1"
+license = "Zlib"
+repo-files = ["native/licenses/pdfium-wasm/zlib/LICENSE"]
+requires-text = ["Jean-loup Gailly and Mark Adler"]
+
+[[library]]
+name = "OpenJPEG (PDFium)"
+license = "BSD-2-Clause"
+repo-files = ["native/licenses/pdfium-wasm/openjpeg/LICENSE"]
+requires-text = ["Universite catholique de Louvain"]
+
+[[library]]
+name = "Little CMS (PDFium)"
+license = "MIT"
+repo-files = ["native/licenses/pdfium-wasm/lcms2/LICENSE"]
+requires-text = ["Marti Maria Saguer"]
 
 # Crates for which cargo-about finds no license file with a copyright line and fills in an SPDX
 # template ("<year> <owner>"). These texts replace the template; the generator fails on any
