@@ -1354,8 +1354,12 @@ subtree mutations still do not invalidate the cached serialization
 
 The pin moves to `05027c9413a5e040f6ea53fc017b64bbe25cfb3c`, the head of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
-(`engine/pdf-viewer-document`): seven commits on `combray/0.7` at
-`6d3218a2a94`, upstream base still v0.7.0. **It is a candidate.** #18 is
+(`engine/pdf-viewer-document`): eight commits on `combray/0.7` at
+`6d3218a2a94`, upstream base still v0.7.0. Seven are the engine change;
+the eighth, `d1e33448d`, adds the downstream GLM review workflow
+(`.github/workflows/zai-code-review.yml`, owner decision of 29 October
+2026, recorded in its `DOWNSTREAM.md`) and is no engine build input.
+**It is a candidate.** #18 is
 not merged yet; before the Combray PR that sets this pin merges, #18
 merges with a merge commit, the pin moves to that commit on
 `combray/0.7`, and the Engine workflow runs again on it.
@@ -1382,6 +1386,30 @@ What the engine change does (its `DOWNSTREAM.md` row has the details):
 - PDFs in frames, and popups of scripts-sandboxed documents, keep the
   stand-in page. `Content-Disposition: attachment` is ignored, so
   attachment PDFs open in the viewer.
+
+Engine behaviour the viewer works around (source at the pin, found in
+review of the Combray PR):
+
+- `Worker.terminate()` does not end an idle worker. `Worker::Terminate`
+  (`components/script/dom/workers/worker.rs`) only sets the closing flag
+  and requests a JavaScript interrupt, which fires only while script
+  runs; it sends nothing. A worker waiting in `run_worker_event_loop`
+  (`abstractworkerglobalscope.rs`) keeps its runtime, here PDFium's wasm
+  heap (at least 17.75 MiB) and the PDF, until its document is discarded,
+  and a document in the back-forward cache is kept. `postMessage` still
+  sends after `Terminate`, and the woken worker's `handle_mixed_message`
+  (`dedicatedworkerglobalscope.rs`) sees the flag, leaves its loop and
+  clears its runtime, so the viewer posts an empty message after
+  `terminate()`. Follow-up for L-K-M/servo, not done here: make
+  `Terminate` send the worker its `WakeUp` message itself.
+- A canvas resized to 0 × 0 cannot be painted, so
+  `CanvasState::set_bitmap_dimensions` sends no `Recreate`, and the
+  canvas paint thread keeps the old pixmap and WebRender image until
+  garbage collection drops the context. The viewer shrinks a page's
+  canvas to 1 × 1 instead.
+- A pipeline in session history gets `ResizeInactive`, which updates its
+  viewport without a `resize` event, and Back queues only `pageshow`. The
+  viewer lays its pages out again whenever it opens the PDF.
 
 Evidence for the engine change is in #18: 24 tests in
 `components/servo/tests/pdf_viewer.rs` and its review. On this Linux
