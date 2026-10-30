@@ -12,7 +12,8 @@
 // PDFium compiles while the PDF still downloads.
 //
 // Pages are laid out from their sizes and drawn lazily: only pages near the screen have elements,
-// at most MAX_LIVE_PAGES of them hold a bitmap, and each bitmap is at most MAX_PAGE_PIXELS.
+// at most MAX_LIVE_PAGES of them (or the pages on screen, if more) hold a bitmap, and each bitmap
+// is at most MAX_PAGE_PIXELS.
 // Links become <a> overlays for http, https, mailto and tel, or scroll to their page (owner
 // decision, 29 October 2026). The title is the PDF's metadata title, else its file name.
 //
@@ -191,6 +192,14 @@ export function bitmapSize(width, height, ratio) {
   return { width: pixelsWide, height: pixelsHigh };
 }
 
+/**
+ * How many pages may hold a bitmap: MAX_LIVE_PAGES, or every page on screen when more fit on it
+ * (small pages), so the pages on screen never take each other's bitmaps in turn.
+ */
+export function bitmapBudget(visible) {
+  return Math.max(MAX_LIVE_PAGES, visible ? visible[1] - visible[0] + 1 : 0);
+}
+
 /** Pages to draw first: those on screen from the top, then those below, then above. */
 export function drawOrder(near, visible) {
   if (!near) return [];
@@ -251,6 +260,9 @@ class Viewer {
     this.count = 0;
     this.sizes = null;
     this.layout = null;
+    this.layoutWidth = 0;
+    // Pages that may hold a bitmap, most wanted first (drawOrder, cut to bitmapBudget).
+    this.wanted = [];
     // Page index -> { element, canvas, drawn: "<width>x<height>" or "", failed, links }.
     this.views = new Map();
     // Bumped by every layout and restart, so a late bitmap for an old one is dropped.
@@ -360,9 +372,15 @@ class Viewer {
 
   relayout() {
     if (!this.sizes) return;
+    const width = document.documentElement.clientWidth || innerWidth;
+    // Only the height changed (a keyboard, a bar): the same layout, other pages on screen.
+    if (this.layout && width === this.layoutWidth) {
+      this.requestUpdate();
+      return;
+    }
     // Keep the page and the point in it at the top of the screen.
     const anchor = this.anchor();
-    const width = document.documentElement.clientWidth || innerWidth;
+    this.layoutWidth = width;
     this.layout = layoutPages(this.sizes, width);
     this.generation++;
     this.pages.style.height = `${this.layout.height}px`;
@@ -420,7 +438,8 @@ class Viewer {
         if (!this.views.has(index)) this.add(index);
       }
     }
-    this.order = drawOrder(near, pagesBetween(this.layout.pages, top, top + height));
+    const visible = pagesBetween(this.layout.pages, top, top + height);
+    this.wanted = drawOrder(near, visible).slice(0, bitmapBudget(visible));
     this.drawNext();
   }
 
@@ -490,7 +509,7 @@ class Viewer {
 
   nextToDraw() {
     const ratio = window.devicePixelRatio || 1;
-    for (const index of this.order || []) {
+    for (const index of this.wanted) {
       const view = this.views.get(index);
       if (!view || view.failed) continue;
       const box = this.layout.pages[index];
@@ -502,7 +521,7 @@ class Viewer {
   }
 
   paint(view, page, size, key) {
-    this.makeRoomForOneMore(view);
+    this.releaseUnwanted();
     view.canvas.width = size.width;
     view.canvas.height = size.height;
     const pixels = new Uint8ClampedArray(page.pixels.buffer || page.pixels);
@@ -510,17 +529,12 @@ class Viewer {
     view.drawn = key;
   }
 
-  /** Releases the bitmaps of the pages farthest from the screen beyond MAX_LIVE_PAGES. */
-  makeRoomForOneMore(keep) {
-    const live = [...this.views.entries()].filter(([, view]) => view.drawn && view !== keep);
-    if (live.length < MAX_LIVE_PAGES) return;
-    const centre = scrollY + innerHeight / 2;
-    const distance = (index) => {
-      const box = this.layout.pages[index];
-      return Math.abs(box.top + box.height / 2 - centre);
-    };
-    live.sort(([a], [b]) => distance(b) - distance(a));
-    for (const [, view] of live.slice(0, live.length - MAX_LIVE_PAGES + 1)) this.release(view);
+  /** Releases the bitmaps of pages no longer among the wanted ones, before drawing another. */
+  releaseUnwanted() {
+    const wanted = new Set(this.wanted);
+    for (const [index, view] of this.views) {
+      if (view.drawn && !wanted.has(index)) this.release(view);
+    }
   }
 
   addLinks(view, links) {

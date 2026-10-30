@@ -17,10 +17,12 @@ import {
   ENGINE_STATE,
   MAX_BITMAP_SIDE,
   MAX_DOCUMENT_HEIGHT,
+  MAX_LIVE_PAGES,
   MAX_PAGE_HEIGHT,
   MAX_PAGE_PIXELS,
   PAGE_MARGIN,
   PROBLEM,
+  bitmapBudget,
   bitmapSize,
   byteCount,
   drawOrder,
@@ -291,4 +293,13 @@ test("pages on screen draw first, then those below, then those above", () => {
   assert.deepEqual(drawOrder([2, 8], [4, 5]), [4, 5, 6, 7, 8, 3, 2]);
   assert.deepEqual(drawOrder([0, 1], null), [0, 1]);
   assert.deepEqual(drawOrder(null, null), []);
+});
+
+test("a few pages hold bitmaps, or every page on screen when more fit", () => {
+  assert.equal(bitmapBudget([4, 5]), MAX_LIVE_PAGES);
+  assert.equal(bitmapBudget(null), MAX_LIVE_PAGES);
+  // Small pages: all twenty on screen keep their bitmaps rather than taking turns.
+  assert.equal(bitmapBudget([10, 29]), 20);
+  const wanted = drawOrder([0, 40], [10, 29]).slice(0, bitmapBudget([10, 29]));
+  assert.deepEqual(wanted, Array.from({ length: 20 }, (_, index) => index + 10));
 });
