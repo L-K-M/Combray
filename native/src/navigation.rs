@@ -28,7 +28,10 @@ pub fn classify(scheme: &str) -> PageNavigation {
         "mailto" | "tel" | "sms" | "smsto" | "mms" | "geo" | "market" | "intent" => {
             PageNavigation::External
         },
-        // The PDF viewer's own files: never a document, whatever token a page guessed.
+        // The PDF viewer's own files: refused for the top-level navigations Servo asks about.
+        // An <iframe src> load reaches the scheme handler without the embedder being asked, so
+        // on plain-HTTP pages only the per-process token keeps the files out of a frame (secure
+        // pages are stopped by mixed content).
         pdf::SCHEME => PageNavigation::Deny,
         _ => PageNavigation::Deny,
     }
