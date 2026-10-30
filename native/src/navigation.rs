@@ -4,6 +4,7 @@
 //! page with Servo's error page, and a page could navigate to `file:` URLs on the device.
 
 use crate::events::ViewKey;
+use crate::pdf;
 
 /// The document every new window starts with, before its first navigation.
 const INITIAL_BLANK: &str = "about:blank";
@@ -27,6 +28,8 @@ pub fn classify(scheme: &str) -> PageNavigation {
         "mailto" | "tel" | "sms" | "smsto" | "mms" | "geo" | "market" | "intent" => {
             PageNavigation::External
         },
+        // The PDF viewer's own files: never a document, whatever token a page guessed.
+        pdf::SCHEME => PageNavigation::Deny,
         _ => PageNavigation::Deny,
     }
 }
@@ -153,5 +156,12 @@ mod tests {
         ] {
             assert_eq!(classify(scheme), PageNavigation::Deny, "{scheme}");
         }
+    }
+
+    #[test]
+    fn a_page_cannot_open_the_pdf_viewers_files() {
+        let url = url::Url::parse("combray-pdf://viewer-0123/pdfium/pdfium.wasm").unwrap();
+
+        assert_eq!(classify(url.scheme()), PageNavigation::Deny);
     }
 }
