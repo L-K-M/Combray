@@ -17,13 +17,13 @@
 //! page is not reported again, and a page whose media has no reportable URL is reported once. A
 //! budget per tab and document ([`MediaBudget`]) bounds the reports of a page that keeps changing
 //! its media URL or its address. A load names no document, so the engine credits it to the
-//! committed one, except while a new document is about to commit ([`PendingMedia`]).
+//! committed one, except while a new document is awaited ([`PendingMedia`]).
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 use std::collections::VecDeque;
 
-use log::debug;
+use log::{debug, info};
 
 /// Longest media URL the engine reports. Signed CDN URLs are typically under 2 KiB.
 pub(crate) const MAX_MEDIA_URL_BYTES: usize = 8192;
@@ -38,6 +38,10 @@ const MEDIA_REFILL_INTERVAL_MS: u64 = 1000 / MEDIA_REPORTS_PER_SECOND;
 /// for it. Servo reports the start and asks for the commit at the same moment, so a commit later
 /// than this means the document will not commit (another navigation replaced it).
 const PENDING_COMMIT_MS: u64 = 5_000;
+/// How long the application's request for a page may take to start or commit a document before
+/// loads stop waiting for it: as long as the application itself waits for that commit
+/// (`NAVIGATION_TIMEOUT_MS` in `BrowserCoordinator.kt`).
+const REQUESTED_DOCUMENT_MS: u64 = 30_000;
 /// Loads held per tab for a document about to commit.
 const MAX_HELD_MEDIA: usize = 16;
 
@@ -210,70 +214,100 @@ pub(crate) struct UnattributedMedia {
     pub(crate) referrer: Option<String>,
 }
 
-/// Loads that arrive while a tab's next document is about to commit. Servo delivers a load
-/// (network), a document's start (script) and its commit (constellation) on three channels and
-/// takes from them in no fixed order, so a new document's first loads can arrive before its
-/// commit and would be credited to the page it replaces. Its start, though, is sent when the
-/// document is created, before it parses anything that loads media. Loads arriving between a
-/// document's start and its commit are held and given to that document when it commits. A
-/// document that reported its start commits even when a traversal commits another document
-/// first (Servo sends its activation before its start and does not override a pending change),
-/// so another commit leaves the hold in place; loads held for a document that never commits go
-/// to the committed one after [`PENDING_COMMIT_MS`]. A late load of the replaced page in that
-/// window is credited to the new one. Before any document commits, loads are held even if the
-/// start is still queued, because there is no previous document to credit them to.
+/// Loads that arrive while a tab's next document is awaited. Servo delivers a load (network), a
+/// document's start (script) and its commit (constellation) on three channels and takes from them
+/// in no fixed order, so a new document's first loads can arrive before its start and its commit,
+/// and would be credited to the page it replaces, or dropped in a new tab where nothing has
+/// committed. Loads are held from the moment the application asks for a page (a new tab, an
+/// address, a reload) or a document reports its start, and given to the next document that
+/// commits: the started one, or, before any start, whichever commits first (a requested page's
+/// commit can overtake its start too). A document that reported its start commits even when a
+/// traversal commits another document first (Servo sends its activation before its start and
+/// does not override a pending change), so another commit leaves the hold in place. A hold ends
+/// without a commit after [`REQUESTED_DOCUMENT_MS`] for a request and [`PENDING_COMMIT_MS`] for
+/// a start ([`PendingMedia::expire`]); what it held is then the committed document's. A late
+/// load of the replaced page during a hold is credited to the new one, and a page's own loads
+/// wait while a request that commits nothing (a 204 answer, a download) is pending.
 #[derive(Default)]
 pub(crate) struct PendingMedia {
+    /// When the application asked for a page no document has started for yet.
+    requested: Option<u64>,
     /// The document that reported its start but has not committed, and when.
-    pending: Option<(u64, u64)>,
+    started: Option<(u64, u64)>,
     held: VecDeque<UnattributedMedia>,
 }
 
 impl PendingMedia {
-    /// Keeps a load until its document commits, even if its start has not arrived yet.
-    pub(crate) fn hold_until_commit(&mut self, media: UnattributedMedia) {
-        if self.held.len() == MAX_HELD_MEDIA {
-            self.held.pop_front();
-        }
-        self.held.push_back(media);
+    /// The application asked for a page: its document's loads may arrive before anything else
+    /// about it, so loads wait for a commit from now on.
+    pub(crate) fn navigation_requested(&mut self, now_ms: u64) {
+        self.requested = Some(now_ms);
     }
 
-    /// `document`, not committed yet, reported its start. A document started later replaces it:
-    /// the loads held for the earlier one are dropped with it.
+    /// `document`, not committed yet, reported its start. It answers a pending request, whose
+    /// held loads are its own. Without one, a document started later replaces an earlier one:
+    /// the loads held for that one are dropped with it.
     pub(crate) fn document_started(&mut self, document: u64, now_ms: u64) {
-        if self.pending.is_some_and(|(pending, _)| pending != document) {
+        let answers_request = self.requested.take().is_some();
+        let replaced = self.started.is_some_and(|(started, _)| started != document);
+        if !answers_request && replaced && !self.held.is_empty() {
+            info!(
+                "{} held media loads dropped: another document started",
+                self.held.len()
+            );
             self.held.clear();
         }
-        self.pending = Some((document, now_ms));
+        self.started = Some((document, now_ms));
     }
 
-    /// Holds `media` for the document about to commit, or returns the loads to credit to the
-    /// committed document now: `media`, after any held for a document that did not commit.
+    /// Holds `media` while a document is awaited, or gives it back to credit to the committed
+    /// document now. Call [`PendingMedia::expire`] first, so loads keep their order.
     pub(crate) fn admit(
         &mut self,
         media: UnattributedMedia,
         now_ms: u64,
-    ) -> Vec<UnattributedMedia> {
-        if let Some((_, since)) = self.pending {
-            if now_ms.saturating_sub(since) <= PENDING_COMMIT_MS {
-                self.hold_until_commit(media);
-                return Vec::new();
-            }
-            self.pending = None;
+    ) -> Option<UnattributedMedia> {
+        if !self.awaiting(now_ms) {
+            return Some(media);
         }
-        let mut admitted: Vec<_> = self.held.drain(..).collect();
-        admitted.push(media);
-        admitted
+        if self.held.len() == MAX_HELD_MEDIA {
+            self.held.pop_front();
+            info!("a held media load was dropped: {MAX_HELD_MEDIA} are held");
+        }
+        self.held.push_back(media);
+        None
     }
 
     /// `document` committed: the loads held for it, in arrival order. Another document's commit
-    /// keeps them for the pending one.
+    /// keeps them for the started one.
     pub(crate) fn committed(&mut self, document: u64) -> Vec<UnattributedMedia> {
-        if self.pending.is_some_and(|(pending, _)| pending != document) {
+        match self.started {
+            Some((started, _)) if started == document => self.started = None,
+            Some(_) => return Vec::new(),
+            None if self.requested.take().is_some() => {},
+            None => return Vec::new(),
+        }
+        std::mem::take(&mut self.held).into()
+    }
+
+    /// Ends a hold whose document did not come in time: the loads it held, in arrival order, to
+    /// credit to the committed document.
+    pub(crate) fn expire(&mut self, now_ms: u64) -> Vec<UnattributedMedia> {
+        if self.awaiting(now_ms) {
             return Vec::new();
         }
-        self.pending = None;
+        self.requested = None;
+        self.started = None;
         std::mem::take(&mut self.held).into()
+    }
+
+    fn awaiting(&self, now_ms: u64) -> bool {
+        let within = |since: u64, window: u64| now_ms.saturating_sub(since) <= window;
+        self.requested
+            .is_some_and(|since| within(since, REQUESTED_DOCUMENT_MS))
+            || self
+                .started
+                .is_some_and(|(_, since)| within(since, PENDING_COMMIT_MS))
     }
 }
 
@@ -292,49 +326,71 @@ mod tests {
     #[test]
     fn loads_without_a_pending_document_are_credited_now() {
         let mut pending = PendingMedia::default();
-        assert_eq!(pending.admit(load("a"), 1_000), vec![load("a")]);
+        assert_eq!(pending.admit(load("a"), 1_000), Some(load("a")));
         assert_eq!(pending.committed(7), Vec::new());
-    }
-
-    #[test]
-    fn a_load_held_before_the_first_document_start_is_released_on_commit() {
-        let mut pending = PendingMedia::default();
-        // A network load can reach the embedder before the script thread reports its start.
-        pending.held.push_back(load("early"));
-        assert_eq!(pending.committed(7), vec![load("early")]);
-        assert_eq!(pending.committed(8), Vec::new());
-    }
-
-    #[test]
-    fn first_document_loads_wait_through_its_start_and_another_commit() {
-        let mut pending = PendingMedia::default();
-        pending.hold_until_commit(load("early"));
-        pending.document_started(7, 1_000);
-        assert_eq!(pending.admit(load("later"), 1_010), Vec::new());
-        assert_eq!(pending.committed(6), Vec::new());
-        assert_eq!(pending.committed(7), vec![load("early"), load("later")]);
-    }
-
-    #[test]
-    fn first_document_loads_are_bounded_before_its_start() {
-        let mut pending = PendingMedia::default();
-        for n in 0..MAX_HELD_MEDIA + 4 {
-            pending.hold_until_commit(load(&n.to_string()));
-        }
-        let held = pending.committed(7);
-        assert_eq!(held.len(), MAX_HELD_MEDIA);
-        assert_eq!(held.first(), Some(&load("4")));
+        assert_eq!(pending.expire(1_000), Vec::new());
     }
 
     #[test]
     fn loads_that_overtake_a_commit_go_to_the_document_that_commits() {
         let mut pending = PendingMedia::default();
         pending.document_started(7, 1_000);
-        assert_eq!(pending.admit(load("a"), 1_010), Vec::new());
-        assert_eq!(pending.admit(load("b"), 1_020), Vec::new());
+        assert_eq!(pending.admit(load("a"), 1_010), None);
+        assert_eq!(pending.admit(load("b"), 1_020), None);
         assert_eq!(pending.committed(7), vec![load("a"), load("b")]);
         // Committed: later loads are the new page's at once.
-        assert_eq!(pending.admit(load("c"), 1_030), vec![load("c")]);
+        assert_eq!(pending.admit(load("c"), 1_030), Some(load("c")));
+    }
+
+    #[test]
+    fn loads_that_overtake_a_requested_pages_start_go_to_the_document_that_commits() {
+        let mut pending = PendingMedia::default();
+        // The previous page (document 6) is committed; the application asks for another.
+        pending.navigation_requested(1_000);
+        // The new document's load arrives before its start and its commit.
+        assert_eq!(pending.admit(load("a"), 1_010), None);
+        pending.document_started(7, 1_020);
+        assert_eq!(pending.admit(load("b"), 1_030), None);
+        assert_eq!(pending.committed(7), vec![load("a"), load("b")]);
+        assert_eq!(pending.admit(load("c"), 1_040), Some(load("c")));
+
+        // A new tab: its first document's commit can overtake its start as well.
+        let mut pending = PendingMedia::default();
+        pending.navigation_requested(2_000);
+        assert_eq!(pending.admit(load("d"), 2_010), None);
+        assert_eq!(pending.committed(8), vec![load("d")]);
+        assert_eq!(pending.admit(load("e"), 2_020), Some(load("e")));
+    }
+
+    #[test]
+    fn a_request_after_a_start_keeps_waiting_once_the_started_document_commits() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        pending.navigation_requested(1_010);
+        assert_eq!(pending.admit(load("a"), 1_020), None);
+        // The document that started first commits and takes what was held.
+        assert_eq!(pending.committed(7), vec![load("a")]);
+        // The requested page has not started: its loads still wait for it.
+        assert_eq!(pending.admit(load("b"), 1_030), None);
+        pending.document_started(8, 1_040);
+        assert_eq!(pending.committed(8), vec![load("b")]);
+    }
+
+    #[test]
+    fn a_request_that_commits_nothing_gives_its_loads_back_after_the_window() {
+        let mut pending = PendingMedia::default();
+        pending.navigation_requested(1_000);
+        assert_eq!(pending.admit(load("a"), 1_010), None);
+        // A slow server: still waiting well past a started document's window.
+        let slow = 1_000 + PENDING_COMMIT_MS + 1;
+        assert_eq!(pending.expire(slow), Vec::new());
+        assert_eq!(pending.admit(load("b"), slow), None);
+
+        // A 204 answer or a download: the loads were the committed page's.
+        let late = 1_000 + REQUESTED_DOCUMENT_MS + 1;
+        assert_eq!(pending.expire(late), vec![load("a"), load("b")]);
+        assert_eq!(pending.admit(load("c"), late), Some(load("c")));
+        assert_eq!(pending.committed(9), Vec::new());
     }
 
     #[test]
@@ -355,11 +411,11 @@ mod tests {
         // A start that never commits stops holding loads after the window, and gives back
         // what it held to the committed document.
         pending.document_started(11, 3_000);
-        assert_eq!(pending.admit(load("c"), 3_100), Vec::new());
-        assert_eq!(
-            pending.admit(load("d"), 3_000 + PENDING_COMMIT_MS + 1),
-            vec![load("c"), load("d")]
-        );
+        assert_eq!(pending.admit(load("c"), 3_100), None);
+        assert_eq!(pending.expire(3_000 + PENDING_COMMIT_MS), Vec::new());
+        let late = 3_000 + PENDING_COMMIT_MS + 1;
+        assert_eq!(pending.expire(late), vec![load("c")]);
+        assert_eq!(pending.admit(load("d"), late), Some(load("d")));
         assert_eq!(pending.committed(11), Vec::new());
     }
 

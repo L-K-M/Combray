@@ -115,8 +115,28 @@ TONE_SECONDS = 3
 TONE_AMPLITUDE = 8000
 FILE_TARGET = "file:///system/etc/hosts"
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+# A check's unique key (`k=`) marks the addresses it looks for in the app's log; the request log
+# leaves its value out.
+KEY_VALUE = re.compile(r"(?<=[?&]k=)[^&#]*")
 
 lock = threading.Lock()
+log_lock = threading.Lock()
+
+
+def logged_target(target):
+    """A request target as the request log shows it: each `k=` value is left out."""
+    return KEY_VALUE.sub("<key>", target)
+
+
+def log_request_line(method, target, now=None):
+    """One line per request on stdout (fixtures.log in a device-check run), in logcat's
+    `threadtime` time format so it lines up with logcat.txt. Logcat stamps the device's local
+    time: the emulator keeps the host's, while a phone's clock or zone may differ."""
+    now = time.time() if now is None else now
+    stamp = time.strftime("%m-%d %H:%M:%S", time.localtime(now)) + f".{int(now * 1000) % 1000:03d}"
+    with log_lock:
+        sys.stdout.write(f"{stamp} {method} {logged_target(target)}\n")
+        sys.stdout.flush()
 def fresh_lists():
     """List id -> bookmark ids in it. Lists that are not here answer 404."""
     return {"reading": []}
@@ -516,6 +536,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    # Logged as it arrives: some requests are never answered (/once.html), and a navigation
+    # that reached the server is what a missing page needs ruled in or out.
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        log_request_line(self.command, self.path)
+        return True
 
     def send(self, status, body=b"", content_type="text/html; charset=utf-8", headers=()):
         if isinstance(body, str):

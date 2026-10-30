@@ -286,7 +286,7 @@ Limitations found while building the app:
 
 - **Servo error lines can contain page URLs.** The log filter keeps Servo's `error` level because engine failures must stay diagnosable; some of those lines name the page. Combray's own log lines carry no page text or addresses.
 - **Screen density is read once.** The HiDPI factor passed to Servo at startup is not updated when the density changes in the same process (display size setting, moving between screens); pages then render at the old scale until the app restarts.
-- **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A load names no document, and Servo delivers loads, document starts and commits on three channels taken in no fixed order, so a new document's first loads can arrive before its commit. The engine holds a load that arrives after a new document reported its start and before its commit, and gives it to that document when it commits (`media::PendingMedia`; a start that does not commit within 5 s gives its loads back to the committed page). The app also holds, while a page it asked for is pending, a report whose referrer is another origin than the committed page's. What stays wrong: a load that overtakes both its document's start and its commit, or a `pushState`, counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
+- **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A load names no document, and Servo delivers loads, document starts and commits on three channels taken in no fixed order, so a new document's first loads can arrive before its start and its commit. The engine holds a load that arrives after the app asked for a page (a new tab, an address, a reload) or after a new document reported its start, and before a commit, and gives it to the document that commits (`media::PendingMedia`; a request that commits nothing within 30 s, or a start within 5 s, gives its loads back to the committed page). The app also holds, while a page it asked for is pending, every report with a referrer, gives those from the new page's origin to that page when it commits, and gives them back to the page on screen when the wait ends without a commit. What stays wrong: a load that overtakes both the start and the commit of a page the page itself opened (a link), or a `pushState`, counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
 - **Leave-page questions cover page navigations only.** Servo 0.6.0 runs `beforeunload` for navigations the page starts (links, forms, `location`), for reloads and for `window.close()`. The constellation loads embedder URLs (`LoadUrl`) and traverses history without it, so a typed address, a link from another app, Back/Forward and closing a tab still discard unsaved form text without asking. Covering them needs a Servo change.
 - **A refused or handed-off link still stops the page's loading.** Servo's `navigate()` queues `abort_a_document_and_its_descendants` on the script thread before it asks the embedder (`components/script/navigation.rs`, step 24.4, lines 546-565 of the patched tree), and `NavigationRequest::deny()` does not undo it. The page stays on screen, but its in-flight fetches, EventSources and parser are aborted. If the link was tapped before the load event, the page never reports load complete: the address bar can keep showing it loading, and capture skips it. The fix needs a Servo patch: skip the abort for schemes the embedder will not load, as Chromium does for external protocols, or queue it only once the embedder allows the navigation.
 - **The tap check ignores pinch-zoom panning.** Servo 0.6.0 exposes the pinch-zoom factor but not the zoomed area's offset, so on a pinch-zoomed page a tap on a field focused before the user touched the page can miss it (no keyboard; tapping elsewhere and then the field works) or count a nearby tap.
@@ -1397,23 +1397,103 @@ byte-for-byte and removed from the device). Device checks were not run
 on the development host, which has no emulator; they run in the Engine
 workflow on the PR.
 
-## 31. Scroll-position flicker (30 October 2026)
+## 31. Missing media notice after a load overtakes its page (30 October 2026)
+
+Symptom: the Play notice never appeared for a page with media, and
+`MediaPlayerTest` waited its full 240 s. It happened in
+[Engine run 41015837139](https://github.com/L-K-M/Combray/actions/runs/41015837139)
+inside the report-only stop-and-start check (logged as
+`REPORT stop and start: failed`, counted as passed) and in
+[Engine run 41023689990](https://github.com/L-K-M/Combray/actions/runs/41023689990)
+attempt 2 (`aRedirectIsFollowedOnlyToAWebAddress`); section 29 records
+the same symptom on an earlier pin.
+
+Likely mechanism, read from the code and not yet confirmed from logs
+(neither the fixture server nor the engine logged navigations or media
+attribution): Servo's embedder takes script, network and constellation
+messages through a crossbeam `Select`, which picks among ready channels
+at random (`components/servo/servo.rs`, `EmbedderMessageSelector`), so a
+page's media load can overtake its document's `LoadStatus::Started` and
+its commit. The engine held loads only from a start report. In a new tab
+nothing had committed, so the load was dropped; after a page of the same
+origin that had already shown its Play notice, the load was credited to
+that page, the app's referrer hold did not apply to a same-origin
+referrer, and the page's notice was already used.
+
+Change (no Servo pin change):
+
+- `media::PendingMedia` holds loads from the moment the app asks for a
+  page (`CreateTab`, `Navigate`, `Reload`) as well as from a start, and
+  gives them to the next document that commits: the started one, or,
+  before any start, whichever commits first. A request that commits
+  nothing gives its loads back to the committed page after 30 s (the
+  app's own navigation timeout), a start after 5 s as before; the engine
+  ends expired holds on its loop as well as when the next load arrives.
+- The app holds every report with a referrer while a page it asked for is
+  pending, not only cross-origin ones; the new page's origin keeps them
+  at its commit, and when the wait ends without a commit (timeout,
+  refusal, Stay, a same-page address) they go to the page on screen.
+- Diagnostics: the fixture server logs each request's method and target
+  to `fixtures.log` with every `k=` value replaced by `<key>`, in
+  logcat's time format; the engine logs (tag `CombrayEngine`, no
+  addresses) the loads held until a document committed, loads dropped
+  with no committed document, and loads a hold credited to the committed
+  document after it ended without a commit; `summary.md` lists every
+  failed report-only check and every check slower than 30 s from
+  `logcat.txt`. These lines use `info`, because the native library is
+  always built `--release` with `log`'s `release_max_level_info`, which
+  removes `debug` lines.
+
+Remaining: loads of a page the page itself opened (a link) still rely on
+the start report; during a hold, a late load of the page being left is
+credited to the new page; and a page's own loads wait while a request
+that commits nothing (a 204 answer, a download) is pending.
+
+Host checks, run on Linux x86_64 with no emulator:
+
+- `cargo fmt --check` in `native/`: clean.
+- `cargo test --lib` in `native/`: 123 passed, 0 failed. The new
+  `media::` case for a load that arrives before a requested page's start
+  failed before the change (the load came back at once, to be credited to
+  the previous page) and passes after it.
+- `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest`: passed; 581 unit tests, 0 failed. The new
+  `BrowserCoordinatorTest` case for a same-origin page whose media
+  overtakes its commit failed before the change (no Play notice after the
+  commit) and passes after it. Lint: no new findings.
+- `python3 -I -m unittest discover -s scripts/tests`: 91 passed.
+- `python3 scripts/check_docs.py` and `git diff --check`: clean.
+
+`engine.rs` is Android-only, so this host did not compile the engine
+changes; the PR's Engine run builds both native ABIs and runs the
+emulator fixture checks.
+
+[Engine run 41096726970](https://github.com/L-K-M/Combray/actions/runs/41096726970)
+at `91c9d76` built both native ABIs and passed all 142 fixture checks
+on the API 30 x86_64 emulator, `MediaPlayerTest` included (10 checks in
+80 s). Its summary listed no failed report-only check and two checks
+over 30 s that wait on purpose (a page-control question's deadline and a
+Karakeep retry). `fixtures.log` held 376 requests, every key replaced.
+None of the new engine media lines appeared: no load overtook its
+document's commit in that run, none was dropped and no hold expired, so
+the race itself is still unobserved; the lines will show it when it
+recurs.
+
+## 32. Scroll-position flicker (30 October 2026)
 
 The owner's recording showed brief returns to an earlier scroll position
 while the browser controls stayed steady. A synthetic page reproduced it:
 scroll from a red section into green, then create and remove an offscreen
-iframe. The regression records the center pixel after every paint, not
-only the settled screenshot. Before the fix, one frame was red, followed
-by green frames, without another scroll request.
+iframe. The regression records the center pixel after every paint. Before
+the fix, one frame was red, followed by green, without another scroll.
 
 WebRender resets its scroll tree when a scene changes. Servo restored the
 offsets for ordinary display lists, but omitted initial empty iframe
 scenes and pipeline removals. Downstream [PR #17](https://github.com/L-K-M/servo/pull/17),
 code `aaab47173cd`, restores surviving pipelines' offsets in those three
 transactions. Pin: `e284adf9fe3d47b71faeb3c0e8bcb6730113b8c8`.
-
 Changed engine files: `components/paint/painter.rs`,
-`components/servo/tests/webview.rs`, `DOWNSTREAM.md`. No site-specific code.
+`components/servo/tests/webview.rs`, `DOWNSTREAM.md`.
 
 Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
 
@@ -1423,37 +1503,22 @@ Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
 - `test_iframe_changes_preserve_every_scrolled_frame --exact`: failed
   before the fix with a red intermediate frame; passed after it.
 - All 34 WebView tests passed, each in a separate test-binary process.
-  A single-process run is invalid here: Servo's global options initialize
-  once, so its later tests fail with `Already initialized`.
-- Independent MiMo V2.6 Pro review: no important defects. The new regression
+  A single-process run fails because Servo's global options initialize once.
+- Independent MiMo V2.6 Pro review: no important defects. The new test
   covers iframe creation/removal; whole-view removal also passed its
   existing pipeline-release check, which does not check transient pixels.
-- Changed-file whitespace check passes. Whole-file rustfmt reports
-  pre-existing operator formatting differences outside the changed hunks.
-- `scripts/build-native.sh`: local x86_64 Android release build passed
-  with NDK 29.0.14206865 and four Cargo workers.
-- Both Android ABIs and native host checks passed in
-  [the first Engine run](https://github.com/L-K-M/Combray/actions/runs/40989841472);
-  Kotlin tests/lint/build passed in its
-  [companion CI run](https://github.com/L-K-M/Combray/actions/runs/40989841398).
-  Its emulator passed the fixed-layer scroll checks, then went offline
-  during the wider suite. Earlier, the media check read only one report
-  immediately after load. Adding a bounded report wait did not fix the
-  [next run](https://github.com/L-K-M/Combray/actions/runs/41037007317):
-  the same check timed out, while all other device checks passed.
-- Investigation found a native loss path: before the first document's
-  start or commit arrived, `PendingMedia.admit` returned a load and
-  `media_blocked` dropped it because there was no current document.
-  First-document loads now use the existing bounded hold until commit,
-  including when the start is still queued. A release regression failed
-  before the fix; all 123 native host tests pass after it, including
-  ordering and hold-bound checks. Independent MiMo review found no
-  important defects. The code explains a missing report; CI still needs
-  to confirm it explains that run. The device check retains its bounded
-  wait and zero-download assertions. Full Android results are tracked in
-  [Combray PR #159](https://github.com/L-K-M/Combray/pull/159).
-- The local API-30 software emulator booted once, then crashed during
-  setup; a second boot also crashed. It supplied no rendering evidence.
+- `scripts/build-native.sh` and APK verification passed locally for
+  x86_64, with NDK 29.0.14206865 and four Cargo workers.
+- Both ABIs passed in [Engine run 41107468092](https://github.com/L-K-M/Combray/actions/runs/41107468092),
+  with 142 device checks passing; a same-origin player launch timed out.
+  The interim first-document media hold was superseded by the broader
+  request-based fix in [PR #164](https://github.com/L-K-M/Combray/pull/164)
+  (section 31). Integration takes that implementation and its regressions
+  unchanged. Final combined checks are recorded in
+  [PR #159](https://github.com/L-K-M/Combray/pull/159).
+- The local software emulator crashed during setup and supplied no device
+  proof. Whole-file Servo rustfmt reports pre-existing differences outside
+  the changed hunks; the native bridge's fmt and whitespace checks pass.
 
 The phone and live example have not been rechecked. The regression proves
 this pipeline-change flicker; other causes remain possible.

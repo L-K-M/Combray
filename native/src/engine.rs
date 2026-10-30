@@ -195,7 +195,7 @@ struct Tab {
     /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
     /// pushState loop stays bounded; restarts when another document commits.
     media_budget: MediaBudget,
-    /// Loads waiting for the document about to commit (see `media::PendingMedia`).
+    /// Loads waiting for the document the tab awaits (see `media::PendingMedia`).
     pending_media: PendingMedia,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
@@ -264,6 +264,36 @@ impl Tab {
             });
         }
         reports
+    }
+
+    /// Credits `media` to the committed document now; the first `unawaited` of them waited for
+    /// a document that did not come in time (`media::PendingMedia::expire`). Before any commit
+    /// there is no document to name, and nothing is reported (the loads were still cancelled).
+    fn credit_now(
+        &mut self,
+        media: Vec<UnattributedMedia>,
+        unawaited: usize,
+        now_ms: u64,
+    ) -> Vec<EngineEvent> {
+        if media.is_empty() {
+            return Vec::new();
+        }
+        let Some(document) = self.current_document else {
+            info!(
+                "view {:?}: {} media loads dropped: no document has committed",
+                self.view,
+                media.len()
+            );
+            return Vec::new();
+        };
+        if unawaited > 0 {
+            info!(
+                "view {:?}: {unawaited} media loads held for a navigation credited to committed document {}",
+                self.view,
+                u64::from(document)
+            );
+        }
+        self.credit_media(document, media, now_ms)
     }
 }
 
@@ -526,11 +556,7 @@ impl Engine {
                     tab.webview.go_forward(1);
                 }
             },
-            Command::Reload { tab } => {
-                if let Some(tab) = self.tab(tab) {
-                    tab.webview.reload();
-                }
-            },
+            Command::Reload { tab } => self.reload(tab),
             Command::ScrollToEdge {
                 view,
                 document,
@@ -587,6 +613,7 @@ impl Engine {
         self.drain_tap_checks();
         self.expire_captures();
         self.expire_leave_page_questions();
+        self.expire_media_holds();
         self.paint();
     }
 
@@ -823,6 +850,11 @@ impl Engine {
             .build();
 
         let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
+        let now_ms = self.now_ms();
+        if let Some(created) = self.tabs.get_mut(&tab) {
+            // Its first document's media loads can arrive before anything else about it.
+            created.pending_media.navigation_requested(now_ms);
+        }
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
@@ -1071,7 +1103,8 @@ impl Engine {
     }
 
     fn navigate(&mut self, tab: i64, request: i64, url: &str) {
-        let Some(found) = self.tabs.get(&tab) else {
+        let now_ms = self.now_ms();
+        let Some(found) = self.tabs.get_mut(&tab) else {
             self.refuse(
                 format!("no tab {tab} to navigate"),
                 Some(tab),
@@ -1083,6 +1116,7 @@ impl Engine {
         match Url::parse(url) {
             Ok(parsed) => {
                 found.webview.load(parsed);
+                found.pending_media.navigation_requested(now_ms);
                 self.emit(EngineEvent::NavigationRequested {
                     view,
                     request,
@@ -1095,6 +1129,17 @@ impl Engine {
                 Some(request),
             ),
         }
+    }
+
+    fn reload(&mut self, tab: i64) {
+        let now_ms = self.now_ms();
+        let Some(found) = self.tabs.get_mut(&tab) else {
+            self.refuse(format!("no tab {tab}"), Some(tab), None);
+            return;
+        };
+        found.webview.reload();
+        // A reload's document is a new one, whose media loads can overtake it like any other.
+        found.pending_media.navigation_requested(now_ms);
     }
 
     // --- Input (always to the active view) ---------------------------------------------------
@@ -1829,13 +1874,15 @@ impl Engine {
     /// A load names its view but not its document, so it is attributed to the tab's committed
     /// document at the time the delegate sees it. Servo delivers load interceptions (net thread),
     /// document starts (script) and history changes (constellation) on separate channels in no
-    /// fixed order. A load that arrives after a new document reported its start and before its
-    /// commit is held and given to that document when it commits (`media::PendingMedia`). What
-    /// remains for an already-committed tab: a load that overtakes both its document's start
-    /// and commit, or a `pushState`, counts for the page before it. A late load of the replaced
-    /// document, or of the previous route, counts for the new page. The application's document
-    /// check cannot tell, because the event carries the document stamped here. Before the first commit,
-    /// loads wait even if the document's start has not arrived yet.
+    /// fixed order. A load that arrives after the application asked for a page (a new tab, an
+    /// address, a reload) or after a new document reported its start, and before a commit, is
+    /// held and given to the document that commits (`media::PendingMedia`). What remains: a load
+    /// that overtakes the start and commit of a document the page navigated to itself (a link),
+    /// or a `pushState`, counts for the page before it; a late load of the replaced document, or
+    /// of the previous route, counts for the new page; and a hold that ends without a commit
+    /// gives its loads to the committed document. The application's document check cannot tell,
+    /// because the event carries the document stamped here. Without a committed document there
+    /// is nothing to name and nothing is reported (the load is still cancelled).
     fn media_blocked(
         &mut self,
         view: ViewKey,
@@ -1852,12 +1899,26 @@ impl Engine {
             url,
             referrer,
         };
-        let Some(document) = tab.current_document else {
-            tab.pending_media.hold_until_commit(load);
-            return;
-        };
-        let admitted = tab.pending_media.admit(load, now_ms);
-        for report in tab.credit_media(document, admitted, now_ms) {
+        // A hold whose document did not come in time ends first, so loads keep their order.
+        let mut loads = tab.pending_media.expire(now_ms);
+        let unawaited = loads.len();
+        loads.extend(tab.pending_media.admit(load, now_ms));
+        for report in tab.credit_now(loads, unawaited, now_ms) {
+            self.emit(report);
+        }
+    }
+
+    /// Ends the media holds whose document did not come in time (`media::PendingMedia`): a
+    /// request that commits nothing, or a start that never commits.
+    fn expire_media_holds(&mut self) {
+        let now_ms = self.now_ms();
+        let mut reports = Vec::new();
+        for tab in self.tabs.values_mut() {
+            let ended = tab.pending_media.expire(now_ms);
+            let unawaited = ended.len();
+            reports.extend(tab.credit_now(ended, unawaited, now_ms));
+        }
+        for report in reports {
             self.emit(report);
         }
     }
@@ -2241,6 +2302,13 @@ impl Engine {
         // Media loads that overtook this commit, credited to this document's new page.
         let released_media = if change == HistoryChange::NewDocument {
             let held = tab.pending_media.committed(u64::from(document));
+            if !held.is_empty() {
+                info!(
+                    "view {view:?}: {} media loads held until document {} committed",
+                    held.len(),
+                    u64::from(document)
+                );
+            }
             tab.credit_media(document, held, now_ms)
         } else {
             Vec::new()

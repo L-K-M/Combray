@@ -227,8 +227,15 @@ All notable changes to this project are documented here. The format follows
 
 - Pages retain their scroll position when embedded frames load or close,
   preventing brief flashes of an earlier position while scrolling.
-- Media discovered before a tab's first document commits is kept for that
-  document, so early player entries are not lost.
+- The notice that a page's audio or video opens in a separate player no
+  longer goes missing when the media starts loading before the page
+  reports itself: in a new tab, or after another page of the same site
+  that already showed its notice. Media found while a page you asked for
+  never arrives (a download, a 204 answer) is offered on the page you are
+  still on.
+- Device-check runs log each request the fixture server receives, and
+  their summary lists every failed report-only check and every check
+  slower than 30 s.
 - A tab selected while Combray is in the background, for example when a
   page closes its own window, stays hidden and unfocused, so it stays
   throttled until you return to the app.
