@@ -67,11 +67,16 @@ class ScrollTest {
         device.awaitState { it.activeTab?.id == scrollTab }
         awaitTitle("SCROLL-TOP")
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        val undo = compose.onNodeWithText(compose.activity.getString(R.string.action_undo))
+        undo.assertIsDisplayed()
 
+        // As in the endpoint check: the button's idle timer must not run out during the engine wait.
+        compose.mainClock.autoAdvance = false
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
-        compose.onNodeWithText(compose.activity.getString(R.string.action_undo)).assertIsDisplayed()
+        undo.assertIsDisplayed()
         compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed().performClick()
+        compose.mainClock.autoAdvance = true
         assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
     }
 
