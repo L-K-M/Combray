@@ -143,12 +143,17 @@ impl ViewerFile {
     }
 }
 
+/// The most [inflate] reserves up front: a little above the largest embedded file (pdfium.wasm,
+/// 4,646,932 bytes). The gzip trailer is only a hint; `read_to_end` grows the buffer past it.
+const MAX_INFLATE_HINT: usize = 6 << 20;
+
 fn inflate(compressed: &[u8]) -> io::Result<Vec<u8>> {
-    // A gzip member ends with its uncompressed length modulo 2^32 (RFC 1952).
+    // A gzip member ends with its uncompressed length modulo 2^32 (RFC 1952). Damaged input can
+    // end in any four bytes, so the length only sizes the first allocation, up to a bound.
     let length = compressed
         .last_chunk::<4>()
         .map_or(0, |size| u32::from_le_bytes(*size) as usize);
-    let mut contents = Vec::with_capacity(length);
+    let mut contents = Vec::with_capacity(length.min(MAX_INFLATE_HINT));
     GzDecoder::new(compressed).read_to_end(&mut contents)?;
     Ok(contents)
 }
@@ -401,6 +406,31 @@ mod tests {
 
         assert!(inflate(&damaged).is_err());
         assert!(inflate(b"not gzip").is_err());
+    }
+
+    #[test]
+    fn a_lying_length_trailer_does_not_size_the_buffer() {
+        use std::io::Write;
+
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(b"%PDF-1.7").unwrap();
+        let mut crafted = encoder.finish().unwrap();
+        // Bytes after the gzip member are not read, but they are the input's last four.
+        crafted.extend_from_slice(&u32::MAX.to_le_bytes());
+
+        let contents = inflate(&crafted).unwrap();
+
+        assert_eq!(contents, b"%PDF-1.7");
+        assert!(contents.capacity() <= MAX_INFLATE_HINT);
+    }
+
+    #[test]
+    fn the_embedded_files_fit_the_capacity_hint() {
+        for compressed in [PDFIUM_SCRIPT_GZ, PDFIUM_WASM_GZ] {
+            let recorded = u32::from_le_bytes(*compressed.last_chunk::<4>().unwrap());
+
+            assert!(recorded as usize <= MAX_INFLATE_HINT, "{recorded}");
+        }
     }
 
     #[test]
