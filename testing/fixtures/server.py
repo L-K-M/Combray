@@ -130,7 +130,8 @@ def logged_target(target):
 
 def log_request_line(method, target, now=None):
     """One line per request on stdout (fixtures.log in a device-check run), in logcat's
-    `threadtime` time format so it lines up with logcat.txt."""
+    `threadtime` time format so it lines up with logcat.txt. Logcat stamps the device's local
+    time: the emulator keeps the host's, while a phone's clock or zone may differ."""
     now = time.time() if now is None else now
     stamp = time.strftime("%m-%d %H:%M:%S", time.localtime(now)) + f".{int(now * 1000) % 1000:03d}"
     with log_lock:

@@ -129,6 +129,17 @@ class SummaryTest(unittest.TestCase):
         _, summary = summarize(PASSED_RUN, logcat)
         self.assertIn("- BrowsingTest `late`: 50.0 s", summary)
 
+    def test_parameterized_and_spaced_names_are_timed(self):
+        logcat = (
+            "10-30 09:00:00.000  1  2 I TestRunner: started: check[1](ch.lkmc.combray.BrowsingTest)\n"
+            "10-30 09:00:31.000  1  2 I TestRunner: finished: check[1](ch.lkmc.combray.BrowsingTest)\n"
+            "10-30 09:01:00.000  1  2 I TestRunner: started: a spaced check(ch.lkmc.combray.BrowsingTest)\n"
+            "10-30 09:02:00.000  1  2 I TestRunner: finished: a spaced check(ch.lkmc.combray.BrowsingTest)\n"
+        )
+        _, summary = summarize(PASSED_RUN, logcat)
+        self.assertIn("- BrowsingTest `check[1]`: 31.0 s", summary)
+        self.assertIn("- BrowsingTest `a spaced check`: 60.0 s", summary)
+
     def test_no_runs_at_all_fail(self):
         status, summary = summarize(None)
         self.assertEqual(status, 1, summary)

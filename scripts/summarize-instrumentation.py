@@ -28,8 +28,9 @@ NOT_RUN = "not run"
 SLOW_SECONDS = 30
 # `logcat -v threadtime`: date, time, pid, tid, level, tag padded before ": ", message.
 LOGCAT_LINE = re.compile(r"^(\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\s+\d+\s+\d+\s+[VDIWEFA]\s+(.*?)\s*: (.*)$")
-# AndroidJUnitRunner's own lines around each test.
-TEST_EVENT = re.compile(r"^(started|finished): (\w+)\((?:[\w$]+\.)*([\w$]+)\)$")
+# AndroidJUnitRunner's own lines around each test; JUnit's method name may hold spaces or a
+# parameter index (`check[1]`).
+TEST_EVENT = re.compile(r"^(started|finished): (.+?)\((?:[\w$]+\.)*([\w$]+)\)$")
 REPORT_FAILED = re.compile(r"^REPORT .+?: failed\b")
 
 
