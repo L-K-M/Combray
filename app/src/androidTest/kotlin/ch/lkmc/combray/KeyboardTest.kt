@@ -129,6 +129,22 @@ class KeyboardTest {
     @Test
     fun pastingWithTheKeyboardOpenKeepsTheFieldUsable() = pasteIntoShadowField(KeyboardBeforePaste.OPEN)
 
+    @Test
+    fun backDismissesThePasteMenuWithoutLeavingThePage() {
+        openFocusedField("shadow-input", "SHADOW:focused")
+        tapField(LONG_PRESS_MS)
+        device.awaitState { it.pageControl != null }
+        val pasteLabel = compose.activity.getString(android.R.string.paste)
+        compose.waitUntil(KEYBOARD_TIMEOUT_MS) { compose.onAllNodesWithText(pasteLabel).fetchSemanticsNodes().isNotEmpty() }
+        shell("input keyevent KEYCODE_BACK")
+        runUi(SETTLE_MS)
+        instrumentation.runOnMainSync {
+            assertTrue("Back left the browser", compose.activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+        }
+        device.awaitState { it.pageControl == null }
+        assertEquals("${Fixtures.BASE}/shadow-input.html", device.browser.browserState.value.activeTab?.url)
+    }
+
     private fun pasteIntoShadowField(keyboardBefore: KeyboardBeforePaste) {
         openFocusedField("shadow-input", "SHADOW:focused")
         if (keyboardBefore == KeyboardBeforePaste.OPEN) {
