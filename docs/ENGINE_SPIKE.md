@@ -1420,3 +1420,14 @@ Host checks, run on Linux x86_64 with no emulator:
 `engine.rs` is Android-only, so this host did not compile the engine
 changes; the PR's Engine run builds both native ABIs and runs the
 emulator fixture checks.
+
+[Engine run 41096726970](https://github.com/L-K-M/Combray/actions/runs/41096726970)
+at `91c9d76` built both native ABIs and passed all 142 fixture checks
+on the API 30 x86_64 emulator, `MediaPlayerTest` included (10 checks in
+80 s). Its summary listed no failed report-only check and two checks
+over 30 s that wait on purpose (a page-control question's deadline and a
+Karakeep retry). `fixtures.log` held 376 requests, every key replaced.
+None of the new engine media lines appeared: no load overtook its
+document's commit in that run, none was dropped and no hold expired, so
+the race itself is still unobserved; the lines will show it when it
+recurs.
