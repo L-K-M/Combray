@@ -50,6 +50,19 @@ BETWEEN_TESTS_RUN = CRASHED_RUN.replace(
 )
 
 
+# `logcat -v threadtime` of a run: a report-only check that timed out and one that passed, a check
+# that waited out a timeout and a quick one.
+LOGCAT = """\
+10-30 09:00:00.000  4242  4260 I TestRunner: started: slowCheck(ch.lkmc.combray.MediaPlayerTest)
+10-30 09:04:00.500  4242  4243 W MediaPlayerTest: REPORT stop and start: failed: Condition still not satisfied after 240000 ms
+10-30 09:04:00.600  4242  4260 I TestRunner: finished: slowCheck(ch.lkmc.combray.MediaPlayerTest)
+10-30 09:04:01.000  4242  4260 I TestRunner: started: quickCheck(ch.lkmc.combray.MediaPlayerTest)
+10-30 09:04:03.000  4242  4243 I MediaPlayerTest: REPORT audio: passed
+10-30 09:04:03.100  4242  4243 I MediaPlayerTest: REPORT audio position advanced: false
+10-30 09:04:04.000  4242  4260 I TestRunner: finished: quickCheck(ch.lkmc.combray.MediaPlayerTest)
+"""
+
+
 def load_summarizer():
     spec = importlib.util.spec_from_file_location("summarize", ROOT / "scripts/summarize-instrumentation.py")
     module = importlib.util.module_from_spec(spec)
@@ -57,11 +70,11 @@ def load_summarizer():
     return module
 
 
-def summarize(raw):
+def summarize(raw, logcat="not a run\n"):
     """(exit status, printed summary) for one run with this raw output, or for none."""
     summarizer = load_summarizer()
     with tempfile.TemporaryDirectory() as directory:
-        (Path(directory) / "logcat.txt").write_text("not a run\n")
+        (Path(directory) / "logcat.txt").write_text(logcat)
         if raw is not None:
             (Path(directory) / "accessibility.txt").write_text(raw)
         output = io.StringIO()
@@ -89,6 +102,43 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("not run: 2", summary)
         self.assertIn("runs that stopped early: accessibility (keyDispatchingTimedOut)", summary)
         self.assertNotIn("crashed", summary)
+
+    def test_failed_reports_and_slow_checks_are_listed_without_failing_the_run(self):
+        status, summary = summarize(PASSED_RUN, LOGCAT)
+        self.assertEqual(status, 0, summary)
+        self.assertIn(
+            "- 10-30 09:04:00.500 MediaPlayerTest: REPORT stop and start: failed: "
+            "Condition still not satisfied after 240000 ms",
+            summary,
+        )
+        self.assertNotIn("REPORT audio", summary)
+        self.assertIn("- MediaPlayerTest `slowCheck`: 240.6 s", summary)
+        self.assertNotIn("quickCheck", summary)
+
+    def test_a_quiet_log_says_so(self):
+        status, summary = summarize(PASSED_RUN)
+        self.assertEqual(status, 0, summary)
+        self.assertIn("Report-only checks that failed: none", summary)
+        self.assertIn("Checks slower than 30 s: none", summary)
+
+    def test_a_check_across_new_year_is_timed(self):
+        logcat = (
+            "12-31 23:59:50.000  1  2 I TestRunner: started: late(ch.lkmc.combray.BrowsingTest)\n"
+            "01-01 00:00:40.000  1  2 I TestRunner: finished: late(ch.lkmc.combray.BrowsingTest)\n"
+        )
+        _, summary = summarize(PASSED_RUN, logcat)
+        self.assertIn("- BrowsingTest `late`: 50.0 s", summary)
+
+    def test_parameterized_and_spaced_names_are_timed(self):
+        logcat = (
+            "10-30 09:00:00.000  1  2 I TestRunner: started: check[1](ch.lkmc.combray.BrowsingTest)\n"
+            "10-30 09:00:31.000  1  2 I TestRunner: finished: check[1](ch.lkmc.combray.BrowsingTest)\n"
+            "10-30 09:01:00.000  1  2 I TestRunner: started: a spaced check(ch.lkmc.combray.BrowsingTest)\n"
+            "10-30 09:02:00.000  1  2 I TestRunner: finished: a spaced check(ch.lkmc.combray.BrowsingTest)\n"
+        )
+        _, summary = summarize(PASSED_RUN, logcat)
+        self.assertIn("- BrowsingTest `check[1]`: 31.0 s", summary)
+        self.assertIn("- BrowsingTest `a spaced check`: 60.0 s", summary)
 
     def test_no_runs_at_all_fail(self):
         status, summary = summarize(None)

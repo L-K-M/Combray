@@ -677,7 +677,7 @@ class BrowserCoordinator(
         // Only where the dialog offered it: a stray request must not silence the page's dialogs.
         if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
         // Stay cancels the navigation or reload the page asked about: nothing will commit (#92).
-        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) view.awaitingCommit = false
+        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) stopAwaitingCommit(view)
         engine.respondToControl(control, response)
         publish()
     }
@@ -772,7 +772,7 @@ class BrowserCoordinator(
                 live.controls.removeAll(hidden)
                 // The engine answers an unanswered leave-page question Stay (its deadline, or the
                 // tab left the screen), or drops it as the page commits; either way stop waiting.
-                if (hidden.any { it.content is PageControlContent.LeavePage }) live.awaitingCommit = false
+                if (hidden.any { it.content is PageControlContent.LeavePage }) stopAwaitingCommit(live)
             }
             is EngineEvent.EngineError -> onEngineError(event)
             // Heartbeats, echoes, navigation confirmations and diagnostics cannot change what
@@ -833,12 +833,13 @@ class BrowserCoordinator(
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
         // A load names no document, so the engine credits it to the committed one. While a page the app asked
-        // for is pending, a load whose referrer is another origin than the committed page's is most likely the
-        // pending page's, overtaking its commit (a data: page leaving for a fixture page did so on the emulator):
-        // it waits for that commit. Without a pending navigation (a cross-origin frame's media, a late load of
-        // a replaced page) it is the committed page's, as before.
+        // for is pending, a load can be the pending page's, overtaking its commit (a data: page leaving for a
+        // fixture page did so on the emulator, and so did a fixture page leaving for another on the same
+        // origin, whose Play notice the earlier page had already used): it waits for that commit, and goes to
+        // the committed page if the wait ends without one (stopAwaitingCommit). Without a pending navigation (a
+        // cross-origin frame's media, a late load of a replaced page) it is the committed page's at once.
         val referrer = event.referrer
-        if (view.awaitingCommit && referrer != null && !MediaPolicy.isAt(key.address, referrer)) {
+        if (view.awaitingCommit && referrer != null) {
             if (view.heldMedia.size == MAX_HELD_MEDIA) view.heldMedia.removeFirst()
             view.heldMedia.addLast(HeldMedia(event, view.commitRequests))
             return
@@ -854,6 +855,20 @@ class BrowserCoordinator(
         val key = view.currentPage?.takeIf { it.document == document } ?: return
         held.filter { it.request == view.commitRequests && MediaPolicy.isAt(key.address, checkNotNull(it.event.referrer)) }
             .forEach { recordMedia(view, key, it.event) }
+    }
+
+    /**
+     * The app stops waiting for the page it asked for without a commit: no answer in time, a refusal, the user
+     * stayed on the page, or the address only moved within the page. The reports held meanwhile were the
+     * committed page's after all; those of a document no longer current are dropped.
+     */
+    private fun stopAwaitingCommit(view: LiveView) {
+        view.awaitingCommit = false
+        if (view.heldMedia.isEmpty()) return
+        val held = view.heldMedia.toList()
+        view.heldMedia.clear()
+        val key = view.currentPage?.takeIf { it.document == view.currentDocument } ?: return
+        held.filter { it.event.document == key.document }.forEach { recordMedia(view, key, it.event) }
     }
 
     private fun recordMedia(view: LiveView, key: PageKey, event: EngineEvent.MediaBlocked) {
@@ -957,7 +972,7 @@ class BrowserCoordinator(
                 HistoryKind.SAME_DOCUMENT -> {
                     // Only an awaited address within this page (a typed "#part") commits this way:
                     // the old page rewriting its own address does not answer the request.
-                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) view.awaitingCommit = false
+                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) stopAwaitingCommit(view)
                     scheduleCapture(view, event.document, captureTiming.debounceMs)
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
@@ -1115,7 +1130,7 @@ class BrowserCoordinator(
             delay(navigationTimeoutMs)
             submit {
                 if (view.commitRequests != request || !view.awaitingCommit) return@submit
-                view.awaitingCommit = false
+                stopAwaitingCommit(view)
                 publish()
             }
         }
@@ -1430,7 +1445,7 @@ class BrowserCoordinator(
                 // A refusal of an earlier address must not end the wait for a newer one. The
                 // refused address never commits, so it no longer marks a typed navigation.
                 if (event.request == view.awaitedRequest) {
-                    view.awaitingCommit = false
+                    stopAwaitingCommit(view)
                     view.awaitedUrl = null
                 }
                 state.update { it.copy(notice = Notice.AddressNotOpened) }
