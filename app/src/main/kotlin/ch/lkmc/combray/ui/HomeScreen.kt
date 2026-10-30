@@ -58,6 +58,7 @@ import ch.lkmc.combray.core.browser.HomeLink
 import ch.lkmc.combray.core.browser.HomeLinksState
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 
@@ -83,7 +84,7 @@ internal fun HomeScreen(
     onUnpin: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val state by links.collectAsStateWithLifecycle<HomeLinksState?>(null)
+    val state by links.collectAsStateWithLifecycle<HomeLinksState?>(null, context = Dispatchers.Main.immediate)
     // Keep order outside the lifecycle-scoped collector: stopping it must not reset this visit.
     var automaticOrder by rememberSaveable(links) { mutableStateOf(emptyList<String>()) }
     val current = state
@@ -95,9 +96,9 @@ internal fun HomeScreen(
         // Null is still loading, not an empty list that should erase a restored order.
         if (current != null) automaticOrder = automatic.map { it.id }
     }
-    val continued by continuation.collectAsStateWithLifecycle(null)
-    val showContinue by settings.homeContinue.collectAsStateWithLifecycle()
-    val showFrequent by settings.homeFrequentSites.collectAsStateWithLifecycle()
+    val continued by continuation.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
+    val showContinue by settings.homeContinue.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val showFrequent by settings.homeFrequentSites.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     var options by remember { mutableStateOf<HomeLink?>(null) }
 
     if (current == null) {
