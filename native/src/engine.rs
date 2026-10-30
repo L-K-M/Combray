@@ -25,6 +25,7 @@ use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
 use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
+use servo::protocol_handler::ProtocolRegistry;
 use servo::{
     AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
     EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
@@ -59,6 +60,7 @@ use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
 use crate::panic_policy;
+use crate::pdf::{self, PdfProtocolHandler, ViewerToken};
 use crate::profile;
 
 /// Receives engine events on the engine thread.
@@ -713,6 +715,7 @@ impl Engine {
         let servo = ServoBuilder::default()
             .opts(opts)
             .preferences(preferences)
+            .protocol_registry(protocols())
             .event_loop_waker(Box::new(ChannelWaker(self.wake.clone())))
             .build();
 
@@ -2393,6 +2396,23 @@ impl Engine {
         self.surface = Surface::Unbound;
         self.emit(EngineEvent::ShutdownComplete);
     }
+}
+
+/// Combray's own schemes, merged into Servo's built-in ones. `combray-pdf:` serves the PDF
+/// viewer's files; nothing requests them until the viewer preferences are set (docs/PDF.md).
+fn protocols() -> ProtocolRegistry {
+    let mut registry = ProtocolRegistry::default();
+    let token = match ViewerToken::for_process() {
+        Ok(token) => token,
+        Err(error) => {
+            error!("no {} scheme without a random token: {error}", pdf::SCHEME);
+            return registry;
+        },
+    };
+    if let Err(error) = registry.register(pdf::SCHEME, PdfProtocolHandler::new(token)) {
+        error!("registering the {} scheme failed: {error:?}", pdf::SCHEME);
+    }
+    registry
 }
 
 /// What the application needs to present `control`; `None` for controls it does not present.
