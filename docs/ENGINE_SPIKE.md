@@ -1397,6 +1397,47 @@ byte-for-byte and removed from the device). Device checks were not run
 on the development host, which has no emulator; they run in the Engine
 workflow on the PR.
 
+## Toolbar tab-swipe checks (30 October 2026)
+
+The existing horizontal `draggable` handled the URL chip and buttons,
+but also switched tabs on cancellation, multi-touch, and a vertical drag
+that later moved sideways. Each case failed in `BottomBarSwipeTest`
+before replacing it with a one-finger, direction-locked release gesture.
+The coordinator's tab ordering and engine commands are unchanged.
+
+Ten Robolectric checks pass: swipes starting on the address and every
+button in both layouts, physical directions in RTL, idle Home, editing
+Home, cancellation, a second finger, vertical intent, short drags and
+taps and long-press shortcuts. `TabSwipeTest` adds two real-Servo checks:
+a swipe from the address or New tab button selects the previous tab,
+preserves the tab count, and paints that tab's solid-color fixture.
+
+Local checks passed on Linux x86_64, JDK 21, SDK 37:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+(cd native && cargo fmt --check && cargo test --lib --locked) # 123 passed after merging main
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Local native/device validation is blocked: `scripts/build-native.sh`
+reaches the pinned downstream Servo `6d3218a2a949c433d5445fe2c9eb7b66ba0a1081`,
+but the default host compiler lacks C headers (`glslopt`: `assert.h`
+not found). `scripts/m0/emulator.sh` exits for missing `libX11.so.6`;
+`scripts/check-app.sh emulator-5560 ch.lkmc.combray.TabSwipeTest` reports
+no device. The PR's Engine workflow runs native builds and device checks.
+No physical-device result is claimed.
+
+[Engine run 41116731775](https://github.com/L-K-M/Combray/actions/runs/41116731775)
+built both native ABIs and passed both `TabSwipeTest` checks on the API 30
+x86_64 emulator. The suite's only failure was
+`BrowsingTest.mediaIsCancelledBeforeDownloadingAndThePageIsTold`.
+It reported one media entry instead of two; the swipe checks passed in
+15.3 s.
+Main's media-report fix (#164, below) was merged into the swipe branch
+before rerunning the full gate.
+
 ## 31. Missing media notice after a load overtakes its page (30 October 2026)
 
 Symptom: the Play notice never appeared for a page with media, and
