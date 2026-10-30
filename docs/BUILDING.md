@@ -18,10 +18,11 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `df5304686d47d6156c9adfed622abca988b3f27e` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `331149c771f2ab018a0412c366c810f67197e900` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
 | Upstream base | v0.7.0, git `aac43a3f31a259f04a574f5ec4e959c943ad7cc7` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
 | Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, and resolved styles and `var()` in rasterized SVG subtrees | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
-| Page input | Focus defaults on shadow-root fields; context-menu paste text bound to the original document and node | [Reproduction and checks](ENGINE_SPIKE.md#32-shadow-root-fields-and-paste-30-october-2026) |
+| Page input | Focus defaults on shadow-root fields; context-menu paste text bound to the original document and node | [Reproduction and checks](ENGINE_SPIKE.md#33-shadow-root-fields-and-paste-30-october-2026) |
+| Scroll repaint fix | Restore scroll offsets when iframe pipelines start or exit and when a shared-context view closes | [Regression and validation](ENGINE_SPIKE.md#32-scroll-position-flicker-30-october-2026) |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
 | PDFium-wasm | `@embedpdf/pdfium` 2.15.1: `pdfium.wasm` and `index.browser.js`, committed `gzip -9n` in `native/src/pdf/vendor/` | `scripts/vendor-pdfium.py` (npm integrity and SHA-256 pins), the same SHA-256s in `native/src/pdf.rs` tests ([Updating PDFium](#updating-pdfium)) |
