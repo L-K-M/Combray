@@ -3,6 +3,7 @@ package ch.lkmc.combray
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.browser.ThemeMode
 import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.HisterSearch
 import kotlinx.coroutines.runBlocking
@@ -99,17 +100,26 @@ class HisterTest {
 
     @Test
     fun aPdfInTheViewerIsNotSentAsTheViewersLabels() {
-        // The viewer shows the pages as images and only its own labels as text; the PDF's text
-        // reaches Hister in a later step (docs/PDF.md).
-        val pdf = Fixtures.pdf("plain.pdf", "hister${System.currentTimeMillis()}")
-        device.browser.openUrl(pdf, Placement.CURRENT_TAB)
-        device.awaitState { it.activeTab?.url == pdf && it.activeTab?.title == Fixtures.PDF_PLAIN_TITLE && it.activeTab?.loading == false }
-        assertTrue(device.matches(device.awaitScreen(Device.PDF_PLUM), Device.PDF_PLUM))
+        // A damaged PDF: once the viewer has named it, its message ("Loading PDF…", then why the
+        // file cannot be shown) is text in the page whenever capture runs, and only capture.js's
+        // viewer check keeps it out of Hister. The PDF's text reaches Hister in a later step
+        // (docs/PDF.md).
+        val theme = device.settings.themeMode.value
+        device.settings.setThemeMode(ThemeMode.LIGHT)
+        try {
+            val pdf = Fixtures.pdf("corrupt.pdf", "hister${System.currentTimeMillis()}")
+            device.browser.openUrl(pdf, Placement.CURRENT_TAB)
+            device.awaitState { it.activeTab?.url == pdf && it.activeTab?.title == "corrupt.pdf" && it.activeTab?.loading == false }
+            // The viewer's background (its light appearance), not Servo's white stand-in page.
+            assertTrue(device.matches(device.awaitScreen(Device.PDF_VIEWER_LIGHT), Device.PDF_VIEWER_LIGHT))
 
-        val later = "${Fixtures.BASE}/rendered.html?p=afterpdf${System.currentTimeMillis()}"
-        device.browser.openUrl(later, Placement.NEW_TAB)
-        awaitDocument(later)
-        assertFalse(documents().has(pdf))
+            val later = "${Fixtures.BASE}/rendered.html?p=afterpdf${System.currentTimeMillis()}"
+            device.browser.openUrl(later, Placement.NEW_TAB)
+            awaitDocument(later)
+            assertFalse(documents().has(pdf))
+        } finally {
+            device.settings.setThemeMode(theme)
+        }
     }
 
     @Test

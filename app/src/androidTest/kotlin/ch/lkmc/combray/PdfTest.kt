@@ -10,7 +10,6 @@ import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.ThemeMode
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -179,11 +178,14 @@ class PdfTest {
         device.browser.openUrl(frame, Placement.CURRENT_TAB)
         device.awaitState { it.activeTab?.url == frame && it.activeTab?.title == "PDF-FRAME:loaded" }
         assertEquals(1, requests(key))
-        // The frame fills the screen: a viewer in it would draw the plum band within seconds.
+        // The frame fills the screen and shows Servo's white stand-in page. A viewer in it would
+        // show its background, a message on it, or the plum band. Every sample is checked: the
+        // light home screen matches white too, so one sample could be taken before the frame drew.
         val deadline = System.currentTimeMillis() + SETTLE_MS
         while (System.currentTimeMillis() < deadline) {
+            device.dismissSystemDialogs()
             val seen = device.screenColor()
-            assertFalse("the frame shows a PDF page (%06x)".format(seen ?: -1), device.matches(seen, Device.PDF_PLUM))
+            assertTrue("the frame does not show Servo's stand-in (%06x)".format(seen ?: -1), device.matches(seen, Device.STAND_IN_WHITE))
             Thread.sleep(1_000)
         }
     }

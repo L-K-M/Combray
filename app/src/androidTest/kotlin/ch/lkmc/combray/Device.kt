@@ -295,6 +295,11 @@ class Device(private val frame: () -> Unit = {}) {
         const val PDF_NAVY = 0x24306e
         /** The PDF viewer's background in the light appearance (native/src/pdf/viewer.css). */
         const val PDF_VIEWER_LIGHT = 0xe4e4e7
+        /**
+         * Servo's stand-in page for a file it cannot show, away from its one line of text. The
+         * light home screen's paper colour also matches it within [TOLERANCE].
+         */
+        const val STAND_IN_WHITE = 0xffffff
         /** The background of [Fixtures.pdfLink]. */
         const val PDF_LINK_PAGE = 0x6b4a2e
     }

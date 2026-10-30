@@ -123,8 +123,10 @@ class ReaderTest {
 
     @Test
     fun aPdfHasNoArticleYet() {
-        // The viewer's labels are no article; reading a PDF as text is a later step (docs/PDF.md).
-        val reader = openReader(Fixtures.pdf("plain.pdf", "reader${System.currentTimeMillis()}"), Fixtures.PDF_PLAIN_TITLE)
+        // A damaged PDF: once the viewer has named it, its message ("Loading PDF…", then why the
+        // file cannot be shown) is text in the page, and only reader.js's viewer check keeps that
+        // from being an article. Reading a PDF as text is a later step (docs/PDF.md).
+        val reader = openReader(Fixtures.pdf("corrupt.pdf", "reader${System.currentTimeMillis()}"), "corrupt.pdf")
         assertTrue("$reader", reader is ReaderState.Unavailable)
     }
 
