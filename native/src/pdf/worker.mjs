@@ -12,8 +12,8 @@
 //     width, height }       ◀───────  { id, ok, pixels (transferred), links }
 //
 // A failure answers { id, ok: false, error: { kind, message } }; kind is one of ERROR. The worker
-// keeps the document open until the viewer ends it on pagehide (terminate), which frees the wasm
-// memory with it.
+// keeps the document open until the viewer ends it on pagehide (terminate, then an empty message
+// that wakes an idle worker so Servo ends it), which frees the wasm memory with it.
 //
 // The page and this worker share one opaque origin and the viewer's CSP (the scheme sends it with
 // this file): scripts and fetches only from the viewer's own origin and the blob: URL, and

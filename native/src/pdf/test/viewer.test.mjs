@@ -1,6 +1,6 @@
 // Host tests of the PDF viewer's logic and of its worker against the vendored PDFium, with the
-// device checks' fixture PDFs (testing/fixtures/server.py --write-pdfs). Needs Node 20 or later
-// and python3; no browser.
+// device checks' fixture PDFs (testing/fixtures/server.py --write-pdfs), and of the viewer's
+// lifecycle on a fake page. Needs Node 20 or later and python3; no browser.
 //
 //   node --test native/src/pdf/test/viewer.test.mjs
 
@@ -22,6 +22,8 @@ import {
   MAX_PAGE_PIXELS,
   PAGE_MARGIN,
   PROBLEM,
+  PdfWorker,
+  Viewer,
   bitmapBudget,
   bitmapSize,
   byteCount,
@@ -33,6 +35,7 @@ import {
   linkHref,
   pagesBetween,
 } from "../viewer.mjs";
+
 const repository = fileURLToPath(new URL("../../../../", import.meta.url));
 const vendor = join(repository, "native/src/pdf/vendor");
 const scratch = mkdtempSync(join(tmpdir(), "combray-pdf-test-"));
@@ -302,4 +305,285 @@ test("a few pages hold bitmaps, or every page on screen when more fit", () => {
   assert.equal(bitmapBudget([10, 29]), 20);
   const wanted = drawOrder([0, 40], [10, 29]).slice(0, bitmapBudget([10, 29]));
   assert.deepEqual(wanted, Array.from({ length: 20 }, (_, index) => index + 10));
+});
+
+// The Viewer on a fake page: just the DOM, window and Worker calls viewer.mjs makes. The test
+// plays the worker's part, and runs animation frames and page events itself.
+
+class FakeElement {
+  constructor(name) {
+    this.localName = name;
+    this.children = [];
+    this.parent = null;
+    this.attributes = new Map();
+    this.listeners = {};
+    this.style = {};
+    this.className = "";
+    this.textContent = "";
+    this.hidden = false;
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+
+  getAttribute(name) {
+    return this.attributes.has(name) ? this.attributes.get(name) : null;
+  }
+
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+
+  append(...nodes) {
+    for (const node of nodes) {
+      node.remove();
+      node.parent = this;
+      this.children.push(node);
+    }
+  }
+
+  remove() {
+    if (!this.parent) return;
+    this.parent.children.splice(this.parent.children.indexOf(this), 1);
+    this.parent = null;
+  }
+
+  replaceChildren(...nodes) {
+    for (const child of [...this.children]) child.remove();
+    this.append(...nodes);
+  }
+
+  /** The first descendant with the class in `selector` (".name"; the only kind the viewer uses). */
+  querySelector(selector) {
+    for (const child of this.children) {
+      if (child.className.split(" ").includes(selector.slice(1))) return child;
+      const found = child.querySelector(selector);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  addEventListener(type, listener) {
+    (this.listeners[type] ||= []).push(listener);
+  }
+
+  getContext() {
+    return { putImageData() {} };
+  }
+}
+
+class FakeWorker {
+  constructor() {
+    this.calls = [];
+    this.answered = new Set();
+    this.listeners = {};
+  }
+
+  postMessage(data) {
+    this.calls.push({ call: "postMessage", data });
+  }
+
+  terminate() {
+    this.calls.push({ call: "terminate" });
+  }
+
+  addEventListener(type, listener) {
+    (this.listeners[type] ||= []).push(listener);
+  }
+
+  requests(op) {
+    return this.calls.filter(({ data }) => data && data.op === op).map(({ data }) => data);
+  }
+
+  reply(request, values) {
+    this.answered.add(request.id);
+    for (const listener of this.listeners.message) listener({ data: { id: request.id, ok: true, ...values } });
+  }
+}
+
+/** Lets the viewer's awaits continue. */
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+/** Runs `run` on a fake page 360 CSS pixels wide whose PDF is ready, then restores Node's globals. */
+async function onFakePage(run) {
+  const root = new FakeElement("html");
+  root.clientWidth = 360;
+  root.setAttribute("data-pdf-state", ENGINE_STATE.READY);
+  root.setAttribute("data-pdf-src", "blob:null/1");
+  const listeners = {};
+  const frames = [];
+  const workers = [];
+  const page = {
+    root,
+    workers,
+    get worker() {
+      return workers.at(-1);
+    },
+    dispatch(type, event = {}) {
+      for (const listener of listeners[type] || []) listener(event);
+    },
+    frame() {
+      for (const callback of frames.splice(0)) callback();
+    },
+  };
+  const globals = {
+    document: {
+      documentElement: root,
+      head: new FakeElement("head"),
+      body: new FakeElement("body"),
+      title: "",
+      URL: "http://localhost:8766/pdf/a.pdf",
+      createElement: (name) => new FakeElement(name),
+    },
+    window: globalThis,
+    Worker: class extends FakeWorker {
+      constructor() {
+        super();
+        workers.push(this);
+      }
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    ImageData: class {
+      constructor(data, width, height) {
+        Object.assign(this, { data, width, height });
+      }
+    },
+    addEventListener: (type, listener) => (listeners[type] ||= []).push(listener),
+    requestAnimationFrame: (callback) => frames.push(callback),
+    scrollTo: (x, y) => {
+      globalThis.scrollY = y;
+    },
+    scrollY: 0,
+    innerWidth: 360,
+    innerHeight: 640,
+    devicePixelRatio: 1,
+  };
+  const saved = Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
+  for (const [name, value] of Object.entries(globals)) {
+    Object.defineProperty(globalThis, name, { value, writable: true, configurable: true });
+  }
+  try {
+    await run(page);
+  } finally {
+    for (const [name, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  }
+}
+
+/** A viewer on `page` whose worker opened a PDF of `sizes`, with the first frame laid out. */
+async function openViewer(page, sizes) {
+  const viewer = new Viewer(page.root);
+  viewer.start();
+  page.worker.reply(page.worker.requests("open")[0], { count: sizes.length, pages: sizes, title: "" });
+  await tick();
+  page.frame();
+  return viewer;
+}
+
+/** Answers each page the viewer asks the current worker for, with white pixels and `links` by page. */
+async function drawPages(page, links = {}) {
+  const worker = page.worker;
+  for (;;) {
+    const request = worker.requests("render").find(({ id }) => !worker.answered.has(id));
+    if (!request) return;
+    const pixels = new Uint8Array(request.width * request.height * 4).fill(0xff);
+    worker.reply(request, { pixels, links: links[request.index] || [] });
+    await tick();
+  }
+}
+
+test("ending the worker also wakes it: Servo ends an idle worker only on its next message", async () => {
+  await onFakePage(async (page) => {
+    const worker = new PdfWorker(() => assert.fail("no failure expected"));
+    worker.terminate();
+    const calls = page.worker.calls;
+    assert.deepEqual(calls.map(({ call }) => call), ["terminate", "postMessage"]);
+    // worker.mjs ignores a message without data.
+    assert.equal(calls[1].data, null);
+  });
+});
+
+test("back from the back-forward cache, no page is drawn before the PDF is open again", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER, LETTER]);
+    await drawPages(page);
+    page.dispatch("pagehide");
+    page.dispatch("pageshow", { persisted: true });
+    const worker = page.worker;
+    assert.equal(page.workers.length, 2);
+
+    // A scroll while the new worker still opens the PDF.
+    page.dispatch("scroll");
+    page.frame();
+    assert.deepEqual(worker.requests("render"), []);
+
+    worker.reply(worker.requests("open")[0], { count: 2, pages: [LETTER, LETTER], title: "" });
+    await tick();
+    page.frame();
+    await drawPages(page);
+    assert.ok(worker.requests("render").length > 0);
+    assert.ok([...viewer.views.values()].every((view) => !view.failed && view.drawn));
+  });
+});
+
+test("a released bitmap is 1x1, which Servo frees at once (a 0x0 one it keeps until GC)", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER]);
+    await drawPages(page);
+    const { canvas } = viewer.views.get(0);
+    assert.deepEqual([canvas.width, canvas.height], [344, 445]);
+    page.dispatch("pagehide");
+    assert.deepEqual([canvas.width, canvas.height], [1, 1]);
+  });
+});
+
+test("back after the screen turned while away, the pages fit its new width", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER, LETTER]);
+    page.dispatch("pagehide");
+    // Servo fires no resize event for a change made while the page was in the back-forward cache.
+    page.root.clientWidth = 720;
+    page.dispatch("pageshow", { persisted: true });
+    page.worker.reply(page.worker.requests("open")[0], { count: 2, pages: [LETTER, LETTER], title: "" });
+    await tick();
+    page.frame();
+    assert.equal(viewer.layoutWidth, 720);
+    assert.equal(viewer.views.get(0).element.style.width, `${720 - 2 * PAGE_MARGIN}px`);
+  });
+});
+
+test("a wider screen that shows fewer pages drops the others, and links to them do nothing", async () => {
+  await onFakePage(async (page) => {
+    const sizes = Array.from({ length: MAX_PAGES }, () => LETTER);
+    const narrow = layoutPages(sizes, 360);
+    const shownWide = layoutPages(sizes, 720).shown;
+    assert.ok(shownWide < narrow.shown);
+    const viewer = await openViewer(page, sizes);
+
+    // Reading just above the last page the wide layout shows: pages past it have elements, and
+    // this page links to a page past it.
+    const index = shownWide - 2;
+    scrollTo(0, narrow.pages[index].top);
+    page.dispatch("scroll");
+    page.frame();
+    await drawPages(page, { [index]: [{ rect: [0, 0, 1, 1], page: shownWide + 100 }] });
+    const withElements = () => [...viewer.views.keys()];
+    assert.ok(withElements().some((at) => at >= shownWide));
+    const link = viewer.views.get(index).element.querySelector(".link");
+    assert.ok(link);
+
+    page.root.clientWidth = 720;
+    page.dispatch("resize");
+    assert.equal(viewer.layout.shown, shownWide);
+    assert.ok(withElements().every((at) => at < shownWide));
+    const top = scrollY;
+    link.listeners.click[0]({ preventDefault() {} });
+    assert.equal(scrollY, top);
+  });
 });

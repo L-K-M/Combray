@@ -17,10 +17,12 @@
 // Links become <a> overlays for http, https, mailto and tel, or scroll to their page (owner
 // decision, 29 October 2026). The title is the PDF's metadata title, else its file name.
 //
-// On pagehide the worker ends (its wasm memory with it) and the bitmaps go. A page in the
-// back-forward cache starts again on pageshow from the same blob: URL, which the engine keeps
+// On pagehide the worker ends and the bitmaps go. Servo ends an idle worker only once a message
+// wakes it (PdfWorker.terminate), and then drops its runtime with PDFium's wasm memory. A page in
+// the back-forward cache starts again on pageshow from the same blob: URL, which the engine keeps
 // while the document lives: never revoke it, and add no unload or beforeunload listener, which
-// would keep the document out of that cache and free the PDF on leaving.
+// would keep the document out of that cache and free the PDF on leaving. Servo sends such a page
+// no resize event, so it lays the pages out again at the current width.
 
 /** The root element's data-pdf-state values the engine sets. */
 export const ENGINE_STATE = Object.freeze({
@@ -212,7 +214,7 @@ export function drawOrder(near, visible) {
 }
 
 /** Requests to the PDFium worker, answered by id. */
-class PdfWorker {
+export class PdfWorker {
   constructor(onFailure) {
     this.pending = new Map();
     this.nextId = 1;
@@ -245,15 +247,22 @@ class PdfWorker {
 
   terminate() {
     this.worker.terminate();
+    // Servo's terminate() only flags the worker and interrupts running script. An idle worker
+    // waits for a message and keeps PDFium's wasm memory until one comes; woken, it sees the flag,
+    // ends and drops its runtime. worker.mjs would ignore this empty message.
+    this.worker.postMessage(null);
     for (const request of this.pending.values()) request.reject({ kind: "stopped", message: "stopped" });
     this.pending.clear();
   }
 }
 
-class Viewer {
+/** The viewer of one PDF document; exported for the host tests, which drive it on a fake page. */
+export class Viewer {
   constructor(root) {
     this.root = root;
     this.worker = null;
+    // Whether this.worker has the PDF open: pages are drawn only then.
+    this.ready = false;
     this.stopped = false;
     this.problem = null;
     // From the worker once the PDF is open.
@@ -310,6 +319,7 @@ class Viewer {
   }
 
   startWorker() {
+    this.ready = false;
     this.worker = new PdfWorker((error) => this.fail(error));
   }
 
@@ -364,7 +374,10 @@ class Viewer {
     if (opened.title) document.title = opened.title;
     this.count = opened.count;
     this.sizes = opened.pages;
-    if (!this.layout) this.relayout();
+    this.ready = true;
+    // Also back from the back-forward cache: Servo fires no resize event for a change of the
+    // screen's width while the page was away.
+    this.relayout();
     this.hideStatus();
     this.main.setAttribute("aria-busy", "false");
     this.requestUpdate();
@@ -384,7 +397,11 @@ class Viewer {
     this.layout = layoutPages(this.sizes, width);
     this.generation++;
     this.pages.style.height = `${this.layout.height}px`;
-    for (const [index, view] of this.views) this.place(index, view.element);
+    // A wider screen makes pages taller, so fewer may fit under MAX_DOCUMENT_HEIGHT.
+    for (const [index, view] of this.views) {
+      if (index >= this.layout.shown) this.remove(index, view);
+      else this.place(index, view.element);
+    }
     this.showMore();
     if (anchor) {
       const page = this.layout.pages[Math.min(anchor.index, this.layout.shown - 1)];
@@ -477,14 +494,15 @@ class Viewer {
   }
 
   release(view) {
-    // A zero-sized canvas gives its bitmap back.
-    view.canvas.width = 0;
-    view.canvas.height = 0;
+    // Servo frees a canvas's pixmap and WebRender image when it is resized to a size it can paint;
+    // a 0x0 canvas keeps both until garbage collection.
+    view.canvas.width = 1;
+    view.canvas.height = 1;
     view.drawn = "";
   }
 
   async drawNext() {
-    if (this.drawing || this.stopped || !this.worker) return;
+    if (this.drawing || this.stopped || !this.worker || !this.ready) return;
     const next = this.nextToDraw();
     if (!next) return;
     this.drawing = true;
@@ -549,7 +567,9 @@ class Viewer {
         // Scrolls without changing the address: the tab's address stays the PDF's.
         anchor.addEventListener("click", (event) => {
           event.preventDefault();
-          scrollTo(0, this.layout.pages[link.page].top - PAGE_MARGIN);
+          // The screen may have widened since, and then fewer pages are shown.
+          const page = this.layout.pages[link.page];
+          if (page) scrollTo(0, page.top - PAGE_MARGIN);
         });
       } else {
         const href = linkHref(link.uri, document.URL);
