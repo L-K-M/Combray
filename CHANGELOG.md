@@ -225,6 +225,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A tab selected while Combray is in the background, for example when a
+  page closes its own window, stays hidden and unfocused, so it stays
+  throttled until you return to the app.
 - Charts and other inline SVG styled from their page now render in their
   real colors and text: the engine resolves the page's class rules,
   custom properties and `var()` references when it rasterizes SVG.
