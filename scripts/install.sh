@@ -102,6 +102,13 @@ EOF
 !! adb has no permission to use the phone. On Linux, add a udev rule for
    it (https://developer.android.com/studio/run/device) and replug.
 EOF
+    elif [ -n "$states" ]; then
+        # authorizing, connecting, recovery, sideload and the like.
+        cat >&2 <<EOF
+!! adb sees a device it cannot install to yet ($(printf '%s\n' "$states" | sort -u | paste -sd, -)).
+   Wait for "authorizing" or "connecting" to finish, or restart the phone
+   into Android from recovery or sideload, then try again.
+EOF
     else
         cat >&2 <<EOF
 !! adb sees no phone or emulator ('$ADB devices' lists none).
@@ -130,7 +137,8 @@ EOF
 
 check_device
 if [ "$CHECK_ONLY" -eq 1 ]; then
-    echo "==> adb sees a device"
+    # Without adb, check_device checked nothing; it said so already.
+    [ -z "$ADB" ] || echo "==> adb sees a device"
     exit 0
 fi
 

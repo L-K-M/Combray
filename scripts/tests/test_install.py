@@ -89,6 +89,22 @@ class InstallTest(unittest.TestCase):
         result = self.run_script("install.sh", devices="R5CT12345\tno permissions (missing udev rules?)\n")
         self.assert_refused(result, "no permission")
 
+    def test_a_device_in_another_state_is_named(self):
+        for state in ("authorizing", "connecting", "recovery", "sideload"):
+            (self.root / "gradle-calls").unlink(missing_ok=True)
+            result = self.run_script("install.sh", devices=f"R5CT12345\t{state}\n")
+            self.assert_refused(result, f"cannot install to yet ({state})")
+            self.assertNotIn("sees no phone", result.stderr)
+
+    def test_without_adb_the_device_check_claims_nothing(self):
+        (self.root / "local.properties").write_text("")
+        self.adb.unlink()
+        self.env["PATH"] = f"{self.path}{os.pathsep}/usr/bin{os.pathsep}/bin"
+        result = self.run_script("install.sh", "--device-check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("adb not found", result.stdout)
+        self.assertNotIn("adb sees a device", result.stdout)
+
     def test_a_usable_device_installs_and_launches(self):
         result = self.run_script("install.sh", devices="R5CT12345\tdevice\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
