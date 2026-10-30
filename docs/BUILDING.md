@@ -53,6 +53,8 @@ COMBRAY_ABI=x86_64 scripts/build.sh --debug    # for the emulator
 scripts/build.sh --debug --install             # then install and launch on the connected device
 ```
 
+With `--install`, the build first asks adb for a usable device (`scripts/install.sh --device-check`) and stops at once if there is none, naming the likely cause: USB debugging off, the phone's "Allow USB debugging?" prompt not accepted, an offline connection, or a second adb version on `PATH`. `scripts/install.sh` runs the same check before Gradle and uses the SDK's adb, as Gradle does.
+
 `scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and checks out the exact downstream commit with `scripts/m0/fetch-servo.sh`. Every build restores and verifies the pinned source. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
 
 ```sh
@@ -220,6 +222,7 @@ For an arm64 device: `COMBRAY_ABI=arm64 scripts/m0/build-harness.sh`, then `scri
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| `installDebug`: `No connected devices!` although the phone is plugged in | adb does not list the phone as a usable `device`: USB debugging off, the authorization prompt not accepted, a charge-only cable, or two adb versions restarting each other's server | `scripts/install.sh` checks with the SDK's adb before Gradle and names the cause; run `<sdk>/platform-tools/adb devices -l` to see the state |
 | `Servo currently only supports NDK r29.` | The Servo book still mentions NDK 28.2; v0.6.0's mach requires r29 | Install `ndk;29.0.14206865` |
 | `current package believes it's in a workspace when it's not` in `mozjs_*_glue` | Their build scripts run `cbindgen`, which runs `cargo metadata` inside `vendor/` | Patch 0001: no `vendor/`, crates from crates.io at the locked versions |
 | `failed to select a version ... encoding_rs (locked to 0.8.41)` | The same glue crates carry their own `Cargo.lock`; `vendor/` only has 0.8.35 | Patch 0001 |

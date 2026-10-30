@@ -228,6 +228,12 @@ All notable changes to this project are documented here. The format follows
 - Charts and other inline SVG styled from their page now render in their
   real colors and text: the engine resolves the page's class rules,
   custom properties and `var()` references when it rasterizes SVG.
+- `scripts/install.sh` and `scripts/build.sh --install` check for a usable
+  device before building and say why there is none (USB debugging off, the
+  phone's prompt not accepted, an offline connection, or a second adb
+  version), instead of Gradle's "No connected devices!" after the build.
+  The app launch after installing now finds the SDK's adb through
+  `local.properties`.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
