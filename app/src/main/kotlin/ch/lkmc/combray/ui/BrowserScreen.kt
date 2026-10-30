@@ -89,6 +89,7 @@ import ch.lkmc.combray.player.PlayerActivity
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
@@ -108,9 +109,13 @@ fun BrowserScreen(
     onLeave: () -> Unit,
 ) {
     val browser = graph.browser
-    val state by browser.browserState.collectAsStateWithLifecycle()
-    val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
-    val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle()
+    // The UI collects every flow on the main thread. The coordinator publishes from
+    // Dispatchers.Default and Room from its executor; without a context, a Compose test's
+    // collector resumes there, wakes the recomposer there and may run the frame there, where a
+    // BackHandler's lifecycle effect throws (MainThreadStateTest).
+    val state by browser.browserState.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val textSize by graph.settings.textSize.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var homeMode by rememberSaveable { mutableStateOf(AddressEditorMode.IDLE) }
     var homeEntry by rememberSaveable { mutableIntStateOf(0) }
@@ -144,9 +149,9 @@ fun BrowserScreen(
     val saveStatus by remember(tab?.url) {
         val url = tab?.url
         graph.integrations.saveStatus(url).map { PageSaveStatus(url, it) }
-    }.collectAsStateWithLifecycle(PageSaveStatus(null, SaveStatus.Unsaved))
+    }.collectAsStateWithLifecycle(PageSaveStatus(null, SaveStatus.Unsaved), context = Dispatchers.Main.immediate)
     val histerStored by remember(tab?.url) { graph.integrations.hister.captureStored(tab?.url) }
-        .collectAsStateWithLifecycle(false)
+        .collectAsStateWithLifecycle(false, context = Dispatchers.Main.immediate)
 
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
@@ -307,7 +312,7 @@ fun BrowserScreen(
 
     // A requested sheet replaces the open one and starts fresh: the counter restarts its state.
     var launches by rememberSaveable { mutableIntStateOf(0) }
-    val pendingLaunch by launchRequest.collectAsStateWithLifecycle()
+    val pendingLaunch by launchRequest.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     LaunchedEffect(pendingLaunch) {
         val request = pendingLaunch ?: return@LaunchedEffect
         launches++

@@ -36,6 +36,7 @@ import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.KarakeepBookmark
 import ch.lkmc.combray.core.integration.KarakeepPage
 import ch.lkmc.combray.core.integration.KarakeepRead
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -53,7 +54,7 @@ private sealed interface BookmarksUi {
  */
 @Composable
 fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
-    val service by integrations.karakeepService.collectAsStateWithLifecycle(null)
+    val service by integrations.karakeepService.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
