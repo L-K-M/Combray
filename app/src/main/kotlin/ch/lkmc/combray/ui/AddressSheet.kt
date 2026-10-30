@@ -133,7 +133,7 @@ internal fun AddressEditor(
     // Matches come from this device only: typing contacts no server. One subscription for the
     // sheet's life; ranking parses every candidate's host, so it waits for a pause in typing and
     // runs off the main thread. The prefilled text lists none: it is where you are.
-    val items by remember { recent() }.collectAsStateWithLifecycle(emptyList())
+    val items by remember { recent() }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
     val query = field.text.trim()
     val edited = mode == AddressEditorMode.EDITING && AddressSuggestions.shouldSuggest(field.text, prefilled)
     val matches by produceState(emptyList<RecentItem>(), items, query, edited) {
@@ -142,8 +142,11 @@ internal fun AddressEditor(
         value = emptyList()
         if (!edited) return@produceState
         delay(SUGGESTION_DELAY_MS)
-        value = withContext(Dispatchers.Default) {
-            AddressSuggestions.rank(items.filter { it.matches(query) }, query, target)
+        // Ranked off the main thread, written on it, as for the flows the UI collects (BrowserScreen).
+        withContext(Dispatchers.Main.immediate) {
+            value = withContext(Dispatchers.Default) {
+                AddressSuggestions.rank(items.filter { it.matches(query) }, query, target)
+            }
         }
     }
 

@@ -37,6 +37,7 @@ import ch.lkmc.combray.R
 import ch.lkmc.combray.core.integration.HisterHit
 import ch.lkmc.combray.core.integration.HisterIntegration
 import ch.lkmc.combray.core.integration.HisterSearch
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -54,7 +55,7 @@ private sealed interface SearchUi {
  */
 @Composable
 fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
-    val service by hister.service.collectAsStateWithLifecycle(null)
+    val service by hister.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
