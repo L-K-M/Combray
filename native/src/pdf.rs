@@ -20,9 +20,9 @@
 //! Every response carries the viewer's CSP: Servo gives a worker loaded from a non-local
 //! scheme the policy in its own script response, not the policy of the document that made it.
 //!
-//! Only PDFium is served so far. The viewer's module, style sheet and worker join the allowlist
-//! with the engine change that creates viewer documents, and the phone's CJK fonts after that
-//! (docs/PDF.md). Until then no document loads these files.
+//! The files are the viewer's module, style sheet and worker (`pdf/viewer.mjs`, `viewer.css`,
+//! `worker.mjs`) and PDFium. The engine loads the module into every top-level PDF response once
+//! `engine.rs` sets the viewer preferences; the phone's CJK fonts join later (docs/PDF.md).
 
 use std::fmt;
 use std::fs::File;
@@ -46,6 +46,10 @@ pub const CONTENT_TYPE_HEADER: &str = "content-type";
 /// `gzip -9n` by `scripts/vendor-pdfium.py`.
 const PDFIUM_WASM_GZ: &[u8] = include_bytes!("pdf/vendor/pdfium.wasm.gz");
 const PDFIUM_SCRIPT_GZ: &[u8] = include_bytes!("pdf/vendor/index.browser.js.gz");
+/// The viewer: the module the engine's viewer document loads, its style sheet and its worker.
+const VIEWER_MODULE: &str = include_str!("pdf/viewer.mjs");
+const VIEWER_STYLESHEET: &str = include_str!("pdf/viewer.css");
+const VIEWER_WORKER: &str = include_str!("pdf/worker.mjs");
 
 /// The random part of the viewer's host name. Not shown in logs: it is what keeps sites from
 /// finding the viewer's files.
@@ -107,12 +111,21 @@ pub fn viewer_csp(token: &ViewerToken) -> String {
 /// The allowlist: every file the scheme serves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ViewerFile {
+    Module,
+    Stylesheet,
+    Worker,
     PdfiumScript,
     PdfiumWasm,
 }
 
 impl ViewerFile {
-    const ALL: [ViewerFile; 2] = [ViewerFile::PdfiumScript, ViewerFile::PdfiumWasm];
+    const ALL: [ViewerFile; 5] = [
+        ViewerFile::Module,
+        ViewerFile::Stylesheet,
+        ViewerFile::Worker,
+        ViewerFile::PdfiumScript,
+        ViewerFile::PdfiumWasm,
+    ];
 
     fn at(path: &str) -> Option<ViewerFile> {
         ViewerFile::ALL.into_iter().find(|file| file.path() == path)
@@ -120,6 +133,9 @@ impl ViewerFile {
 
     fn path(self) -> &'static str {
         match self {
+            ViewerFile::Module => "/viewer.mjs",
+            ViewerFile::Stylesheet => "/viewer.css",
+            ViewerFile::Worker => "/worker.mjs",
             ViewerFile::PdfiumScript => "/pdfium/index.browser.js",
             ViewerFile::PdfiumWasm => "/pdfium/pdfium.wasm",
         }
@@ -127,16 +143,21 @@ impl ViewerFile {
 
     fn content_type(self) -> &'static str {
         match self {
-            ViewerFile::PdfiumScript => "text/javascript",
+            // Module scripts and module workers need a JavaScript MIME type.
+            ViewerFile::Module | ViewerFile::Worker | ViewerFile::PdfiumScript => "text/javascript",
+            ViewerFile::Stylesheet => "text/css",
             // What WebAssembly.instantiateStreaming requires.
             ViewerFile::PdfiumWasm => "application/wasm",
         }
     }
 
-    /// Inflated on every request rather than kept: a viewer loads each file once, and keeping
-    /// 4.9 MB for the life of the process would cost more than inflating 2.2 MB again.
+    /// PDFium is inflated on every request rather than kept: a viewer loads each file once, and
+    /// keeping 4.9 MB for the life of the process would cost more than inflating 2.2 MB again.
     fn contents(self) -> io::Result<Vec<u8>> {
         match self {
+            ViewerFile::Module => Ok(VIEWER_MODULE.as_bytes().to_vec()),
+            ViewerFile::Stylesheet => Ok(VIEWER_STYLESHEET.as_bytes().to_vec()),
+            ViewerFile::Worker => Ok(VIEWER_WORKER.as_bytes().to_vec()),
             ViewerFile::PdfiumScript => inflate(PDFIUM_SCRIPT_GZ),
             ViewerFile::PdfiumWasm => inflate(PDFIUM_WASM_GZ),
         }
@@ -353,6 +374,9 @@ mod tests {
     #[test]
     fn the_allowlisted_files_are_served_with_their_types() {
         for (path, content_type) in [
+            ("/viewer.mjs", "text/javascript"),
+            ("/viewer.css", "text/css"),
+            ("/worker.mjs", "text/javascript"),
             ("/pdfium/index.browser.js", "text/javascript"),
             ("/pdfium/pdfium.wasm", "application/wasm"),
         ] {
@@ -383,12 +407,61 @@ mod tests {
     }
 
     #[test]
+    fn the_viewer_files_are_served_as_written() {
+        for (path, source) in [
+            ("/viewer.mjs", VIEWER_MODULE),
+            ("/viewer.css", VIEWER_STYLESHEET),
+            ("/worker.mjs", VIEWER_WORKER),
+        ] {
+            let body = get(&format!("combray-pdf://{HOST}{path}")).body.unwrap();
+
+            assert_eq!(body, source.as_bytes(), "{path}");
+        }
+    }
+
+    #[test]
+    fn the_viewer_loads_only_allowlisted_files() {
+        // Every scheme path the module and the worker name, relative to them, is served. A
+        // renamed file would otherwise only fail on a device.
+        let module = ViewerFile::Module.path();
+        for (source, relative) in [
+            (VIEWER_MODULE, "worker.mjs"),
+            (VIEWER_MODULE, "viewer.css"),
+            (VIEWER_WORKER, "./pdfium/index.browser.js"),
+            (VIEWER_WORKER, "pdfium/pdfium.wasm"),
+        ] {
+            assert!(source.contains(&format!("\"{relative}\"")), "{relative}");
+            let url = Url::parse(&format!("combray-pdf://{HOST}{module}"))
+                .unwrap()
+                .join(relative)
+                .unwrap();
+            assert!(get(url.as_str()).body.is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn the_viewer_adds_no_unload_listener() {
+        // An unload or beforeunload listener keeps the viewer out of the back-forward cache, and
+        // the engine then frees the PDF on leaving (docs/PDF.md).
+        for source in [VIEWER_MODULE, VIEWER_WORKER] {
+            for event in [
+                "\"unload\"",
+                "\"beforeunload\"",
+                "onunload",
+                "onbeforeunload",
+            ] {
+                assert!(!source.contains(event), "{event}");
+            }
+            assert!(!source.contains("revokeObjectURL"));
+        }
+    }
+
+    #[test]
     fn every_file_inflates_to_the_length_its_gzip_trailer_records() {
-        for file in ViewerFile::ALL {
-            let compressed = match file {
-                ViewerFile::PdfiumScript => PDFIUM_SCRIPT_GZ,
-                ViewerFile::PdfiumWasm => PDFIUM_WASM_GZ,
-            };
+        for (file, compressed) in [
+            (ViewerFile::PdfiumScript, PDFIUM_SCRIPT_GZ),
+            (ViewerFile::PdfiumWasm, PDFIUM_WASM_GZ),
+        ] {
             let recorded = u32::from_le_bytes(*compressed.last_chunk::<4>().unwrap());
 
             assert_eq!(
@@ -443,8 +516,13 @@ mod tests {
             "/pdfium/PDFIUM.WASM",
             "/pdfium/%70dfium.wasm",
             "/pdfium/../pdfium/pdfium.wasm/x",
-            "/viewer.mjs",
-            "/worker.mjs",
+            "/viewer.js",
+            "/VIEWER.MJS",
+            "/viewer.mjs/",
+            "/pdf/viewer.mjs",
+            "/test/viewer.test.mjs",
+            "/vendor/pdfium.LICENSE",
+            "/pdfium.wasm",
             "/font/manifest.json",
         ] {
             assert_eq!(
@@ -498,7 +576,7 @@ mod tests {
     fn every_scheme_response_carries_the_viewer_csp() {
         let served = ViewerFile::ALL.map(|file| format!("combray-pdf://{HOST}{}", file.path()));
         let refused = [
-            format!("combray-pdf://{HOST}/viewer.mjs"),
+            format!("combray-pdf://{HOST}/viewer.js"),
             "combray-pdf://viewer-0/pdfium/pdfium.wasm".to_owned(),
         ];
         let mut responses: Vec<SchemeResponse> =
@@ -509,12 +587,15 @@ mod tests {
             assert_eq!(header(response, CSP_HEADER), [CSP], "{:?}", response.body);
             assert_eq!(response.headers[0], (CSP_HEADER, CSP.to_owned()));
         }
-        assert_eq!(responses.iter().filter(|r| r.body.is_ok()).count(), 2);
+        assert_eq!(
+            responses.iter().filter(|r| r.body.is_ok()).count(),
+            ViewerFile::ALL.len()
+        );
     }
 
     #[test]
     fn a_refusal_names_no_content_type() {
-        let response = get(&format!("combray-pdf://{HOST}/viewer.mjs"));
+        let response = get(&format!("combray-pdf://{HOST}/viewer.js"));
 
         assert!(header(&response, CONTENT_TYPE_HEADER).is_empty());
     }
@@ -522,11 +603,11 @@ mod tests {
     #[test]
     fn header_values_are_visible_ascii() {
         // What http::HeaderValue accepts without error, so the Android handler never drops one.
-        for response in [
-            get(&format!("combray-pdf://{HOST}/pdfium/pdfium.wasm")),
-            get(&format!("combray-pdf://{HOST}/pdfium/index.browser.js")),
-            get(&format!("combray-pdf://{HOST}/")),
-        ] {
+        let mut responses: Vec<SchemeResponse> = ViewerFile::ALL
+            .map(|file| get(&format!("combray-pdf://{HOST}{}", file.path())))
+            .into();
+        responses.push(get(&format!("combray-pdf://{HOST}/")));
+        for response in responses {
             for (name, value) in &response.headers {
                 assert_eq!(*name, name.to_ascii_lowercase());
                 assert!(
