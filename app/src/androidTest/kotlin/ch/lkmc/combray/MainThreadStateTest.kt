@@ -2,6 +2,8 @@ package ch.lkmc.combray
 
 import android.os.Looper
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.Placement
@@ -23,6 +25,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * always precedes it: snapshot changes applied off the main thread.
  */
 @RunWith(AndroidJUnit4::class)
+@OptIn(ExperimentalTestApi::class)
 class MainThreadStateTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
@@ -39,6 +42,8 @@ class MainThreadStateTest {
     fun findOpenedAndClosedByTheBrowserUpdatesBackOnTheMainThread() {
         device.browser.openUrl(Fixtures.EMPTY, Placement.CURRENT_TAB)
         device.awaitPage(Fixtures.EMPTY)
+        // The screen shows each toggle, so a check whose toggles never reached it cannot pass.
+        val findBar = hasContentDescription(compose.activity.getString(R.string.action_close_find))
 
         // Where each snapshot change off the main thread was applied, for the failure's cause.
         val offMain = ConcurrentLinkedQueue<Throwable>()
@@ -51,11 +56,9 @@ class MainThreadStateTest {
             // Each toggle turns the find bar's BackHandler on or off from the browser's worker.
             repeat(TOGGLES) {
                 device.browser.openFind()
-                device.awaitState { it.find != null }
-                compose.waitForIdle()
+                compose.waitUntilAtLeastOneExists(findBar, Device.LOAD_TIMEOUT_MS)
                 device.browser.closeFind()
-                device.awaitState { it.find == null }
-                compose.waitForIdle()
+                compose.waitUntilDoesNotExist(findBar, Device.LOAD_TIMEOUT_MS)
             }
         } finally {
             observer.dispose()
