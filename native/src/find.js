@@ -9,6 +9,9 @@
 // maxMatches matches, maxNodes text nodes and maxMillis milliseconds, checked as the walk goes;
 // Servo cannot interrupt this script, so they are what bounds it.
 //
+// Combray's PDF viewer has no text to search yet: there the script answers { unavailable: true }
+// instead of counting the viewer's own labels.
+//
 // The page's realm runs this: a page can observe the query and misreport its own matches, which
 // is why only bounded integers come back. The selection find made is remembered on the document,
 // with the selection the page had before it, so clearing restores that one and never removes a
@@ -64,6 +67,11 @@
     release();
     return { count: 0, index: -1, capped: false };
   }
+
+  __STAND_IN__
+
+  // The viewer draws PDF pages as images; their text comes in a later step (docs/PDF.md).
+  if (isCombrayPdfViewer()) return { unavailable: true };
 
   // Lowercase matching needs the lowercased query to keep its length, so offsets stay aligned.
   var caseless = query.toLowerCase();
