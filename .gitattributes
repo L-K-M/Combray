@@ -14,6 +14,7 @@ gradlew text eol=lf
 *.jpg binary
 *.webp binary
 *.mp4 binary
+*.gz binary
 # Raw device output kept verbatim as evidence
 docs/engine-spike/*.txt -whitespace
 # Copied verbatim from the Rust toolchain by scripts/generate-notices.py
