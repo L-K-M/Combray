@@ -108,6 +108,37 @@ pub fn viewer_csp(token: &ViewerToken) -> String {
     )
 }
 
+/// The largest PDF the viewer shows: 64 MiB (owner decision, 29 October 2026). The engine
+/// refuses a larger body at its headers or as it arrives, and cancels the download.
+pub const MAX_PDF_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What the engine's PDF viewer preferences are set to (L-K-M/servo's PDF viewer document).
+#[derive(Debug, PartialEq, Eq)]
+pub struct ViewerPreferences {
+    /// `combray_pdf_viewer_module`: the module every viewer document loads.
+    pub module: String,
+    /// `combray_pdf_viewer_csp`: the policy that replaces the PDF response's.
+    pub csp: String,
+    /// `combray_pdf_viewer_max_bytes`.
+    pub max_bytes: u64,
+}
+
+impl ViewerPreferences {
+    /// The preferences for this process's viewer origin. They only exist with a token, so
+    /// without one the engine keeps Servo's stand-in page for PDFs.
+    pub fn new(token: &ViewerToken) -> ViewerPreferences {
+        ViewerPreferences {
+            module: format!(
+                "{}{}",
+                token.origin(),
+                ViewerFile::Module.path().trim_start_matches('/')
+            ),
+            csp: viewer_csp(token),
+            max_bytes: MAX_PDF_BYTES,
+        }
+    }
+}
+
 /// The allowlist: every file the scheme serves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ViewerFile {
@@ -633,6 +664,21 @@ mod tests {
         );
         assert_ne!(ViewerToken::generate().unwrap(), *token);
         assert_eq!(format!("{token:?}"), "ViewerToken(..)");
+    }
+
+    #[test]
+    fn the_preferences_name_the_served_module_and_the_viewer_csp() {
+        let preferences = ViewerPreferences::new(&ViewerToken::from_bytes(TOKEN));
+
+        assert_eq!(
+            preferences.module,
+            format!("combray-pdf://{HOST}/viewer.mjs")
+        );
+        assert!(get(&preferences.module).body.is_ok());
+        // The engine writes the address into markup, escaping only & " < >.
+        assert!(!preferences.module.contains(['&', '"', '<', '>']));
+        assert_eq!(preferences.csp, CSP);
+        assert_eq!(preferences.max_bytes, 67_108_864);
     }
 
     #[test]
