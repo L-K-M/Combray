@@ -27,13 +27,13 @@ use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
-    EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
-    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
-    NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
-    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme,
-    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
-    WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    AuthenticationRequest, CompositionEvent, CompositionState, ContextMenuAction, ContextMenuItem,
+    DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue,
+    JavaScriptEvaluationError, Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction,
+    MouseButtonEvent, NamedKey, NavigationRequest, Opts, PipelineId, PrefValue, Preferences,
+    RenderingContext, SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder,
+    SimpleDialog, Theme, TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager,
+    UserScript, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
@@ -328,6 +328,8 @@ impl ImeField {
 /// A page control waiting for the application's answer. Dropping it answers with Servo's default.
 struct PendingControl {
     view: ViewKey,
+    /// The top-level document at opening, including for a menu inside a frame.
+    document: Option<PipelineId>,
     control: ControlHandle,
 }
 
@@ -2000,9 +2002,10 @@ impl Engine {
     }
 
     fn show_page_control(&mut self, view: ViewKey, control: ControlHandle) {
-        if self.live_tab(view).is_none() {
+        let Some(tab) = self.live_tab(view) else {
             return;
-        }
+        };
+        let document = tab.current_document;
         let description = match &control {
             ControlHandle::Embedder(control) => describe(control),
             ControlHandle::SignIn(request) => Some(ControlDescription::SignIn {
@@ -2017,8 +2020,14 @@ impl Engine {
         };
         let id = self.next_control;
         self.next_control += 1;
-        self.page_controls
-            .insert(id, PendingControl { view, control });
+        self.page_controls.insert(
+            id,
+            PendingControl {
+                view,
+                document,
+                control,
+            },
+        );
         self.emit(EngineEvent::ControlShown {
             view,
             control: id,
@@ -2204,6 +2213,26 @@ impl Engine {
                 picker.submit();
             },
             (EmbedderControl::FilePicker(picker), ControlResponse::Dismiss) => picker.dismiss(),
+            (EmbedderControl::ContextMenu(menu), ControlResponse::Paste { text }) => {
+                // A late answer cannot paste into another tab or a replacement document.
+                let Some(tab) = self.tabs.get(&pending.view.tab).filter(|tab| {
+                    tab.view == pending.view
+                        && self.active == Some(pending.view.tab)
+                        && tab.current_document == pending.document
+                        && tab.webview.active_document_id() == pending.document
+                }) else {
+                    return;
+                };
+                if tab.current_document.is_none() || !allows_paste(&menu) {
+                    return;
+                }
+                // The long-press cancelled its touch: choosing Paste is the page interaction.
+                self.note_interaction();
+                self.note_activation();
+                // The text travels with the original menu's pipeline and node. No clipboard
+                // grant remains available for an unrelated request or a replaced frame.
+                menu.paste_text(text);
+            },
             // The application performed the action itself.
             (EmbedderControl::ContextMenu(menu), ControlResponse::Dismiss) => menu.dismiss(),
             // Dropping a select keeps its previous selection.
@@ -2315,10 +2344,14 @@ impl Engine {
         };
 
         if change == HistoryChange::NewDocument {
-            // Another document replaced the one asking (a load the application started): its
-            // question is moot.
+            // A replacement document cannot answer the previous page's question or paste menu.
             self.hide_controls(|pending| {
-                pending.view == view && matches!(pending.control, ControlHandle::LeavePage { .. })
+                pending.view == view
+                    && matches!(
+                        pending.control,
+                        ControlHandle::LeavePage { .. }
+                            | ControlHandle::Embedder(EmbedderControl::ContextMenu(_))
+                    )
             });
         }
 
@@ -2510,18 +2543,30 @@ fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
                 .map(|pattern| pattern.0.clone())
                 .collect(),
         },
-        // Only links and images: the bottom bar has back, forward and reload, and editing
-        // actions need a clipboard bridge the app does not have.
         EmbedderControl::ContextMenu(menu) => {
             let info = menu.element_info();
             return controls::link_menu(
                 info.link_url.as_ref().map(Url::as_str),
                 info.image_url.as_ref().map(Url::as_str),
-            );
+            )
+            .or_else(|| allows_paste(menu).then_some(ControlDescription::PasteMenu));
         },
         _ => return None,
     };
     Some(description)
+}
+
+fn allows_paste(menu: &servo::ContextMenu) -> bool {
+    menu.items().iter().any(|item| {
+        matches!(
+            item,
+            ContextMenuItem::Item {
+                action: ContextMenuAction::Paste,
+                enabled: true,
+                ..
+            }
+        )
+    })
 }
 
 /// Flattens `<optgroup>`s: each option remembers its group's label.

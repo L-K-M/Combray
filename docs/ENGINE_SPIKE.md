@@ -1478,3 +1478,57 @@ None of the new engine media lines appeared: no load overtook its
 document's commit in that run, none was dropped and no hold expired, so
 the race itself is still unobserved; the lines will show it when it
 recurs.
+
+## 32. Shadow-root fields and Paste (30 October 2026)
+
+Servo retargets composed focus events to the shadow host for page listeners.
+Its default-action dispatch used that host too, so a shadow-root input never
+requested its input method. Downstream `df5304686d4` extends the existing
+keyboard-default exception to focus events: defaults use the original field,
+while listeners keep seeing the host. Composition behavior is unchanged.
+Source and regressions: [downstream PR #19](https://github.com/L-K-M/servo/pull/19).
+
+Combray also discarded context menus without link/image addresses. It now
+offers Paste when Servo permits it. Android reads plain clipboard text only
+on that tap; URI clips are not fetched and text above 256 KiB UTF-8 is refused
+whole. `ContextMenu::paste_text` carries the text with the retained control's
+pipeline and node. Servo rejects inactive documents and removed/adopted nodes,
+then uses its normal cancellable paste and input-event path. No clipboard
+grant remains for another request. Both response boundaries redact diagnostics.
+
+Evidence on Linux x86_64, Rust 1.97.1, NDK r29 and the API-30 x86_64 emulator
+`emulator-5590` (SwiftShader, software CPU emulation):
+
+- The archived APK `b0a3c689c260e4c89b26897c28412be501cf0c459aafb6e3bc433e893d28c6d1`
+  fails the shadow-field keyboard assertion and discards the long-press control
+  (`build/input-red-retry/`). The first attempt stopped at painting because
+  System UI had an ANR; restarting System UI let both checks reach their targets.
+- Paste-only pin `5df20e78f74` builds natively. Its APK
+  `8c3bdfd35556b21f706f840a391da76619c551f2609302427e2b32f915c773d9` passes
+  the new paste check and all three existing keyboard checks. The shadow-field
+  tap reaches the page, then still fails to open the keyboard, isolating the
+  missing focus default (`build/input-paste-interim/`, four passed, one failed).
+- Kotlin unit tests, lint and both debug APK builds pass at that checkpoint;
+  the current native host suite passes all 125 tests. The full-pin x86_64
+  native build passes (6m32s incremental). Host WebView and final device
+  validation are pending.
+
+Reproduction uses `testing/fixtures/server.py`'s nested closed-shadow password
+field. `KeyboardTest` checks tap acknowledgement, keyboard opening, IME text,
+Back/reopening, and paste both before and after opening the keyboard.
+`AccessibilityTest.aPagePasteMenuIsAccessible` covers labels and touch targets.
+No live login or physical phone was tested.
+
+```sh
+ANDROID_SDK_ROOT=$HOME/android-sdk \
+  COMBRAY_HOST_CC="$PWD/servo-checkout/host-cc" \
+  COMBRAY_HOST_CXX="$PWD/servo-checkout/host-cxx" \
+  CARGO_BUILD_JOBS=6 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5590 ch.lkmc.combray.KeyboardTest
+```
+
+The host wrappers use the existing Zig 0.17 C/C++ wrappers with
+`-fno-sanitize=undefined`, as in the earlier builds. The initial native attempt
+used the NDK's clang for host code and failed on missing host C headers.
+Raw logs remain under `build/`; no generated binaries or screenshots are committed.

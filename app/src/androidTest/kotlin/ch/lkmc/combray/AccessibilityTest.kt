@@ -343,6 +343,9 @@ class AccessibilityTest {
     fun aLeavePageQuestionIsAccessible() = assertControlIsAccessible(PageControlContent.LeavePage)
 
     @Test
+    fun aPagePasteMenuIsAccessible() = assertControlIsAccessible(PageControlContent.PasteMenu)
+
+    @Test
     fun aSelectIsAccessible() = assertControlIsAccessible(
         PageControlContent.Select(
             listOf(

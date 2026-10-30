@@ -225,6 +225,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Show the keyboard for fields inside shadow roots, and offer Paste when
+  you long-press an editable page field.
 - The notice that a page's audio or video opens in a separate player no
   longer goes missing when the media starts loading before the page
   reports itself: in a new tab, or after another page of the same site

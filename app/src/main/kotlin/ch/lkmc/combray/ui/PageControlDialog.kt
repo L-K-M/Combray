@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import ch.lkmc.combray.R
 import ch.lkmc.combray.UploadStaging
+import ch.lkmc.combray.readPagePaste
 import ch.lkmc.combray.core.browser.DialogBlocking
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.engine.ControlResponse
@@ -91,9 +92,31 @@ fun PageControlDialog(
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
+        PageControlContent.PasteMenu -> PasteMenu(answer, onNotify)
         PageControlContent.LeavePage -> LeavePageDialog(control.site) { answer(it.response) }
         else -> ScriptDialog(control, content, onAnswer)
     }
+}
+
+/** Clipboard contents are read on the action, never while a page opens its menu. */
+@Composable
+private fun PasteMenu(onAnswer: (ControlResponse) -> Unit, onNotify: (String) -> Unit) {
+    val context = LocalContext.current
+    val unavailable = stringResource(R.string.page_paste_unavailable)
+    AlertDialog(
+        onDismissRequest = { onAnswer(ControlResponse.Dismiss) },
+        title = { Text(stringResource(R.string.page_text_menu)) },
+        confirmButton = {
+            TextButton(onClick = {
+                val text = readPagePaste(context)
+                onAnswer(text?.let(ControlResponse::Paste) ?: ControlResponse.Dismiss)
+                if (text == null) onNotify(unavailable)
+            }) { Text(stringResource(android.R.string.paste)) }
+        },
+        dismissButton = {
+            TextButton(onClick = { onAnswer(ControlResponse.Dismiss) }) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
 }
 
 /** Long-press on a link or image. The app acts on the address; Servo's own menu is dismissed. */
