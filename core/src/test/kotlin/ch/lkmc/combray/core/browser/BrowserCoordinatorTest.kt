@@ -2400,8 +2400,8 @@ class BrowserCoordinatorTest {
         assertEquals(MediaKind.VIDEO, request.kind)
         assertEquals(FakeEngine.USER_AGENT, request.userAgent)
         assertEquals("https://example.org", request.origin.referrer)
-        assertEquals("example.org", request.origin.pageHost)
         assertTrue(request.origin.secure)
+        assertFalse(request.origin.onDevice)
         assertEquals("clip.mp4", request.name)
         assertEquals("cdn.example.org", request.site)
         // An entry the page does not have.
