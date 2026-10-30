@@ -23,6 +23,7 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 | Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, and resolved styles and `var()` in rasterized SVG subtrees | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
+| PDFium-wasm | `@embedpdf/pdfium` 2.15.1: `pdfium.wasm` and `index.browser.js`, committed `gzip -9n` in `native/src/pdf/vendor/` | `scripts/vendor-pdfium.py` (npm integrity and SHA-256 pins), the same SHA-256s in `native/src/pdf.rs` tests ([Updating PDFium](#updating-pdfium)) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-1`, downloaded by its build script | Servo's lockfile |
 | Android NDK | r29, `29.0.14206865` | `env.sh`, which also rejects a `PATH` where the linker wrapper named in `native/.cargo/config.toml` resolves outside it; Servo's build rejects other majors |
 | Android SDK | platform `android-37` (compileSdk), build-tools 36.0.0 | `app/build.gradle.kts`, `spike/android/app/build.gradle.kts` |
@@ -97,7 +98,7 @@ Settings › About lists the APK's third-party components with their license tex
 | --- | --- | --- |
 | Rust crates linked into the engine | `cargo about` (0.9.2) with `native/about.toml` | Regenerate after changing `native/Cargo.lock` |
 | C/C++ code compiled into the engine (SpiderMonkey and its ICU, ANGLE, FreeType, HarfBuzz, …), libc++, libunwind and compiler-rt | `native/bundled-notices.toml`, read from the crates' sources and the pinned NDK | Recheck the list after changing the Servo pin; it was found by listing the linked archives' members and symbols |
-| Vendored JavaScript and Servo's baked-in data files (Public Suffix List, HSTS preload list, GATT blocklist) | `native/bundled-notices.toml`, with `native/src/vendor/*.LICENSE.md` and `native/licenses/` | Recheck after updating a vendored script or changing the Servo pin (`components/default-resources`) |
+| Vendored JavaScript, PDFium-wasm and the libraries built into it, and Servo's baked-in data files (Public Suffix List, HSTS preload list, GATT blocklist) | `native/bundled-notices.toml`, with `native/src/vendor/*.LICENSE.md`, `native/src/pdf/vendor/*.LICENSE` and `native/licenses/` | Recheck after updating a vendored script or PDFium ([Updating PDFium](#updating-pdfium)) or changing the Servo pin (`components/default-resources`) |
 | Crates cargo-about shows without their own copyright line | `[[crate]]` entries in `native/bundled-notices.toml`, texts from the crate, `native/licenses/` or the Servo checkout | The generator fails on an SPDX template (`<year> <owner>`) or a `[[crate]]` version that no longer matches |
 | Rust standard library | The pinned toolchain's `COPYRIGHT-library.html`, as text and verbatim `Rust-Licenses.html` | Regenerate after changing `native/rust-toolchain.toml` |
 | Java/Kotlin libraries | Licensee Gradle plugin, at build time | Automatic; the build fails on a license other than Apache-2.0 |
@@ -190,6 +191,27 @@ Resolve engine/API conflicts and inspect any reintroduced `.github` automation b
 In a Combray PR, set the full candidate SHA and its upstream base in `scripts/m0/servo-pin.sh`. Update this table and `ENGINE_SPIKE.md`; reconcile `native/Cargo.lock`, resources, toolchains and notices if they changed. Require host tests, both native ABI builds, packaging checks and x86_64 fixture/device evidence on that candidate. Run critical regressions in the M0 harness as needed. Merge the downstream engine PR preserving its commits, then land the Combray pin only after its CI and review pass. The Engine workflow records build/device evidence; an arm64 build does not prove arm64 runtime support.
 
 Rollback: revert the Combray pin change to the previous tested SHA and rebuild. Keep the downstream commits available; no force-push or source deletion is needed.
+
+## Updating PDFium
+
+The PDF viewer's renderer is `@embedpdf/pdfium` from the npm registry. Its two runtime files are committed gzip-compressed (owner decision, 29 October 2026), so builds need no network for them and the native library embeds them with `include_bytes!` (`native/src/pdf.rs`, about 2.2 MB of the APK instead of 4.9 MB raw).
+
+```sh
+python3 -I scripts/vendor-pdfium.py                 # download, check, write native/src/pdf/vendor/
+python3 -I scripts/vendor-pdfium.py --tarball <tgz> # the same from a tarball already downloaded
+```
+
+The script downloads the tarball into a new empty temporary directory, checks the registry's `sha512` integrity and the SHA-256 of `pdfium.wasm` and `index.browser.js`, and writes them with `gzip -9n` (no name or time, so the output is reproducible with the same gzip) next to the package's `LICENSE` and `LICENSE.pdfium`.
+
+To move to another version:
+
+1. Read the new version's `dist.integrity` from `https://registry.npmjs.org/@embedpdf/pdfium` and set `VERSION` and `INTEGRITY` in `scripts/vendor-pdfium.py`.
+2. Download the tarball once, compute the two files' SHA-256, review the package's changes, and set both pins in the script and in the `native/src/pdf.rs` tests.
+3. Run the script, then `python3 -I -m unittest discover -s scripts/tests` and `cd native && cargo test --lib`.
+4. Recheck the libraries built into `pdfium.wasm` (its strings name libpng and zlib versions, and FreeType, OpenJPEG and Little CMS code) against `native/bundled-notices.toml` and [native/licenses](../native/licenses/README.md), and regenerate the notices ([Third-party notices](#third-party-notices)).
+5. Record the version in `docs/PDF.md` and this table. Check the viewer on a device once it exists.
+
+Rollback: revert the commit that changed the files and pins.
 
 ## Emulator and checks
 
