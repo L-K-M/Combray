@@ -292,8 +292,8 @@ function serveRequests() {
   };
 
   self.addEventListener("message", async ({ data }) => {
-    const operation = operations[data && data.op];
-    if (!operation) return;
+    if (!data || !Object.hasOwn(operations, data.op)) return;
+    const operation = operations[data.op];
     try {
       const { result, transfer = [] } = await operation(data);
       self.postMessage({ id: data.id, ok: true, ...result }, transfer);
