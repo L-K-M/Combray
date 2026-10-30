@@ -1519,3 +1519,47 @@ None of the new engine media lines appeared: no load overtook its
 document's commit in that run, none was dropped and no hold expired, so
 the race itself is still unobserved; the lines will show it when it
 recurs.
+
+## 32. Scroll-position flicker (30 October 2026)
+
+The owner's recording showed brief returns to an earlier scroll position
+while the browser controls stayed steady. A synthetic page reproduced it:
+scroll from a red section into green, then create and remove an offscreen
+iframe. The regression records the center pixel after every paint. Before
+the fix, one frame was red, followed by green, without another scroll.
+
+WebRender resets its scroll tree when a scene changes. Servo restored the
+offsets for ordinary display lists, but omitted initial empty iframe
+scenes and pipeline removals. Downstream [PR #17](https://github.com/L-K-M/servo/pull/17),
+code `aaab47173cd`, restores surviving pipelines' offsets in those three
+transactions. Pin: `e284adf9fe3d47b71faeb3c0e8bcb6730113b8c8`.
+Changed engine files: `components/paint/painter.rs`,
+`components/servo/tests/webview.rs`, `DOWNSTREAM.md`.
+
+Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
+
+- `cargo rustc --locked --profile medium -p servo --no-default-features
+  --features bundled,js_jit --test webview -- -C link-arg=-fuse-ld=lld`:
+  built with the host's conda clang, zlib headers and linker libraries.
+- `test_iframe_changes_preserve_every_scrolled_frame --exact`: failed
+  before the fix with a red intermediate frame; passed after it.
+- All 34 WebView tests passed, each in a separate test-binary process.
+  A single-process run fails because Servo's global options initialize once.
+- Independent MiMo V2.6 Pro review: no important defects. The new test
+  covers iframe creation/removal; whole-view removal also passed its
+  existing pipeline-release check, which does not check transient pixels.
+- `scripts/build-native.sh` and APK verification passed locally for
+  x86_64, with NDK 29.0.14206865 and four Cargo workers.
+- Both ABIs passed in [Engine run 41107468092](https://github.com/L-K-M/Combray/actions/runs/41107468092),
+  with 142 device checks passing; a same-origin player launch timed out.
+  The interim first-document media hold was superseded by the broader
+  request-based fix in [PR #164](https://github.com/L-K-M/Combray/pull/164)
+  (section 31). Integration takes that implementation and its regressions
+  unchanged. Final combined checks are recorded in
+  [PR #159](https://github.com/L-K-M/Combray/pull/159).
+- The local software emulator crashed during setup and supplied no device
+  proof. Whole-file Servo rustfmt reports pre-existing differences outside
+  the changed hunks; the native bridge's fmt and whitespace checks pass.
+
+The phone and live example have not been rechecked. The regression proves
+this pipeline-change flicker; other causes remain possible.

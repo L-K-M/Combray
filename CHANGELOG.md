@@ -225,6 +225,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages retain their scroll position when embedded frames load or close,
+  preventing brief flashes of an earlier position while scrolling.
 - Horizontal swipes across the URL bar or buttons switch tabs only after
   release. Cancelled, vertical and two-finger gestures keep the current tab.
 - The notice that a page's audio or video opens in a separate player no
