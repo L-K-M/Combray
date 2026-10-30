@@ -478,7 +478,9 @@ The existing page endpoint check failed when its top button was no longer
 displayed after an engine wait. `ScrollTest` drives a frame/layout after
 each raw swipe. Its endpoint and idle checks freeze Compose's clock, with
 the latter advancing timeout steps explicitly. Reload and snackbar checks
-keep automatic advancement for their recomposition and transitions.
+keep automatic advancement for their recomposition and transitions (the
+snackbar check only until its snackbar shows, since
+[section 30](#30-device-check-timing-races-30-october-2026)).
 An intermediate [run](https://github.com/L-K-M/Combray/actions/runs/40722224056)
 passed the endpoint check but exposed those two dependencies when freezing
 the whole class; clock control is now scoped to the checks that need it.
@@ -1349,6 +1351,51 @@ for `transform`, `overflow`, `filter`, `mask`, `clip-path`, `marker-*`,
 unresolved; substituted geometry values must carry units; deeper
 subtree mutations still do not invalidate the cached serialization
 (pre-existing).
+
+## 30. Device-check timing races (30 October 2026)
+
+Three device checks failed intermittently in the Engine workflow for
+timing reasons, not engine behavior. The changes are test-only.
+
+- `PageContrastTest.defaultTextStaysReadableAcrossThemeChangesReloadsAndNewTabs`
+  sampled the reloaded page as soon as its title was back
+  ([run 41015837139](https://github.com/L-K-M/Combray/actions/runs/41015837139)):
+  `text color ffffff`, a frame from before the page painted, not the
+  contrast bug's `e8e8e8`. After the reload it now waits for the
+  fixture's paint marker, as `open()` does, and a color failure names
+  both samples.
+- `ScrollTest.aSnackbarOverThePageDoesNotTakeTheButtonsTap` (same run)
+  saw "Scroll to bottom" displayed, but the chained click then found no
+  such node: under automatic clock advancement the button's 2 s idle
+  timer ran out during the engine wait. The check freezes Compose's
+  clock once the Undo snackbar shows, through the swipe and the tap,
+  then restores automatic advancement.
+- `AboutTest.theEngineLicenseCanBeRead` timed out after 60 s
+  ([run 41023689990](https://github.com/L-K-M/Combray/actions/runs/41023689990),
+  attempt 2). Logcat shows a global configuration change (`h648dp` to
+  `h599dp`, app bounds gaining a 136 px top inset) 13 ms after the
+  check's activity started. In the passing run the configuration was
+  already `h599dp` before the first class. `scripts/check-app.sh` now
+  waits until `am get-config` has held for 5 s before the first class
+  and records it in `device.txt`. On failure `AboutTest` saves a
+  screenshot and `dumpsys window windows`, which `check-app.sh` moves to
+  `<results>/AboutTest-failure/`. The logged change arrived with the
+  activity launch, so the wait may not prevent a repeat; the evidence
+  shows what the window held if it does.
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests
+shellcheck scripts/check-app.sh
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The new `check-app.sh` functions were also exercised against a fake
+`adb` (configuration changes reset the wait; evidence is copied
+byte-for-byte and removed from the device). Device checks were not run
+on the development host, which has no emulator; they run in the Engine
+workflow on the PR.
 
 ## 31. Scroll-position flicker (30 October 2026)
 
