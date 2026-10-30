@@ -225,6 +225,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Horizontal swipes across the URL bar or buttons switch tabs only after
+  release. Cancelled, vertical and two-finger gestures keep the current tab.
 - A tab selected while Combray is in the background, for example when a
   page closes its own window, stays hidden and unfocused, so it stays
   throttled until you return to the app.

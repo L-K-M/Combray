@@ -1396,3 +1396,35 @@ The new `check-app.sh` functions were also exercised against a fake
 byte-for-byte and removed from the device). Device checks were not run
 on the development host, which has no emulator; they run in the Engine
 workflow on the PR.
+
+## Toolbar tab-swipe checks (30 October 2026)
+
+The existing horizontal `draggable` handled the URL chip and buttons,
+but also switched tabs on cancellation, multi-touch, and a vertical drag
+that later moved sideways. Each case failed in `BottomBarSwipeTest`
+before replacing it with a one-finger, direction-locked release gesture.
+The coordinator's tab ordering and engine commands are unchanged.
+
+Ten Robolectric checks pass: swipes starting on the address and every
+button in both layouts, physical directions in RTL, idle Home, editing
+Home, cancellation, a second finger, vertical intent, short drags and
+taps and long-press shortcuts. `TabSwipeTest` adds two real-Servo checks:
+a swipe from the address or New tab button selects the previous tab,
+preserves the tab count, and paints that tab's solid-color fixture.
+
+Local checks passed on Linux x86_64, JDK 21, SDK 37:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+(cd native && cargo test --lib --locked) # 120 passed
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Local native/device validation is blocked: `scripts/build-native.sh`
+reaches the pinned downstream Servo `6d3218a2a949c433d5445fe2c9eb7b66ba0a1081`,
+but the default host compiler lacks C headers (`glslopt`: `assert.h`
+not found). `scripts/m0/emulator.sh` exits for missing `libX11.so.6`;
+`scripts/check-app.sh emulator-5560 ch.lkmc.combray.TabSwipeTest` reports
+no device. The PR's Engine workflow runs native builds and device checks.
+No physical-device result is claimed.
