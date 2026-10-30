@@ -208,7 +208,7 @@ To move to another version:
 1. Read the new version's `dist.integrity` from `https://registry.npmjs.org/@embedpdf/pdfium` and set `VERSION` and `INTEGRITY` in `scripts/vendor-pdfium.py`.
 2. Download the tarball once, compute the two files' SHA-256, review the package's changes, and set both pins in the script and in the `native/src/pdf.rs` tests.
 3. Run the script, then `python3 -I -m unittest discover -s scripts/tests` and `cd native && cargo test --lib`.
-4. Recheck the libraries built into `pdfium.wasm` (its strings name libpng and zlib versions, and FreeType, OpenJPEG and Little CMS code) against `native/bundled-notices.toml` and [native/licenses](../native/licenses/README.md), and regenerate the notices ([Third-party notices](#third-party-notices)).
+4. Recheck the libraries built into `pdfium.wasm` and `index.browser.js` against `native/bundled-notices.toml` and [native/licenses](../native/licenses/README.md), and regenerate the notices ([Third-party notices](#third-party-notices)). Strings reveal only some of them (libpng and zlib versions, FreeType, OpenJPEG, Little CMS, libc++, musl). Read the package's build recipe (`packages/pdfium` on embed-pdf-viewer's release branch: GN arguments, the PDFium fork's `DEPS` and the `deps` of `core/fxcrt`, `core/fxcodec` and `core/fxge`, and the Emscripten image) and look for the data tables of libraries without strings, such as ICU's case-mapping tables, fast_float's power-of-five table and libjpeg's `jpeg_natural_order`.
 5. Record the version in `docs/PDF.md` and this table. Check the viewer on a device once it exists.
 
 Rollback: revert the commit that changed the files and pins.
