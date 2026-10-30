@@ -518,7 +518,10 @@ export class Viewer {
       }
     } catch (error) {
       const view = this.views.get(index);
-      if (error && error.kind !== "stopped" && view && worker === this.worker) this.pageFailed(index, view, error);
+      // A failure at an earlier layout's size (out of memory, say) says nothing of the current
+      // one; dropped, the page is asked for again at its new size.
+      const current = generation === this.generation && worker === this.worker;
+      if (error && error.kind !== "stopped" && view && current) this.pageFailed(index, view, error);
     } finally {
       this.drawing = false;
     }

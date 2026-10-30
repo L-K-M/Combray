@@ -400,6 +400,11 @@ class FakeWorker {
     this.answered.add(request.id);
     for (const listener of this.listeners.message) listener({ data: { id: request.id, ok: true, ...values } });
   }
+
+  fail(request, error) {
+    this.answered.add(request.id);
+    for (const listener of this.listeners.message) listener({ data: { id: request.id, ok: false, error } });
+  }
 }
 
 /** Lets the viewer's awaits continue. */
@@ -578,12 +583,38 @@ test("a wider screen that shows fewer pages drops the others, and links to them 
     const link = viewer.views.get(index).element.querySelector(".link");
     assert.ok(link);
 
+    const beyond = [...viewer.views].filter(([at]) => at >= shownWide).map(([, view]) => view);
+
     page.root.clientWidth = 720;
     page.dispatch("resize");
     assert.equal(viewer.layout.shown, shownWide);
     assert.ok(withElements().every((at) => at < shownWide));
+    // Their elements leave the page and their bitmaps are released.
+    assert.ok(beyond.every(({ element, canvas }) => !element.parent && canvas.width <= 1));
     const top = scrollY;
     link.listeners.click[0]({ preventDefault() {} });
     assert.equal(scrollY, top);
+  });
+});
+
+test("a page that failed to draw at the old width is drawn again at the new one", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER, LETTER]);
+    const worker = page.worker;
+    const [first] = worker.requests("render");
+    assert.equal(first.index, 0);
+
+    // The screen turns while page 0 draws, and that drawing runs out of memory at the old size.
+    page.root.clientWidth = 720;
+    page.dispatch("resize");
+    worker.fail(first, { kind: "memory", message: "no memory for a page" });
+    await tick();
+    page.frame();
+    await drawPages(page);
+    const view = viewer.views.get(0);
+    assert.equal(view.failed, false);
+    assert.equal(view.element.querySelector(".page-error"), null);
+    const widths = worker.requests("render").filter(({ index }) => index === 0).map(({ width }) => width);
+    assert.deepEqual(widths, [360 - 2 * PAGE_MARGIN, 720 - 2 * PAGE_MARGIN]);
   });
 });
