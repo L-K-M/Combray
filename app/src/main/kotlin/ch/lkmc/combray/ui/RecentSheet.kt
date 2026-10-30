@@ -87,6 +87,7 @@ import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
@@ -144,7 +145,7 @@ fun RecentSheet(
     // Null until the first answer: an empty list before it would flash an empty-state message.
     // Tagged with its depth: the first keystroke filters the newest rows until the retained
     // ones arrive, and those must not report "no matches" for an older page.
-    val answer by remember(browser, depth) { browser.recent(depth).map { depth to it } }.collectAsStateWithLifecycle(null)
+    val answer by remember(browser, depth) { browser.recent(depth).map { depth to it } }.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     val items = answer?.second
     val rows = remember(items, query) { items?.let { LocalRows(query, it.matching(query)) } }
     val complete = answer?.first == depth
