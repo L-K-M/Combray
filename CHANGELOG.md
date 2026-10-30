@@ -227,6 +227,8 @@ All notable changes to this project are documented here. The format follows
 
 - Pages retain their scroll position when embedded frames load or close,
   preventing brief flashes of an earlier position while scrolling.
+- Media discovered before a tab's first document commits is kept for that
+  document, so early player entries are not lost.
 - A tab selected while Combray is in the background, for example when a
   page closes its own window, stays hidden and unfocused, so it stays
   throttled until you return to the app.

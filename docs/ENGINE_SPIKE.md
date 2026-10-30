@@ -1438,10 +1438,19 @@ Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
   [companion CI run](https://github.com/L-K-M/Combray/actions/runs/40989841398).
   Its emulator passed the fixed-layer scroll checks, then went offline
   during the wider suite. Earlier, the media check read only one report
-  immediately after load: cancellation can deliver the page's `error`
-  before its loader thread queues the native report. The check now waits
-  for both reports with its existing bounded state wait; server assertions
-  still require zero downloads. Full Android results are tracked in
+  immediately after load. Adding a bounded report wait did not fix the
+  [next run](https://github.com/L-K-M/Combray/actions/runs/41037007317):
+  the same check timed out, while all other device checks passed.
+- Investigation found a native loss path: before the first document's
+  start or commit arrived, `PendingMedia.admit` returned a load and
+  `media_blocked` dropped it because there was no current document.
+  First-document loads now use the existing bounded hold until commit,
+  including when the start is still queued. A release regression failed
+  before the fix; all 123 native host tests pass after it, including
+  ordering and hold-bound checks. Independent MiMo review found no
+  important defects. The code explains a missing report; CI still needs
+  to confirm it explains that run. The device check retains its bounded
+  wait and zero-download assertions. Full Android results are tracked in
   [Combray PR #159](https://github.com/L-K-M/Combray/pull/159).
 - The local API-30 software emulator booted once, then crashed during
   setup; a second boot also crashed. It supplied no rendering evidence.

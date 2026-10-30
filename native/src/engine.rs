@@ -1831,12 +1831,11 @@ impl Engine {
     /// document starts (script) and history changes (constellation) on separate channels in no
     /// fixed order. A load that arrives after a new document reported its start and before its
     /// commit is held and given to that document when it commits (`media::PendingMedia`). What
-    /// remains: a load that overtakes both its document's start and commit, or a `pushState`,
-    /// counts for the page before it, and a late load of the replaced document, or of the
-    /// previous route, counts for the new page. The application's document check cannot tell,
-    /// because the event carries the document stamped here. A load before the tab's first
-    /// commit is held for its first document once that reported its start; without a start,
-    /// there is no document to name and nothing is reported (the load is still cancelled).
+    /// remains for an already-committed tab: a load that overtakes both its document's start
+    /// and commit, or a `pushState`, counts for the page before it. A late load of the replaced
+    /// document, or of the previous route, counts for the new page. The application's document
+    /// check cannot tell, because the event carries the document stamped here. Before the first commit,
+    /// loads wait even if the document's start has not arrived yet.
     fn media_blocked(
         &mut self,
         view: ViewKey,
@@ -1853,11 +1852,11 @@ impl Engine {
             url,
             referrer,
         };
-        // Held first: a tab's first document starts before any document has committed.
-        let admitted = tab.pending_media.admit(load, now_ms);
         let Some(document) = tab.current_document else {
+            tab.pending_media.hold_until_commit(load);
             return;
         };
+        let admitted = tab.pending_media.admit(load, now_ms);
         for report in tab.credit_media(document, admitted, now_ms) {
             self.emit(report);
         }

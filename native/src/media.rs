@@ -220,7 +220,8 @@ pub(crate) struct UnattributedMedia {
 /// first (Servo sends its activation before its start and does not override a pending change),
 /// so another commit leaves the hold in place; loads held for a document that never commits go
 /// to the committed one after [`PENDING_COMMIT_MS`]. A late load of the replaced page in that
-/// window is credited to the new one.
+/// window is credited to the new one. Before any document commits, loads are held even if the
+/// start is still queued, because there is no previous document to credit them to.
 #[derive(Default)]
 pub(crate) struct PendingMedia {
     /// The document that reported its start but has not committed, and when.
@@ -229,6 +230,14 @@ pub(crate) struct PendingMedia {
 }
 
 impl PendingMedia {
+    /// Keeps a load until its document commits, even if its start has not arrived yet.
+    pub(crate) fn hold_until_commit(&mut self, media: UnattributedMedia) {
+        if self.held.len() == MAX_HELD_MEDIA {
+            self.held.pop_front();
+        }
+        self.held.push_back(media);
+    }
+
     /// `document`, not committed yet, reported its start. A document started later replaces it:
     /// the loads held for the earlier one are dropped with it.
     pub(crate) fn document_started(&mut self, document: u64, now_ms: u64) {
@@ -247,10 +256,7 @@ impl PendingMedia {
     ) -> Vec<UnattributedMedia> {
         if let Some((_, since)) = self.pending {
             if now_ms.saturating_sub(since) <= PENDING_COMMIT_MS {
-                if self.held.len() == MAX_HELD_MEDIA {
-                    self.held.pop_front();
-                }
-                self.held.push_back(media);
+                self.hold_until_commit(media);
                 return Vec::new();
             }
             self.pending = None;
@@ -263,7 +269,7 @@ impl PendingMedia {
     /// `document` committed: the loads held for it, in arrival order. Another document's commit
     /// keeps them for the pending one.
     pub(crate) fn committed(&mut self, document: u64) -> Vec<UnattributedMedia> {
-        if self.pending.is_none_or(|(pending, _)| pending != document) {
+        if self.pending.is_some_and(|(pending, _)| pending != document) {
             return Vec::new();
         }
         self.pending = None;
@@ -288,6 +294,36 @@ mod tests {
         let mut pending = PendingMedia::default();
         assert_eq!(pending.admit(load("a"), 1_000), vec![load("a")]);
         assert_eq!(pending.committed(7), Vec::new());
+    }
+
+    #[test]
+    fn a_load_held_before_the_first_document_start_is_released_on_commit() {
+        let mut pending = PendingMedia::default();
+        // A network load can reach the embedder before the script thread reports its start.
+        pending.held.push_back(load("early"));
+        assert_eq!(pending.committed(7), vec![load("early")]);
+        assert_eq!(pending.committed(8), Vec::new());
+    }
+
+    #[test]
+    fn first_document_loads_wait_through_its_start_and_another_commit() {
+        let mut pending = PendingMedia::default();
+        pending.hold_until_commit(load("early"));
+        pending.document_started(7, 1_000);
+        assert_eq!(pending.admit(load("later"), 1_010), Vec::new());
+        assert_eq!(pending.committed(6), Vec::new());
+        assert_eq!(pending.committed(7), vec![load("early"), load("later")]);
+    }
+
+    #[test]
+    fn first_document_loads_are_bounded_before_its_start() {
+        let mut pending = PendingMedia::default();
+        for n in 0..MAX_HELD_MEDIA + 4 {
+            pending.hold_until_commit(load(&n.to_string()));
+        }
+        let held = pending.committed(7);
+        assert_eq!(held.len(), MAX_HELD_MEDIA);
+        assert_eq!(held.first(), Some(&load("4")));
     }
 
     #[test]

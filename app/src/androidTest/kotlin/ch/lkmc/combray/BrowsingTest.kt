@@ -366,8 +366,8 @@ class BrowsingTest {
         // Both elements fired `error`, and they no longer hold back the page's load event.
         device.awaitState { it.activeTab?.title == MEDIA_FAILED }
         device.awaitPage(Fixtures.MEDIA)
-        // Cancellation can fire `error` before the loader thread queues its media report.
-        val reported = device.awaitState { it.activeTab?.media?.size == MEDIA_ENTRIES }
+        // Page completion and the native media reports arrive independently.
+        val reported = device.awaitState { (it.activeTab?.media?.size ?: 0) >= MEDIA_ENTRIES }
         assertEquals("media entries", MEDIA_ENTRIES, reported.activeTab?.media?.size)
         val media = Fixtures.state().getJSONObject("media")
         assertEquals("media requests that reached the server", 0, media.getInt("requests"))
