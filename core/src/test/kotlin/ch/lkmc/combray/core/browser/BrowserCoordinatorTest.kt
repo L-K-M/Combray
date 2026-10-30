@@ -2133,6 +2133,46 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aSameOriginPagesMediaThatOvertakesItsCommitGetsItsOwnNotice() {
+        ready()
+        browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/one")
+        media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        shown(state().notice)
+        browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
+
+        // Credited to the page still committed, which already showed its Play notice.
+        media(1, 10, "https://example.org/two.mp4", referrer = "https://example.org")
+        assertNull(state().notice)
+        commit(1, 11, "https://example.org/two", index = 1, length = 2)
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("two.mp4"), mediaNames())
+    }
+
+    @Test
+    fun mediaHeldForAPageThatNeverCommitsGoesToThePageShown() {
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        browser = newCoordinator(navigationTimeoutMs = SHORT_TIMEOUT_MS)
+        ready()
+        browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/one")
+        browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
+
+        media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
+        assertNull(state().notice)
+        // A 204 answer commits nothing: once the app stops waiting, the report is the shown page's.
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TEST_WAIT_MS)
+        while (state().activeTab!!.loading && System.nanoTime() < deadline) {
+            Thread.sleep(50)
+            idle()
+        }
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("one.mp4"), mediaNames())
+    }
+
+    @Test
     fun aHeldReportFromAnotherOriginIsDroppedWhenThePendingPageCommits() {
         ready()
         browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
