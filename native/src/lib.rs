@@ -12,12 +12,13 @@
 //!                         ├─ page_zoom: the layout zoom of every view
 //!                         ├─ find: find in page (bounded in-page search)
 //!                         ├─ keyboard: taps that open the keyboard for a focused field
+//!                         ├─ pdf: the combray-pdf: scheme serving the PDF viewer's files
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
 //! `activation`, `animations`, `events`, `keyboard`, `media`, `navigation`, `page_zoom`,
-//! `panic_policy`, `profile`, `userinfo` and the pure parts of `capture` and `find` build on any
-//! host so their tests run without Servo.
+//! `panic_policy`, `profile`, `userinfo` and the pure parts of `capture`, `find` and `pdf` build
+//! on any host so their tests run without Servo.
 
 pub mod activation;
 mod animations;
@@ -30,6 +31,7 @@ mod media;
 pub mod navigation;
 mod page_zoom;
 mod panic_policy;
+pub mod pdf;
 mod profile;
 mod userinfo;
 
