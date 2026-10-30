@@ -1349,3 +1349,58 @@ for `transform`, `overflow`, `filter`, `mask`, `clip-path`, `marker-*`,
 unresolved; substituted geometry values must carry units; deeper
 subtree mutations still do not invalidate the cached serialization
 (pre-existing).
+
+## 30. PDF viewer document, candidate (30 October 2026)
+
+The pin moves to `05027c9413a5e040f6ea53fc017b64bbe25cfb3c`, the head of
+[L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
+(`engine/pdf-viewer-document`): seven commits on `combray/0.7` at
+`6d3218a2a94`, upstream base still v0.7.0. **It is a candidate.** #18 is
+not merged yet; before the Combray PR that sets this pin merges, #18
+merges with a merge commit, the pin moves to that commit on
+`combray/0.7`, and the Engine workflow runs again on it.
+
+What the engine change does (its `DOWNSTREAM.md` row has the details):
+
+- With the `combray_pdf_viewer_module` and `combray_pdf_viewer_csp`
+  preferences set, a top-level `application/pdf` response becomes a viewer
+  document at the PDF's own URL: a fresh opaque origin, Combray's policy
+  in place of the response's, and markup that loads Combray's viewer
+  module as soon as the headers arrive. Without them, PDFs keep Servo's
+  stand-in page, as before.
+- The body is fetched once. At its end it moves into the blob URL store
+  under the document's origin, and the root element's `data-pdf-state`
+  (`loading`, `ready`, `too-large`, `failed`), `data-pdf-src`,
+  `data-pdf-length` and `data-pdf-limit` tell the viewer where it is.
+- A body over `combray_pdf_viewer_max_bytes` is refused at the headers
+  or mid-stream, and the navigation fetch is cancelled; leaving a viewer
+  while its body still arrives cancels it too. A body shorter than its
+  `Content-Length` is `failed`.
+- The blob is released when the document unloads unsalvageable or leaves
+  session history, so Back to a viewer in the back-forward cache reads
+  the same blob without a request.
+- PDFs in frames, and popups of scripts-sandboxed documents, keep the
+  stand-in page. `Content-Disposition: attachment` is ignored, so
+  attachment PDFs open in the viewer.
+
+Evidence for the engine change is in #18: 24 tests in
+`components/servo/tests/pdf_viewer.rs` and its review. On this Linux
+x86_64 host, for the pin:
+
+- `git diff --name-only 6d3218a2a94 05027c9413a` touches no `Cargo.toml`,
+  `Cargo.lock`, toolchain or default resource. `cargo test --lib` in
+  `native/` against the candidate checkout: 120 passed, and
+  `native/Cargo.lock` did not change. The notices' content is the same;
+  only their input hash of `scripts/m0/servo-pin.sh` and the compare link
+  in `THIRD_PARTY_NOTICES.md` follow the pin.
+- `scripts/m0/fetch-servo.sh` refused this host's checkout because
+  `servo-checkout/servo` is a symbolic link to a checkout elsewhere on the
+  same disk (space). Its fetch and checkout steps were run by hand on that
+  checkout: `git fetch --no-tags --depth=1
+  https://github.com/L-K-M/servo.git 05027c9413a...` from L-K-M/servo,
+  then `git checkout --force --detach` and `git clean -ffd`.
+
+This host has no Android NDK or emulator: both native ABI builds,
+packaging and the fixture checks are the Engine workflow's evidence on the
+PR that sets this pin. Combray turns the viewer on in the same PR
+([PDF.md](PDF.md#phases)).
