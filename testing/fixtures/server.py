@@ -73,8 +73,8 @@ Pages
                                attachment.pdf   plum, PDF-ATTACHMENT-TITLE, Content-Disposition: attachment
                                corrupt.pdf      %PDF- and then nothing PDFium reads
                                protected.pdf    needs the user password "fixture"
-                               large.pdf?k=     PDF_TOO_LARGE_BYTES with Content-Length, sent until the
-                                                client stops reading
+                               large.pdf?k=     PDF_TOO_LARGE_BYTES with Content-Length, sent at about
+                                                3 MB/s until the client stops reading
                              /_admin/state "pdf" has, per k, requests, bytesSent and whether the
                              response ended
   /pdf/link.html?k=          page-filling #6b4a2e link to /pdf/plain.pdf?k=
@@ -173,6 +173,10 @@ PDF_PAGES = 300
 # Over the viewer's 64 MiB cap (owner decision, 29 October 2026).
 PDF_TOO_LARGE_BYTES = 65 * 1024 * 1024
 PDF_STREAM_CHUNK = 64 * 1024
+# Pause after each chunk of large.pdf: about 3 MB/s, so the whole body takes over 20 s. Unpaced,
+# `adb reverse` took all 65 MiB within 2 s on the CI emulator, before the check could tell a
+# cancelled download from a finished one.
+PDF_STREAM_PAUSE_S = 0.02
 
 
 def pdf_string(text):
@@ -1046,7 +1050,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.send(404, page("not found", ""))
 
     def send_large_pdf(self, key):
-        """PDF_TOO_LARGE_BYTES with a Content-Length, sent until the client stops reading."""
+        """PDF_TOO_LARGE_BYTES with a Content-Length, paced, sent until the client stops reading."""
         self.send_response(200)
         self.send_header("Content-Type", "application/pdf")
         self.send_header("Content-Length", str(PDF_TOO_LARGE_BYTES))
@@ -1062,6 +1066,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 sent += len(part)
                 with lock:
                     state["pdf"][key]["bytesSent"] = sent
+                time.sleep(PDF_STREAM_PAUSE_S)
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True
         finally:
