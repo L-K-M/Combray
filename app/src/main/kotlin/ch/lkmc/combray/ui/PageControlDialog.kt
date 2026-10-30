@@ -2,6 +2,7 @@ package ch.lkmc.combray.ui
 
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +21,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -47,8 +50,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.PopupProperties
 import ch.lkmc.combray.R
 import ch.lkmc.combray.UploadStaging
+import ch.lkmc.combray.readPagePaste
 import ch.lkmc.combray.core.browser.DialogBlocking
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.engine.ControlResponse
@@ -91,8 +96,37 @@ fun PageControlDialog(
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
+        PageControlContent.PasteMenu -> PasteMenu(answer, onNotify)
         PageControlContent.LeavePage -> LeavePageDialog(control.site) { answer(it.response) }
         else -> ScriptDialog(control, content, onAnswer)
+    }
+}
+
+/** Clipboard contents are read on the action, never while a page opens its menu. */
+@Composable
+private fun PasteMenu(onAnswer: (ControlResponse) -> Unit, onNotify: (String) -> Unit) {
+    val context = LocalContext.current
+    val unavailable = stringResource(R.string.page_paste_unavailable)
+    BackHandler { onAnswer(ControlResponse.Dismiss) }
+
+    // Keep the page's IME and focus: a dialog's keyboard dismissal blurs the field and withdraws its menu.
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = { onAnswer(ControlResponse.Dismiss) },
+        properties = PopupProperties(focusable = false),
+    ) {
+        DropdownMenuItem(
+            text = { Text(stringResource(android.R.string.paste)) },
+            onClick = {
+                val text = readPagePaste(context)
+                onAnswer(text?.let(ControlResponse::Paste) ?: ControlResponse.Dismiss)
+                if (text == null) onNotify(unavailable)
+            },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.action_cancel)) },
+            onClick = { onAnswer(ControlResponse.Dismiss) },
+        )
     }
 }
 

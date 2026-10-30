@@ -335,4 +335,5 @@
     <string name="notices_title">Third-party notices</string>
     <string name="notices_intro">Combray includes the following software. Tap an entry to read its license.</string>
     <string name="notices_unavailable">The notices are missing from this build.</string>
+    <string name="page_paste_unavailable">Clipboard text cannot be pasted.</string>
 </resources>

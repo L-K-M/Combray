@@ -20,6 +20,8 @@ Pages
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /shadow-input.html         nested closed-shadow password field; title SHADOW:<state>,
+                              then SHADOW:input:<value>:<paste count> after typing or pasting
   /leave.html[?auto]         link to /solid/2e6b4f.html above a <textarea>; its beforeunload handler
                              always asks to stay (title LEAVE:<times asked>); ?auto follows the link
                              by script a second after load, without any user input
@@ -518,6 +520,23 @@ CONTROL_PAGES = {
         "<script>addEventListener('load',function(){var q=document.getElementById('q');"
         "q.onfocus=function(){document.title='AUTOFOCUS:focused'};"
         "q.onblur=function(){document.title='AUTOFOCUS:blurred'};q.focus()})</script>",
+    ),
+    "/shadow-input.html": (
+        "SHADOW:ready",
+        "<div class='c' id='field'></div>",
+        "<script>addEventListener('load',function(){"
+        "var outer=document.getElementById('field').attachShadow({mode:'closed'});"
+        "var host=document.createElement('div');outer.appendChild(host);"
+        "var inner=host.attachShadow({mode:'closed'});"
+        "var q=document.createElement('input');q.type='password';"
+        "q.style.cssText='box-sizing:border-box;width:100%;height:70vh;font-size:32px';"
+        "inner.appendChild(q);var pastes=0;"
+        "q.onfocus=function(){document.title='SHADOW:focused'};"
+        "q.onblur=function(){document.title='SHADOW:blurred'};"
+        "q.onclick=function(){document.title='SHADOW:tapped'};"
+        "q.onpaste=function(){pastes++};"
+        "q.oninput=function(){document.title='SHADOW:input:'+q.value+':'+pastes};"
+        "q.focus()})</script>",
     ),
 }
 

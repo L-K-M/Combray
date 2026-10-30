@@ -150,6 +150,24 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesAPagePasteMenu() {
+        val event = EngineEvent.parse(
+            """{"type":"control_shown","control":7,"kind":"paste_menu","tab":1,"generation":2}""",
+        ) as EngineEvent.ControlShown
+
+        assertEquals(ViewRef(1, 2), event.view)
+        assertEquals(7L, event.control)
+        assertEquals(PageControlContent.PasteMenu, event.content)
+    }
+
+    @Test
+    fun pasteResponsesKeepExactTextButRedactDiagnostics() {
+        val paste = ControlResponse.Paste("Ada été\n\"secret\"")
+        assertEquals("""{"type":"paste","text":"Ada été\n\"secret\""}""", paste.toJson())
+        assertFalse(paste.toString(), "secret" in paste.toString())
+    }
+
+    @Test
     fun parsesPageControls() {
         val select = EngineEvent.parse(
             """{"type":"control_shown","control":5,"kind":"select","multiple":false,"selected":[2],""" +

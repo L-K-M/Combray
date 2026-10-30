@@ -377,6 +377,7 @@ sealed interface EngineEvent {
                 array("extensions").map { (it as? JsonPrimitive)?.contentOrNull ?: throw IllegalArgumentException("extension is not a string") },
             )
             "link_menu" -> PageControlContent.LinkMenu(optionalString("link"), optionalString("image"))
+            "paste_menu" -> PageControlContent.PasteMenu
             "sign_in" -> PageControlContent.SignIn(string("origin"), boolean("proxy"))
             "leave_page" -> PageControlContent.LeavePage
             else -> throw IllegalArgumentException("unknown control kind $kind")

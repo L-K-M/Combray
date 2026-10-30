@@ -225,6 +225,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Show the keyboard for fields inside shadow roots, and offer Paste when
+  you long-press an editable page field.
 - Pages retain their scroll position when embedded frames load or close,
   preventing brief flashes of an earlier position while scrolling.
 - Horizontal swipes across the URL bar or buttons switch tabs only after

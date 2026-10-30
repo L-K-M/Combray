@@ -4,6 +4,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -69,6 +70,10 @@ class SaveTest {
 
     private fun tapSave() {
         device.dismissSystemDialogs()
+        // Engine state can arrive before the bar's merged semantics update.
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) {
+            compose.onAllNodesWithContentDescription("Save").fetchSemanticsNodes().size == 1
+        }
         compose.onNodeWithContentDescription("Save").performClick()
     }
 

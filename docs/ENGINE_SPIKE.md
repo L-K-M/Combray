@@ -1563,3 +1563,81 @@ Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
 
 The phone and live example have not been rechecked. The regression proves
 this pipeline-change flicker; other causes remain possible.
+
+## 33. Shadow-root fields and Paste (30 October 2026)
+
+Servo retargets composed focus events to the shadow host for page listeners.
+Its default-action dispatch used that host too, so a shadow-root input never
+requested its input method. Downstream `df5304686d4` extends the existing
+keyboard-default exception to focus events: defaults use the original field,
+while listeners keep seeing the host. Composition behavior is unchanged.
+Source and regressions: [downstream PR #19](https://github.com/L-K-M/servo/pull/19).
+The final pin `331149c771f` also includes the merged scroll fix from section 32.
+
+Combray also discarded context menus without link/image addresses. It now
+offers Paste when Servo permits it. Android reads plain clipboard text only
+on that tap; URI clips are not fetched and text above 256 KiB UTF-8 is refused
+whole. `ContextMenu::paste_text` carries the text with the retained control's
+pipeline and node. Servo rejects inactive documents and removed/adopted nodes,
+then uses its normal cancellable paste and input-event path. No clipboard
+grant remains for another request. Both response boundaries redact diagnostics.
+The menu is a non-focusable popup: a focusable dialog hid the IME, blurred the
+field and withdrew its own menu. A scoped Back handler dismisses the popup
+before page navigation.
+
+Evidence on Linux x86_64, Rust 1.97.1, NDK r29 and API-30 x86_64 emulators
+`emulator-5590`, then `emulator-5584` (SwiftShader, software CPU emulation):
+
+- The archived APK `b0a3c689c260e4c89b26897c28412be501cf0c459aafb6e3bc433e893d28c6d1`
+  fails the shadow-field keyboard assertion and discards the long-press control
+  (`build/input-red-retry/`). The first attempt stopped at painting because
+  System UI had an ANR; restarting System UI let both checks reach their targets.
+- Paste-only pin `5df20e78f74` builds natively. Its APK
+  `8c3bdfd35556b21f706f840a391da76619c551f2609302427e2b32f915c773d9` passes
+  the new paste check and all three existing keyboard checks. The shadow-field
+  tap reaches the page, then still fails to open the keyboard, isolating the
+  missing focus default (`build/input-paste-interim/`, four passed, one failed).
+- With the focus fix and dialog menu, six focused device checks passed; paste
+  with the keyboard open failed because the dialog triggered an IME dismissal
+  (`build/input-final-clean/`). The popup fix passes all seven checks, including
+  open-keyboard paste, further typing and accessible targets (`build/input-popup/`,
+  APK `0e19d821423cf2f1b6454069f4a1c61d552b3d51cf7d453776e3f02483f745f0`).
+- All eight focused desktop tests pass on the combined pin: two shadow-root
+  IME cases, ordinary IME show/hide, four paste cases and the redacted Debug
+  library test. Run each WebView test in its own process; Servo's options
+  initialize once. Three pre-existing embedder-traits doctests fail to compile;
+  the focused `--lib` test passes. The desktop setup uses Xvfb `:99`, Mesa from
+  the `poltergeist-gl` conda environment and build dependencies from `build`.
+  The final host linker supplies conda's `libstdc++.so` by full path because
+  Zig maps `-lstdc++` to libc++, which lacks the prebuilt SpiderMonkey symbols.
+- Kotlin unit tests, lint, debug app/test assembly, 125 native host tests and
+  92 script checks pass. The combined-pin x86_64 native build passes (1m16s
+  incremental). Final both-ABI CI and full device results are tracked in
+  [PR #166](https://github.com/L-K-M/Combray/pull/166).
+- `PasteMenuBackTest` fails without the menu's Back handler and passes with
+  it. The device Back check passes in CI at `52cae22`; the local emulator
+  crashed before that additional case ran.
+- That full CI run passes 149 of 150 checks, including every keyboard/paste
+  case. `SaveTest` looked up Save before the bar's merged semantics were
+  ready. Its shared tap helper now waits for that node, like other UI checks,
+  before clicking. Saving and server-acknowledgment assertions are unchanged.
+
+Reproduction uses `testing/fixtures/server.py`'s nested closed-shadow password
+field. `KeyboardTest` checks tap acknowledgement, keyboard opening, IME text,
+Back/reopening, and paste both before and after opening the keyboard.
+`AccessibilityTest.aPagePasteMenuIsAccessible` covers labels and touch targets.
+No live login or physical phone was tested.
+
+```sh
+export ANDROID_SDK_ROOT=$HOME/android-sdk
+COMBRAY_HOST_CC="$PWD/servo-checkout/host-cc" \
+  COMBRAY_HOST_CXX="$PWD/servo-checkout/host-cxx" \
+  CARGO_BUILD_JOBS=6 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5584 ch.lkmc.combray.KeyboardTest
+```
+
+The host wrappers use the existing Zig 0.17 C/C++ wrappers with
+`-fno-sanitize=undefined`, as in the earlier builds. The initial native attempt
+used the NDK's clang for host code and failed on missing host C headers.
+Raw logs remain under `build/`; no generated binaries or screenshots are committed.
