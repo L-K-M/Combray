@@ -1,0 +1,127 @@
+/* Combray's PDF viewer (viewer.mjs). Pages stay white paper in both appearances; the space around
+   them and the messages follow the app's light or dark appearance. Page positions and sizes are
+   set by viewer.mjs. */
+
+:root {
+  color-scheme: light dark;
+  --background: #e4e4e7;
+  --text: #1c1c1e;
+  --muted: #5c5c63;
+  --focus: #1f5fbf;
+  --shadow: rgba(0, 0, 0, 0.28);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1c1c1e;
+    --text: #ececf0;
+    --muted: #a6a6ad;
+    --focus: #8ab4f8;
+    --shadow: rgba(0, 0, 0, 0.6);
+  }
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font: 16px/1.5 sans-serif;
+}
+
+.pages {
+  position: relative;
+}
+
+.page {
+  position: absolute;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 1px 3px var(--shadow);
+}
+
+.page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.page .link {
+  position: absolute;
+  display: block;
+}
+
+.page .link:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.page-error {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  margin: 0;
+  padding: 16px;
+  color: #5c5c63;
+  text-align: center;
+}
+
+.more {
+  margin: 0;
+  padding: 8px 16px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.status {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.status[hidden] {
+  display: none;
+}
+
+.status p {
+  max-width: 32em;
+  margin: 12px 0 0;
+  color: var(--muted);
+}
+
+.status h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  border: 3px solid var(--muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

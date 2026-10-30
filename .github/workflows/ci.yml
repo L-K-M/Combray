@@ -1,8 +1,9 @@
 # CI: prove every push to main and every PR.
 #
 #   scripts — bash -n + shellcheck over scripts/*.sh, the scripts' regression
-#             tests, rustfmt over native/ and a syntax check of the engine's
-#             page scripts (always meaningful; none needs the Servo tree).
+#             tests, rustfmt over native/, a syntax check of the engine's
+#             page scripts, and the PDF viewer's modules and host tests
+#             (always meaningful; none needs the Servo tree).
 #   android — JVM tests, Android lint, debug + release APKs, the device
 #             checks' test APK (compiled, not run), a check that Room's
 #             exported schemas are committed, the third-party notices in
@@ -79,6 +80,15 @@ jobs:
           for f in native/src/*.js native/src/vendor/*.js; do
             node -e 'const file = process.argv[1]; new (require("vm").Script)(require("fs").readFileSync(file, "utf8"), { filename: file })' "$f"
           done
+
+      # The PDF viewer's module and worker (served by native/src/pdf.rs) are ES
+      # modules, which vm.Script would reject: `node --check` parses them as
+      # modules. The host tests run the worker against the vendored PDFium and
+      # the fixture server's PDFs, and the viewer's layout and link rules.
+      - name: PDF viewer modules
+        run: |
+          for f in native/src/pdf/*.mjs native/src/pdf/test/*.mjs; do node --check "$f"; done
+          node --test native/src/pdf/test/viewer.test.mjs
 
   android:
     name: Test, lint, assemble

@@ -8,6 +8,10 @@
 //! The query enters the script as a JSON string literal, so it is never source text. The script
 //! runs in the page's realm: a page can observe the query and misreport its own matches, so the
 //! result is reduced to bounded integers here and anything else is refused.
+//!
+//! Combray's PDF viewer has no text to search yet: the script answers `{ unavailable: true }`
+//! there, which becomes an error, and the app says the page cannot be searched rather than
+//! reporting no matches.
 
 #[cfg(target_os = "android")]
 use std::collections::HashMap;
@@ -15,7 +19,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use servo::{JSValue, JavaScriptEvaluationError};
 
-use crate::capture::{MAX_NODES, truncate_utf8};
+use crate::capture::{MAX_NODES, STAND_IN, truncate_utf8};
 
 /// Matches counted before the script stops; beyond it the count is a lower bound.
 pub const MAX_MATCHES: u32 = 999;
@@ -47,6 +51,7 @@ pub fn script(query: &str, action: FindAction) -> String {
 
     // The query goes in last, so placeholder-like text inside it is never replaced.
     TEMPLATE
+        .replacen("__STAND_IN__", STAND_IN, 1)
         .replacen("__INDEX__", &index.to_string(), 1)
         .replacen("__ACTION__", &format!("\"{name}\""), 1)
         .replacen("__MAX_MATCHES__", &MAX_MATCHES.to_string(), 1)
@@ -89,6 +94,29 @@ pub fn bounded_counts(count: f64, index: f64, capped: bool) -> Option<FindCounts
     })
 }
 
+/// The fields `find.js` answers with, as read from its result object.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ScriptAnswer {
+    pub count: Option<f64>,
+    pub index: Option<f64>,
+    pub capped: Option<bool>,
+    /// `true` in Combray's PDF viewer, which has no text to search yet.
+    pub unavailable: bool,
+}
+
+impl ScriptAnswer {
+    /// Bounded counts, or why the answer is not usable (no page text in the reason).
+    pub fn counts(self) -> Result<FindCounts, &'static str> {
+        if self.unavailable {
+            return Err("the PDF viewer cannot be searched yet");
+        }
+        let (Some(count), Some(index), Some(capped)) = (self.count, self.index, self.capped) else {
+            return Err("missing count, index or capped");
+        };
+        bounded_counts(count, index, capped).ok_or("counts out of bounds")
+    }
+}
+
 #[cfg(target_os = "android")]
 /// The script's result as counts, or why it is not usable (no page text in the reason).
 pub fn interpret_result(
@@ -105,14 +133,17 @@ pub fn interpret_result(
         Some(JSValue::Number(value)) => Some(*value),
         _ => None,
     };
-    let (Some(count), Some(index), Some(JSValue::Boolean(capped))) = (
-        number(&fields, "count"),
-        number(&fields, "index"),
-        fields.get("capped"),
-    ) else {
-        return Err("missing count, index or capped");
+    let flag = |fields: &HashMap<String, JSValue>, name: &str| match fields.get(name) {
+        Some(JSValue::Boolean(value)) => Some(*value),
+        _ => None,
     };
-    bounded_counts(count, index, *capped).ok_or("counts out of bounds")
+    ScriptAnswer {
+        count: number(&fields, "count"),
+        index: number(&fields, "index"),
+        capped: flag(&fields, "capped"),
+        unavailable: flag(&fields, "unavailable") == Some(true),
+    }
+    .counts()
 }
 
 #[cfg(test)]
@@ -178,6 +209,65 @@ mod tests {
         let script = script(&query, FindAction::Find { index: 0 });
         let expected = format!("\"{}\"", "é".repeat(MAX_QUERY_BYTES / 2));
         assert!(script.contains(&format!("}})({expected}, 0,")));
+    }
+
+    #[test]
+    fn the_script_checks_for_the_pdf_viewer_inside_its_function() {
+        let script = script("x", FindAction::Find { index: 0 });
+        let wrapper = script
+            .find("(function (query, wanted, action, maxMatches, maxNodes, maxMillis) {")
+            .unwrap();
+        let declared = script.find("function isCombrayPdfViewer()").unwrap();
+        let used = script
+            .find("if (isCombrayPdfViewer()) return { unavailable: true };")
+            .unwrap();
+        // Inside the function, and before the walk; clearing still runs everywhere.
+        assert!(wrapper < declared && declared < used);
+        assert!(used < script.find("createTreeWalker").unwrap());
+        assert!(script.find("action === \"clear\"").unwrap() < used);
+        assert!(!script.contains("__STAND_IN__"));
+    }
+
+    #[test]
+    fn find_unavailable_in_the_pdf_viewer_is_an_error() {
+        let unavailable = ScriptAnswer {
+            unavailable: true,
+            ..ScriptAnswer::default()
+        };
+        assert_eq!(
+            unavailable.counts(),
+            Err("the PDF viewer cannot be searched yet")
+        );
+        // Even with counts beside it: a page could add them, never turn the error into matches.
+        let mixed = ScriptAnswer {
+            count: Some(1.0),
+            index: Some(0.0),
+            capped: Some(false),
+            unavailable: true,
+        };
+        assert!(mixed.counts().is_err());
+    }
+
+    #[test]
+    fn a_complete_answer_gives_its_counts() {
+        let answer = ScriptAnswer {
+            count: Some(2.0),
+            index: Some(1.0),
+            capped: Some(true),
+            unavailable: false,
+        };
+        assert_eq!(
+            answer.counts(),
+            Ok(FindCounts {
+                count: 2,
+                index: Some(1),
+                capped: true
+            })
+        );
+        assert_eq!(
+            ScriptAnswer::default().counts(),
+            Err("missing count, index or capped")
+        );
     }
 
     #[test]

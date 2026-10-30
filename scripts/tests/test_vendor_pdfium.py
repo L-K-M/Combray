@@ -45,6 +45,18 @@ class VendorPdfiumTest(unittest.TestCase):
             flags, mtime = header[3], int.from_bytes(header[4:8], "little")
             self.assertEqual((flags, mtime), (0, 0), output)
 
+    def test_the_committed_licenses_are_the_pinned_package_files(self):
+        for member, (output, digest) in self.vendor.LICENSES.items():
+            data = (self.vendor.VENDOR / output).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), digest, member)
+
+    def test_gzip_is_required_on_path(self):
+        from unittest import mock
+
+        with mock.patch.object(self.vendor.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(OSError, "gzip is not on PATH"):
+                self.vendor.gzip_n9(b"data")
+
     def test_the_package_licenses_are_vendored(self):
         self.assertIn("MIT License", (self.vendor.VENDOR / "embedpdf-pdfium.LICENSE").read_text())
         pdfium = (self.vendor.VENDOR / "pdfium.LICENSE").read_text()

@@ -2,6 +2,7 @@
 """Synthetic pages and fake services for Combray's device checks (no live services, no personal data).
 
     python3 -I testing/fixtures/server.py [--port 8766]
+    python3 -I testing/fixtures/server.py --write-pdfs DIR
 
 The device reaches it through `adb reverse tcp:8766 tcp:8766` at http://localhost:8766.
 
@@ -58,6 +59,26 @@ Pages
   /fixed-scroll.html         transparent fixed scroll box over a red/green page
                               (?loading=1 holds an image until /_admin/finish-scroll-load)
   /document.pdf              one-page PDF (application/pdf) whose page reads PDF-FIXTURE-TEXT
+  /document.bin              the same PDF as application/octet-stream with nosniff (Servo's stand-in page)
+  /pdf/<name>.pdf            generated PDFs (pdf_fixtures; --write-pdfs DIR writes them for the viewer's
+                             host tests): each page a band of one colour over its top 65%, with a
+                             metadata title unless named otherwise, and Cache-Control: no-store
+                               plain.pdf?k=     plum, PDF-PLAIN-TITLE; requests counted per k
+                               untitled.pdf     plum, no title
+                               pages.pdf        300 pages: sand, then navy; PDF-PAGES-TITLE
+                               page-link.pdf    teal, linked to page 3 (sand), then navy
+                               web-link.pdf     teal, linked to /solid/2e6b4f.html; javascript:, file: and
+                                                intent: links below the band
+                               cookie.pdf       plum, PDF-COOKIE-TITLE with the /cookie-set cookie, else 403
+                               attachment.pdf   plum, PDF-ATTACHMENT-TITLE, Content-Disposition: attachment
+                               corrupt.pdf      %PDF- and then nothing PDFium reads
+                               protected.pdf    needs the user password "fixture"
+                               large.pdf?k=     PDF_TOO_LARGE_BYTES with Content-Length, sent at about
+                                                3 MB/s until the client stops reading
+                             /_admin/state "pdf" has, per k, requests, bytesSent and whether the
+                             response ended
+  /pdf/link.html?k=          page-filling #6b4a2e link to /pdf/plain.pdf?k=
+  /pdf/frame.html?k=         page-filling iframe of /pdf/plain.pdf?k=; title PDF-FRAME:loaded on its load
   (the five control pages have a #1f6f78 margin on the left for paint checks)
 Fake Karakeep (root http://10.0.2.2:8766/keep on the emulator: a host of its own, because a
 service's own host is never captured for Hister)
@@ -132,23 +153,125 @@ def fresh_media():
     return {"requests": 0, "completed": 0, "clip": fresh_served(), "tone": fresh_served(), "redirects": 0}
 
 
-state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media(), "pdf": {}}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 scroll_load_finished = threading.Event()
 
 
-def pdf_document(text):
-    """A minimal valid one-page PDF showing `text` (ASCII) in Helvetica."""
-    stream = f"BT /F1 24 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
-    objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    ]
+# Generated PDFs (deterministic, no external tools). Each page is US Letter with a solid band of
+# its colour over the top PDF_BAND of the page, so a screenshot shows which page is on screen.
+PDF_PAGE_POINTS = (612, 792)
+PDF_BAND = 0.65
+# Band colours. None is used by another fixture or the app, and they stay apart by more than the
+# device checks' colour tolerance.
+PDF_PLUM = 0x7a2e64
+PDF_TEAL = 0x2a8a8a
+PDF_SAND = 0xa08a3a
+PDF_NAVY = 0x24306e
+PDF_PAGES = 300
+# Over the viewer's 64 MiB cap (owner decision, 29 October 2026).
+PDF_TOO_LARGE_BYTES = 65 * 1024 * 1024
+PDF_STREAM_CHUNK = 64 * 1024
+# Pause after each chunk of large.pdf: about 3 MB/s, so the whole body takes over 20 s. Unpaced,
+# `adb reverse` took all 65 MiB within 2 s on the CI emulator, before the check could tell a
+# cancelled download from a finished one.
+PDF_STREAM_PAUSE_S = 0.02
+
+
+def pdf_string(text):
+    """A PDF literal string for ASCII `text`."""
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    return f"({escaped})".encode("ascii")
+
+
+# The padding string of the PDF standard security handler (ISO 32000-1, 7.6.3.3).
+PDF_PASSWORD_PAD = bytes.fromhex("28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a")
+PDF_FILE_ID = hashlib.md5(b"combray-fixture").digest()
+
+
+def rc4(key, data):
+    """RC4, which the PDF standard security handler's revision 2 uses (not for anything secret)."""
+    box = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + box[i] + key[i % len(key)]) % 256
+        box[i], box[j] = box[j], box[i]
+    i = j = 0
+    out = bytearray()
+    for byte in data:
+        i = (i + 1) % 256
+        j = (j + box[i]) % 256
+        box[i], box[j] = box[j], box[i]
+        out.append(byte ^ box[(box[i] + box[j]) % 256])
+    return bytes(out)
+
+
+def pdf_encryption(user_password):
+    """The /Encrypt dictionary of revision 2 (40-bit RC4) for `user_password` (ISO 32000-1,
+    algorithms 2 to 4). PDFium checks the password against /U before it decrypts anything, so the
+    fixture's content stays unencrypted: without the password nothing is read."""
+    padded = (user_password.encode("latin-1") + PDF_PASSWORD_PAD)[:32]
+    owner_key = hashlib.md5(padded).digest()[:5]
+    owner = rc4(owner_key, padded)
+    permissions = -44
+    key = hashlib.md5(padded + owner + struct.pack("<i", permissions) + PDF_FILE_ID).digest()[:5]
+    user = rc4(key, PDF_PASSWORD_PAD)
+    return b"<< /Filter /Standard /V 1 /R 2 /O <%s> /U <%s> /P %d >>" % (
+        owner.hex().encode(), user.hex().encode(), permissions)
+
+
+def pdf_file(pages, title=None, user_password=None):
+    """A valid PDF of `pages`, each (band colour, text, links); `title` goes in its Info dictionary,
+    and a `user_password` makes it need one.
+
+    A link is (rect, target): rect as fractions of the page (left, top, right, bottom, from the top
+    left corner), target ("uri", address) or ("page", 0-based index).
+    """
+    width, height = PDF_PAGE_POINTS
+    band = round(height * PDF_BAND)
+    objects = []
+
+    def reserve():
+        objects.append(None)
+        return len(objects)
+
+    catalog, tree, font = reserve(), reserve(), reserve()
+    objects[font - 1] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+    kids = [reserve() for _ in pages]
+    for number, (color, text, links) in zip(kids, pages):
+        red, green, blue = ((color >> shift) & 0xFF for shift in (16, 8, 0))
+        stream = (b"%.4f %.4f %.4f rg 0 %d %d %d re f 0 g BT /F1 24 Tf 72 %d Td %s Tj ET"
+                  % (red / 255, green / 255, blue / 255, height - band, width, band, height - band - 48,
+                     pdf_string(text)))
+        contents = reserve()
+        objects[contents - 1] = b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream)
+        annotations = []
+        for (left, top, right, bottom), (kind, target) in links:
+            if kind == "uri":
+                action = b"<< /S /URI /URI %s >>" % pdf_string(target)
+            else:
+                action = b"<< /S /GoTo /D [%d 0 R /XYZ 0 %d 0] >>" % (kids[target], height)
+            annotation = reserve()
+            objects[annotation - 1] = (
+                b"<< /Type /Annot /Subtype /Link /Rect [%d %d %d %d] /Border [0 0 0] /A %s >>"
+                % (left * width, height - bottom * height, right * width, height - top * height, action))
+            annotations.append(b"%d 0 R" % annotation)
+        objects[number - 1] = (
+            b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %d %d] /Resources << /Font << /F1 %d 0 R >> >> "
+            b"/Contents %d 0 R /Annots [%s] >>" % (tree, width, height, font, contents, b" ".join(annotations)))
+    objects[catalog - 1] = b"<< /Type /Catalog /Pages %d 0 R >>" % tree
+    objects[tree - 1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids), len(kids))
+    info = b""
+    if title is not None:
+        objects.append(b"<< /Title %s /Producer (Combray fixtures) >>" % pdf_string(title))
+        info = b" /Info %d 0 R" % len(objects)
+    if user_password is not None:
+        objects.append(pdf_encryption(user_password))
+        file_id = PDF_FILE_ID.hex().encode()
+        info += b" /Encrypt %d 0 R /ID [<%s> <%s>]" % (len(objects), file_id, file_id)
+
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -157,11 +280,62 @@ def pdf_document(text):
     xref = len(out)
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
-    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    out += b"trailer\n<< /Size %d /Root %d 0 R%s >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, catalog, info, xref)
     return bytes(out)
 
 
+def pdf_document(text):
+    """A minimal valid one-page PDF showing `text` (ASCII) in Helvetica, without a title."""
+    return pdf_file([(0xFFFFFF, text, [])])
+
+
+# The band covers the point a tap or a screenshot checks (35% down a portrait screen).
+PDF_LINK_RECT = (0.05, 0.05, 0.95, 0.6)
+# /pdf/link.html: a page-filling link on a background no other fixture uses.
+PDF_LINK_PAGE = "6b4a2e"
+PDF_PAGE_STYLE = ("<style>html,body{margin:0;height:100%%;background:#%s}"
+                  ".c{display:block;width:100vw;height:100vh;font-size:40px;color:#fff}</style>")
 PDF_DOCUMENT = pdf_document("PDF-FIXTURE-TEXT")
+PDF_PLAIN = pdf_file([(PDF_PLUM, "PDF-PLAIN-TEXT", [])], title="PDF-PLAIN-TITLE")
+PDF_UNTITLED = pdf_file([(PDF_PLUM, "PDF-UNTITLED-TEXT", [])])
+# Page 1 in sand, the others in navy: the screen shows whether the first page is on top.
+PDF_MANY_PAGES = pdf_file([(PDF_SAND if index == 0 else PDF_NAVY, f"PDF-PAGE-{index + 1}", [])
+                           for index in range(PDF_PAGES)], title="PDF-PAGES-TITLE")
+# A link over page 1's band (teal) to page 3 (sand); the others in navy, enough of them for
+# page 3 to scroll to the top of the screen.
+PDF_PAGE_LINK = pdf_file([(PDF_TEAL, "PDF-LINK-PAGE-1", [(PDF_LINK_RECT, ("page", 2))])] + [
+    (PDF_SAND if number == 3 else PDF_NAVY, f"PDF-LINK-PAGE-{number}", []) for number in range(2, 7)
+], title="PDF-PAGE-LINK-TITLE")
+# Starts like a PDF, then nothing PDFium can read.
+PDF_CORRUPT = b"%PDF-1.7\n" + bytes((index * 37 + 11) % 251 for index in range(4096))
+PDF_PROTECTED = pdf_file([(PDF_PLUM, "PDF-PROTECTED-TEXT", [])], user_password="fixture")
+PDF_COOKIE = pdf_file([(PDF_PLUM, "PDF-COOKIE-TEXT", [])], title="PDF-COOKIE-TITLE")
+PDF_ATTACHMENT = pdf_file([(PDF_PLUM, "PDF-ATTACHMENT-TEXT", [])], title="PDF-ATTACHMENT-TITLE")
+
+
+def pdf_web_link(target):
+    """A one-page PDF whose band links to `target`; links PDFs may not follow sit under the band."""
+    ignored = [
+        ((0.05, 0.62, 0.3, 0.7), ("uri", "javascript:document.title='PDF-SCRIPT-RAN'")),
+        ((0.35, 0.62, 0.6, 0.7), ("uri", "file:///system/etc/hosts")),
+        ((0.65, 0.62, 0.95, 0.7), ("uri", "intent://fixture#Intent;scheme=http;end")),
+    ]
+    return pdf_file([(PDF_TEAL, "PDF-LINK-WEB", [(PDF_LINK_RECT, ("uri", target))] + ignored)],
+                    title="PDF-WEB-LINK-TITLE")
+
+
+def pdf_fixtures(base):
+    """Every generated PDF by file name, with links to `base` (for the viewer's host tests)."""
+    return {
+        "plain.pdf": PDF_PLAIN,
+        "untitled.pdf": PDF_UNTITLED,
+        "pages.pdf": PDF_MANY_PAGES,
+        "page-link.pdf": PDF_PAGE_LINK,
+        "web-link.pdf": pdf_web_link(f"{base}/solid/2e6b4f.html"),
+        "corrupt.pdf": PDF_CORRUPT,
+        "protected.pdf": PDF_PROTECTED,
+        "document.pdf": PDF_DOCUMENT,
+    }
 
 
 def tone_wav():
@@ -682,6 +856,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
         if path == "/document.pdf":
             return self.send(200, PDF_DOCUMENT, "application/pdf")
+        if path == "/document.bin":
+            # A PDF Servo does not recognise: it shows its stand-in page for it.
+            return self.send(200, PDF_DOCUMENT, "application/octet-stream",
+                             headers=[("X-Content-Type-Options", "nosniff")])
+        if path.startswith("/pdf/"):
+            return self.send_pdf(path[len("/pdf/"):], media_key(query))
         if path == "/empty.html":
             # Nothing to read: reader view finds no article.
             return self.send(200, page("EMPTY", ""))
@@ -760,6 +940,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state["log"].clear()
                 once_served.clear()
                 state["media"] = fresh_media()
+                state["pdf"].clear()
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})
@@ -827,6 +1008,70 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if fault == "store_then_hang":
             time.sleep(HANG_SECONDS)
         return self.send_json(status, existing)
+
+    def send_pdf(self, name, key):
+        """The /pdf/ routes; the PDFs and the large one's bytes are counted per `key`."""
+        fixed = {
+            "untitled.pdf": PDF_UNTITLED,
+            "pages.pdf": PDF_MANY_PAGES,
+            "page-link.pdf": PDF_PAGE_LINK,
+            "corrupt.pdf": PDF_CORRUPT,
+            "protected.pdf": PDF_PROTECTED,
+        }
+        if name in ("plain.pdf", "large.pdf"):
+            with lock:
+                counted = state["pdf"].setdefault(key, {"requests": 0, "bytesSent": 0, "ended": False})
+                counted["requests"] += 1
+        if name == "plain.pdf":
+            return self.send(200, PDF_PLAIN, "application/pdf")
+        if name in fixed:
+            return self.send(200, fixed[name], "application/pdf")
+        if name == "web-link.pdf":
+            return self.send(200, pdf_web_link(f"http://{self.headers.get('Host', 'localhost')}/solid/2e6b4f.html"),
+                             "application/pdf")
+        if name == "attachment.pdf":
+            return self.send(200, PDF_ATTACHMENT, "application/pdf",
+                             headers=[("Content-Disposition", 'attachment; filename="attachment.pdf"')])
+        if name == "cookie.pdf":
+            if f"{COOKIE_NAME}=" not in self.headers.get("Cookie", ""):
+                return self.send(403, page("PDF-COOKIE-REFUSED", "<p>no cookie</p>"))
+            return self.send(200, PDF_COOKIE, "application/pdf")
+        if name == "large.pdf":
+            return self.send_large_pdf(key)
+        if name == "link.html":
+            target = html.escape(f"/pdf/plain.pdf?k={key}", quote=True)
+            return self.send(200, page("PDF-LINK", f"<a class='c' href='{target}'>PDF</a>",
+                                       PDF_PAGE_STYLE % PDF_LINK_PAGE))
+        if name == "frame.html":
+            source = html.escape(f"/pdf/plain.pdf?k={key}", quote=True)
+            return self.send(200, page(
+                "PDF-FRAME", f"<iframe src='{source}' onload=\"document.title='PDF-FRAME:loaded'\"></iframe>",
+                "<style>html,body{margin:0;height:100%}iframe{display:block;border:0;width:100vw;height:100vh}</style>"))
+        return self.send(404, page("not found", ""))
+
+    def send_large_pdf(self, key):
+        """PDF_TOO_LARGE_BYTES with a Content-Length, paced, sent until the client stops reading."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Length", str(PDF_TOO_LARGE_BYTES))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        chunk = b"%PDF-1.7\n%" + b" " * (PDF_STREAM_CHUNK - 10)
+        sent = 0
+        try:
+            while sent < PDF_TOO_LARGE_BYTES:
+                part = chunk[:PDF_TOO_LARGE_BYTES - sent]
+                self.wfile.write(part)
+                self.wfile.flush()
+                sent += len(part)
+                with lock:
+                    state["pdf"][key]["bytesSent"] = sent
+                time.sleep(PDF_STREAM_PAUSE_S)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+        finally:
+            with lock:
+                state["pdf"][key]["ended"] = True
 
     def send_media(self, name, data, content_type):
         """`data` with byte ranges (one range per request: 206, or 416 past the end), recording the request."""
@@ -926,7 +1171,14 @@ def check_clip():
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--write-pdfs", metavar="DIR", type=pathlib.Path,
+                        help="write the generated PDFs to DIR (for the viewer's host tests) and exit")
     args = parser.parse_args()
+    if args.write_pdfs:
+        args.write_pdfs.mkdir(parents=True, exist_ok=True)
+        for name, data in pdf_fixtures(f"http://localhost:{args.port}").items():
+            (args.write_pdfs / name).write_bytes(data)
+        return
     check_clip()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"serving Combray fixtures on http://127.0.0.1:{args.port}", flush=True)
