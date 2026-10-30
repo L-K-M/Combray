@@ -1383,9 +1383,21 @@ Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
   existing pipeline-release check, which does not check transient pixels.
 - Changed-file whitespace check passes. Whole-file rustfmt reports
   pre-existing operator formatting differences outside the changed hunks.
-- Android validation pending. The local API-30 software emulator booted
-  once, then crashed during the reproduction setup; a second boot also
-  crashed. Neither attempt establishes an Android rendering result.
+- `scripts/build-native.sh`: local x86_64 Android release build passed
+  with NDK 29.0.14206865 and four Cargo workers.
+- Both Android ABIs and native host checks passed in
+  [the first Engine run](https://github.com/L-K-M/Combray/actions/runs/40989841472);
+  Kotlin tests/lint/build passed in its
+  [companion CI run](https://github.com/L-K-M/Combray/actions/runs/40989841398).
+  Its emulator passed the fixed-layer scroll checks, then went offline
+  during the wider suite. Earlier, the media check read only one report
+  immediately after load: cancellation can deliver the page's `error`
+  before its loader thread queues the native report. The check now waits
+  for both reports with its existing bounded state wait; server assertions
+  still require zero downloads. Full Android results are tracked in
+  [Combray PR #159](https://github.com/L-K-M/Combray/pull/159).
+- The local API-30 software emulator booted once, then crashed during
+  setup; a second boot also crashed. It supplied no rendering evidence.
 
 The phone and live example have not been rechecked. The regression proves
 this pipeline-change flicker; other causes remain possible.
