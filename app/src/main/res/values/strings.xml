@@ -38,6 +38,8 @@
     <string name="action_settings">Settings</string>
     <string name="action_save">Save</string>
     <string name="action_recent">Recent</string>
+    <string name="tab_swipe_older">Older tab</string>
+    <string name="tab_swipe_newer">Newer tab</string>
     <plurals name="action_recent_with_count">
         <item quantity="one">Recent, %1$d open tab</item>
         <item quantity="other">Recent, %1$d open tabs</item>

@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The bottom bar follows sideways swipes, with directional progress toward
+  switching tabs, then springs back on release or cancellation.
 - Play a page's audio or video in a fullscreen player after a tap. Media
   on your home network or tailnet plays from any page; this phone and
   link-local hosts stay closed to pages that are not on them.

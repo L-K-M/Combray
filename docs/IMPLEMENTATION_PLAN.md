@@ -61,6 +61,10 @@ right goes older, left newer, without wrapping. A one-finger horizontal
 drag of at least 56dp switches once on release; taps, vertical drags,
 cancellation and multi-touch do not switch. Home accepts swipes outside
 editing, which keeps horizontal drags for its text field.
+Swipe feedback (owner request, 31 October 2026): the controls follow the
+finger by up to 24dp while a directional line fills toward the 56dp
+threshold. Release or cancellation clears the line and springs the bar
+back. This feedback uses the existing gesture; it does not move the page.
 
 Use a quiet bottom bar containing Back, an address/search surface, Save, Share, New tab (+), Recent, and More. The + button is always visible in the bottom controls, including while editing and in Find in page (owner request, 24 October 2026). The exact spacing adapts to narrow widths; avoid tiny targets. The address takes its own row below 420dp, leaving six 48dp actions and a usable field; this preserves the owner's below-400dp rule. Home has its own search dock with Hister, Karakeep, +, Recent and More instead of disabled page actions. More opens a bottom sheet with Forward, Reload/Stop, Close tab, page information, Find in page, Text size, and Settings. A loading indicator must not shift the bar or obscure its actions. It shows from the app's request (typed address, reload, a new or restored tab) until the page loads, not only from the commit, and gives up after 30 seconds without a commit (proposed default). Servo reports page-initiated navigations for frames too, without saying which, so a tapped link shows loading from its commit. Show the page's current address/domain and a security state derived from real engine data, never a decorative lock.
 
@@ -621,7 +625,7 @@ Answers given while triaging the open PRs (#24 to #110). "Confirmed" rows are th
 | Swiping a tab row in Recent closes it; the close button stays | Confirmed | #53 |
 | Haptics: a tick when a save lands, a distinct one when it is refused, and one on a page long-press | Confirmed | #76 |
 | Long-pressing Recent switches to the previously used tab | Confirmed | #109 |
-| Swiping sideways on the bottom bar switches tabs | Confirmed (owner request, repeated 30 October 2026) | Implemented; ten JVM gesture checks pass, real-Servo device checks added. [Evidence](ENGINE_SPIKE.md#toolbar-tab-swipe-checks-30-october-2026) |
+| Swiping sideways on the bottom bar switches tabs | Confirmed (owner request, repeated 30 October 2026; feedback requested 31 October) | Implemented with thumb-following motion and directional progress; 14 JVM gesture checks pass. Real-Servo checks also verify held feedback and release. [Evidence](ENGINE_SPIKE.md#swipe-feedback-31-october-2026) |
 | The More sheet keeps "Resume history capture" while capture is paused | Superseded 23 October 2026: capture has no More row; Settings keeps the switch, and the address chip marks pages Hister accepted | #58 |
 | Saves that never reached the server do not use up the ten attempts; they need attention after seven days. Hister's deliberate refusals cancel the capture | Confirmed | #74 |
 | The new-tab page shows Combray's icon and up to six quick links. Pins lead; automatic sites rank by retained visits and open their newest page. Ranking, Hide and site-wide Forget merge the `www.`/bare spelling; credential-bearing addresses are excluded. The owner approved the launchpad, typing suggestions above the field and the persistent + button | Confirmed (24 October 2026); supersedes the original automatic-only #42 layout and resolves its Forget gap | #42, #123 |

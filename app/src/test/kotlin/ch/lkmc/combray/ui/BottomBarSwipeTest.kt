@@ -4,11 +4,17 @@ import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -39,6 +45,81 @@ class BottomBarSwipeTest {
 
     private val steps = mutableListOf<TabStep>()
     private val clicks = mutableListOf<String>()
+    private var shownTab by mutableStateOf(PAGE)
+
+    @Test
+    fun aHeldSwipeMovesTheBarAndShowsProgressUntilRelease() {
+        showBar()
+        val start = address().fetchSemanticsNode().boundsInRoot.left
+        val halfSwipe = with(compose.density) { 28.dp.toPx() }
+        address().performTouchInput {
+            down(center)
+            moveBy(Offset(halfSwipe, 0f))
+        }
+
+        assertProgress("Older tab", 0.5f)
+        assertTrue(address().fetchSemanticsNode().boundsInRoot.left > start)
+        compose.runOnIdle { assertTrue(steps.isEmpty()) }
+        compose.onRoot().performTouchInput { moveBy(Offset(halfSwipe * 3, 0f)) }
+        assertProgress("Older tab", 1f)
+        compose.onRoot().performTouchInput { up() }
+
+        assertNoFeedback()
+        assertEquals(start, address().fetchSemanticsNode().boundsInRoot.left, 1f)
+        compose.runOnIdle { assertEquals(listOf(TabStep.OLDER), steps) }
+    }
+
+    @Test
+    fun reversingASwipeChangesTheFeedbackAndCancellationResetsIt() {
+        showBar()
+        val start = address().fetchSemanticsNode().boundsInRoot.left
+        val halfSwipe = with(compose.density) { 28.dp.toPx() }
+        address().performTouchInput {
+            down(center)
+            moveBy(Offset(halfSwipe, 0f))
+        }
+        assertProgress("Older tab", 0.5f)
+
+        compose.onRoot().performTouchInput { moveBy(Offset(-halfSwipe * 2, 0f)) }
+        assertProgress("Newer tab", 0.5f)
+        assertTrue(address().fetchSemanticsNode().boundsInRoot.left < start)
+        compose.onRoot().performTouchInput { cancel() }
+
+        assertNoFeedback()
+        assertEquals(start, address().fetchSemanticsNode().boundsInRoot.left, 1f)
+        compose.runOnIdle { assertTrue(steps.isEmpty()) }
+    }
+
+    @Test
+    fun changingTabsDuringASwipeClearsFeedbackWithoutSwitchingAgain() {
+        showBar()
+        address().performTouchInput {
+            down(center)
+            moveBy(Offset(swipeDistance(), 0f))
+        }
+        assertProgress("Older tab", 1f)
+
+        compose.runOnIdle { shownTab = PAGE.copy(id = "another") }
+        assertNoFeedback()
+        compose.onRoot().performTouchInput { up() }
+        compose.runOnIdle { assertTrue(steps.isEmpty()) }
+    }
+
+    @Test
+    fun feedbackFollowsThePhysicalDirectionInRtl() {
+        showBar(direction = LayoutDirection.Rtl)
+        val start = address().fetchSemanticsNode().boundsInRoot.left
+        val halfSwipe = with(compose.density) { 28.dp.toPx() }
+        address().performTouchInput {
+            down(center)
+            moveBy(Offset(-halfSwipe, 0f))
+        }
+
+        assertProgress("Newer tab", 0.5f)
+        assertTrue(address().fetchSemanticsNode().boundsInRoot.left < start)
+        compose.onRoot().performTouchInput { cancel() }
+        assertNoFeedback()
+    }
 
     @Test
     fun swipesStartOnTheAddressAndEveryButtonInTheStackedBar() {
@@ -72,6 +153,7 @@ class BottomBarSwipeTest {
         address().performTouchInput { swipe(center, center + Offset(swipeDistance(), 0f)) }
 
         compose.runOnIdle { assertTrue(steps.isEmpty()) }
+        assertNoFeedback()
     }
 
     @Test
@@ -87,6 +169,7 @@ class BottomBarSwipeTest {
             assertTrue(steps.isEmpty())
             assertTrue(clicks.isEmpty())
         }
+        assertNoFeedback()
     }
 
     @Test
@@ -104,6 +187,7 @@ class BottomBarSwipeTest {
             assertTrue(steps.isEmpty())
             assertTrue(clicks.isEmpty())
         }
+        assertNoFeedback()
     }
 
     @Test
@@ -165,6 +249,19 @@ class BottomBarSwipeTest {
     private fun address(): SemanticsNodeInteraction =
         compose.onNodeWithContentDescription("Edit address", substring = true)
 
+    private fun assertProgress(label: String, progress: Float) {
+        val indicator = compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        assertEquals(
+            ProgressBarRangeInfo(progress, 0f..1f),
+            indicator.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo],
+        )
+    }
+
+    private fun assertNoFeedback() {
+        compose.onNodeWithContentDescription("Older tab").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Newer tab").assertDoesNotExist()
+    }
+
     private fun swipeDistance() = with(compose.density) { 96.dp.toPx() }
 
     private fun showBar(
@@ -173,12 +270,13 @@ class BottomBarSwipeTest {
         mode: AddressEditorMode = AddressEditorMode.IDLE,
         direction: LayoutDirection = LayoutDirection.Ltr,
     ) {
+        shownTab = tab
         compose.setContent {
             CompositionLocalProvider(LocalLayoutDirection provides direction) {
                 CombrayTheme {
                     Box(Modifier.width(width).testTag("bar")) {
                         BottomBar(
-                            tab = tab,
+                            tab = shownTab,
                             openTabs = 3,
                             tabCounter = TabCounter.HIDDEN,
                             saveStatus = PageSaveStatus(tab.url, SaveStatus.Unsaved),

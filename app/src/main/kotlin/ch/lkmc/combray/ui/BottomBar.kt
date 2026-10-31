@@ -2,6 +2,9 @@ package ch.lkmc.combray.ui
 
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -49,18 +52,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -69,6 +76,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
@@ -118,39 +126,53 @@ fun BottomBar(
     // Editing keeps horizontal drags for the cursor. Otherwise the whole bar shares one gesture.
     val swipeEnabled = tab?.url != null || homeMode == AddressEditorMode.IDLE
     val swipeTab by rememberUpdatedState(onSwipeTab)
+    var swipeProgress by remember(tab?.id, swipeEnabled) { mutableFloatStateOf(0f) }
+    val previewDistance = with(LocalDensity.current) { TAB_SWIPE_PREVIEW_DISTANCE.toPx() }
+    val swipeOffset by animateFloatAsState(
+        targetValue = swipeProgress * previewDistance,
+        animationSpec = if (swipeProgress == 0f) spring() else snap(),
+        label = "tab swipe offset",
+    )
     val swipe = Modifier.pointerInput(tab?.id, swipeDistance, swipeEnabled) {
         if (!swipeEnabled) return@pointerInput
 
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            var dragging = false
-            while (true) {
-                val event = awaitPointerEvent()
-                // Multi-touch and a child's claimed gesture cannot select another tab.
-                if (event.changes.size != 1) return@awaitEachGesture
-                val change = event.changes.single()
-                if (change.id != down.id || change.isConsumed) return@awaitEachGesture
+            try {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var dragging = false
+                while (true) {
+                    val event = awaitPointerEvent()
+                    // Multi-touch and a child's claimed gesture cannot select another tab.
+                    if (event.changes.size != 1) return@awaitEachGesture
+                    val change = event.changes.single()
+                    if (change.id != down.id || change.isConsumed) return@awaitEachGesture
 
-                val distance = change.position - down.position
-                if (!dragging) {
-                    if (distance.getDistance() <= viewConfiguration.touchSlop) {
-                        if (!change.pressed) return@awaitEachGesture
-                        continue
+                    val distance = change.position - down.position
+                    if (!dragging) {
+                        if (distance.getDistance() <= viewConfiguration.touchSlop) {
+                            if (!change.pressed) return@awaitEachGesture
+                            continue
+                        }
+                        // Lock intent at the first drag, so a vertical gesture stays vertical.
+                        if (abs(distance.x) <= abs(distance.y)) return@awaitEachGesture
+                        dragging = true
                     }
-                    // Lock intent at the first drag, so a vertical gesture stays vertical.
-                    if (abs(distance.x) <= abs(distance.y)) return@awaitEachGesture
-                    dragging = true
-                }
 
-                // Cancel the button's click, but switch only on release, never cancellation.
-                change.consume()
-                if (change.pressed) continue
+                    // The controls follow the thumb, but the gesture's coordinates stay fixed.
+                    swipeProgress = (distance.x / swipeDistance).coerceIn(-1f, 1f)
+                    // Cancel the button's click, but switch only on release, never cancellation.
+                    change.consume()
+                    if (change.pressed) continue
 
-                when {
-                    distance.x >= swipeDistance -> swipeTab(TabStep.OLDER)
-                    distance.x <= -swipeDistance -> swipeTab(TabStep.NEWER)
+                    when {
+                        distance.x >= swipeDistance -> swipeTab(TabStep.OLDER)
+                        distance.x <= -swipeDistance -> swipeTab(TabStep.NEWER)
+                    }
+                    break
                 }
-                break
+            } finally {
+                // Also clear a cancelled gesture or one interrupted by another tab or editing.
+                swipeProgress = 0f
             }
         }
     }
@@ -177,7 +199,7 @@ fun BottomBar(
                 // Six 48dp actions leave a narrow phone's chip too little room for a site name, so
                 // the address takes a row of its own above them (owner decision, 22 October 2026).
                 val stacked = maxWidth < STACKED_BAR_BELOW
-                Column {
+                Column(Modifier.graphicsLayer { translationX = swipeOffset }) {
                     if (home && homeSearch != null) {
                         homeSearch()
                     } else if (stacked || home) {
@@ -252,7 +274,16 @@ fun BottomBar(
             }
             HorizontalDivider(Modifier.align(Alignment.TopCenter), color = MaterialTheme.colorScheme.outlineVariant)
             // Overlaid on the bar's top edge: loading never moves or covers an action.
-            if (tab?.loading == true) {
+            if (swipeProgress != 0f) {
+                val label = stringResource(if (swipeProgress > 0f) R.string.tab_swipe_older else R.string.tab_swipe_newer)
+                // Fill in the physical swipe direction, including in an RTL interface.
+                CompositionLocalProvider(LocalLayoutDirection provides if (swipeProgress > 0f) LayoutDirection.Ltr else LayoutDirection.Rtl) {
+                    LinearProgressIndicator(
+                        progress = { abs(swipeProgress) },
+                        modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.TopCenter).semantics { contentDescription = label },
+                    )
+                }
+            } else if (tab?.loading == true) {
                 val loading = stringResource(R.string.loading)
                 LinearProgressIndicator(
                     Modifier.fillMaxWidth().height(2.dp).align(Alignment.TopCenter).semantics { contentDescription = loading },
@@ -484,6 +515,9 @@ private val STACKED_ACTION_ROW_HEIGHT = 56.dp
 
 /** How far a drag along the bar must go to switch tabs: well past a tap's slop, short of the bar. */
 private val TAB_SWIPE_DISTANCE = 56.dp
+
+/** Bounded motion previews the swipe without moving its touch target or the page. */
+private val TAB_SWIPE_PREVIEW_DISTANCE = 24.dp
 
 /** Beyond this many open tabs the badge shows a capped label instead of the count. */
 private const val BADGE_LIMIT = 99
