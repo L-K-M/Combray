@@ -839,7 +839,8 @@ def _servo_binary(option: str | None, rt: Runtime) -> Path:
         )
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise config.ConfigError(f"{binary} is not an executable file")
-    return binary
+    # The page supervisor starts servoshell from another working directory.
+    return binary.absolute()
 
 
 def _named_urls(args: argparse.Namespace) -> list[str] | None:
