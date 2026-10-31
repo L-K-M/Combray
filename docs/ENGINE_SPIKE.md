@@ -1832,6 +1832,8 @@ first scroll: the fixture's head script accessed `panel` before its body
 existed. A Node lifecycle probe reproduced that `ReferenceError`. The
 listener now binds after the panel is parsed, using an explicit element
 lookup. Panel overflow stays shorter than the return drag, so fling travel
-cannot invalidate its endpoint assertion. Browser behavior is unchanged;
-follow-up results are tracked in
-[PR #171](https://github.com/L-K-M/Combray/pull/171).
+cannot invalidate its endpoint assertion. Browser behavior is unchanged.
+Follow-up [Engine CI](https://github.com/L-K-M/Combray/actions/runs/41220778947)
+at `25a62ce` passed both native ABIs and all 155 API-30 x86_64 emulator
+checks. The final follow-up records evidence only; browser and fixture code
+are unchanged from that tested revision. [PR #171](https://github.com/L-K-M/Combray/pull/171).
