@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Known issues
+
+- Some Cloudflare-protected pages stay at security verification. The cause
+  remains unresolved; see the [engine investigation](docs/ENGINE_SPIKE.md#34-cloudflare-verification-31-october-2026).
+
 ### Added
 
 - Play a page's audio or video in a fullscreen player after a tap. Media

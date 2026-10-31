@@ -1641,3 +1641,58 @@ The host wrappers use the existing Zig 0.17 C/C++ wrappers with
 `-fno-sanitize=undefined`, as in the earlier builds. The initial native attempt
 used the NDK's clang for host code and failed on missing host C headers.
 Raw logs remain under `build/`; no generated binaries or screenshots are committed.
+
+## 34. Cloudflare verification (31 October 2026)
+
+The owner supplied an article URL and a screenshot of Cloudflare's
+"Performing security verification" page. The article stayed at that page
+during an emulator reproduction. This is an open compatibility blocker;
+no engine fix is established.
+
+Environment: a fresh Android 11/API-30 x86_64 emulator, `emulator-5590`,
+SwiftShader and software CPU emulation (no KVM), 720×1440 at 320 dpi.
+The debug APK came from [Engine run 41143423337](https://github.com/L-K-M/Combray/actions/runs/41143423337),
+with Servo pin `331149c771f2ab018a0412c366c810f67197e900`.
+APK SHA-256: `401388c75e1c8177c1c855b6a7e631481357e2d17251481ba34f7c4c2469a586`.
+No integration services or personal history were used.
+
+Observations:
+
+- An independent HTTP request returned `403` with
+  `cf-mitigated: challenge`. This identifies the interstitial, not its
+  failure mechanism in Servo.
+- [Cloudflare's diagnostic](https://debug.challenges.cloudflare.com/),
+  version 1.3.4, ran in Combray. Its Automation Check, System Clock,
+  Privacy Tools and Server Connection checks all passed. The widget then
+  showed "Security Check Failed", error `300031`, and status `failed`.
+- Cloudflare documents `300*` as a [generic challenge failure](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/).
+  It names no missing API. Its [browser support](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/)
+  guidance lists custom engines and embedded browsers as limited-support
+  environments. Neither fact proves the cause of this failure.
+- The filtered `CombrayEngine` log reported no engine exception. That log
+  is not a complete JavaScript console or network trace.
+
+Reproduction with the same APK installed on a test device:
+
+```sh
+adb -s <serial> shell am start -W -a android.intent.action.VIEW \
+  -d 'https://blog.adafruit.com/2026/10/27/an-illustrated-online-book-on-hewlett-packard-equipment/' \
+  -n ch.lkmc.combray.debug/ch.lkmc.combray.MainActivity
+adb -s <serial> shell am start -W -a android.intent.action.VIEW \
+  -d 'https://debug.challenges.cloudflare.com/' \
+  -n ch.lkmc.combray.debug/ch.lkmc.combray.MainActivity
+adb -s <serial> logcat -d CombrayEngine:I AndroidRuntime:E '*:S'
+```
+
+Observe the article before opening the diagnostic. Wait for its final
+widget result and scroll through the diagnostic results. Capture only
+the error and check outcomes when sharing evidence: Technical details
+also includes the IP address and session identifiers.
+
+The phone's diagnostic result, the relevant console/network failure and
+a same-network browser comparison remain unverified. Emulation can
+affect challenge timing and browser signals, so `300031` on this host
+does not establish the phone's failure mechanism. Next: collect the
+phone-side result, isolate a specific engine defect, and reproduce it
+with a synthetic regression before changing Servo. Native builds and
+the fixture suite were not rerun for this documentation-only record.
