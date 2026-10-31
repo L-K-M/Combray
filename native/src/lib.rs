@@ -33,6 +33,7 @@ mod page_zoom;
 mod panic_policy;
 pub mod pdf;
 mod profile;
+pub mod reload_pull;
 mod userinfo;
 
 #[cfg(target_os = "android")]

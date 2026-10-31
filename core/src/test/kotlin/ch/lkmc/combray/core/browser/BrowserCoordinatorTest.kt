@@ -22,6 +22,7 @@ import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
+import ch.lkmc.combray.engine.ReloadPullPhase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -421,6 +422,72 @@ class BrowserCoordinatorTest {
 
         browser.setAppVisibility(AppVisibility.FOREGROUND); idle()
         assertEquals(1L to false, engine.throttling.last())
+    }
+
+    @Test
+    fun aReleasedPullReloadsItsPageOnceAndShowsLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val page = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.PULLING, 0.5f)); idle()
+        assertEquals(ReloadPullState(page, 0.5f), state().reloadPull)
+        assertTrue(engine.reloaded.isEmpty())
+
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertEquals(listOf(1L), engine.reloaded)
+        assertEquals(listOf(page), engine.reloadedPages)
+        assertTrue(state().activeTab!!.loading)
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertEquals(listOf(1L), engine.reloaded)
+    }
+
+    @Test
+    fun cancelledPullsAndReplacedDocumentsCannotReload() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val oldPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.PULLING, 1f)); idle()
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.CANCELLED, 0f)); idle()
+        assertNull(state().reloadPull)
+        assertTrue(engine.reloaded.isEmpty())
+
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.PULLING, 1f)); idle()
+        commit(1, 11, "https://a.test/")
+        loaded(1, 11)
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        val wrongGeneration = state().activeTab!!.page!!.let { it.copy(view = it.view.copy(generation = -1)) }
+        engine.emit(EngineEvent.ReloadPull(wrongGeneration, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertTrue(engine.reloaded.isEmpty())
+    }
+
+    @Test
+    fun pullsCannotReloadHiddenCrashedLoadingOrReaderPages() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val firstTab = state().activeTab!!.id
+        val firstPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.PULLING, 1f)); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        commit(2, 20, "https://b.test/")
+        val secondPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(secondPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        loaded(2, 20)
+        engine.emit(EngineEvent.Crashed(engine.view(2), "fixture")); idle()
+        engine.emit(EngineEvent.ReloadPull(secondPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        browser.selectTab(firstTab); idle()
+        browser.openReader(); idle()
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertTrue(engine.reloaded.isEmpty())
     }
 
     @Test

@@ -1758,3 +1758,51 @@ suite were not rerun for this documentation-only update.
 The owner also reports that the diagnostic's Copy button and manual text
 selection do not work. These are deferred to a separate follow-up,
 [issue #168](https://github.com/L-K-M/Combray/issues/168), as requested.
+
+## 35. Pull-to-reload, 31 October 2026
+
+Pulling down at the top arms a reload after 80dp beyond touch slop. Release
+reloads once; a progress ring distinguishes pulling from ordinary scrolling.
+Short pulls, reversal below the threshold, horizontal/upward gestures,
+cancellation and multi-touch do not reload. A scroll that only reaches the
+top does not arm the same gesture.
+
+DOM scroll metrics are insufficient: section 15 records stale offsets after
+painted jumps. Downstream [Servo PR #20](https://github.com/L-K-M/servo/pull/20)
+adds `WebView::can_scroll_up_at_point`, reading compositor root, nested/frame
+scroll chains and pinch-viewport offsets. Missing hit-test/scroll data means
+unknown, not top. Candidate pin: `693872def24e0fb254c73c5423cfaeb8d7badc65`,
+based on the prior pin, with no unrelated engine upgrade or dependency change.
+Changed downstream files: `components/servo/webview.rs`,
+`components/paint/{paint,painter,pinch_zoom,webview_renderer}.rs`,
+`components/shared/paint/display_list.rs` and its `tests/compositor.rs`.
+No upstream contact or contribution.
+
+The bridge follows raw touch input without stealing page touches. Release
+waits for every input acknowledgement: delayed or out-of-order
+`preventDefault` wins. Unanswered input is bounded to 128 outstanding events
+and a three-second release deadline. View generation, document and selection
+are rechecked after the acknowledgements. The coordinator refuses reloads
+under Reader, page controls or an existing load. Progress stays in memory,
+without reading Room on each touch movement.
+
+The scroll-button fade was already merged in #147 and remains unchanged:
+two idle seconds, accessibility-adjusted, followed by a 200 ms fade.
+
+Local checks on Linux x86_64, JDK 21, Rust 1.97.1 and NDK r29:
+
+- Passed: `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`.
+  The new coordinator regression failed before its handler and passes after
+  it; coverage includes cancellation, duplicate release, same-address reload,
+  generation mismatch and hidden/crashed/loading/Reader pages.
+- Passed: `cargo fmt --check`, `cargo test --lib` (134 tests), fixture-server
+  script tests, documentation and whitespace checks.
+- Source-query tests and native builds are pending validation. Run
+  `cargo test --profile medium -p servo-paint-api --test compositor` in the
+  downstream checkout, then `scripts/build-native.sh` and
+  `scripts/check-app.sh <serial> ch.lkmc.combray.ScrollTest`.
+  The real-Servo checks cover top release, reaching top during a scroll,
+  painted jumps with stale DOM metrics, page-prevented drags and nested panels.
+
+No local ADB device was connected; physical-device and live-site checks were
+not run. PR checks carry native/emulator evidence before landing.
