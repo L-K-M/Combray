@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollToIndex
@@ -105,10 +107,14 @@ class ReaderScrollObserverTest {
         compose.onNode(hasScrollAction()).performScrollToIndex(ARTICLE.blocks.size + 1)
         compose.onNode(hasScrollAction()).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -NEAR_END_DISTANCE_PX) }
         compose.waitForIdle()
+        compose.onNodeWithText("Paragraph ${ARTICLE.blocks.lastIndex}").assertIsDisplayed()
         compose.runOnIdle { observe = true }
 
         swipeUp()
-        compose.runOnIdle { assertTrue(reported.contains(ScrollEdge.BOTTOM)) }
+        compose.runOnIdle {
+            assertTrue(reported.contains(ScrollEdge.BOTTOM))
+            assertTrue(reported.none { it == ScrollEdge.TOP })
+        }
         compose.onNodeWithTag(CONTROLS).assertDoesNotExist()
     }
 
