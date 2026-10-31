@@ -90,10 +90,18 @@ class ScrollTest {
         awaitTitle("SCROLL-MIDDLE")
         compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
 
+        // Stop inertia before the jump; one green frame is not a stable top edge.
+        cancelPageTouch()
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
         device.browser.scrollToEdge(page, ScrollEdge.TOP)
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
         swipe(0.25f, 0.65f)
-        device.awaitState { it.activeTab?.page != page && it.activeTab?.loading == false }
+        try {
+            device.awaitState { it.activeTab?.page != page && it.activeTab?.loading == false }
+        } catch (timeout: TimeoutCancellationException) {
+            val state = device.browser.browserState.value
+            throw AssertionError("Pull ended: samePage=${state.activeTab?.page == page}, loading=${state.activeTab?.loading}, progress=${state.reloadPull?.progress}", timeout)
+        }
         compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
     }
 
@@ -227,6 +235,18 @@ class ScrollTest {
         compose.onNodeWithContentDescription(TOP).assertIsDisplayed()
         compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
         compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
+    }
+
+    private fun cancelPageTouch() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val metrics = compose.activity.resources.displayMetrics
+        val down = SystemClock.uptimeMillis()
+        for (action in intArrayOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL)) {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, metrics.widthPixels / 2f, metrics.heightPixels / 2f, 0)
+            try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
     }
 
     private fun pageHeight(): Int = compose.runOnIdle {

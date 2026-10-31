@@ -1874,5 +1874,14 @@ pull-to-reload while revealing hidden controls.
 `ReaderTest` checks the same direction behavior with an extracted article.
 They compile locally; the [Engine PR workflow](https://github.com/L-K-M/Combray/actions/workflows/engine.yml)
 carries runtime evidence for `feat/scroll-hide-bottom-bar` before landing.
-No local emulator or physical-device run: this host lacks `libX11.so.6` and
-KVM. No personal history or live service was used.
+Initial CI at `80ef61a` built both ABIs and passed 158/159 emulator checks.
+Only the combined hidden-controls pull timed out. Its setup now cancels the
+previous fling before jumping to top: one green frame does not prove a
+stable top edge. Failure output also distinguishes an unchanged document
+from a load that never finished. Follow-up evidence is in [PR #172](https://github.com/L-K-M/Combray/pull/172).
+
+A local software emulator booted after extracting X11 libraries into a
+private temporary directory. Local diagnostics stopped at paint/input-focus
+setup and did not validate the target gesture; temporary tracing was removed.
+KVM and a physical device remain unavailable. No personal history or live
+service was used.
