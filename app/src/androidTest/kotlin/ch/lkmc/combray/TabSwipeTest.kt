@@ -1,10 +1,11 @@
 package ch.lkmc.combray
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.Placement
@@ -42,18 +43,24 @@ class TabSwipeTest {
         device.browser.openUrl(Fixtures.solid(Device.GREEN), Placement.NEW_TAB)
         val first = device.awaitPage(Fixtures.solid(Device.GREEN)).activeTab!!.id
         device.browser.openUrl(Fixtures.solid(Device.BLUE), Placement.NEW_TAB)
-        device.awaitPage(Fixtures.solid(Device.BLUE))
+        val second = device.awaitPage(Fixtures.solid(Device.BLUE)).activeTab!!.id
         assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
 
         // End a previous test's 3 s swipe run before walking these newly created tabs.
         Thread.sleep(SWIPE_RUN_RESET_MS)
         val distance = with(compose.density) { 96.dp.toPx() }
         compose.onNodeWithContentDescription(label, substring = true).performTouchInput {
-            swipe(center, center + Offset(distance, 0f))
+            down(center)
+            moveBy(Offset(distance, 0f))
         }
+        compose.onNodeWithContentDescription("Older tab").assertIsDisplayed()
+        assertEquals(second, device.browser.browserState.value.activeTab?.id)
+        assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
+        compose.onRoot().performTouchInput { up() }
 
         val state = device.awaitState { it.activeTab?.id == first }
         assertEquals(2, state.openTabCount)
+        compose.onNodeWithContentDescription("Older tab").assertDoesNotExist()
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
     }
 

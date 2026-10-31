@@ -1438,6 +1438,39 @@ It reported one media entry instead of two; the swipe checks passed in
 Main's media-report fix (#164, below) was merged into the swipe branch
 before rerunning the full gate.
 
+### Swipe feedback (31 October 2026)
+
+The controls now follow a horizontal drag by up to 24dp. A top-edge line
+fills in the physical swipe direction toward the existing 56dp threshold.
+Release, cancellation, multi-touch or changing tabs clears the line and
+springs the controls back. The gesture's coordinate space and page stay
+fixed. During the drag the swipe line takes precedence over the loading
+line; loading returns on release if the page is still loading.
+
+Four added Robolectric checks cover held progress, its cap, reversal,
+spring-back, cancellation, interrupted tab identity and RTL. The first
+three failed before the UI change; all 14 toolbar checks pass afterward.
+Both real-Servo `TabSwipeTest` cases now also hold the finger down to check
+that feedback is visible while the original blue page and tab stay put,
+then release and check that feedback clears and the green tab paints.
+
+Local checks on Linux x86_64, JDK 21 and SDK 37 passed:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+(cd native && cargo fmt --check && cargo test --lib --locked) # 125 passed
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The unchanged downstream pin is `331149c771f2ab018a0412c366c810f67197e900`.
+`ANDROID_HOME=$HOME/android-sdk scripts/build-native.sh` reaches the native
+build but fails in host `glslopt`: the default clang has no C headers,
+including `assert.h`. The headless emulator cannot start because
+`libtcmalloc_minimal.so.4` is missing; adb lists no device. Native builds
+and real-Servo checks therefore require the PR's Engine workflow. No
+local emulator or physical-phone result is claimed.
+
 ## 31. Missing media notice after a load overtakes its page (30 October 2026)
 
 Symptom: the Play notice never appeared for a page with media, and
