@@ -13,6 +13,9 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -95,6 +98,19 @@ class ReaderTest {
     }
 
     @Test
+    fun scrollingTheReaderHidesAndRevealsTheBottomBar() {
+        openReader(Fixtures.ARTICLE, ARTICLE_TITLE)
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp(durationMillis = SWIPE_DURATION_MS) }
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown(durationMillis = SWIPE_DURATION_MS) }
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+        assertTrue(device.browser.browserState.value.reader is ReaderState.Ready)
+    }
+
+    @Test
     fun showThePageAtTheTopOfTheArticleLeavesReaderView() {
         openReader(Fixtures.ARTICLE, ARTICLE_TITLE)
         compose.onNodeWithText("Show the page").assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
@@ -132,5 +148,7 @@ class ReaderTest {
 
     private companion object {
         const val ARTICLE_TITLE = "ARTICLE"
+        const val NEW_TAB = "New tab"
+        const val SWIPE_DURATION_MS = 600L
     }
 }

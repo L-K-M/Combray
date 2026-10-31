@@ -2,6 +2,8 @@ package ch.lkmc.combray
 
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.ViewGroup
+import androidx.core.view.descendants
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -11,6 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.engine.ScrollEdge
+import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.TimeoutCancellationException
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
@@ -35,12 +38,63 @@ class ScrollTest {
     }
 
     @Test
+    fun scrollingDownHidesTheBarAndScrollingUpRestoresIt() {
+        val page = device.browser.browserState.value.activeTab!!.page!!
+        val originalHeight = pageHeight()
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+
+        swipe(0.65f, 0.35f)
+        awaitTitle("SCROLL-MIDDLE")
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+        assertTrue("hidden controls did not free page space", pageHeight() > originalHeight)
+
+        swipe(0.35f, 0.65f)
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+        assertEquals(originalHeight, pageHeight())
+        assertEquals(page, device.browser.browserState.value.activeTab!!.page)
+
+        // Both viewport changes must leave the real renderer usable.
+        device.browser.scrollToEdge(page, ScrollEdge.BOTTOM)
+        assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
+    }
+
+    @Test
+    fun homeAndTabSwitchingRestoreTheControls() {
+        val tab = device.browser.browserState.value.activeTab!!.id
+        swipe(0.65f, 0.35f)
+        awaitTitle("SCROLL-MIDDLE")
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+
+        device.browser.newTab()
+        device.awaitState { it.activeTab?.isHome == true }
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+
+        device.browser.selectTab(tab)
+        device.awaitState { it.activeTab?.id == tab }
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+    }
+
+    @Test
     fun pullingAtTopReloadsAndClearsTheScrollButton() {
         val oldPage = device.browser.browserState.value.activeTab!!.page
         swipe(0.25f, 0.65f)
         device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.loading == false }
         compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
         compose.onNodeWithContentDescription("Release to reload").assertDoesNotExist()
+    }
+
+    @Test
+    fun aPullRevealsHiddenControlsAndStillReloads() {
+        val page = device.browser.browserState.value.activeTab!!.page!!
+        swipe(0.65f, 0.35f)
+        awaitTitle("SCROLL-MIDDLE")
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+
+        device.browser.scrollToEdge(page, ScrollEdge.TOP)
+        assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        swipe(0.25f, 0.65f)
+        device.awaitState { it.activeTab?.page != page && it.activeTab?.loading == false }
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
     }
 
     @Test
@@ -144,10 +198,12 @@ class ScrollTest {
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
         compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
         val oldPage = device.browser.browserState.value.activeTab!!.page
         device.browser.reload()
         device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.title?.substringBefore(':') == "SCROLL-TOP" }
         compose.onNodeWithContentDescription(BOTTOM).assertDoesNotExist()
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
     }
 
     @Test
@@ -171,6 +227,10 @@ class ScrollTest {
         compose.onNodeWithContentDescription(TOP).assertIsDisplayed()
         compose.mainClock.advanceTimeBy(IDLE_WAIT_MS)
         compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
+    }
+
+    private fun pageHeight(): Int = compose.runOnIdle {
+        (compose.activity.window.decorView as ViewGroup).descendants.filterIsInstance<EngineSurfaceView>().single().height
     }
 
     private fun swipe(start: Float, end: Float) {
@@ -206,6 +266,7 @@ class ScrollTest {
         const val URL = "${Fixtures.BASE}/scroll.html"
         const val TOP = "Scroll to top"
         const val BOTTOM = "Scroll to bottom"
+        const val NEW_TAB = "New tab"
         const val SWIPE_STEPS = 20
         const val SWIPE_STEP_MS = 30L
         const val SCROLL_INTERVAL_MS = 1_000L
