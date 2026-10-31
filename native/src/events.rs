@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::controls::ControlDescription;
 use crate::find::FindCounts;
+use crate::reload_pull::PullUpdate;
 use crate::userinfo::strip_userinfo;
 
 /// One native incarnation of a logical tab.
@@ -278,6 +279,11 @@ pub enum EngineEvent {
         request: i64,
         status: FindStatus,
     },
+    ReloadPull {
+        view: ViewKey,
+        document: u64,
+        update: PullUpdate,
+    },
     Painted {
         view: ViewKey,
         frames: u64,
@@ -493,6 +499,21 @@ impl EngineEvent {
                         "index": counts.index,
                         "capped": counts.capped,
                     }),
+                )
+            },
+            EngineEvent::ReloadPull {
+                view,
+                document,
+                update,
+            } => {
+                let (phase, progress) = match update {
+                    PullUpdate::Pulling(progress) => ("pulling", *progress),
+                    PullUpdate::Released => ("released", 1.0),
+                    PullUpdate::Cancelled => ("cancelled", 0.0),
+                };
+                with_view(
+                    view,
+                    json!({ "type": "reload_pull", "document": document, "phase": phase, "progress": progress }),
                 )
             },
             EngineEvent::Painted { view, frames } => {

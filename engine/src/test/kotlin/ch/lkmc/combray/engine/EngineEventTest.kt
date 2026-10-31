@@ -4,10 +4,24 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /** Events as libcombray_engine.so emits them (copied from M0 run reports). */
 class EngineEventTest {
+    @Test
+    fun parsesDocumentBoundReloadPullsAndRejectsInvalidProgress() {
+        val event = EngineEvent.parse(
+            """{"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":0.5}""",
+        )
+        assertEquals(EngineEvent.ReloadPull(PageRef(ViewRef(3, 4), 7), ReloadPullPhase.PULLING, 0.5f), event)
+        for (progress in listOf("-1", "2", "\"NaN\"", "\"Infinity\"", "null")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                EngineEvent.parse("""{"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":$progress}""")
+            }
+        }
+    }
+
     @Test
     fun parsesDocumentCommitWithHistoryPosition() {
         val event = EngineEvent.parse(

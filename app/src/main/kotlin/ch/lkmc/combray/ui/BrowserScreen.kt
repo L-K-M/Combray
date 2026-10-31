@@ -131,6 +131,7 @@ fun BrowserScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val tab = state.activeTab
     val page = tab?.page
+    val reloadPull = state.reloadPull?.takeIf { it.page == page }
     val home = tab?.url == null
     val stopHomeInput: () -> Unit = {
         homeMode = AddressEditorMode.IDLE
@@ -386,7 +387,7 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize(),
                     update = { view ->
                         view.observeScroll(page) {
-                            scrollEdge = it
+                            scrollEdge = it.takeIf { reloadPull == null }
                             scrollActivity++
                         }
                     },
@@ -420,7 +421,13 @@ fun BrowserScreen(
                     },
                 )
                 if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed) {
-                    scrollEdge?.let { edge ->
+                    reloadPull?.let { pull ->
+                        ReloadPullIndicator(
+                            progress = pull.progress,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
+                        )
+                    }
+                    scrollEdge?.takeIf { reloadPull == null }?.let { edge ->
                         ScrollEdgeButton(
                             edge = edge,
                             scrollActivity = scrollActivity,

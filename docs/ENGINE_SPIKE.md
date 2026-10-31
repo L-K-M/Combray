@@ -1758,3 +1758,82 @@ suite were not rerun for this documentation-only update.
 The owner also reports that the diagnostic's Copy button and manual text
 selection do not work. These are deferred to a separate follow-up,
 [issue #168](https://github.com/L-K-M/Combray/issues/168), as requested.
+
+## 35. Pull-to-reload, 31 October 2026
+
+Pulling down at the top arms a reload after 80dp beyond touch slop. Release
+reloads once; a progress ring distinguishes pulling from ordinary scrolling.
+Short pulls, reversal below the threshold, horizontal/upward gestures,
+cancellation and multi-touch do not reload. A scroll that only reaches the
+top does not arm the same gesture.
+
+DOM scroll metrics are insufficient: section 15 records stale offsets after
+painted jumps. Downstream [Servo PR #20](https://github.com/L-K-M/servo/pull/20)
+adds `WebView::can_scroll_up_at_point`, reading compositor root, nested/frame
+scroll chains and pinch-viewport offsets. Missing hit-test/scroll data means
+unknown, not top. CSS `touch-action: none` or `pan-x` also withholds a pull.
+Candidate pin: `ef6beb09ab19325d597dd96f758ed359ad33ccce`,
+based on the prior pin, with no unrelated engine upgrade or dependency change.
+Changed downstream files: `components/servo/webview.rs`,
+`components/paint/{paint,painter,pinch_zoom,webview_renderer}.rs`,
+`components/shared/paint/display_list.rs` and its `tests/compositor.rs`.
+No upstream contact or contribution.
+
+The bridge follows raw touch input without stealing page touches. Release
+waits for every input acknowledgement: delayed or out-of-order
+`preventDefault` wins. Unanswered input is bounded to 128 outstanding events
+and a three-second release deadline. View generation, document and selection
+are rechecked after the acknowledgements. The coordinator refuses reloads
+under Reader, page controls or an existing load. Progress stays in memory,
+without reading Room on each touch movement. Only changed pull progress crosses
+JNI; inactive scrolls produce no pull events, and completion/cancellation is
+sent once. Four emission-policy regressions failed before that filter and
+pass after it.
+
+Touch-down enters Servo before probing the scroll chain, resetting any
+preceding fling's cached hit target. This ordering guard is source-verified,
+not reproduced locally. Manual check: with the root at top, fling one nested
+panel to top, then immediately pull down over another panel scrolled below
+top. The second panel must scroll without reloading the document.
+
+The scroll-button fade was already merged in #147 and remains unchanged:
+two idle seconds, accessibility-adjusted, followed by a 200 ms fade.
+
+Local checks on Linux x86_64, JDK 21, Rust 1.97.1 and NDK r29:
+
+- Passed: `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`.
+  The new coordinator regression failed before its handler and passes after
+  it; coverage includes cancellation, duplicate release, same-address reload,
+  generation mismatch and hidden/crashed/loading/Reader pages.
+- Passed: `cargo fmt --check`, `cargo test --lib` (138 tests), fixture-server
+  script tests, documentation and whitespace checks.
+- Passed: all 11 compositor integration tests, including five new query
+  checks. The CSS-owned-drag case failed before the guard and passes after it.
+  This host lacks pkg-config/FreeType development files, so a standalone
+  Cargo driver ran the unchanged test file against the real source crates,
+  with bundled FreeType and the installed zlib's development symlink.
+- Passed: final-candidate x86_64 `scripts/build-native.sh`, Gradle packaging
+  and `verify-apk.py --expected-arch x86_64`. The built library exports
+  `Java_ch_lkmc_combray_engine_NativeEngine_reloadPage`.
+  CI native/emulator runs are tracked in [PR #171](https://github.com/L-K-M/Combray/pull/171).
+  Reproduce the source checks with `cargo test --profile medium -p servo-paint-api --test
+  compositor`, then `scripts/build-native.sh` and
+  `scripts/check-app.sh <serial> ch.lkmc.combray.ScrollTest`.
+  The real-Servo checks cover top release, reaching top during a scroll,
+  painted jumps with stale DOM metrics, page-prevented drags and nested panels.
+
+No local ADB device was connected. The local emulator cannot start without
+`libX11.so.6`, and KVM is unavailable. Physical-device and live-site checks
+were not run. PR checks carry native/emulator evidence before landing.
+
+Initial Engine CI at `5af10c6` built both ABIs and passed 154/155 API-30
+emulator checks. The nested-panel check timed out before reporting its
+first scroll: the fixture's head script accessed `panel` before its body
+existed. A Node lifecycle probe reproduced that `ReferenceError`. The
+listener now binds after the panel is parsed, using an explicit element
+lookup. Panel overflow stays shorter than the return drag, so fling travel
+cannot invalidate its endpoint assertion. Browser behavior is unchanged.
+Follow-up [Engine CI](https://github.com/L-K-M/Combray/actions/runs/41220778947)
+at `25a62ce` passed both native ABIs and all 155 API-30 x86_64 emulator
+checks. The final follow-up records evidence only; browser and fixture code
+are unchanged from that tested revision. [PR #171](https://github.com/L-K-M/Combray/pull/171).

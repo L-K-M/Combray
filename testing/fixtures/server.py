@@ -636,6 +636,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "const title=edge+':'+s.scrollTop+','+innerHeight+','+s.scrollHeight;"
                 "if(document.title!==title)document.title=title;};"
                 "addEventListener('scroll',update);</script>"))
+        if path == "/pull-blocked.html":
+            return self.send(200, page("PULL-READY", "<p>Page-owned drag</p>",
+                "<style>html,body{margin:0;height:100vh}</style>"
+                "<script>addEventListener('touchmove',event=>{event.preventDefault();"
+                "document.title='PULL-PREVENTED';},{passive:false});</script>"))
+        if path == "/pull-panel.html":
+            # Bound overflow so the return drag reaches top even after a fling.
+            return self.send(200, page("PANEL-TOP",
+                "<div id='panel' style='height:100vh;overflow:auto'>"
+                "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
+                "<section style='height:50vh;background:#8a5a2b'>PANEL</section></div>"
+                "<script>const panel=document.getElementById('panel');"
+                "panel.addEventListener('scroll',()=>{document.title="
+                "panel.scrollTop<=1?'PANEL-TOP':'PANEL-MIDDLE';});</script>",
+                "<style>html,body{margin:0;height:100vh;overflow:hidden}</style>"))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":

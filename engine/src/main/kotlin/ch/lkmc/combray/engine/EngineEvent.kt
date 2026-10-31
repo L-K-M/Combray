@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
@@ -27,6 +28,8 @@ enum class HistoryKind {
 }
 
 enum class LoadPhase { STARTED, HEAD_PARSED, COMPLETE }
+
+enum class ReloadPullPhase { PULLING, RELEASED, CANCELLED }
 
 /**
  * How a report relates to its tab's current document. Reports from a replaced document are
@@ -164,6 +167,9 @@ sealed interface EngineEvent {
         val capped: Boolean,
     ) : EngineEvent
 
+    /** A compositor-checked pull on one document; release asks the coordinator to reload it. */
+    data class ReloadPull(val page: PageRef, val phase: ReloadPullPhase, val progress: Float) : EngineEvent
+
     data class Painted(val view: ViewRef, val frames: Long) : EngineEvent
 
     /**
@@ -275,6 +281,12 @@ sealed interface EngineEvent {
                     event.int("count"),
                     (event["index"] as? JsonPrimitive)?.intOrNull,
                     event.boolean("capped"),
+                )
+                "reload_pull" -> ReloadPull(
+                    PageRef(event.view(), event.long("document")),
+                    ReloadPullPhase.valueOf(event.string("phase").uppercase()),
+                    event.primitive("progress").floatOrNull?.takeIf { it.isFinite() && it in 0f..1f }
+                        ?: throw IllegalArgumentException("invalid reload pull progress"),
                 )
                 "painted" -> Painted(event.view(), event.long("frames"))
                 "ime_shown" -> ImeShown(

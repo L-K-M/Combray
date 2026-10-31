@@ -28,12 +28,13 @@ use servo::CreateNewWebViewRequest;
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
     AuthenticationRequest, CompositionEvent, CompositionState, ContextMenuAction, ContextMenuItem,
-    DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue,
-    JavaScriptEvaluationError, Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction,
-    MouseButtonEvent, NamedKey, NavigationRequest, Opts, PipelineId, PrefValue, Preferences,
-    RenderingContext, SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder,
-    SimpleDialog, Theme, TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager,
-    UserScript, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent,
+    InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
+    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
+    Opts, PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
+    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme, TouchEvent,
+    TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
+    WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
@@ -62,6 +63,10 @@ use crate::page_zoom;
 use crate::panic_policy;
 use crate::pdf::{self, PdfProtocolHandler, ViewerToken};
 use crate::profile;
+use crate::reload_pull::{
+    DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
+    StartPosition,
+};
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -91,6 +96,7 @@ const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// First tab ID for views that pages open (`window.open`). Applications number their own tabs
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
+const PULL_INPUT_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn run(
     config: EngineConfig,
@@ -415,6 +421,11 @@ struct Engine {
     next_sequence: u64,
     needs_paint: bool,
     field_taps: TapTracker,
+    reload_pull: ReloadPull,
+    reload_pull_page: Option<(ViewKey, PipelineId)>,
+    reload_pull_inputs: PullInputGate<InputEventId>,
+    reload_pull_feedback: PullFeedback,
+    reload_pull_release: Option<(f32, f32, Instant)>,
     tap_checks: TapChecks,
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
@@ -459,6 +470,11 @@ impl Engine {
             next_sequence: 1,
             needs_paint: false,
             field_taps: TapTracker::new(density),
+            reload_pull: ReloadPull::new(density),
+            reload_pull_page: None,
+            reload_pull_inputs: Default::default(),
+            reload_pull_feedback: Default::default(),
+            reload_pull_release: None,
             tap_checks: Default::default(),
             delegate_queue: Default::default(),
             capture_results: Default::default(),
@@ -559,6 +575,16 @@ impl Engine {
                 }
             },
             Command::Reload { tab } => self.reload(tab),
+            Command::ReloadPage { view, document } => {
+                let current = self.tabs.get(&view.tab).is_some_and(|tab| {
+                    tab.view == view
+                        && tab.current_document.map(u64::from) == Some(document)
+                        && self.active == Some(view.tab)
+                });
+                if current {
+                    self.reload(view.tab);
+                }
+            },
             Command::ScrollToEdge {
                 view,
                 document,
@@ -606,6 +632,12 @@ impl Engine {
     fn pump(&mut self) {
         if let Some(runtime) = &self.runtime {
             runtime.servo.spin_event_loop();
+        }
+        if self
+            .reload_pull_release
+            .is_some_and(|(_, _, deadline)| Instant::now() >= deadline)
+        {
+            self.reject_reload_pull();
         }
         self.drain_delegate_events();
         self.start_deferred_captures();
@@ -769,6 +801,7 @@ impl Engine {
     fn surface_destroyed(&mut self) {
         // The gesture on this surface ends without its up events.
         self.touches.forget_pointers();
+        self.cancel_reload_pull();
         let Surface::Bound { .. } = self.surface else {
             return;
         };
@@ -968,6 +1001,7 @@ impl Engine {
 
     /// Hides every view; the surface shows no page until a tab is selected again.
     fn select_none(&mut self) {
+        self.cancel_reload_pull();
         for tab in self.tabs.values() {
             tab.webview.set_focused(false);
             tab.webview.hide();
@@ -1038,6 +1072,7 @@ impl Engine {
         }
 
         if self.active != Some(tab) {
+            self.cancel_reload_pull();
             self.withhold_keyboard();
         }
         self.active = Some(tab);
@@ -1202,12 +1237,17 @@ impl Engine {
             TouchPhase::Up => TouchEventType::Up,
             TouchPhase::Cancel => TouchEventType::Cancel,
         };
-        webview.notify_input_event(InputEvent::Touch(TouchEvent::new(
+        let input = webview.notify_input_event(InputEvent::Touch(TouchEvent::new(
             event_type,
             TouchId(pointer),
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        // Down resets a preceding fling's hit-test cache before we inspect the new target.
+        let track_input = self.track_reload_pull(phase, pointer, x, y);
+        if track_input && self.reload_pull_inputs.sent(input) == InputDecision::Cancelled {
+            self.reject_reload_pull();
+        }
         // Only a tap: the end of a scroll, fling or pinch must not let the page open an app.
         if tapped {
             self.note_activation();
@@ -1216,6 +1256,130 @@ impl Engine {
         if let Some((x, y)) = field_tap {
             self.check_tap_on_field(x, y);
         }
+    }
+
+    fn cancel_reload_pull(&mut self) {
+        self.reject_reload_pull();
+        self.reload_pull.reset();
+        self.reload_pull_page = None;
+    }
+
+    fn reject_reload_pull(&mut self) {
+        self.reload_pull.cancel_gesture();
+        self.reload_pull_inputs.reset();
+        self.reload_pull_release = None;
+        if let Some((view, document)) = self.reload_pull_page {
+            self.emit_reload_pull(view, document, PullUpdate::Cancelled);
+        }
+    }
+
+    fn emit_reload_pull(&mut self, view: ViewKey, document: PipelineId, update: PullUpdate) {
+        let Some(update) = self.reload_pull_feedback.update(update) else {
+            return;
+        };
+        self.emit(EngineEvent::ReloadPull {
+            view,
+            document: u64::from(document),
+            update,
+        });
+    }
+
+    fn track_reload_pull(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) -> bool {
+        if phase == TouchPhase::Down {
+            self.reload_pull_inputs.reset();
+            self.reload_pull_release = None;
+        }
+        let page = self
+            .active
+            .and_then(|id| self.tabs.get(&id))
+            .and_then(|tab| Some((tab.view, tab.current_document?)));
+        if page != self.reload_pull_page {
+            self.cancel_reload_pull();
+            self.reload_pull_page = page;
+        }
+        let Some((view, document)) = page else {
+            return false;
+        };
+
+        // Read the compositor, not scrollY: script metrics can lag behind a painted jump.
+        let position = if matches!(phase, TouchPhase::Down | TouchPhase::Up) {
+            match self.tabs[&view.tab]
+                .webview
+                .can_scroll_up_at_point(DevicePoint::new(x, y).into())
+            {
+                Some(false) => StartPosition::Top,
+                Some(true) => StartPosition::Scrollable,
+                None => StartPosition::Unknown,
+            }
+        } else {
+            StartPosition::Unknown
+        };
+        let update = match phase {
+            TouchPhase::Down => self.reload_pull.press(pointer, x, y, position),
+            TouchPhase::Move => self.reload_pull.moved(pointer, x, y),
+            TouchPhase::Up => self.reload_pull.release(pointer, x, y, position),
+            TouchPhase::Cancel => {
+                self.reload_pull.reset();
+                PullUpdate::Cancelled
+            },
+        };
+        if update == PullUpdate::Released {
+            self.reload_pull_inputs.release();
+            self.reload_pull_release = Some((x, y, Instant::now() + PULL_INPUT_TIMEOUT));
+            return true;
+        }
+        if update == PullUpdate::Cancelled {
+            self.reload_pull_inputs.reset();
+            self.reload_pull_release = None;
+        }
+        self.emit_reload_pull(view, document, update);
+        matches!(update, PullUpdate::Pulling(_))
+    }
+
+    fn reload_pull_input_handled(
+        &mut self,
+        view: ViewKey,
+        id: InputEventId,
+        result: InputEventResult,
+    ) {
+        if self.reload_pull_page.map(|(page_view, _)| page_view) != Some(view) {
+            return;
+        }
+        let action = if result
+            .intersects(InputEventResult::DefaultPrevented | InputEventResult::DispatchFailed)
+        {
+            DefaultAction::Prevented
+        } else {
+            DefaultAction::Allowed
+        };
+        match self.reload_pull_inputs.handled(id, action) {
+            InputDecision::Waiting => return,
+            InputDecision::Cancelled => {
+                self.reject_reload_pull();
+                return;
+            },
+            InputDecision::Released => {},
+        }
+        let Some((x, y, deadline)) = self.reload_pull_release.take() else {
+            return;
+        };
+        let Some((_, document)) = self.reload_pull_page else {
+            return;
+        };
+        let current = self.tabs.get(&view.tab).filter(|tab| {
+            tab.view == view
+                && tab.current_document == Some(document)
+                && self.active == Some(view.tab)
+        });
+        let at_top = current.and_then(|tab| {
+            tab.webview
+                .can_scroll_up_at_point(DevicePoint::new(x, y).into())
+        }) == Some(false);
+        if Instant::now() >= deadline || !at_top {
+            self.reject_reload_pull();
+            return;
+        }
+        self.emit_reload_pull(view, document, PullUpdate::Released);
     }
 
     fn note_activation(&mut self) {
@@ -1792,6 +1956,9 @@ impl Engine {
                 }
             },
             DelegateEvent::PageNavigation { view, request } => self.page_navigation(view, request),
+            DelegateEvent::InputHandled { view, id, result } => {
+                self.reload_pull_input_handled(view, id, result)
+            },
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
