@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -348,9 +349,22 @@ fun BrowserScreen(
     BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
     BackHandler(enabled = sheet == Sheet.NONE && home && homeMode == AddressEditorMode.EDITING) { stopHomeInput() }
 
-    // The bar is one row or two (BottomBar), so snackbars clear its measured height.
     val density = LocalDensity.current
+    val accessibleControls = rememberAccessibleControlsRequired()
+    val barBehavior = when {
+        home || page == null || state.engine != EngineStatus.READY || tab.crashed || tab.loadFailed -> BottomBarBehavior.PINNED
+        sheet != Sheet.NONE || state.find != null || state.pageControl != null || appLink != null -> BottomBarBehavior.PINNED
+        WindowInsets.ime.getBottom(density) > 0 || accessibleControls -> BottomBarBehavior.PINNED
+        else -> BottomBarBehavior.SCROLLING
+    }
+    // A new document or editing context starts with reachable controls, not an old drag.
+    var barDirection by remember(tab?.id, page, state.reader, barBehavior) { mutableStateOf<ScrollEdge?>(null) }
+    val showBar = bottomBarVisible(barDirection, barBehavior)
+    val pageInsets = if (showBar || state.find != null) {
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+    } else WindowInsets.safeDrawing
     var barHeight by remember { mutableStateOf(0.dp) }
+    val noticeInset = if (showBar || state.find != null) barHeight else with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
     // A shown snackbar covers the page's bottom-left corner, where the scroll button sits, and
     // takes the taps there: the button moves above it. Measured from both edges, as snackbars
     // clear the bottom bar's last height, which is not the find bar's.
@@ -377,7 +391,7 @@ fun BrowserScreen(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .windowInsetsPadding(pageInsets)
                     .onGloballyPositioned { pageBottom = it.boundsInRoot().bottom },
             ) {
                 AndroidView(
@@ -387,6 +401,7 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize(),
                     update = { view ->
                         view.observeScroll(page) {
+                            barDirection = it
                             scrollEdge = it.takeIf { reloadPull == null }
                             scrollActivity++
                         }
@@ -444,6 +459,7 @@ fun BrowserScreen(
                         state = reader,
                         textSize = textSize,
                         scrollButtonPadding = scrollButtonPadding,
+                        onScroll = { barDirection = it },
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
                             browser.closeReader()
@@ -463,7 +479,7 @@ fun BrowserScreen(
                     modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
                 )
             }
-            if (state.find == null) BottomBar(
+            if (state.find == null && showBar) BottomBar(
                 tab = tab,
                 openTabs = state.openTabCount,
                 tabCounter = tabCounter,
@@ -527,14 +543,14 @@ fun BrowserScreen(
         }
         // Above the keyboard too: a page field can hold it while a Save error shows. Recent is a
         // separate window over this one and shows the snackbars itself while it is open. The
-        // bar's height includes the navigation bar, and the keyboard's padding is the column's.
+        // visible bar includes navigation insets; hidden controls reserve only those insets.
         if (sheet != Sheet.RECENT) {
             NoticeHost(
                 snackbar,
                 Modifier
                     .align(Alignment.BottomCenter)
                     .imePadding()
-                    .padding(bottom = barHeight + SNACKBAR_GAP)
+                    .padding(bottom = noticeInset + SNACKBAR_GAP)
                     // The host itself, without its offset: empty while no snackbar shows.
                     .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
             )

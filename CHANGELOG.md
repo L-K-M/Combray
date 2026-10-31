@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The bottom bar hides while scrolling down and returns while scrolling up,
+  on pages and in Reader. Editing and accessibility controls stay visible.
 - Pull down at the page's top and release to reload. A progress ring shows
   when the pull is long enough; scrolling, pinching and page-owned drags stay separate.
 - The bottom bar follows sideways swipes, with directional progress toward

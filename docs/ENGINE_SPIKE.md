@@ -1837,3 +1837,51 @@ Follow-up [Engine CI](https://github.com/L-K-M/Combray/actions/runs/41220778947)
 at `25a62ce` passed both native ABIs and all 155 API-30 x86_64 emulator
 checks. The final follow-up records evidence only; browser and fixture code
 are unchanged from that tested revision. [PR #171](https://github.com/L-K-M/Combray/pull/171).
+
+## 36. Scroll-hiding bottom controls (31 October 2026)
+
+Owner request: hide the bottom bar while scrolling down and reveal it while
+scrolling up. This also applies to Reader. Implementation defaults keep
+Home, Find, editing, page dialogs and enabled accessibility services pinned.
+Tab, document and editing-context changes restore controls.
+
+Pages reuse the existing single-finger vertical intent signal; taps,
+horizontal gestures and multi-touch do not choose a direction. Scripted
+page jumps have no direction signal. Reader uses its list's scroll activity.
+Removing the bar frees page space in one viewport resize, not an animated
+sequence of relayouts. System insets remain reserved; snackbars and scroll
+buttons follow the new page bottom.
+
+A focused JVM regression reproduced Reader's resize feedback: near the
+article end, hiding controls enlarges the viewport and clamps the list
+backward, falsely reporting an upward scroll and revealing the controls.
+Ignoring viewport-change corrections fixes it; the regression failed before
+the guard and passes after it. Callback replacement also has coverage.
+
+Local Linux x86_64 / JDK 21.0.13 checks use unchanged Servo pin
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`, Rust 1.97.1 and NDK r29:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`.
+- Eight focused visibility, accessibility and Reader observer checks.
+- `cd native && cargo fmt --check && cargo test --lib --locked`: 138 tests.
+- `scripts/build-native.sh` for x86_64, then APK verification with
+  `python3 -I scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk --expected-arch x86_64`.
+- `python3 scripts/check_docs.py` and `git diff --check`.
+
+Real-Servo checks in `ScrollTest` verify hiding/revealing, freed viewport
+space, painting after resize, Home/tab resets, same-address reload and
+pull-to-reload while revealing hidden controls.
+`ReaderTest` checks the same direction behavior with an extracted article.
+They compile locally; the [Engine PR workflow](https://github.com/L-K-M/Combray/actions/workflows/engine.yml)
+carries runtime evidence for `feat/scroll-hide-bottom-bar` before landing.
+Initial CI at `80ef61a` built both ABIs and passed 158/159 emulator checks.
+Only the combined hidden-controls pull timed out. Its setup now cancels the
+previous fling before jumping to top: one green frame does not prove a
+stable top edge. Failure output also distinguishes an unchanged document
+from a load that never finished. Follow-up evidence is in [PR #172](https://github.com/L-K-M/Combray/pull/172).
+
+A local software emulator booted after extracting X11 libraries into a
+private temporary directory. Local diagnostics stopped at paint/input-focus
+setup and did not validate the target gesture; temporary tracing was removed.
+KVM and a physical device remain unavailable. No personal history or live
+service was used.
