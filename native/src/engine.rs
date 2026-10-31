@@ -1182,7 +1182,6 @@ impl Engine {
     // --- Input (always to the active view) ---------------------------------------------------
 
     fn touch(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) {
-        let track_input = self.track_reload_pull(phase, pointer, x, y);
         // A scroll ends with Up too, so it counts, where browsers cancel the pointer once
         // scrolling starts: asking a little more often is the safe side for unsaved text.
         if phase == TouchPhase::Up {
@@ -1244,6 +1243,8 @@ impl Engine {
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        // Down resets a preceding fling's hit-test cache before we inspect the new target.
+        let track_input = self.track_reload_pull(phase, pointer, x, y);
         if track_input && self.reload_pull_inputs.sent(input) == InputDecision::Cancelled {
             self.reject_reload_pull();
         }

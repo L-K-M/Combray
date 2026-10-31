@@ -1790,6 +1790,12 @@ JNI; inactive scrolls produce no pull events, and completion/cancellation is
 sent once. Four emission-policy regressions failed before that filter and
 pass after it.
 
+Touch-down enters Servo before probing the scroll chain, resetting any
+preceding fling's cached hit target. This ordering guard is source-verified,
+not reproduced locally. Manual check: with the root at top, fling one nested
+panel to top, then immediately pull down over another panel scrolled below
+top. The second panel must scroll without reloading the document.
+
 The scroll-button fade was already merged in #147 and remains unchanged:
 two idle seconds, accessibility-adjusted, followed by a 200 ms fade.
 
