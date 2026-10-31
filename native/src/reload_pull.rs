@@ -93,6 +93,25 @@ impl ReloadPull {
     }
 }
 
+/// Keep the UI's pull lifecycle separate from raw touch activity.
+#[derive(Default)]
+pub(crate) struct PullFeedback {
+    progress: Option<f32>,
+}
+
+impl PullFeedback {
+    pub(crate) fn update(&mut self, update: PullUpdate) -> Option<PullUpdate> {
+        let PullUpdate::Pulling(progress) = update else {
+            return self.progress.take().map(|_| update);
+        };
+        if self.progress == Some(progress) {
+            return None;
+        }
+        self.progress = Some(progress);
+        Some(update)
+    }
+}
+
 /// A page may prevent a drag after Android has already delivered its release.
 /// Wait for every input answer, even when those answers arrive out of order.
 pub struct PullInputGate<I> {
@@ -161,6 +180,63 @@ impl<I: Eq + std::hash::Hash> PullInputGate<I> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_scrolling_emits_no_pull_feedback() {
+        let mut pull = ReloadPull::new(1.0);
+        let mut feedback = PullFeedback::default();
+        assert_eq!(
+            feedback.update(pull.press(0, 0.0, 0.0, StartPosition::Scrollable)),
+            None
+        );
+        for y in [20.0, 40.0, 80.0, 100.0] {
+            assert_eq!(feedback.update(pull.moved(0, 0.0, y)), None);
+        }
+        assert_eq!(
+            feedback.update(pull.release(0, 0.0, 100.0, StartPosition::Top)),
+            None
+        );
+    }
+
+    #[test]
+    fn cancellation_is_emitted_once_even_while_input_answers_are_pending() {
+        let mut feedback = PullFeedback::default();
+        assert_eq!(
+            feedback.update(PullUpdate::Pulling(1.0)),
+            Some(PullUpdate::Pulling(1.0))
+        );
+        assert_eq!(
+            feedback.update(PullUpdate::Cancelled),
+            Some(PullUpdate::Cancelled)
+        );
+        assert_eq!(feedback.update(PullUpdate::Cancelled), None);
+    }
+
+    #[test]
+    fn completing_a_pull_leaves_no_lifecycle_cancellation_to_emit() {
+        let mut feedback = PullFeedback::default();
+        feedback.update(PullUpdate::Pulling(1.0));
+        assert_eq!(
+            feedback.update(PullUpdate::Released),
+            Some(PullUpdate::Released)
+        );
+        assert_eq!(feedback.update(PullUpdate::Cancelled), None);
+        assert_eq!(feedback.update(PullUpdate::Released), None);
+    }
+
+    #[test]
+    fn unchanged_progress_does_not_repeat_ui_events() {
+        let mut feedback = PullFeedback::default();
+        assert_eq!(
+            feedback.update(PullUpdate::Pulling(0.0)),
+            Some(PullUpdate::Pulling(0.0))
+        );
+        assert_eq!(feedback.update(PullUpdate::Pulling(0.0)), None);
+        assert_eq!(
+            feedback.update(PullUpdate::Pulling(0.5)),
+            Some(PullUpdate::Pulling(0.5))
+        );
+    }
 
     #[test]
     fn delayed_prevent_default_wins_over_a_release() {

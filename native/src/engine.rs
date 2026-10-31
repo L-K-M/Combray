@@ -64,7 +64,8 @@ use crate::panic_policy;
 use crate::pdf::{self, PdfProtocolHandler, ViewerToken};
 use crate::profile;
 use crate::reload_pull::{
-    DefaultAction, InputDecision, PullInputGate, PullUpdate, ReloadPull, StartPosition,
+    DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
+    StartPosition,
 };
 
 /// Receives engine events on the engine thread.
@@ -423,6 +424,7 @@ struct Engine {
     reload_pull: ReloadPull,
     reload_pull_page: Option<(ViewKey, PipelineId)>,
     reload_pull_inputs: PullInputGate<InputEventId>,
+    reload_pull_feedback: PullFeedback,
     reload_pull_release: Option<(f32, f32, Instant)>,
     tap_checks: TapChecks,
     delegate_queue: DelegateQueue,
@@ -471,6 +473,7 @@ impl Engine {
             reload_pull: ReloadPull::new(density),
             reload_pull_page: None,
             reload_pull_inputs: Default::default(),
+            reload_pull_feedback: Default::default(),
             reload_pull_release: None,
             tap_checks: Default::default(),
             delegate_queue: Default::default(),
@@ -1265,12 +1268,19 @@ impl Engine {
         self.reload_pull_inputs.reset();
         self.reload_pull_release = None;
         if let Some((view, document)) = self.reload_pull_page {
-            self.emit(EngineEvent::ReloadPull {
-                view,
-                document: u64::from(document),
-                update: PullUpdate::Cancelled,
-            });
+            self.emit_reload_pull(view, document, PullUpdate::Cancelled);
         }
+    }
+
+    fn emit_reload_pull(&mut self, view: ViewKey, document: PipelineId, update: PullUpdate) {
+        let Some(update) = self.reload_pull_feedback.update(update) else {
+            return;
+        };
+        self.emit(EngineEvent::ReloadPull {
+            view,
+            document: u64::from(document),
+            update,
+        });
     }
 
     fn track_reload_pull(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) -> bool {
@@ -1321,11 +1331,7 @@ impl Engine {
             self.reload_pull_inputs.reset();
             self.reload_pull_release = None;
         }
-        self.emit(EngineEvent::ReloadPull {
-            view,
-            document: u64::from(document),
-            update,
-        });
+        self.emit_reload_pull(view, document, update);
         matches!(update, PullUpdate::Pulling(_))
     }
 
@@ -1372,11 +1378,7 @@ impl Engine {
             self.reject_reload_pull();
             return;
         }
-        self.emit(EngineEvent::ReloadPull {
-            view,
-            document: u64::from(document),
-            update: PullUpdate::Released,
-        });
+        self.emit_reload_pull(view, document, PullUpdate::Released);
     }
 
     fn note_activation(&mut self) {
