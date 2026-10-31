@@ -1689,10 +1689,39 @@ widget result and scroll through the diagnostic results. Capture only
 the error and check outcomes when sharing evidence: Technical details
 also includes the IP address and session identifiers.
 
-The phone's diagnostic result, the relevant console/network failure and
-a same-network browser comparison remain unverified. Emulation can
-affect challenge timing and browser signals, so `300031` on this host
-does not establish the phone's failure mechanism. Next: collect the
-phone-side result, isolate a specific engine defect, and reproduce it
-with a synthetic regression before changing Servo. Native builds and
-the fixture suite were not rerun for this documentation-only record.
+### Phone report and next probe
+
+The owner supplied a phone screenshot on 31 October 2026. All four basic
+checks pass, but Technical details shows Turnstile Status `loading`.
+No final widget result or error code is visible. This confirms a pending
+state at capture time, not the emulator's `300031` result. The browser
+string names Servo 0.7.0; the exact APK, device OS, ABI and elapsed wait
+are not established. The screenshot's IP and session identifiers are not
+part of this record.
+
+In the inspected diagnostic v1.3.4 source, `renderTurnstile()` sets
+`loading` before rendering the widget. The Server Connection check passes
+when a no-CORS `HEAD` fetch resolves, without checking its HTTP status.
+Neither observation establishes that the challenge's scripts, iframe or
+requests completed successfully.
+
+Source inspection confirms that Combray does not enable WebDriver or
+devtools (`native/src/engine.rs`), forward page-console messages or report
+failed challenge resources (`native/src/delegate.rs`). Its generic
+`NativeEngine.evaluate` test route is used by the M0 harness, but has no
+app UI trigger. A controlled debug harness can use that route for a
+bounded error probe; a top-document probe alone cannot observe errors
+inside a cross-origin challenge iframe. No ADB device was connected for
+this follow-up, so no additional runtime probe was run.
+
+Next: obtain the phone's widget outcome (or confirm it stays pending),
+collect the relevant console/subresource failure and compare another
+browser on the same network. Isolate a specific engine defect and
+reproduce it with a synthetic regression before changing Servo.
+Emulation can affect challenge timing and browser signals; it does not
+establish the phone's failure mechanism. Native builds and the fixture
+suite were not rerun for this documentation-only update.
+
+The owner also reports that the diagnostic's Copy button and manual text
+selection do not work. These are deferred to a separate follow-up,
+[issue #168](https://github.com/L-K-M/Combray/issues/168), as requested.
