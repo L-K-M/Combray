@@ -1825,3 +1825,11 @@ Local checks on Linux x86_64, JDK 21, Rust 1.97.1 and NDK r29:
 No local ADB device was connected. The local emulator cannot start without
 `libX11.so.6`, and KVM is unavailable. Physical-device and live-site checks
 were not run. PR checks carry native/emulator evidence before landing.
+
+Initial Engine CI at `5af10c6` built both ABIs and passed 154/155 API-30
+emulator checks. The nested-panel check timed out before reporting its
+first scroll: the fixture's head script accessed `panel` before its body
+existed. A Node lifecycle probe reproduced that `ReferenceError`. The
+listener now binds after the panel is parsed, using an explicit element
+lookup. Browser behavior is unchanged; follow-up results are tracked in
+[PR #171](https://github.com/L-K-M/Combray/pull/171).
