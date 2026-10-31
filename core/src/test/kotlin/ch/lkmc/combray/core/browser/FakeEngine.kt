@@ -93,7 +93,10 @@ class FakeEngine : EnginePort {
 
     override fun goForward(tab: Long) = Unit
 
-    override fun reload(tab: Long) = Unit
+    val reloaded = mutableListOf<Long>()
+    override fun reload(tab: Long) { reloaded += tab }
+    val reloadedPages = mutableListOf<PageRef>()
+    override fun reload(page: PageRef) { reloaded += page.view.tab; reloadedPages += page }
 
     val scrolled = mutableListOf<Pair<PageRef, ScrollEdge>>()
 

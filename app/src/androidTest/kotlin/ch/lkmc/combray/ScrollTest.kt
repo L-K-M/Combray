@@ -10,8 +10,10 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.TimeoutCancellationException
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -30,6 +32,63 @@ class ScrollTest {
         device.browser.openUrl(URL, Placement.CURRENT_TAB)
         awaitTitle("SCROLL-TOP")
         assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+    }
+
+    @Test
+    fun pullingAtTopReloadsAndClearsTheScrollButton() {
+        val oldPage = device.browser.browserState.value.activeTab!!.page
+        swipe(0.25f, 0.65f)
+        device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.loading == false }
+        compose.onNodeWithContentDescription(TOP).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Release to reload").assertDoesNotExist()
+    }
+
+    @Test
+    fun reachingTopDuringAScrollDoesNotReload() {
+        val oldPage = device.browser.browserState.value.activeTab!!.page!!
+        swipe(0.65f, 0.35f)
+        awaitTitle("SCROLL-MIDDLE")
+        swipe(0.25f, 0.75f)
+        assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        assertEquals(oldPage, device.browser.browserState.value.activeTab!!.page)
+    }
+
+    @Test
+    fun paintedJumpsNotStaleDomOffsetsGateReloads() {
+        val oldPage = device.browser.browserState.value.activeTab!!.page!!
+        device.browser.scrollToEdge(oldPage, ScrollEdge.BOTTOM)
+        assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
+        swipe(0.35f, 0.65f)
+        awaitTitle("SCROLL-MIDDLE")
+        assertEquals(oldPage, device.browser.browserState.value.activeTab!!.page)
+
+        device.browser.scrollToEdge(oldPage, ScrollEdge.TOP)
+        assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        swipe(0.25f, 0.65f)
+        device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.loading == false }
+    }
+
+    @Test
+    fun aPageOwnedDragDoesNotReload() {
+        device.browser.openUrl("${Fixtures.BASE}/pull-blocked.html", Placement.CURRENT_TAB)
+        awaitTitle("PULL-READY")
+        val page = device.browser.browserState.value.activeTab!!.page
+        swipe(0.25f, 0.65f)
+        awaitTitle("PULL-PREVENTED")
+        device.awaitState { it.reloadPull == null }
+        assertEquals(page, device.browser.browserState.value.activeTab!!.page)
+    }
+
+    @Test
+    fun aScrolledPanelKeepsItsOwnDownwardDrag() {
+        device.browser.openUrl("${Fixtures.BASE}/pull-panel.html", Placement.CURRENT_TAB)
+        awaitTitle("PANEL-TOP")
+        val page = device.browser.browserState.value.activeTab!!.page
+        swipe(0.65f, 0.35f)
+        awaitTitle("PANEL-MIDDLE")
+        swipe(0.25f, 0.75f)
+        awaitTitle("PANEL-TOP")
+        assertEquals(page, device.browser.browserState.value.activeTab!!.page)
     }
 
     @Test

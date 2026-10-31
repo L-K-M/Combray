@@ -170,6 +170,9 @@ enum class SessionState {
  */
 data class ExternalLink(val id: Long, val url: String)
 
+/** Transient feedback for a pull on one particular page. */
+data class ReloadPullState(val page: PageRef, val progress: Float)
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
     val session: SessionState = SessionState.RESTORING,
@@ -187,6 +190,7 @@ data class BrowserState(
     /** Find in page over the focused tab's page, while the find bar is open. */
     val find: FindState? = null,
     val notice: Notice? = null,
+    val reloadPull: ReloadPullState? = null,
 )
 
 /** A step along the open tabs in Recent order, as a swipe along the bottom bar asks for one. */

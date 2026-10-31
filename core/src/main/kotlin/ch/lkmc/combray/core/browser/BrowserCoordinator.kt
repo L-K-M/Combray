@@ -24,6 +24,7 @@ import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ReloadPullPhase
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
@@ -509,6 +510,23 @@ class BrowserCoordinator(
         publish()
     }
 
+    private fun pullView(page: PageRef): LiveView? = view(page.view)?.takeIf {
+        it.nativeTab == selectedNative && it.currentDocument == page.document && !it.crashed &&
+            !it.loading && !it.awaitingCommit && reader == null && it.controls.isEmpty()
+    }
+
+    /** Progress stays in memory; only a valid release changes the browser projection. */
+    private fun onReloadPull(event: EngineEvent.ReloadPull): Boolean {
+        val live = pullView(event.page) ?: return false
+        val pull = if (event.phase == ReloadPullPhase.PULLING) ReloadPullState(event.page, event.progress) else null
+        state.update { it.copy(reloadPull = pull) }
+        if (event.phase != ReloadPullPhase.RELEASED) return false
+
+        engine.reload(event.page)
+        awaitCommit(live)
+        return true
+    }
+
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
         database.withTransaction {
@@ -731,6 +749,7 @@ class BrowserCoordinator(
             }
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.FindResult -> onFindResult(event)
+            is EngineEvent.ReloadPull -> if (!onReloadPull(event)) return@submit
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
             // Said once per document: a page that keeps trying must not keep a notice up.
             is EngineEvent.PopupBlocked -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
@@ -1587,6 +1606,7 @@ class BrowserCoordinator(
                 // Every publish reads the stored session, so the first one ends restoring.
                 session = SessionState.RESTORED,
                 find = findSession?.state(),
+                reloadPull = it.reloadPull?.takeIf { pull -> pullView(pull.page) != null },
             )
         }
     }
