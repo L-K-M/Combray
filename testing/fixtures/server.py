@@ -642,10 +642,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "<script>addEventListener('touchmove',event=>{event.preventDefault();"
                 "document.title='PULL-PREVENTED';},{passive:false});</script>"))
         if path == "/pull-panel.html":
+            # Bound overflow so the return drag reaches top even after a fling.
             return self.send(200, page("PANEL-TOP",
                 "<div id='panel' style='height:100vh;overflow:auto'>"
                 "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
-                "<section style='height:500vh;background:#8a5a2b'>PANEL</section></div>"
+                "<section style='height:50vh;background:#8a5a2b'>PANEL</section></div>"
                 "<script>const panel=document.getElementById('panel');"
                 "panel.addEventListener('scroll',()=>{document.title="
                 "panel.scrollTop<=1?'PANEL-TOP':'PANEL-MIDDLE';});</script>",

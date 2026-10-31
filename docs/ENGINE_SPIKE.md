@@ -1831,5 +1831,7 @@ emulator checks. The nested-panel check timed out before reporting its
 first scroll: the fixture's head script accessed `panel` before its body
 existed. A Node lifecycle probe reproduced that `ReferenceError`. The
 listener now binds after the panel is parsed, using an explicit element
-lookup. Browser behavior is unchanged; follow-up results are tracked in
+lookup. Panel overflow stays shorter than the return drag, so fling travel
+cannot invalidate its endpoint assertion. Browser behavior is unchanged;
+follow-up results are tracked in
 [PR #171](https://github.com/L-K-M/Combray/pull/171).
