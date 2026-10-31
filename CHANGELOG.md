@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - Some Cloudflare-protected pages stay at security verification. The cause
   remains unresolved; see the [engine investigation](docs/ENGINE_SPIKE.md#34-cloudflare-verification-31-october-2026).
+- The page Copy button and manual text selection are reported broken;
+  tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
 
 ### Added
 
