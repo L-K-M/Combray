@@ -1,7 +1,7 @@
 # Verified together on the reference host (docs/BUILDING.md). Update deliberately, then re-run
 # the unit tests, lint and the device checks.
 [versions]
-agp = "9.4.1"
+agp = "9.5.0"
 kotlin = "2.4.21"
 ksp = "2.3.12"
 composeBom = "2026.09.00"
@@ -18,7 +18,7 @@ okhttp = "4.12.0"
 # annotation libraries (app/build.gradle.kts).
 guava = "33.7.2-android"
 coroutines = "1.11.0"
-serialization = "1.11.0"
+serialization = "1.12.0"
 licensee = "1.14.1"
 junit4 = "4.13.2"
 robolectric = "4.17"

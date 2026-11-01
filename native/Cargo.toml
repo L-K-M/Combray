@@ -16,10 +16,12 @@ path = "src/lib.rs"
 # Feature choices mirror servoshell's Android build (the configuration upstream CI exercises);
 # trimming them is an M1 decision that needs its own build and size measurements.
 [dependencies]
+flate2 = "=1.1.9"
 log = { version = "=0.4.34", features = ["release_max_level_info"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.10.9"
+url = "=2.5.8"
 
 # Everything that touches Servo or JNI only builds for Android; host builds compile the pure
 # modules so their unit tests run without a host Servo build.
@@ -28,11 +30,11 @@ android_logger = "=0.15.1"
 dpi = "=0.1.2"
 euclid = "=0.22.14"
 gleam = "=0.15.1"
+http = "=1.5.0"
 jni = "=0.22.4"
 keyboard-types = { version = "=0.8.3", features = ["serde", "webdriver"] }
 raw-window-handle = "=0.6.2"
 rustls = { version = "=0.23.46", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"] }
-url = "=2.5.8"
 
 [target.'cfg(target_os = "android")'.dependencies.servo]
 path = "../servo-checkout/servo/components/servo"

@@ -301,7 +301,7 @@ class AccessibilityTest {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 CombrayTheme(ThemeMode.DARK) {
                     HomeContent(
-                        links, RecentItem.OpenTab("exact-tab", "https://example.org/", "A remembered page", System.currentTimeMillis(), false),
+                        links, RecentItem.OpenTab("exact-tab", "https://example.org/", "A remembered page", System.currentTimeMillis(), false, createdAt = 0),
                         {}, { selected = it }, {}, {}, {}, Modifier.width(NARROW_WIDTH),
                     )
                 }
@@ -341,6 +341,9 @@ class AccessibilityTest {
 
     @Test
     fun aLeavePageQuestionIsAccessible() = assertControlIsAccessible(PageControlContent.LeavePage)
+
+    @Test
+    fun aPagePasteMenuIsAccessible() = assertControlIsAccessible(PageControlContent.PasteMenu)
 
     @Test
     fun aSelectIsAccessible() = assertControlIsAccessible(

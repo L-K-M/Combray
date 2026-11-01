@@ -24,6 +24,7 @@ import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ReloadPullPhase
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
@@ -129,10 +130,6 @@ class BrowserCoordinator(
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
-    /** The open tabs in Recent order when the current run of bar swipes began, and its last swipe. */
-    private var swipeRun: List<String> = emptyList()
-    private var swipeRunAt: Long? = null
-
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
 
@@ -217,7 +214,7 @@ class BrowserCoordinator(
         ) { tabs, visits, session, _ ->
             val cutoff = clock.now() - retention.closedHistoryMillis
             val items = tabs.map {
-                RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId)
+                RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId, createdAt = it.createdAt)
             } + visits.filter { it.lastSeenAt >= cutoff }.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
             items.sortedByDescending { it.time }
         }
@@ -269,7 +266,7 @@ class BrowserCoordinator(
             }
             val used = eligible.filter { it.tab.lastFocusedAt >= it.tab.createdAt }
             (used + (eligible - used)).firstOrNull()?.let {
-                RecentItem.OpenTab(it.tab.id, it.tab.url, it.tab.title, it.tab.lastFocusedAt, active = false)
+                RecentItem.OpenTab(it.tab.id, it.tab.url, it.tab.title, it.tab.lastFocusedAt, active = false, createdAt = it.tab.createdAt)
             }
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
@@ -420,25 +417,16 @@ class BrowserCoordinator(
         publish()
     }
 
-    /**
-     * A swipe along the bottom bar: focuses the [step] neighbour of the focused tab in Recent
-     * order. Focusing reorders Recent, so a run of swipes walks the order as the run found it:
-     * repeated swipes go further back instead of flipping between the two newest tabs. A pause
-     * of [SWIPE_RUN_MS] starts the next run from the order as it is then.
-     */
+    /** A bar swipe follows fixed creation order, never focus recency, and does not wrap. */
     fun stepTab(step: TabStep) = submit {
-        val now = clock.now()
-        val open = dao.openTabs()
-        if (swipeRunAt.let { it == null || now - it > SWIPE_RUN_MS }) swipeRun = open.map { it.id }
-        swipeRunAt = now
-        // Tabs closed during the run drop out; tabs opened during it wait for the next run.
-        val order = swipeRun.filter { id -> open.any { it.id == id } }
-        val index = order.indexOf(activeTab()?.id)
+        val open = dao.openTabsInCreationOrder()
+        val active = activeTab()?.id
+        val index = open.indexOfFirst { it.id == active }
         val target = when (step) {
-            TabStep.OLDER -> order.getOrNull(index + 1)
-            TabStep.NEWER -> if (index > 0) order[index - 1] else null
+            TabStep.OLDER -> open.getOrNull(index + 1)
+            TabStep.NEWER -> if (index > 0) open[index - 1] else null
         } ?: return@submit
-        focus(open.first { it.id == target })
+        focus(target)
         reconcile()
         publish()
     }
@@ -507,6 +495,23 @@ class BrowserCoordinator(
             }
         }
         publish()
+    }
+
+    private fun pullView(page: PageRef): LiveView? = view(page.view)?.takeIf {
+        it.nativeTab == selectedNative && it.currentDocument == page.document && !it.crashed &&
+            !it.loading && !it.awaitingCommit && reader == null && it.controls.isEmpty()
+    }
+
+    /** Progress stays in memory; only a valid release changes the browser projection. */
+    private fun onReloadPull(event: EngineEvent.ReloadPull): Boolean {
+        val live = pullView(event.page) ?: return false
+        val pull = if (event.phase == ReloadPullPhase.PULLING) ReloadPullState(event.page, event.progress) else null
+        state.update { it.copy(reloadPull = pull) }
+        if (event.phase != ReloadPullPhase.RELEASED) return false
+
+        engine.reload(event.page)
+        awaitCommit(live)
+        return true
     }
 
     /** Removes one history row. The page an open tab shows is not history and stays. */
@@ -677,7 +682,7 @@ class BrowserCoordinator(
         // Only where the dialog offered it: a stray request must not silence the page's dialogs.
         if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
         // Stay cancels the navigation or reload the page asked about: nothing will commit (#92).
-        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) view.awaitingCommit = false
+        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) stopAwaitingCommit(view)
         engine.respondToControl(control, response)
         publish()
     }
@@ -731,6 +736,7 @@ class BrowserCoordinator(
             }
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.FindResult -> onFindResult(event)
+            is EngineEvent.ReloadPull -> if (!onReloadPull(event)) return@submit
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
             // Said once per document: a page that keeps trying must not keep a notice up.
             is EngineEvent.PopupBlocked -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
@@ -772,7 +778,7 @@ class BrowserCoordinator(
                 live.controls.removeAll(hidden)
                 // The engine answers an unanswered leave-page question Stay (its deadline, or the
                 // tab left the screen), or drops it as the page commits; either way stop waiting.
-                if (hidden.any { it.content is PageControlContent.LeavePage }) live.awaitingCommit = false
+                if (hidden.any { it.content is PageControlContent.LeavePage }) stopAwaitingCommit(live)
             }
             is EngineEvent.EngineError -> onEngineError(event)
             // Heartbeats, echoes, navigation confirmations and diagnostics cannot change what
@@ -833,12 +839,13 @@ class BrowserCoordinator(
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
         // A load names no document, so the engine credits it to the committed one. While a page the app asked
-        // for is pending, a load whose referrer is another origin than the committed page's is most likely the
-        // pending page's, overtaking its commit (a data: page leaving for a fixture page did so on the emulator):
-        // it waits for that commit. Without a pending navigation (a cross-origin frame's media, a late load of
-        // a replaced page) it is the committed page's, as before.
+        // for is pending, a load can be the pending page's, overtaking its commit (a data: page leaving for a
+        // fixture page did so on the emulator, and so did a fixture page leaving for another on the same
+        // origin, whose Play notice the earlier page had already used): it waits for that commit, and goes to
+        // the committed page if the wait ends without one (stopAwaitingCommit). Without a pending navigation (a
+        // cross-origin frame's media, a late load of a replaced page) it is the committed page's at once.
         val referrer = event.referrer
-        if (view.awaitingCommit && referrer != null && !MediaPolicy.isAt(key.address, referrer)) {
+        if (view.awaitingCommit && referrer != null) {
             if (view.heldMedia.size == MAX_HELD_MEDIA) view.heldMedia.removeFirst()
             view.heldMedia.addLast(HeldMedia(event, view.commitRequests))
             return
@@ -854,6 +861,20 @@ class BrowserCoordinator(
         val key = view.currentPage?.takeIf { it.document == document } ?: return
         held.filter { it.request == view.commitRequests && MediaPolicy.isAt(key.address, checkNotNull(it.event.referrer)) }
             .forEach { recordMedia(view, key, it.event) }
+    }
+
+    /**
+     * The app stops waiting for the page it asked for without a commit: no answer in time, a refusal, the user
+     * stayed on the page, or the address only moved within the page. The reports held meanwhile were the
+     * committed page's after all; those of a document no longer current are dropped.
+     */
+    private fun stopAwaitingCommit(view: LiveView) {
+        view.awaitingCommit = false
+        if (view.heldMedia.isEmpty()) return
+        val held = view.heldMedia.toList()
+        view.heldMedia.clear()
+        val key = view.currentPage?.takeIf { it.document == view.currentDocument } ?: return
+        held.filter { it.event.document == key.document }.forEach { recordMedia(view, key, it.event) }
     }
 
     private fun recordMedia(view: LiveView, key: PageKey, event: EngineEvent.MediaBlocked) {
@@ -957,7 +978,7 @@ class BrowserCoordinator(
                 HistoryKind.SAME_DOCUMENT -> {
                     // Only an awaited address within this page (a typed "#part") commits this way:
                     // the old page rewriting its own address does not answer the request.
-                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) view.awaitingCommit = false
+                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) stopAwaitingCommit(view)
                     scheduleCapture(view, event.document, captureTiming.debounceMs)
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
@@ -1115,7 +1136,7 @@ class BrowserCoordinator(
             delay(navigationTimeoutMs)
             submit {
                 if (view.commitRequests != request || !view.awaitingCommit) return@submit
-                view.awaitingCommit = false
+                stopAwaitingCommit(view)
                 publish()
             }
         }
@@ -1430,7 +1451,7 @@ class BrowserCoordinator(
                 // A refusal of an earlier address must not end the wait for a newer one. The
                 // refused address never commits, so it no longer marks a typed navigation.
                 if (event.request == view.awaitedRequest) {
-                    view.awaitingCommit = false
+                    stopAwaitingCommit(view)
                     view.awaitedUrl = null
                 }
                 state.update { it.copy(notice = Notice.AddressNotOpened) }
@@ -1572,6 +1593,7 @@ class BrowserCoordinator(
                 // Every publish reads the stored session, so the first one ends restoring.
                 session = SessionState.RESTORED,
                 find = findSession?.state(),
+                reloadPull = it.reloadPull?.takeIf { pull -> pullView(pull.page) != null },
             )
         }
     }
@@ -1719,8 +1741,6 @@ class BrowserCoordinator(
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val PROCESS_KEY_LENGTH = 8
 
-        /** How long a pause between bar swipes keeps them one run over the same order. */
-        const val SWIPE_RUN_MS = 3_000L
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */
         val SERVO_ERROR_TITLES = setOf("Error loading page", "Certificate error")
 

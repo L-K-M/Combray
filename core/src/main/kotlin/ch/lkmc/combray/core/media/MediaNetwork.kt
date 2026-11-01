@@ -15,10 +15,10 @@ import java.net.Proxy
  * call factory per playback that applies [MediaPolicy] to every hop.
  *
  * ```
- *  Media3 ─> call ─> first-request check ─> OkHttp: connect ─> HopPolicy ─> send
- *                   (URL rules, no connect)                 (URL rules, connected address,
- *                                                            headers; a redirect's target
- *                                                            before OkHttp follows it)
+ *  Media3 ─> call ─> first-request check ─> OkHttp: resolve ─> connect ─> HopPolicy ─> send
+ *                   (URL rules, no connect)  (open addresses             (URL rules, connected address,
+ *                                             only: OpenAddresses)        headers; a redirect's target
+ *                                                                         before OkHttp follows it)
  * ```
  *
  * Nothing of Servo's is shared: no cookies, no cache, no authenticator (a 401 is an error), no
@@ -27,13 +27,13 @@ import java.net.Proxy
  */
 class MediaNetwork(
     private val base: OkHttpClient = baseClient(),
-    private val isLocal: (InetAddress) -> Boolean = MediaPolicy::isLocalAddress,
-    private val isDeviceOrLink: (InetAddress) -> Boolean = MediaPolicy::isDeviceOrLinkAddress,
+    private val zoneOf: (InetAddress) -> AddressZone = MediaPolicy::zoneOf,
 ) {
     /** The [Call.Factory] Media3 fetches [request] with. */
     fun callFactory(request: PlaybackRequest): Call.Factory = base.newBuilder()
+        .dns(OpenAddresses(base.dns, request.origin, zoneOf))
         .addInterceptor(FirstRequestCheck(request.origin))
-        .addNetworkInterceptor(HopPolicy(request, isLocal, isDeviceOrLink))
+        .addNetworkInterceptor(HopPolicy(request, zoneOf))
         .build()
 
     companion object {
@@ -66,6 +66,21 @@ fun refusalIn(error: Throwable): MediaRefusal? {
     return null
 }
 
+/**
+ * The addresses [system] resolves a host to, minus those the device rule closes to [origin]'s page:
+ * OkHttp then never connects to one and tries the next address instead. No address left is a
+ * refusal, before any connection.
+ */
+private class OpenAddresses(
+    private val system: Dns,
+    private val origin: MediaOrigin,
+    private val zoneOf: (InetAddress) -> AddressZone,
+) : Dns {
+    override fun lookup(hostname: String): List<InetAddress> = system.lookup(hostname)
+        .filter { MediaPolicy.checkAddress(origin, hostname, it, zoneOf) == null }
+        .ifEmpty { throw MediaRefusedException(MediaRefusal.DEVICE_OR_LINK) }
+}
+
 /** Refuses the first request before OkHttp connects, when its address alone breaks a rule. */
 private class FirstRequestCheck(private val origin: MediaOrigin) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -76,14 +91,14 @@ private class FirstRequestCheck(private val origin: MediaOrigin) : Interceptor {
 
 /**
  * A network interceptor: OkHttp calls it once per hop, after connecting and before sending. It
- * applies the URL rules again, the private network rule to the address actually connected to,
+ * applies the URL rules again, the device rule to the address actually connected to (a backstop
+ * behind [OpenAddresses]),
  * sets the headers, and checks a redirect's target before OkHttp follows it, so a target the URL
  * rules refuse is never connected to.
  */
 internal class HopPolicy(
     private val request: PlaybackRequest,
-    private val isLocal: (InetAddress) -> Boolean,
-    private val isDeviceOrLink: (InetAddress) -> Boolean = MediaPolicy::isDeviceOrLinkAddress,
+    private val zoneOf: (InetAddress) -> AddressZone = MediaPolicy::zoneOf,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val hop = chain.request()
@@ -91,8 +106,7 @@ internal class HopPolicy(
         MediaPolicy.check(origin, hop.url)?.let { throw MediaRefusedException(it) }
         // Whatever name or literal led there: the address OkHttp connected to.
         val connection = checkNotNull(chain.connection()) { "a network interceptor runs on a connection" }
-        MediaPolicy.checkAddress(origin, hop.url.host, connection.route().socketAddress.address, isLocal, isDeviceOrLink)
-            ?.let { throw MediaRefusedException(it) }
+        MediaPolicy.checkAddress(origin, hop.url.host, connection.route().socketAddress.address, zoneOf)?.let { throw MediaRefusedException(it) }
 
         val referer = MediaPolicy.referer(origin, hop.url)
         val sent = hop.newBuilder()

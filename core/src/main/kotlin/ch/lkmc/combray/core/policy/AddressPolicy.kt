@@ -174,6 +174,9 @@ object AddressPolicy {
     private val BLOCKED_SCHEMES = setOf(
         "javascript", "data", "file", "content", "intent", "blob", "about", "chrome", "view-source",
         "filesystem", "ftp", "ws", "wss", "jar", "resource", "android-app",
+        // The engine's PDF viewer files (native/src/pdf.rs): never a page, and never a search,
+        // which would send the viewer's per-process token to Kagi.
+        "combray-pdf",
     )
 
     private val KNOWN_SCHEMES = WEB_SCHEMES + EXTERNAL_SCHEMES + BLOCKED_SCHEMES
@@ -505,8 +508,7 @@ object HostNames {
 
     /**
      * Whether [host] names this device or a home network: localhost, or a name under a home
-     * network suffix such as ".lan" or ".local". The address field's rule; the media player adds
-     * more names (ch.lkmc.combray.core.media.MediaPolicy).
+     * network suffix such as ".lan" or ".local". The address field's rule.
      */
     fun isLocalHost(host: String): Boolean {
         val name = host.trimEnd('.')

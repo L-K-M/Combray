@@ -74,6 +74,8 @@ object NativeEngine {
 
     @JvmStatic external fun reload(tab: Long)
 
+    @JvmStatic external fun reloadPage(tab: Long, generation: Long, document: Long)
+
     /** Root-page jump, guarded by view generation and document identity. */
     @JvmStatic external fun scrollToEdge(tab: Long, generation: Long, document: Long, edge: Int)
 

@@ -25,13 +25,15 @@ use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
 use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
+use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
-    EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
-    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
-    NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
-    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme,
-    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
+    AuthenticationRequest, CompositionEvent, CompositionState, ContextMenuAction, ContextMenuItem,
+    DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent,
+    InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
+    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
+    Opts, PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
+    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme, TouchEvent,
+    TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
     WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
@@ -59,7 +61,12 @@ use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
 use crate::panic_policy;
+use crate::pdf::{self, PdfProtocolHandler, ViewerToken};
 use crate::profile;
+use crate::reload_pull::{
+    DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
+    StartPosition,
+};
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -89,6 +96,7 @@ const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// First tab ID for views that pages open (`window.open`). Applications number their own tabs
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
+const PULL_INPUT_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn run(
     config: EngineConfig,
@@ -193,7 +201,7 @@ struct Tab {
     /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
     /// pushState loop stays bounded; restarts when another document commits.
     media_budget: MediaBudget,
-    /// Loads waiting for the document about to commit (see `media::PendingMedia`).
+    /// Loads waiting for the document the tab awaits (see `media::PendingMedia`).
     pending_media: PendingMedia,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
@@ -211,6 +219,9 @@ struct Tab {
     /// The field that has Servo's input method. Servo keeps focus per document, so a hidden
     /// tab keeps its field; only the selected tab's field gets the keyboard.
     ime_field: Option<ImeField>,
+    /// The application's last `SetThrottling` for this tab. A throttled tab stays hidden and
+    /// unfocused even when selected, until the application lifts the throttling.
+    throttling: Throttling,
 }
 
 impl Tab {
@@ -260,6 +271,36 @@ impl Tab {
         }
         reports
     }
+
+    /// Credits `media` to the committed document now; the first `unawaited` of them waited for
+    /// a document that did not come in time (`media::PendingMedia::expire`). Before any commit
+    /// there is no document to name, and nothing is reported (the loads were still cancelled).
+    fn credit_now(
+        &mut self,
+        media: Vec<UnattributedMedia>,
+        unawaited: usize,
+        now_ms: u64,
+    ) -> Vec<EngineEvent> {
+        if media.is_empty() {
+            return Vec::new();
+        }
+        let Some(document) = self.current_document else {
+            info!(
+                "view {:?}: {} media loads dropped: no document has committed",
+                self.view,
+                media.len()
+            );
+            return Vec::new();
+        };
+        if unawaited > 0 {
+            info!(
+                "view {:?}: {unawaited} media loads held for a navigation credited to committed document {}",
+                self.view,
+                u64::from(document)
+            );
+        }
+        self.credit_media(document, media, now_ms)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -293,6 +334,8 @@ impl ImeField {
 /// A page control waiting for the application's answer. Dropping it answers with Servo's default.
 struct PendingControl {
     view: ViewKey,
+    /// The top-level document at opening, including for a menu inside a frame.
+    document: Option<PipelineId>,
     control: ControlHandle,
 }
 
@@ -378,6 +421,11 @@ struct Engine {
     next_sequence: u64,
     needs_paint: bool,
     field_taps: TapTracker,
+    reload_pull: ReloadPull,
+    reload_pull_page: Option<(ViewKey, PipelineId)>,
+    reload_pull_inputs: PullInputGate<InputEventId>,
+    reload_pull_feedback: PullFeedback,
+    reload_pull_release: Option<(f32, f32, Instant)>,
     tap_checks: TapChecks,
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
@@ -422,6 +470,11 @@ impl Engine {
             next_sequence: 1,
             needs_paint: false,
             field_taps: TapTracker::new(density),
+            reload_pull: ReloadPull::new(density),
+            reload_pull_page: None,
+            reload_pull_inputs: Default::default(),
+            reload_pull_feedback: Default::default(),
+            reload_pull_release: None,
             tap_checks: Default::default(),
             delegate_queue: Default::default(),
             capture_results: Default::default(),
@@ -521,9 +574,15 @@ impl Engine {
                     tab.webview.go_forward(1);
                 }
             },
-            Command::Reload { tab } => {
-                if let Some(tab) = self.tab(tab) {
-                    tab.webview.reload();
+            Command::Reload { tab } => self.reload(tab),
+            Command::ReloadPage { view, document } => {
+                let current = self.tabs.get(&view.tab).is_some_and(|tab| {
+                    tab.view == view
+                        && tab.current_document.map(u64::from) == Some(document)
+                        && self.active == Some(view.tab)
+                });
+                if current {
+                    self.reload(view.tab);
                 }
             },
             Command::ScrollToEdge {
@@ -531,26 +590,7 @@ impl Engine {
                 document,
                 edge,
             } => self.scroll_to_edge(view, document, edge),
-            // Servo throttles exactly the hidden views, so throttling hides a view and
-            // lifting it shows the view again only if it is the selected one.
-            Command::SetThrottling {
-                tab: id,
-                throttling,
-            } => {
-                if let Some(tab) = self.tab(id) {
-                    match throttling {
-                        Throttling::Throttled => {
-                            tab.webview.set_focused(false);
-                            tab.webview.hide();
-                        },
-                        Throttling::Normal if self.active == Some(id) => {
-                            tab.webview.show();
-                            tab.webview.set_focused(true);
-                        },
-                        Throttling::Normal => {},
-                    }
-                }
-            },
+            Command::SetThrottling { tab, throttling } => self.set_throttling(tab, throttling),
             Command::SetPageZoom { zoom } => self.set_page_zoom(zoom),
             Command::Touch {
                 phase,
@@ -593,6 +633,12 @@ impl Engine {
         if let Some(runtime) = &self.runtime {
             runtime.servo.spin_event_loop();
         }
+        if self
+            .reload_pull_release
+            .is_some_and(|(_, _, deadline)| Instant::now() >= deadline)
+        {
+            self.reject_reload_pull();
+        }
         self.drain_delegate_events();
         self.start_deferred_captures();
         self.drain_capture_results();
@@ -601,6 +647,7 @@ impl Engine {
         self.drain_tap_checks();
         self.expire_captures();
         self.expire_leave_page_questions();
+        self.expire_media_holds();
         self.paint();
     }
 
@@ -729,6 +776,7 @@ impl Engine {
         let servo = ServoBuilder::default()
             .opts(opts)
             .preferences(preferences)
+            .protocol_registry(protocols())
             .event_loop_waker(Box::new(ChannelWaker(self.wake.clone())))
             .build();
 
@@ -753,6 +801,7 @@ impl Engine {
     fn surface_destroyed(&mut self) {
         // The gesture on this surface ends without its up events.
         self.touches.forget_pointers();
+        self.cancel_reload_pull();
         let Surface::Bound { .. } = self.surface else {
             return;
         };
@@ -836,6 +885,11 @@ impl Engine {
             .build();
 
         let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
+        let now_ms = self.now_ms();
+        if let Some(created) = self.tabs.get_mut(&tab) {
+            // Its first document's media loads can arrive before anything else about it.
+            created.pending_media.navigation_requested(now_ms);
+        }
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
@@ -878,6 +932,7 @@ impl Engine {
                 opener,
                 shown: Shown::InitialBlank,
                 opening_tap,
+                throttling: Throttling::Normal,
                 ime_field: None,
             },
         );
@@ -922,8 +977,31 @@ impl Engine {
         self.emit(EngineEvent::TabOpened { view, opener });
     }
 
+    /// Servo throttles exactly the hidden views, so throttling hides a view and lifting it
+    /// shows the view again only if it is the selected one.
+    fn set_throttling(&mut self, id: i64, throttling: Throttling) {
+        let active = self.active == Some(id);
+        let Some(tab) = self.tabs.get_mut(&id) else {
+            self.refuse(format!("no tab {id}"), Some(id), None);
+            return;
+        };
+        tab.throttling = throttling;
+        match throttling {
+            Throttling::Throttled => {
+                tab.webview.set_focused(false);
+                tab.webview.hide();
+            },
+            Throttling::Normal if active => {
+                tab.webview.show();
+                tab.webview.set_focused(true);
+            },
+            Throttling::Normal => {},
+        }
+    }
+
     /// Hides every view; the surface shows no page until a tab is selected again.
     fn select_none(&mut self) {
+        self.cancel_reload_pull();
         for tab in self.tabs.values() {
             tab.webview.set_focused(false);
             tab.webview.hide();
@@ -986,10 +1064,15 @@ impl Engine {
                 other.webview.hide();
             }
         }
-        selected.webview.show();
-        selected.webview.set_focused(true);
+        // The application may throttle a view before selecting it (while it is in the
+        // background): it stays hidden until the throttling is lifted.
+        if selected.throttling == Throttling::Normal {
+            selected.webview.show();
+            selected.webview.set_focused(true);
+        }
 
         if self.active != Some(tab) {
+            self.cancel_reload_pull();
             self.withhold_keyboard();
         }
         self.active = Some(tab);
@@ -1057,7 +1140,8 @@ impl Engine {
     }
 
     fn navigate(&mut self, tab: i64, request: i64, url: &str) {
-        let Some(found) = self.tabs.get(&tab) else {
+        let now_ms = self.now_ms();
+        let Some(found) = self.tabs.get_mut(&tab) else {
             self.refuse(
                 format!("no tab {tab} to navigate"),
                 Some(tab),
@@ -1069,6 +1153,7 @@ impl Engine {
         match Url::parse(url) {
             Ok(parsed) => {
                 found.webview.load(parsed);
+                found.pending_media.navigation_requested(now_ms);
                 self.emit(EngineEvent::NavigationRequested {
                     view,
                     request,
@@ -1081,6 +1166,17 @@ impl Engine {
                 Some(request),
             ),
         }
+    }
+
+    fn reload(&mut self, tab: i64) {
+        let now_ms = self.now_ms();
+        let Some(found) = self.tabs.get_mut(&tab) else {
+            self.refuse(format!("no tab {tab}"), Some(tab), None);
+            return;
+        };
+        found.webview.reload();
+        // A reload's document is a new one, whose media loads can overtake it like any other.
+        found.pending_media.navigation_requested(now_ms);
     }
 
     // --- Input (always to the active view) ---------------------------------------------------
@@ -1141,12 +1237,17 @@ impl Engine {
             TouchPhase::Up => TouchEventType::Up,
             TouchPhase::Cancel => TouchEventType::Cancel,
         };
-        webview.notify_input_event(InputEvent::Touch(TouchEvent::new(
+        let input = webview.notify_input_event(InputEvent::Touch(TouchEvent::new(
             event_type,
             TouchId(pointer),
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        // Down resets a preceding fling's hit-test cache before we inspect the new target.
+        let track_input = self.track_reload_pull(phase, pointer, x, y);
+        if track_input && self.reload_pull_inputs.sent(input) == InputDecision::Cancelled {
+            self.reject_reload_pull();
+        }
         // Only a tap: the end of a scroll, fling or pinch must not let the page open an app.
         if tapped {
             self.note_activation();
@@ -1155,6 +1256,130 @@ impl Engine {
         if let Some((x, y)) = field_tap {
             self.check_tap_on_field(x, y);
         }
+    }
+
+    fn cancel_reload_pull(&mut self) {
+        self.reject_reload_pull();
+        self.reload_pull.reset();
+        self.reload_pull_page = None;
+    }
+
+    fn reject_reload_pull(&mut self) {
+        self.reload_pull.cancel_gesture();
+        self.reload_pull_inputs.reset();
+        self.reload_pull_release = None;
+        if let Some((view, document)) = self.reload_pull_page {
+            self.emit_reload_pull(view, document, PullUpdate::Cancelled);
+        }
+    }
+
+    fn emit_reload_pull(&mut self, view: ViewKey, document: PipelineId, update: PullUpdate) {
+        let Some(update) = self.reload_pull_feedback.update(update) else {
+            return;
+        };
+        self.emit(EngineEvent::ReloadPull {
+            view,
+            document: u64::from(document),
+            update,
+        });
+    }
+
+    fn track_reload_pull(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) -> bool {
+        if phase == TouchPhase::Down {
+            self.reload_pull_inputs.reset();
+            self.reload_pull_release = None;
+        }
+        let page = self
+            .active
+            .and_then(|id| self.tabs.get(&id))
+            .and_then(|tab| Some((tab.view, tab.current_document?)));
+        if page != self.reload_pull_page {
+            self.cancel_reload_pull();
+            self.reload_pull_page = page;
+        }
+        let Some((view, document)) = page else {
+            return false;
+        };
+
+        // Read the compositor, not scrollY: script metrics can lag behind a painted jump.
+        let position = if matches!(phase, TouchPhase::Down | TouchPhase::Up) {
+            match self.tabs[&view.tab]
+                .webview
+                .can_scroll_up_at_point(DevicePoint::new(x, y).into())
+            {
+                Some(false) => StartPosition::Top,
+                Some(true) => StartPosition::Scrollable,
+                None => StartPosition::Unknown,
+            }
+        } else {
+            StartPosition::Unknown
+        };
+        let update = match phase {
+            TouchPhase::Down => self.reload_pull.press(pointer, x, y, position),
+            TouchPhase::Move => self.reload_pull.moved(pointer, x, y),
+            TouchPhase::Up => self.reload_pull.release(pointer, x, y, position),
+            TouchPhase::Cancel => {
+                self.reload_pull.reset();
+                PullUpdate::Cancelled
+            },
+        };
+        if update == PullUpdate::Released {
+            self.reload_pull_inputs.release();
+            self.reload_pull_release = Some((x, y, Instant::now() + PULL_INPUT_TIMEOUT));
+            return true;
+        }
+        if update == PullUpdate::Cancelled {
+            self.reload_pull_inputs.reset();
+            self.reload_pull_release = None;
+        }
+        self.emit_reload_pull(view, document, update);
+        matches!(update, PullUpdate::Pulling(_))
+    }
+
+    fn reload_pull_input_handled(
+        &mut self,
+        view: ViewKey,
+        id: InputEventId,
+        result: InputEventResult,
+    ) {
+        if self.reload_pull_page.map(|(page_view, _)| page_view) != Some(view) {
+            return;
+        }
+        let action = if result
+            .intersects(InputEventResult::DefaultPrevented | InputEventResult::DispatchFailed)
+        {
+            DefaultAction::Prevented
+        } else {
+            DefaultAction::Allowed
+        };
+        match self.reload_pull_inputs.handled(id, action) {
+            InputDecision::Waiting => return,
+            InputDecision::Cancelled => {
+                self.reject_reload_pull();
+                return;
+            },
+            InputDecision::Released => {},
+        }
+        let Some((x, y, deadline)) = self.reload_pull_release.take() else {
+            return;
+        };
+        let Some((_, document)) = self.reload_pull_page else {
+            return;
+        };
+        let current = self.tabs.get(&view.tab).filter(|tab| {
+            tab.view == view
+                && tab.current_document == Some(document)
+                && self.active == Some(view.tab)
+        });
+        let at_top = current.and_then(|tab| {
+            tab.webview
+                .can_scroll_up_at_point(DevicePoint::new(x, y).into())
+        }) == Some(false);
+        if Instant::now() >= deadline || !at_top {
+            self.reject_reload_pull();
+            return;
+        }
+        self.emit_reload_pull(view, document, PullUpdate::Released);
     }
 
     fn note_activation(&mut self) {
@@ -1731,6 +1956,9 @@ impl Engine {
                 }
             },
             DelegateEvent::PageNavigation { view, request } => self.page_navigation(view, request),
+            DelegateEvent::InputHandled { view, id, result } => {
+                self.reload_pull_input_handled(view, id, result)
+            },
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
@@ -1815,14 +2043,15 @@ impl Engine {
     /// A load names its view but not its document, so it is attributed to the tab's committed
     /// document at the time the delegate sees it. Servo delivers load interceptions (net thread),
     /// document starts (script) and history changes (constellation) on separate channels in no
-    /// fixed order. A load that arrives after a new document reported its start and before its
-    /// commit is held and given to that document when it commits (`media::PendingMedia`). What
-    /// remains: a load that overtakes both its document's start and commit, or a `pushState`,
-    /// counts for the page before it, and a late load of the replaced document, or of the
-    /// previous route, counts for the new page. The application's document check cannot tell,
-    /// because the event carries the document stamped here. A load before the tab's first
-    /// commit is held for its first document once that reported its start; without a start,
-    /// there is no document to name and nothing is reported (the load is still cancelled).
+    /// fixed order. A load that arrives after the application asked for a page (a new tab, an
+    /// address, a reload) or after a new document reported its start, and before a commit, is
+    /// held and given to the document that commits (`media::PendingMedia`). What remains: a load
+    /// that overtakes the start and commit of a document the page navigated to itself (a link),
+    /// or a `pushState`, counts for the page before it; a late load of the replaced document, or
+    /// of the previous route, counts for the new page; and a hold that ends without a commit
+    /// gives its loads to the committed document. The application's document check cannot tell,
+    /// because the event carries the document stamped here. Without a committed document there
+    /// is nothing to name and nothing is reported (the load is still cancelled).
     fn media_blocked(
         &mut self,
         view: ViewKey,
@@ -1839,12 +2068,26 @@ impl Engine {
             url,
             referrer,
         };
-        // Held first: a tab's first document starts before any document has committed.
-        let admitted = tab.pending_media.admit(load, now_ms);
-        let Some(document) = tab.current_document else {
-            return;
-        };
-        for report in tab.credit_media(document, admitted, now_ms) {
+        // A hold whose document did not come in time ends first, so loads keep their order.
+        let mut loads = tab.pending_media.expire(now_ms);
+        let unawaited = loads.len();
+        loads.extend(tab.pending_media.admit(load, now_ms));
+        for report in tab.credit_now(loads, unawaited, now_ms) {
+            self.emit(report);
+        }
+    }
+
+    /// Ends the media holds whose document did not come in time (`media::PendingMedia`): a
+    /// request that commits nothing, or a start that never commits.
+    fn expire_media_holds(&mut self) {
+        let now_ms = self.now_ms();
+        let mut reports = Vec::new();
+        for tab in self.tabs.values_mut() {
+            let ended = tab.pending_media.expire(now_ms);
+            let unawaited = ended.len();
+            reports.extend(tab.credit_now(ended, unawaited, now_ms));
+        }
+        for report in reports {
             self.emit(report);
         }
     }
@@ -1926,9 +2169,10 @@ impl Engine {
     }
 
     fn show_page_control(&mut self, view: ViewKey, control: ControlHandle) {
-        if self.live_tab(view).is_none() {
+        let Some(tab) = self.live_tab(view) else {
             return;
-        }
+        };
+        let document = tab.current_document;
         let description = match &control {
             ControlHandle::Embedder(control) => describe(control),
             ControlHandle::SignIn(request) => Some(ControlDescription::SignIn {
@@ -1943,8 +2187,14 @@ impl Engine {
         };
         let id = self.next_control;
         self.next_control += 1;
-        self.page_controls
-            .insert(id, PendingControl { view, control });
+        self.page_controls.insert(
+            id,
+            PendingControl {
+                view,
+                document,
+                control,
+            },
+        );
         self.emit(EngineEvent::ControlShown {
             view,
             control: id,
@@ -2130,6 +2380,26 @@ impl Engine {
                 picker.submit();
             },
             (EmbedderControl::FilePicker(picker), ControlResponse::Dismiss) => picker.dismiss(),
+            (EmbedderControl::ContextMenu(menu), ControlResponse::Paste { text }) => {
+                // A late answer cannot paste into another tab or a replacement document.
+                let Some(tab) = self.tabs.get(&pending.view.tab).filter(|tab| {
+                    tab.view == pending.view
+                        && self.active == Some(pending.view.tab)
+                        && tab.current_document == pending.document
+                        && tab.webview.active_document_id() == pending.document
+                }) else {
+                    return;
+                };
+                if tab.current_document.is_none() || !allows_paste(&menu) {
+                    return;
+                }
+                // The long-press cancelled its touch: choosing Paste is the page interaction.
+                self.note_interaction();
+                self.note_activation();
+                // The text travels with the original menu's pipeline and node. No clipboard
+                // grant remains available for an unrelated request or a replaced frame.
+                menu.paste_text(text);
+            },
             // The application performed the action itself.
             (EmbedderControl::ContextMenu(menu), ControlResponse::Dismiss) => menu.dismiss(),
             // Dropping a select keeps its previous selection.
@@ -2228,16 +2498,27 @@ impl Engine {
         // Media loads that overtook this commit, credited to this document's new page.
         let released_media = if change == HistoryChange::NewDocument {
             let held = tab.pending_media.committed(u64::from(document));
+            if !held.is_empty() {
+                info!(
+                    "view {view:?}: {} media loads held until document {} committed",
+                    held.len(),
+                    u64::from(document)
+                );
+            }
             tab.credit_media(document, held, now_ms)
         } else {
             Vec::new()
         };
 
         if change == HistoryChange::NewDocument {
-            // Another document replaced the one asking (a load the application started): its
-            // question is moot.
+            // A replacement document cannot answer the previous page's question or paste menu.
             self.hide_controls(|pending| {
-                pending.view == view && matches!(pending.control, ControlHandle::LeavePage { .. })
+                pending.view == view
+                    && matches!(
+                        pending.control,
+                        ControlHandle::LeavePage { .. }
+                            | ControlHandle::Embedder(EmbedderControl::ContextMenu(_))
+                    )
             });
         }
 
@@ -2384,6 +2665,23 @@ impl Engine {
     }
 }
 
+/// Combray's own schemes, merged into Servo's built-in ones. `combray-pdf:` serves the PDF
+/// viewer's files; nothing requests them until the viewer preferences are set (docs/PDF.md).
+fn protocols() -> ProtocolRegistry {
+    let mut registry = ProtocolRegistry::default();
+    let token = match ViewerToken::for_process() {
+        Ok(token) => token,
+        Err(error) => {
+            error!("no {} scheme without a random token: {error}", pdf::SCHEME);
+            return registry;
+        },
+    };
+    if let Err(error) = registry.register(pdf::SCHEME, PdfProtocolHandler::new(token)) {
+        error!("registering the {} scheme failed: {error:?}", pdf::SCHEME);
+    }
+    registry
+}
+
 /// What the application needs to present `control`; `None` for controls it does not present.
 fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
     let description = match control {
@@ -2412,18 +2710,30 @@ fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
                 .map(|pattern| pattern.0.clone())
                 .collect(),
         },
-        // Only links and images: the bottom bar has back, forward and reload, and editing
-        // actions need a clipboard bridge the app does not have.
         EmbedderControl::ContextMenu(menu) => {
             let info = menu.element_info();
             return controls::link_menu(
                 info.link_url.as_ref().map(Url::as_str),
                 info.image_url.as_ref().map(Url::as_str),
-            );
+            )
+            .or_else(|| allows_paste(menu).then_some(ControlDescription::PasteMenu));
         },
         _ => return None,
     };
     Some(description)
+}
+
+fn allows_paste(menu: &servo::ContextMenu) -> bool {
+    menu.items().iter().any(|item| {
+        matches!(
+            item,
+            ContextMenuItem::Item {
+                action: ContextMenuAction::Paste,
+                enabled: true,
+                ..
+            }
+        )
+    })
 }
 
 /// Flattens `<optgroup>`s: each option remembers its group's label.
