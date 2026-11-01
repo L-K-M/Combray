@@ -233,7 +233,8 @@ ARTICLE_BODY = (
     "<nav><a href='/'>READER-NAV-TEXT</a> <a href='/solid/112233.html'>Section</a></nav>"
     "<article><h1>Reader fixture</h1>"
     # The link comes first, so reader view shows it without scrolling.
-    f"<p>READER-BODY-ONE <a id='inner' href='/solid/2f6b3c.html'>READER-LINK</a> {ARTICLE_PARAGRAPH * 3}</p>"
+    f"<p>READER-BODY-ONE <a id='inner' href='/solid/2f6b3c.html'>READER-LINK</a> "
+    f"<a href='https://'>READER-REFUSED-LINK</a> {ARTICLE_PARAGRAPH * 3}</p>"
     f"<p>{ARTICLE_PARAGRAPH * 3}</p>"
     "<h2>READER-HEADING</h2>"
     f"<p>READER-BODY-TWO {ARTICLE_PARAGRAPH * 3}</p>"
