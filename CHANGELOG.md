@@ -159,6 +159,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The engine sleeps until a message or pending deadline instead of polling
+  every 250 ms. Capture, dialog, reload-pull, media and paint retries stay timed.
 - The media notice offers Play.
 - The media notice waits until the page has loaded when none of the
   page's audio or video has a web address, and a page that moves to
