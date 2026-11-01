@@ -286,7 +286,7 @@ Limitations found while building the app:
 
 - **Servo error lines can contain page URLs.** The log filter keeps Servo's `error` level because engine failures must stay diagnosable; some of those lines name the page. Combray's own log lines carry no page text or addresses.
 - **Screen density is read once.** The HiDPI factor passed to Servo at startup is not updated when the density changes in the same process (display size setting, moving between screens); pages then render at the old scale until the app restarts.
-- **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A load names no document, and Servo delivers loads, document starts and commits on three channels taken in no fixed order, so a new document's first loads can arrive before its commit. The engine holds a load that arrives after a new document reported its start and before its commit, and gives it to that document when it commits (`media::PendingMedia`; a start that does not commit within 5 s gives its loads back to the committed page). The app also holds, while a page it asked for is pending, a report whose referrer is another origin than the committed page's. What stays wrong: a load that overtakes both its document's start and its commit, or a `pushState`, counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
+- **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A load names no document, and Servo delivers loads, document starts and commits on three channels taken in no fixed order, so a new document's first loads can arrive before its start and its commit. The engine holds a load that arrives after the app asked for a page (a new tab, an address, a reload) or after a new document reported its start, and before a commit, and gives it to the document that commits (`media::PendingMedia`; a request that commits nothing within 30 s, or a start within 5 s, gives its loads back to the committed page). The app also holds, while a page it asked for is pending, every report with a referrer, gives those from the new page's origin to that page when it commits, and gives them back to the page on screen when the wait ends without a commit. What stays wrong: a load that overtakes both the start and the commit of a page the page itself opened (a link), or a `pushState`, counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
 - **Leave-page questions cover page navigations only.** Servo 0.6.0 runs `beforeunload` for navigations the page starts (links, forms, `location`), for reloads and for `window.close()`. The constellation loads embedder URLs (`LoadUrl`) and traverses history without it, so a typed address, a link from another app, Back/Forward and closing a tab still discard unsaved form text without asking. Covering them needs a Servo change.
 - **A refused or handed-off link still stops the page's loading.** Servo's `navigate()` queues `abort_a_document_and_its_descendants` on the script thread before it asks the embedder (`components/script/navigation.rs`, step 24.4, lines 546-565 of the patched tree), and `NavigationRequest::deny()` does not undo it. The page stays on screen, but its in-flight fetches, EventSources and parser are aborted. If the link was tapped before the load event, the page never reports load complete: the address bar can keep showing it loading, and capture skips it. The fix needs a Servo patch: skip the abort for schemes the embedder will not load, as Chromium does for external protocols, or queue it only once the embedder allows the navigation.
 - **The tap check ignores pinch-zoom panning.** Servo 0.6.0 exposes the pinch-zoom factor but not the zoomed area's offset, so on a pinch-zoomed page a tap on a field focused before the user touched the page can miss it (no keyboard; tapping elsewhere and then the field works) or count a nearby tap.
@@ -478,7 +478,9 @@ The existing page endpoint check failed when its top button was no longer
 displayed after an engine wait. `ScrollTest` drives a frame/layout after
 each raw swipe. Its endpoint and idle checks freeze Compose's clock, with
 the latter advancing timeout steps explicitly. Reload and snackbar checks
-keep automatic advancement for their recomposition and transitions.
+keep automatic advancement for their recomposition and transitions (the
+snackbar check only until its snackbar shows, since
+[section 30](#30-device-check-timing-races-30-october-2026)).
 An intermediate [run](https://github.com/L-K-M/Combray/actions/runs/40722224056)
 passed the endpoint check but exposed those two dependencies when freezing
 the whole class; clock control is now scoped to the checks that need it.
@@ -1350,7 +1352,587 @@ unresolved; substituted geometry values must carry units; deeper
 subtree mutations still do not invalidate the cached serialization
 (pre-existing).
 
-## 30. PDF viewer document, candidate (30 October 2026)
+## 30. Device-check timing races (30 October 2026)
+
+Three device checks failed intermittently in the Engine workflow for
+timing reasons, not engine behavior. The changes are test-only.
+
+- `PageContrastTest.defaultTextStaysReadableAcrossThemeChangesReloadsAndNewTabs`
+  sampled the reloaded page as soon as its title was back
+  ([run 41015837139](https://github.com/L-K-M/Combray/actions/runs/41015837139)):
+  `text color ffffff`, a frame from before the page painted, not the
+  contrast bug's `e8e8e8`. After the reload it now waits for the
+  fixture's paint marker, as `open()` does, and a color failure names
+  both samples.
+- `ScrollTest.aSnackbarOverThePageDoesNotTakeTheButtonsTap` (same run)
+  saw "Scroll to bottom" displayed, but the chained click then found no
+  such node: under automatic clock advancement the button's 2 s idle
+  timer ran out during the engine wait. The check freezes Compose's
+  clock once the Undo snackbar shows, through the swipe and the tap,
+  then restores automatic advancement.
+- `AboutTest.theEngineLicenseCanBeRead` timed out after 60 s
+  ([run 41023689990](https://github.com/L-K-M/Combray/actions/runs/41023689990),
+  attempt 2). Logcat shows a global configuration change (`h648dp` to
+  `h599dp`, app bounds gaining a 136 px top inset) 13 ms after the
+  check's activity started. In the passing run the configuration was
+  already `h599dp` before the first class. `scripts/check-app.sh` now
+  waits until `am get-config` has held for 5 s before the first class
+  and records it in `device.txt`. On failure `AboutTest` saves a
+  screenshot and `dumpsys window windows`, which `check-app.sh` moves to
+  `<results>/AboutTest-failure/`. The logged change arrived with the
+  activity launch, so the wait may not prevent a repeat; the evidence
+  shows what the window held if it does.
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests
+shellcheck scripts/check-app.sh
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The new `check-app.sh` functions were also exercised against a fake
+`adb` (configuration changes reset the wait; evidence is copied
+byte-for-byte and removed from the device). Device checks were not run
+on the development host, which has no emulator; they run in the Engine
+workflow on the PR.
+
+## Toolbar tab-swipe checks (30 October 2026)
+
+The existing horizontal `draggable` handled the URL chip and buttons,
+but also switched tabs on cancellation, multi-touch, and a vertical drag
+that later moved sideways. Each case failed in `BottomBarSwipeTest`
+before replacing it with a one-finger, direction-locked release gesture.
+The coordinator's tab ordering and engine commands are unchanged.
+
+Ten Robolectric checks pass: swipes starting on the address and every
+button in both layouts, physical directions in RTL, idle Home, editing
+Home, cancellation, a second finger, vertical intent, short drags and
+taps and long-press shortcuts. `TabSwipeTest` adds two real-Servo checks:
+a swipe from the address or New tab button selects the previous tab,
+preserves the tab count, and paints that tab's solid-color fixture.
+
+Local checks passed on Linux x86_64, JDK 21, SDK 37:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+(cd native && cargo fmt --check && cargo test --lib --locked) # 123 passed after merging main
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Local native/device validation is blocked: `scripts/build-native.sh`
+reaches the pinned downstream Servo `6d3218a2a949c433d5445fe2c9eb7b66ba0a1081`,
+but the default host compiler lacks C headers (`glslopt`: `assert.h`
+not found). `scripts/m0/emulator.sh` exits for missing `libX11.so.6`;
+`scripts/check-app.sh emulator-5560 ch.lkmc.combray.TabSwipeTest` reports
+no device. The PR's Engine workflow runs native builds and device checks.
+No physical-device result is claimed.
+
+[Engine run 41116731775](https://github.com/L-K-M/Combray/actions/runs/41116731775)
+built both native ABIs and passed both `TabSwipeTest` checks on the API 30
+x86_64 emulator. The suite's only failure was
+`BrowsingTest.mediaIsCancelledBeforeDownloadingAndThePageIsTold`.
+It reported one media entry instead of two; the swipe checks passed in
+15.3 s.
+Main's media-report fix (#164, below) was merged into the swipe branch
+before rerunning the full gate.
+
+### Swipe feedback (31 October 2026)
+
+The controls now follow a horizontal drag by up to 24dp. A top-edge line
+fills in the physical swipe direction toward the existing 56dp threshold.
+Release, cancellation, multi-touch or changing tabs clears the line and
+springs the controls back. The gesture's coordinate space and page stay
+fixed. During the drag the swipe line takes precedence over the loading
+line; loading returns on release if the page is still loading.
+
+Four added Robolectric checks cover held progress, its cap, reversal,
+spring-back, cancellation, interrupted tab identity and RTL. The first
+three failed before the UI change; all 14 toolbar checks pass afterward.
+Both real-Servo `TabSwipeTest` cases now also hold the finger down to check
+that feedback is visible while the original blue page and tab stay put,
+then release and check that feedback clears and the green tab paints.
+
+Local checks on Linux x86_64, JDK 21 and SDK 37 passed:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+(cd native && cargo fmt --check && cargo test --lib --locked) # 125 passed
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The unchanged downstream pin is `331149c771f2ab018a0412c366c810f67197e900`.
+`ANDROID_HOME=$HOME/android-sdk scripts/build-native.sh` reaches the native
+build but fails in host `glslopt`: the default clang has no C headers,
+including `assert.h`. The headless emulator cannot start because
+`libtcmalloc_minimal.so.4` is missing; adb lists no device. Native builds
+and real-Servo checks therefore require the PR's Engine workflow. No
+local emulator or physical-phone result is claimed.
+
+## 31. Missing media notice after a load overtakes its page (30 October 2026)
+
+Symptom: the Play notice never appeared for a page with media, and
+`MediaPlayerTest` waited its full 240 s. It happened in
+[Engine run 41015837139](https://github.com/L-K-M/Combray/actions/runs/41015837139)
+inside the report-only stop-and-start check (logged as
+`REPORT stop and start: failed`, counted as passed) and in
+[Engine run 41023689990](https://github.com/L-K-M/Combray/actions/runs/41023689990)
+attempt 2 (`aRedirectIsFollowedOnlyToAWebAddress`); section 29 records
+the same symptom on an earlier pin.
+
+Likely mechanism, read from the code and not yet confirmed from logs
+(neither the fixture server nor the engine logged navigations or media
+attribution): Servo's embedder takes script, network and constellation
+messages through a crossbeam `Select`, which picks among ready channels
+at random (`components/servo/servo.rs`, `EmbedderMessageSelector`), so a
+page's media load can overtake its document's `LoadStatus::Started` and
+its commit. The engine held loads only from a start report. In a new tab
+nothing had committed, so the load was dropped; after a page of the same
+origin that had already shown its Play notice, the load was credited to
+that page, the app's referrer hold did not apply to a same-origin
+referrer, and the page's notice was already used.
+
+Change (no Servo pin change):
+
+- `media::PendingMedia` holds loads from the moment the app asks for a
+  page (`CreateTab`, `Navigate`, `Reload`) as well as from a start, and
+  gives them to the next document that commits: the started one, or,
+  before any start, whichever commits first. A request that commits
+  nothing gives its loads back to the committed page after 30 s (the
+  app's own navigation timeout), a start after 5 s as before; the engine
+  ends expired holds on its loop as well as when the next load arrives.
+- The app holds every report with a referrer while a page it asked for is
+  pending, not only cross-origin ones; the new page's origin keeps them
+  at its commit, and when the wait ends without a commit (timeout,
+  refusal, Stay, a same-page address) they go to the page on screen.
+- Diagnostics: the fixture server logs each request's method and target
+  to `fixtures.log` with every `k=` value replaced by `<key>`, in
+  logcat's time format; the engine logs (tag `CombrayEngine`, no
+  addresses) the loads held until a document committed, loads dropped
+  with no committed document, and loads a hold credited to the committed
+  document after it ended without a commit; `summary.md` lists every
+  failed report-only check and every check slower than 30 s from
+  `logcat.txt`. These lines use `info`, because the native library is
+  always built `--release` with `log`'s `release_max_level_info`, which
+  removes `debug` lines.
+
+Remaining: loads of a page the page itself opened (a link) still rely on
+the start report; during a hold, a late load of the page being left is
+credited to the new page; and a page's own loads wait while a request
+that commits nothing (a 204 answer, a download) is pending.
+
+Host checks, run on Linux x86_64 with no emulator:
+
+- `cargo fmt --check` in `native/`: clean.
+- `cargo test --lib` in `native/`: 123 passed, 0 failed. The new
+  `media::` case for a load that arrives before a requested page's start
+  failed before the change (the load came back at once, to be credited to
+  the previous page) and passes after it.
+- `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest`: passed; 581 unit tests, 0 failed. The new
+  `BrowserCoordinatorTest` case for a same-origin page whose media
+  overtakes its commit failed before the change (no Play notice after the
+  commit) and passes after it. Lint: no new findings.
+- `python3 -I -m unittest discover -s scripts/tests`: 91 passed.
+- `python3 scripts/check_docs.py` and `git diff --check`: clean.
+
+`engine.rs` is Android-only, so this host did not compile the engine
+changes; the PR's Engine run builds both native ABIs and runs the
+emulator fixture checks.
+
+[Engine run 41096726970](https://github.com/L-K-M/Combray/actions/runs/41096726970)
+at `91c9d76` built both native ABIs and passed all 142 fixture checks
+on the API 30 x86_64 emulator, `MediaPlayerTest` included (10 checks in
+80 s). Its summary listed no failed report-only check and two checks
+over 30 s that wait on purpose (a page-control question's deadline and a
+Karakeep retry). `fixtures.log` held 376 requests, every key replaced.
+None of the new engine media lines appeared: no load overtook its
+document's commit in that run, none was dropped and no hold expired, so
+the race itself is still unobserved; the lines will show it when it
+recurs.
+
+## 32. Scroll-position flicker (30 October 2026)
+
+The owner's recording showed brief returns to an earlier scroll position
+while the browser controls stayed steady. A synthetic page reproduced it:
+scroll from a red section into green, then create and remove an offscreen
+iframe. The regression records the center pixel after every paint. Before
+the fix, one frame was red, followed by green, without another scroll.
+
+WebRender resets its scroll tree when a scene changes. Servo restored the
+offsets for ordinary display lists, but omitted initial empty iframe
+scenes and pipeline removals. Downstream [PR #17](https://github.com/L-K-M/servo/pull/17),
+code `aaab47173cd`, restores surviving pipelines' offsets in those three
+transactions. Pin: `e284adf9fe3d47b71faeb3c0e8bcb6730113b8c8`.
+Changed engine files: `components/paint/painter.rs`,
+`components/servo/tests/webview.rs`, `DOWNSTREAM.md`.
+
+Local evidence, Linux x86_64, Rust 1.97.1, Xvfb and Mesa software rendering:
+
+- `cargo rustc --locked --profile medium -p servo --no-default-features
+  --features bundled,js_jit --test webview -- -C link-arg=-fuse-ld=lld`:
+  built with the host's conda clang, zlib headers and linker libraries.
+- `test_iframe_changes_preserve_every_scrolled_frame --exact`: failed
+  before the fix with a red intermediate frame; passed after it.
+- All 34 WebView tests passed, each in a separate test-binary process.
+  A single-process run fails because Servo's global options initialize once.
+- Independent MiMo V2.6 Pro review: no important defects. The new test
+  covers iframe creation/removal; whole-view removal also passed its
+  existing pipeline-release check, which does not check transient pixels.
+- `scripts/build-native.sh` and APK verification passed locally for
+  x86_64, with NDK 29.0.14206865 and four Cargo workers.
+- Both ABIs passed in [Engine run 41107468092](https://github.com/L-K-M/Combray/actions/runs/41107468092),
+  with 142 device checks passing; a same-origin player launch timed out.
+  The interim first-document media hold was superseded by the broader
+  request-based fix in [PR #164](https://github.com/L-K-M/Combray/pull/164)
+  (section 31). Integration takes that implementation and its regressions
+  unchanged. Final combined checks are recorded in
+  [PR #159](https://github.com/L-K-M/Combray/pull/159).
+- The local software emulator crashed during setup and supplied no device
+  proof. Whole-file Servo rustfmt reports pre-existing differences outside
+  the changed hunks; the native bridge's fmt and whitespace checks pass.
+
+The phone and live example have not been rechecked. The regression proves
+this pipeline-change flicker; other causes remain possible.
+
+## 33. Shadow-root fields and Paste (30 October 2026)
+
+Servo retargets composed focus events to the shadow host for page listeners.
+Its default-action dispatch used that host too, so a shadow-root input never
+requested its input method. Downstream `df5304686d4` extends the existing
+keyboard-default exception to focus events: defaults use the original field,
+while listeners keep seeing the host. Composition behavior is unchanged.
+Source and regressions: [downstream PR #19](https://github.com/L-K-M/servo/pull/19).
+The final pin `331149c771f` also includes the merged scroll fix from section 32.
+
+Combray also discarded context menus without link/image addresses. It now
+offers Paste when Servo permits it. Android reads plain clipboard text only
+on that tap; URI clips are not fetched and text above 256 KiB UTF-8 is refused
+whole. `ContextMenu::paste_text` carries the text with the retained control's
+pipeline and node. Servo rejects inactive documents and removed/adopted nodes,
+then uses its normal cancellable paste and input-event path. No clipboard
+grant remains for another request. Both response boundaries redact diagnostics.
+The menu is a non-focusable popup: a focusable dialog hid the IME, blurred the
+field and withdrew its own menu. A scoped Back handler dismisses the popup
+before page navigation.
+
+Evidence on Linux x86_64, Rust 1.97.1, NDK r29 and API-30 x86_64 emulators
+`emulator-5590`, then `emulator-5584` (SwiftShader, software CPU emulation):
+
+- The archived APK `b0a3c689c260e4c89b26897c28412be501cf0c459aafb6e3bc433e893d28c6d1`
+  fails the shadow-field keyboard assertion and discards the long-press control
+  (`build/input-red-retry/`). The first attempt stopped at painting because
+  System UI had an ANR; restarting System UI let both checks reach their targets.
+- Paste-only pin `5df20e78f74` builds natively. Its APK
+  `8c3bdfd35556b21f706f840a391da76619c551f2609302427e2b32f915c773d9` passes
+  the new paste check and all three existing keyboard checks. The shadow-field
+  tap reaches the page, then still fails to open the keyboard, isolating the
+  missing focus default (`build/input-paste-interim/`, four passed, one failed).
+- With the focus fix and dialog menu, six focused device checks passed; paste
+  with the keyboard open failed because the dialog triggered an IME dismissal
+  (`build/input-final-clean/`). The popup fix passes all seven checks, including
+  open-keyboard paste, further typing and accessible targets (`build/input-popup/`,
+  APK `0e19d821423cf2f1b6454069f4a1c61d552b3d51cf7d453776e3f02483f745f0`).
+- All eight focused desktop tests pass on the combined pin: two shadow-root
+  IME cases, ordinary IME show/hide, four paste cases and the redacted Debug
+  library test. Run each WebView test in its own process; Servo's options
+  initialize once. Three pre-existing embedder-traits doctests fail to compile;
+  the focused `--lib` test passes. The desktop setup uses Xvfb `:99`, Mesa from
+  the `poltergeist-gl` conda environment and build dependencies from `build`.
+  The final host linker supplies conda's `libstdc++.so` by full path because
+  Zig maps `-lstdc++` to libc++, which lacks the prebuilt SpiderMonkey symbols.
+- Kotlin unit tests, lint, debug app/test assembly, 125 native host tests and
+  92 script checks pass. The combined-pin x86_64 native build passes (1m16s
+  incremental). Final both-ABI CI and full device results are tracked in
+  [PR #166](https://github.com/L-K-M/Combray/pull/166).
+- `PasteMenuBackTest` fails without the menu's Back handler and passes with
+  it. The device Back check passes in CI at `52cae22`; the local emulator
+  crashed before that additional case ran.
+- That full CI run passes 149 of 150 checks, including every keyboard/paste
+  case. `SaveTest` looked up Save before the bar's merged semantics were
+  ready. Its shared tap helper now waits for that node, like other UI checks,
+  before clicking. Saving and server-acknowledgment assertions are unchanged.
+
+Reproduction uses `testing/fixtures/server.py`'s nested closed-shadow password
+field. `KeyboardTest` checks tap acknowledgement, keyboard opening, IME text,
+Back/reopening, and paste both before and after opening the keyboard.
+`AccessibilityTest.aPagePasteMenuIsAccessible` covers labels and touch targets.
+No live login or physical phone was tested.
+
+```sh
+export ANDROID_SDK_ROOT=$HOME/android-sdk
+COMBRAY_HOST_CC="$PWD/servo-checkout/host-cc" \
+  COMBRAY_HOST_CXX="$PWD/servo-checkout/host-cxx" \
+  CARGO_BUILD_JOBS=6 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5584 ch.lkmc.combray.KeyboardTest
+```
+
+The host wrappers use the existing Zig 0.17 C/C++ wrappers with
+`-fno-sanitize=undefined`, as in the earlier builds. The initial native attempt
+used the NDK's clang for host code and failed on missing host C headers.
+Raw logs remain under `build/`; no generated binaries or screenshots are committed.
+
+## 34. Cloudflare verification (31 October 2026)
+
+The owner supplied an article URL and a screenshot of Cloudflare's
+"Performing security verification" page. The article stayed at that page
+during an emulator reproduction. This is an open compatibility blocker;
+no engine fix is established.
+
+Environment: a fresh Android 11/API-30 x86_64 emulator, `emulator-5590`,
+SwiftShader and software CPU emulation (no KVM), 720×1440 at 320 dpi.
+The debug APK came from [Engine run 41143423337](https://github.com/L-K-M/Combray/actions/runs/41143423337),
+with Servo pin `331149c771f2ab018a0412c366c810f67197e900`.
+APK SHA-256: `401388c75e1c8177c1c855b6a7e631481357e2d17251481ba34f7c4c2469a586`.
+No integration services or personal history were used.
+
+Observations:
+
+- An independent HTTP request returned `403` with
+  `cf-mitigated: challenge`. This identifies the interstitial, not its
+  failure mechanism in Servo.
+- [Cloudflare's diagnostic](https://debug.challenges.cloudflare.com/),
+  version 1.3.4, ran in Combray. Its Automation Check, System Clock,
+  Privacy Tools and Server Connection checks all passed. The widget then
+  showed "Security Check Failed", error `300031`, and status `failed`.
+- Cloudflare documents `300*` as a [generic challenge failure](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/).
+  It names no missing API. Its [browser support](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/)
+  guidance lists custom engines and embedded browsers as limited-support
+  environments. Neither fact proves the cause of this failure.
+- The filtered `CombrayEngine` log reported no engine exception. That log
+  is not a complete JavaScript console or network trace.
+
+Reproduction with the same APK installed on a test device:
+
+```sh
+adb -s <serial> shell am start -W -a android.intent.action.VIEW \
+  -d 'https://blog.adafruit.com/2026/10/27/an-illustrated-online-book-on-hewlett-packard-equipment/' \
+  -n ch.lkmc.combray.debug/ch.lkmc.combray.MainActivity
+adb -s <serial> shell am start -W -a android.intent.action.VIEW \
+  -d 'https://debug.challenges.cloudflare.com/' \
+  -n ch.lkmc.combray.debug/ch.lkmc.combray.MainActivity
+adb -s <serial> logcat -d CombrayEngine:I AndroidRuntime:E '*:S'
+```
+
+Observe the article before opening the diagnostic. Wait for its final
+widget result and scroll through the diagnostic results. Capture only
+the error and check outcomes when sharing evidence: Technical details
+also includes the IP address and session identifiers.
+
+### Phone report and next probe
+
+The owner supplied a phone screenshot on 31 October 2026. All four basic
+checks pass, but Technical details shows Turnstile Status `loading`.
+No final widget result or error code is visible. This confirms a pending
+state at capture time, not the emulator's `300031` result. The browser
+string names Servo 0.7.0; the exact APK, device OS, ABI and elapsed wait
+are not established. The screenshot's IP and session identifiers are not
+part of this record.
+
+In the inspected diagnostic v1.3.4 source, `renderTurnstile()` sets
+`loading` before rendering the widget. The Server Connection check passes
+when a no-CORS `HEAD` fetch resolves, without checking its HTTP status.
+Neither observation establishes that the challenge's scripts, iframe or
+requests completed successfully.
+
+Source inspection confirms that Combray does not enable WebDriver or
+devtools (`native/src/engine.rs`), forward page-console messages or report
+failed challenge resources (`native/src/delegate.rs`). Its generic
+`NativeEngine.evaluate` test route is used by the M0 harness, but has no
+app UI trigger. A controlled debug harness can use that route for a
+bounded error probe; a top-document probe alone cannot observe errors
+inside a cross-origin challenge iframe. No ADB device was connected for
+this follow-up, so no additional runtime probe was run.
+
+Next: obtain the phone's widget outcome (or confirm it stays pending),
+collect the relevant console/subresource failure and compare another
+browser on the same network. Isolate a specific engine defect and
+reproduce it with a synthetic regression before changing Servo.
+Emulation can affect challenge timing and browser signals; it does not
+establish the phone's failure mechanism. Native builds and the fixture
+suite were not rerun for this documentation-only update.
+
+The owner also reports that the diagnostic's Copy button and manual text
+selection do not work. These are deferred to a separate follow-up,
+[issue #168](https://github.com/L-K-M/Combray/issues/168), as requested.
+
+## 35. Pull-to-reload, 31 October 2026
+
+Pulling down at the top arms a reload after 80dp beyond touch slop. Release
+reloads once; a progress ring distinguishes pulling from ordinary scrolling.
+Short pulls, reversal below the threshold, horizontal/upward gestures,
+cancellation and multi-touch do not reload. A scroll that only reaches the
+top does not arm the same gesture.
+
+DOM scroll metrics are insufficient: section 15 records stale offsets after
+painted jumps. Downstream [Servo PR #20](https://github.com/L-K-M/servo/pull/20)
+adds `WebView::can_scroll_up_at_point`, reading compositor root, nested/frame
+scroll chains and pinch-viewport offsets. Missing hit-test/scroll data means
+unknown, not top. CSS `touch-action: none` or `pan-x` also withholds a pull.
+Candidate pin: `ef6beb09ab19325d597dd96f758ed359ad33ccce`,
+based on the prior pin, with no unrelated engine upgrade or dependency change.
+Changed downstream files: `components/servo/webview.rs`,
+`components/paint/{paint,painter,pinch_zoom,webview_renderer}.rs`,
+`components/shared/paint/display_list.rs` and its `tests/compositor.rs`.
+No upstream contact or contribution.
+
+The bridge follows raw touch input without stealing page touches. Release
+waits for every input acknowledgement: delayed or out-of-order
+`preventDefault` wins. Unanswered input is bounded to 128 outstanding events
+and a three-second release deadline. View generation, document and selection
+are rechecked after the acknowledgements. The coordinator refuses reloads
+under Reader, page controls or an existing load. Progress stays in memory,
+without reading Room on each touch movement. Only changed pull progress crosses
+JNI; inactive scrolls produce no pull events, and completion/cancellation is
+sent once. Four emission-policy regressions failed before that filter and
+pass after it.
+
+Touch-down enters Servo before probing the scroll chain, resetting any
+preceding fling's cached hit target. This ordering guard is source-verified,
+not reproduced locally. Manual check: with the root at top, fling one nested
+panel to top, then immediately pull down over another panel scrolled below
+top. The second panel must scroll without reloading the document.
+
+The scroll-button fade was already merged in #147 and remains unchanged:
+two idle seconds, accessibility-adjusted, followed by a 200 ms fade.
+
+Local checks on Linux x86_64, JDK 21, Rust 1.97.1 and NDK r29:
+
+- Passed: `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`.
+  The new coordinator regression failed before its handler and passes after
+  it; coverage includes cancellation, duplicate release, same-address reload,
+  generation mismatch and hidden/crashed/loading/Reader pages.
+- Passed: `cargo fmt --check`, `cargo test --lib` (138 tests), fixture-server
+  script tests, documentation and whitespace checks.
+- Passed: all 11 compositor integration tests, including five new query
+  checks. The CSS-owned-drag case failed before the guard and passes after it.
+  This host lacks pkg-config/FreeType development files, so a standalone
+  Cargo driver ran the unchanged test file against the real source crates,
+  with bundled FreeType and the installed zlib's development symlink.
+- Passed: final-candidate x86_64 `scripts/build-native.sh`, Gradle packaging
+  and `verify-apk.py --expected-arch x86_64`. The built library exports
+  `Java_ch_lkmc_combray_engine_NativeEngine_reloadPage`.
+  CI native/emulator runs are tracked in [PR #171](https://github.com/L-K-M/Combray/pull/171).
+  Reproduce the source checks with `cargo test --profile medium -p servo-paint-api --test
+  compositor`, then `scripts/build-native.sh` and
+  `scripts/check-app.sh <serial> ch.lkmc.combray.ScrollTest`.
+  The real-Servo checks cover top release, reaching top during a scroll,
+  painted jumps with stale DOM metrics, page-prevented drags and nested panels.
+
+No local ADB device was connected. The local emulator cannot start without
+`libX11.so.6`, and KVM is unavailable. Physical-device and live-site checks
+were not run. PR checks carry native/emulator evidence before landing.
+
+Initial Engine CI at `5af10c6` built both ABIs and passed 154/155 API-30
+emulator checks. The nested-panel check timed out before reporting its
+first scroll: the fixture's head script accessed `panel` before its body
+existed. A Node lifecycle probe reproduced that `ReferenceError`. The
+listener now binds after the panel is parsed, using an explicit element
+lookup. Panel overflow stays shorter than the return drag, so fling travel
+cannot invalidate its endpoint assertion. Browser behavior is unchanged.
+Follow-up [Engine CI](https://github.com/L-K-M/Combray/actions/runs/41220778947)
+at `25a62ce` passed both native ABIs and all 155 API-30 x86_64 emulator
+checks. The final follow-up records evidence only; browser and fixture code
+are unchanged from that tested revision. [PR #171](https://github.com/L-K-M/Combray/pull/171).
+
+## 36. Scroll-hiding bottom controls (31 October 2026)
+
+Owner request: hide the bottom bar while scrolling down and reveal it while
+scrolling up. This also applies to Reader. Implementation defaults keep
+Home, Find, editing, page dialogs and enabled accessibility services pinned.
+Tab, document and editing-context changes restore controls.
+
+Pages reuse the existing single-finger vertical intent signal; taps,
+horizontal gestures and multi-touch do not choose a direction. Scripted
+page jumps have no direction signal. Reader uses its list's scroll activity.
+Removing the bar frees page space in one viewport resize, not an animated
+sequence of relayouts. System insets remain reserved; snackbars and scroll
+buttons follow the new page bottom.
+
+A focused JVM regression reproduced Reader's resize feedback: near the
+article end, hiding controls enlarges the viewport and clamps the list
+backward, falsely reporting an upward scroll and revealing the controls.
+Ignoring viewport-change corrections fixes it; the regression failed before
+the guard and passes after it. Callback replacement also has coverage.
+
+Local Linux x86_64 / JDK 21.0.13 checks use unchanged Servo pin
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`, Rust 1.97.1 and NDK r29:
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`.
+- Eight focused visibility, accessibility and Reader observer checks.
+- `cd native && cargo fmt --check && cargo test --lib --locked`: 138 tests.
+- `scripts/build-native.sh` for x86_64, then APK verification with
+  `python3 -I scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk --expected-arch x86_64`.
+- `python3 scripts/check_docs.py` and `git diff --check`.
+
+Real-Servo checks in `ScrollTest` verify hiding/revealing, freed viewport
+space, painting after resize, Home/tab resets, same-address reload and
+pull-to-reload while revealing hidden controls.
+`ReaderTest` checks the same direction behavior with an extracted article.
+They compile locally; the [Engine PR workflow](https://github.com/L-K-M/Combray/actions/workflows/engine.yml)
+carries runtime evidence for `feat/scroll-hide-bottom-bar` before landing.
+Initial CI at `80ef61a` built both ABIs and passed 158/159 emulator checks.
+Only the combined hidden-controls pull timed out. Its setup now cancels the
+previous fling before jumping to top: one green frame does not prove a
+stable top edge. Failure output also distinguishes an unchanged document
+from a load that never finished. Follow-up evidence is in [PR #172](https://github.com/L-K-M/Combray/pull/172).
+
+A local software emulator booted after extracting X11 libraries into a
+private temporary directory. Local diagnostics stopped at paint/input-focus
+setup and did not validate the target gesture; temporary tracing was removed.
+KVM and a physical device remain unavailable. No personal history or live
+service was used.
+
+## 37. Stable tab ordering (1 November 2026)
+
+The owner reported that bottom-bar swipes reorder tabs. `stepTab` used a
+snapshot of last-focus order for three seconds, then rebuilt it after a
+pause. Focusing each swiped tab changed the next snapshot. The focused
+pause regression failed before the fix and passes afterward.
+
+Swipes and Recent's Open tabs now use creation time, newest first, then tab
+ID for equal timestamps. Creation time already persists in Room, so there
+is no schema change. The swipe snapshot and timer are removed. Undo returns
+a tab to its creation slot; a new background tab joins the order at once.
+All, address suggestions, previous-tab switching, close successor, Continue,
+retention and renderer eviction keep their last-use semantics. Row times
+still show last use. Only All shows last-use day headers, avoiding repeated
+header keys when fixed tab order crosses the same day more than once.
+
+Coordinator checks cover pauses, both edges, focus/navigation versus history,
+background insertion, both Undo modes, restart and tied creation times.
+`TabSwipeTest` keeps the held-feedback checks and adds a three-page walk,
+with a deliberate four-second pause, identity/count and painted-color
+assertions at both ends. Its obsolete swipe-run reset sleeps are removed.
+
+Local Linux x86_64, JDK 21 / SDK 37 commands:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew :core:testDebugUnitTest --tests 'ch.lkmc.combray.core.browser.BrowserCoordinatorTest.aPauseBetweenSwipesKeepsTheTabOrder'
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The Servo pin remains `ef6beb09ab19325d597dd96f758ed359ad33ccce`; native
+code is unchanged. Native builds and real-Servo fixtures run in the
+[Engine PR workflow](https://github.com/L-K-M/Combray/actions/workflows/engine.yml)
+before merge. No local device or physical-phone result is claimed; no
+personal history or live service was used.
+
+[Initial Engine CI](https://github.com/L-K-M/Combray/actions/runs/41276183297)
+built both ABIs and passed all three tab-swipe cases (159/160 checks total).
+The unchanged `ScrollTest.scrollingDownHidesTheBarAndScrollingUpRestoresIt`
+failed its final blue-paint assertion: the bottom jump raced the previous
+upward fling. Its geometry check now uses the existing gesture cancellation
+before jumping, as the top-jump check already does. Touch, resize and paint
+assertions remain; browser/native behavior is unchanged. Follow-up CI is
+tracked in [PR #173](https://github.com/L-K-M/Combray/pull/173).
+
+## 38. PDF viewer document, candidate (30 October 2026)
 
 The pin moves to `05027c9413a5e040f6ea53fc017b64bbe25cfb3c`, the head of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)

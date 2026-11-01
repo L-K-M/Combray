@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -89,6 +90,7 @@ import ch.lkmc.combray.player.PlayerActivity
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
@@ -108,9 +110,13 @@ fun BrowserScreen(
     onLeave: () -> Unit,
 ) {
     val browser = graph.browser
-    val state by browser.browserState.collectAsStateWithLifecycle()
-    val textSize by graph.settings.textSize.collectAsStateWithLifecycle()
-    val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle()
+    // The UI collects every flow on the main thread. The coordinator publishes from
+    // Dispatchers.Default and Room from its executor; without a context, a Compose test's
+    // collector resumes there, wakes the recomposer there and may run the frame there, where a
+    // BackHandler's lifecycle effect throws (MainThreadStateTest).
+    val state by browser.browserState.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val textSize by graph.settings.textSize.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var homeMode by rememberSaveable { mutableStateOf(AddressEditorMode.IDLE) }
     var homeEntry by rememberSaveable { mutableIntStateOf(0) }
@@ -126,6 +132,7 @@ fun BrowserScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val tab = state.activeTab
     val page = tab?.page
+    val reloadPull = state.reloadPull?.takeIf { it.page == page }
     val home = tab?.url == null
     val stopHomeInput: () -> Unit = {
         homeMode = AddressEditorMode.IDLE
@@ -144,9 +151,9 @@ fun BrowserScreen(
     val saveStatus by remember(tab?.url) {
         val url = tab?.url
         graph.integrations.saveStatus(url).map { PageSaveStatus(url, it) }
-    }.collectAsStateWithLifecycle(PageSaveStatus(null, SaveStatus.Unsaved))
+    }.collectAsStateWithLifecycle(PageSaveStatus(null, SaveStatus.Unsaved), context = Dispatchers.Main.immediate)
     val histerStored by remember(tab?.url) { graph.integrations.hister.captureStored(tab?.url) }
-        .collectAsStateWithLifecycle(false)
+        .collectAsStateWithLifecycle(false, context = Dispatchers.Main.immediate)
 
     val closedMessage = stringResource(R.string.notice_tab_closed)
     val notOpened = stringResource(R.string.notice_address_not_opened)
@@ -307,7 +314,7 @@ fun BrowserScreen(
 
     // A requested sheet replaces the open one and starts fresh: the counter restarts its state.
     var launches by rememberSaveable { mutableIntStateOf(0) }
-    val pendingLaunch by launchRequest.collectAsStateWithLifecycle()
+    val pendingLaunch by launchRequest.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     LaunchedEffect(pendingLaunch) {
         val request = pendingLaunch ?: return@LaunchedEffect
         launches++
@@ -342,9 +349,22 @@ fun BrowserScreen(
     BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
     BackHandler(enabled = sheet == Sheet.NONE && home && homeMode == AddressEditorMode.EDITING) { stopHomeInput() }
 
-    // The bar is one row or two (BottomBar), so snackbars clear its measured height.
     val density = LocalDensity.current
+    val accessibleControls = rememberAccessibleControlsRequired()
+    val barBehavior = when {
+        home || page == null || state.engine != EngineStatus.READY || tab.crashed || tab.loadFailed -> BottomBarBehavior.PINNED
+        sheet != Sheet.NONE || state.find != null || state.pageControl != null || appLink != null -> BottomBarBehavior.PINNED
+        WindowInsets.ime.getBottom(density) > 0 || accessibleControls -> BottomBarBehavior.PINNED
+        else -> BottomBarBehavior.SCROLLING
+    }
+    // A new document or editing context starts with reachable controls, not an old drag.
+    var barDirection by remember(tab?.id, page, state.reader, barBehavior) { mutableStateOf<ScrollEdge?>(null) }
+    val showBar = bottomBarVisible(barDirection, barBehavior)
+    val pageInsets = if (showBar || state.find != null) {
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+    } else WindowInsets.safeDrawing
     var barHeight by remember { mutableStateOf(0.dp) }
+    val noticeInset = if (showBar || state.find != null) barHeight else with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
     // A shown snackbar covers the page's bottom-left corner, where the scroll button sits, and
     // takes the taps there: the button moves above it. Measured from both edges, as snackbars
     // clear the bottom bar's last height, which is not the find bar's.
@@ -371,7 +391,7 @@ fun BrowserScreen(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .windowInsetsPadding(pageInsets)
                     .onGloballyPositioned { pageBottom = it.boundsInRoot().bottom },
             ) {
                 AndroidView(
@@ -381,7 +401,8 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize(),
                     update = { view ->
                         view.observeScroll(page) {
-                            scrollEdge = it
+                            barDirection = it
+                            scrollEdge = it.takeIf { reloadPull == null }
                             scrollActivity++
                         }
                     },
@@ -415,7 +436,13 @@ fun BrowserScreen(
                     },
                 )
                 if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed) {
-                    scrollEdge?.let { edge ->
+                    reloadPull?.let { pull ->
+                        ReloadPullIndicator(
+                            progress = pull.progress,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
+                        )
+                    }
+                    scrollEdge?.takeIf { reloadPull == null }?.let { edge ->
                         ScrollEdgeButton(
                             edge = edge,
                             scrollActivity = scrollActivity,
@@ -432,6 +459,7 @@ fun BrowserScreen(
                         state = reader,
                         textSize = textSize,
                         scrollButtonPadding = scrollButtonPadding,
+                        onScroll = { barDirection = it },
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
                             browser.closeReader()
@@ -451,7 +479,7 @@ fun BrowserScreen(
                     modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
                 )
             }
-            if (state.find == null) BottomBar(
+            if (state.find == null && showBar) BottomBar(
                 tab = tab,
                 openTabs = state.openTabCount,
                 tabCounter = tabCounter,
@@ -515,14 +543,14 @@ fun BrowserScreen(
         }
         // Above the keyboard too: a page field can hold it while a Save error shows. Recent is a
         // separate window over this one and shows the snackbars itself while it is open. The
-        // bar's height includes the navigation bar, and the keyboard's padding is the column's.
+        // visible bar includes navigation insets; hidden controls reserve only those insets.
         if (sheet != Sheet.RECENT) {
             NoticeHost(
                 snackbar,
                 Modifier
                     .align(Alignment.BottomCenter)
                     .imePadding()
-                    .padding(bottom = barHeight + SNACKBAR_GAP)
+                    .padding(bottom = noticeInset + SNACKBAR_GAP)
                     // The host itself, without its offset: empty while no snackbar shows.
                     .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
             )

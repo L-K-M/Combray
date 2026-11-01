@@ -7,7 +7,7 @@ import org.junit.Test
 
 /** The local Recent filter lives on RecentItem now that one flow per depth feeds every query. */
 class RecentItemMatchTest {
-    private val tab = RecentItem.OpenTab("tab1", "https://news.example.org/world", "World News", 10, active = false)
+    private val tab = RecentItem.OpenTab("tab1", "https://news.example.org/world", "World News", 10, active = false, createdAt = 1)
     private val visit = RecentItem.Visit("visit1", "tab1", "https://example.org/", "Example Home", 5)
 
     @Test
@@ -39,11 +39,11 @@ class RecentItemMatchTest {
         assertTrue(noTitle.matches("only-url"))
         assertFalse(noTitle.matches("nothing"))
 
-        val noUrl = RecentItem.OpenTab("tab2", url = null, title = null, time = 0, active = false)
+        val noUrl = RecentItem.OpenTab("tab2", url = null, title = null, time = 0, active = false, createdAt = 0)
         assertFalse(noUrl.matches("anything"))
         assertTrue(noUrl.matches(null))
 
-        val titleOnly = RecentItem.OpenTab("tab3", url = null, title = "Kotlin Docs", time = 0, active = false)
+        val titleOnly = RecentItem.OpenTab("tab3", url = null, title = "Kotlin Docs", time = 0, active = false, createdAt = 0)
         assertTrue(titleOnly.matches("docs"))
         assertFalse(titleOnly.matches("example.com"))
     }
@@ -51,11 +51,11 @@ class RecentItemMatchTest {
     @Test
     fun theHistoryCapAppliesAfterFilteringAndNeverCutsOpenTabs() {
         val rows = listOf(
-            RecentItem.OpenTab("t1", "https://a.test/", "A", 9, active = true),
+            RecentItem.OpenTab("t1", "https://a.test/", "A", 9, active = true, createdAt = 1),
             RecentItem.Visit("v1", "t1", "https://a.test/1", "Soup one", 8),
             RecentItem.Visit("v2", "t1", "https://b.test/2", "Other", 7),
             RecentItem.Visit("v3", "t1", "https://a.test/3", "Soup three", 6),
-            RecentItem.OpenTab("t2", "https://a.test/tab", "Soup tab", 5, active = false),
+            RecentItem.OpenTab("t2", "https://a.test/tab", "Soup tab", 5, active = false, createdAt = 2),
             RecentItem.Visit("v4", "t1", "https://a.test/4", "Soup four", 4),
         )
 

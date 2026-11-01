@@ -1,14 +1,20 @@
 package ch.lkmc.combray
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowInsets
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.engine.NativeEngine
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -97,10 +103,85 @@ class KeyboardTest {
         awaitKeyboard(visible = false)
     }
 
+    @Test
+    fun aClosedShadowPasswordFieldOpensTheKeyboardAndAcceptsImeText() {
+        openFocusedField("shadow-input", "SHADOW:focused")
+        runUi(SETTLE_MS)
+        assertFalse("autofocus opened the keyboard", keyboardVisible())
+
+        tapField()
+        awaitTitle("SHADOW:tapped")
+        awaitKeyboard(visible = true)
+        // The same commit the soft keyboard sends, including non-ASCII characters.
+        NativeEngine.imeCommit("été")
+        awaitTitle("SHADOW:input:été:0")
+
+        shell("input keyevent KEYCODE_BACK")
+        awaitKeyboard(visible = false)
+        awaitTitle("SHADOW:blurred")
+        tapField()
+        awaitKeyboard(visible = true)
+    }
+
+    @Test
+    fun aLongPressPastesClipboardTextIntoAClosedShadowPasswordField() = pasteIntoShadowField(KeyboardBeforePaste.CLOSED)
+
+    @Test
+    fun pastingWithTheKeyboardOpenKeepsTheFieldUsable() = pasteIntoShadowField(KeyboardBeforePaste.OPEN)
+
+    @Test
+    fun backDismissesThePasteMenuWithoutLeavingThePage() {
+        openFocusedField("shadow-input", "SHADOW:focused")
+        tapField(LONG_PRESS_MS)
+        device.awaitState { it.pageControl != null }
+        val pasteLabel = compose.activity.getString(android.R.string.paste)
+        compose.waitUntil(KEYBOARD_TIMEOUT_MS) { compose.onAllNodesWithText(pasteLabel).fetchSemanticsNodes().isNotEmpty() }
+        shell("input keyevent KEYCODE_BACK")
+        runUi(SETTLE_MS)
+        instrumentation.runOnMainSync {
+            assertTrue("Back left the browser", compose.activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+        }
+        device.awaitState { it.pageControl == null }
+        assertEquals("${Fixtures.BASE}/shadow-input.html", device.browser.browserState.value.activeTab?.url)
+    }
+
+    private fun pasteIntoShadowField(keyboardBefore: KeyboardBeforePaste) {
+        openFocusedField("shadow-input", "SHADOW:focused")
+        if (keyboardBefore == KeyboardBeforePaste.OPEN) {
+            tapField()
+            awaitTitle("SHADOW:tapped")
+            awaitKeyboard(visible = true)
+        }
+        val pasteLabel = compose.activity.getString(android.R.string.paste)
+        val clipboard = compose.activity.getSystemService(ClipboardManager::class.java)
+        var previous: ClipData? = null
+        instrumentation.runOnMainSync {
+            previous = clipboard.primaryClip
+            clipboard.setPrimaryClip(ClipData.newPlainText("fixture", "Ada été"))
+        }
+        try {
+            tapField(LONG_PRESS_MS)
+            device.awaitState { it.pageControl != null }
+            compose.waitUntil(KEYBOARD_TIMEOUT_MS) { compose.onAllNodesWithText(pasteLabel).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(pasteLabel).performClick()
+            // Both the native paste event and its default insertion must reach the field.
+            awaitTitle("SHADOW:input:Ada été:1")
+            tapField()
+            awaitTitle("SHADOW:tapped")
+            awaitKeyboard(visible = true)
+            NativeEngine.imeCommit("!")
+            awaitTitle("SHADOW:input:Ada été!:1")
+        } finally {
+            instrumentation.runOnMainSync {
+                previous?.let(clipboard::setPrimaryClip) ?: clipboard.clearPrimaryClip()
+            }
+        }
+    }
+
     /** Opens the page whose search field focuses itself on load and waits until it is painted. */
-    private fun openFocusedField() {
-        device.browser.openUrl(AUTOFOCUS_URL, Placement.CURRENT_TAB)
-        device.awaitState { it.activeTab?.title == FOCUSED_TITLE && it.activeTab?.loading == false }
+    private fun openFocusedField(name: String = "autofocus", title: String = FOCUSED_TITLE) {
+        device.browser.openUrl("${Fixtures.BASE}/$name.html", Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.title == title && it.activeTab?.loading == false }
         val deadline = System.currentTimeMillis() + Device.SCREEN_TIMEOUT_MS
         while (!device.matches(device.screenColor(MARGIN_X, 0.5f), MARGIN) && System.currentTimeMillis() < deadline) {
             device.dismissSystemDialogs()
@@ -110,14 +191,15 @@ class KeyboardTest {
     }
 
     /** A tap in the middle of the page area, where the field is. */
-    private fun tapField() {
+    private fun tapField(durationMs: Long = TAP_MS) {
         device.dismissSystemDialogs()
         val metrics = compose.activity.resources.displayMetrics
         val x = metrics.widthPixels / 2f
-        val y = metrics.heightPixels * 0.3f
+        val y = metrics.heightPixels * 0.2f
         val down = SystemClock.uptimeMillis()
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
-        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + TAP_MS, MotionEvent.ACTION_UP, x, y, 0))
+        if (durationMs > TAP_MS) runUi(durationMs)
+        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + durationMs, MotionEvent.ACTION_UP, x, y, 0))
     }
 
     private fun keyboardVisible(): Boolean {
@@ -157,6 +239,8 @@ class KeyboardTest {
         return ParcelFileDescriptor.AutoCloseInputStream(output).use { it.readBytes().toString(Charsets.UTF_8) }
     }
 
+    private enum class KeyboardBeforePaste { CLOSED, OPEN }
+
     private companion object {
         const val AUTOFOCUS_URL = "${Fixtures.BASE}/autofocus.html"
         const val FOCUSED_TITLE = "AUTOFOCUS:focused"
@@ -167,6 +251,7 @@ class KeyboardTest {
         const val MARGIN = 0x1f6f78
         const val MARGIN_X = 0.05f
         const val TAP_MS = 80L
+        const val LONG_PRESS_MS = 1_500L
         const val SETTLE_MS = 3_000L
         const val FRAME_WAIT_MS = 100L
         const val KEYBOARD_TIMEOUT_MS = 30_000L

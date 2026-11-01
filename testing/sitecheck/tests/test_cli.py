@@ -332,6 +332,17 @@ class RunFlowTest(CliTestCase):
             self.sitecheck("run", "--servo", str(self.binary), "--no-reference", NEWS)[0], 0
         )
 
+    def test_a_relative_servo_path_reaches_the_engine_as_an_absolute_path(self) -> None:
+        engines: list[Path] = []
+        rt = self.runtime()
+        rt.servo_engine = lambda binary, user_agent: engines.append(binary) or self.servo
+        with contextlib.chdir(self.root):
+            code = cli.main(["run", "--servo", self.binary.name, "--no-reference", NEWS], rt)
+        self.assertEqual(code, 0, rt.stderr.getvalue())
+        self.assertEqual(len(engines), 1)
+        self.assertTrue(engines[0].is_absolute())
+        self.assertTrue(engines[0].samefile(self.binary))
+
     def test_a_run_where_every_page_fails_in_the_harness_exits_1(self) -> None:
         self.servo.default = fakes.ERROR_LOAD
         code, _, err = self.sitecheck("run", "--servo", str(self.binary), NEWS, SHOP)

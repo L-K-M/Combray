@@ -81,6 +81,7 @@ import ch.lkmc.combray.core.integration.SecretName
 import ch.lkmc.combray.core.integration.ServiceRootProblem
 import ch.lkmc.combray.core.integration.ServiceUrls
 import ch.lkmc.combray.core.policy.HostNames
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -188,7 +189,7 @@ fun SettingsSheet(
 /** Opt-in: open tabs unused for the retention period close like history expires. */
 @Composable
 private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: () -> Unit) {
-    val choice by settings.unusedTabs.collectAsStateWithLifecycle()
+    val choice by settings.unusedTabs.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val closing = choice == UnusedTabs.CLOSE
     // One accessibility node per row: TalkBack reads the label with the switch state.
     Row(
@@ -211,7 +212,7 @@ private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: (
  */
 @Composable
 private fun ThemeSetting(settings: BrowserSettings) {
-    val choice by settings.themeMode.collectAsStateWithLifecycle()
+    val choice by settings.themeMode.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     Text(stringResource(R.string.settings_appearance), modifier = Modifier.semantics { heading() }.padding(top = 8.dp))
     Column(Modifier.selectableGroup()) {
         ThemeMode.entries.forEach { mode ->
@@ -223,7 +224,7 @@ private fun ThemeSetting(settings: BrowserSettings) {
 /** One labeled switch controls the badge; the button still opens Recent either way. */
 @Composable
 private fun TabCounterSetting(settings: BrowserSettings) {
-    val choice by settings.tabCounter.collectAsStateWithLifecycle()
+    val choice by settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val shown = choice == TabCounter.SHOWN
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -283,9 +284,9 @@ private fun ServiceSettings(
     remove: suspend () -> Unit,
     extra: @Composable (ServiceEntity) -> Unit = {},
 ) {
-    val current by service.collectAsStateWithLifecycle(null)
-    val jobs by remember(kind) { integrations.openJobs(kind) }.collectAsStateWithLifecycle(emptyList())
-    val parked by remember(kind) { integrations.parkedJobs(kind) }.collectAsStateWithLifecycle(emptyList())
+    val current by service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
+    val jobs by remember(kind) { integrations.openJobs(kind) }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
+    val parked by remember(kind) { integrations.parkedJobs(kind) }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
     // Null until edited: the field shows the stored address, and an edit survives rotation.
     var editedAddress by rememberSaveable { mutableStateOf<String?>(null) }
     val address = editedAddress ?: current?.baseUrl.orEmpty()
@@ -499,9 +500,9 @@ private fun ListOption(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun HisterCaptureSettings(integrations: Integrations, service: ServiceEntity) {
     val hister = integrations.hister
-    val exclusions by hister.exclusions.collectAsStateWithLifecycle(emptyList())
-    val queued by hister.queuedBytes.collectAsStateWithLifecycle(0L)
-    val budgetReached by hister.captureBudgetReached.collectAsStateWithLifecycle(false)
+    val exclusions by hister.exclusions.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
+    val queued by hister.queuedBytes.collectAsStateWithLifecycle(0L, context = Dispatchers.Main.immediate)
+    val budgetReached by hister.captureBudgetReached.collectAsStateWithLifecycle(false, context = Dispatchers.Main.immediate)
     var site by rememberSaveable { mutableStateOf("") }
     var includeSubdomains by rememberSaveable { mutableStateOf(true) }
     var problem by remember { mutableStateOf(false) }

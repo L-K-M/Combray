@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Known issues
+
+- Some Cloudflare-protected pages stay at security verification. The cause
+  remains unresolved; see the [engine investigation](docs/ENGINE_SPIKE.md#34-cloudflare-verification-31-october-2026).
+- The page Copy button and manual text selection are reported broken;
+  tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
+
 ### Added
 
 - Tap a PDF link and read it: a top-level PDF opens in Combray's own
@@ -20,6 +27,12 @@ All notable changes to this project are documented here. The format follows
   page. Find in page says a PDF cannot be searched yet, and its text does
   not reach Hister or reader view yet; Japanese, Chinese and Korean text
   without an embedded font is not drawn yet.
+- The bottom bar hides while scrolling down and returns while scrolling up,
+  on pages and in Reader. Editing and accessibility controls stay visible.
+- Pull down at the page's top and release to reload. A progress ring shows
+  when the pull is long enough; scrolling, pinching and page-owned drags stay separate.
+- The bottom bar follows sideways swipes, with directional progress toward
+  switching tabs, then springs back on release or cancellation.
 - Play a page's audio or video in a fullscreen player after a tap. Media
   on your home network or tailnet plays from any page; this phone and
   link-local hosts stay closed to pages that are not on them.
@@ -40,10 +53,9 @@ All notable changes to this project are documented here. The format follows
 - Settings › Display › Show tab count: an optional counter on the tabs
   button, off by default. The choice persists across restarts.
 - Long-press Recent to switch to the tab you used before this one (a tap
-  still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
-  Recent's order. Repeated swipes keep going back; after a pause they
-  start from the tab you are on. Switching this way hides the keyboard, so
-  further typing does not reach the next tab's page.
+  still opens the list), and swipe sideways along the bottom bar to step
+  through tabs in fixed creation order, without wrapping. Switching hides
+  the keyboard, so typing does not reach the next tab's page.
 - A quiet check beside the address when Hister accepts the current page.
   It means the server acknowledged the capture, not that search indexing
   finished.
@@ -237,6 +249,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Selecting or swiping tabs no longer reorders them. Open tabs keep creation
+  order across pauses and restarts; history stays recent-first.
+- Show the keyboard for fields inside shadow roots, and offer Paste when
+  you long-press an editable page field.
+- Pages retain their scroll position when embedded frames load or close,
+  preventing brief flashes of an earlier position while scrolling.
+- Horizontal swipes across the URL bar or buttons switch tabs only after
+  release. Cancelled, vertical and two-finger gestures keep the current tab.
+- The notice that a page's audio or video opens in a separate player no
+  longer goes missing when the media starts loading before the page
+  reports itself: in a new tab, or after another page of the same site
+  that already showed its notice. Media found while a page you asked for
+  never arrives (a download, a 204 answer) is offered on the page you are
+  still on.
+- Device-check runs log each request the fixture server receives, and
+  their summary lists every failed report-only check and every check
+  slower than 30 s.
 - A tab selected while Combray is in the background, for example when a
   page closes its own window, stays hidden and unfocused, so it stays
   throttled until you return to the app.

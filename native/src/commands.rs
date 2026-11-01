@@ -131,6 +131,10 @@ pub enum Command {
     Reload {
         tab: i64,
     },
+    ReloadPage {
+        view: ViewKey,
+        document: u64,
+    },
     ScrollToEdge {
         view: ViewKey,
         document: u64,
