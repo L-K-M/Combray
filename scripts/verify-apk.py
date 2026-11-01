@@ -37,8 +37,8 @@ REQUIRED_NOTICES = {
     "LLVM libc++": "LLVM Exceptions to the Apache 2.0 License",
     "Rust standard library": "The Rust Standard Library is dual-licensed",
     # The PDF viewer's renderer, embedded in the engine library (native/src/pdf.rs). PDFium's
-    # text ends with the Apache License the package's LICENSE.pdfium appends to it.
-    "PDFium": "Apache License",
+    # own BSD notice, which the package's LICENSE.pdfium follows with the Apache License.
+    "PDFium": "PDFium Authors. All rights reserved.",
     "@embedpdf/pdfium": "MIT License",
     # Libraries built into pdfium.wasm and index.browser.js whose licenses require their notice or
     # a statement in a binary's documentation (native/bundled-notices.toml).

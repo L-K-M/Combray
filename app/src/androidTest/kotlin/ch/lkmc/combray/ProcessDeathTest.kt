@@ -8,6 +8,7 @@ import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.SaveStatus
+import ch.lkmc.combray.engine.ScrollEdge
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -21,7 +22,8 @@ import java.io.File
 /**
  * Process death, in two instrumentation runs: Android kills the process when the first run ends,
  * without a clean shutdown, as it kills background apps. Open tabs, the focused tab, a queued
- * save and a login cookie must survive. scripts/check-app.sh runs [prepare] then [verify] with
+ * save and a login cookie must survive, and a PDF read down to its last page opens again on its
+ * first (owner decision, 29 October 2026). scripts/check-app.sh runs [prepare] then [verify] with
  * the same `-e value <alnum>` argument.
  */
 @RunWith(AndroidJUnit4::class)
@@ -44,6 +46,14 @@ class ProcessDeathTest {
         device.awaitPage(cookiePage)
         device.browser.openUrl(Fixtures.solid(Device.RED), Placement.NEW_TAB)
         device.awaitPage(Fixtures.solid(Device.RED))
+
+        // A long PDF, scrolled to its last page (navy; the first is sand).
+        device.browser.openUrl(PDF, Placement.NEW_TAB)
+        val pdf = device.awaitState { it.activeTab?.url == PDF && it.activeTab?.title == PDF_TITLE && it.activeTab?.loading == false }
+        assertTrue(device.matches(device.awaitScreen(Device.PDF_SAND), Device.PDF_SAND))
+        device.browser.scrollToEdge(pdf.activeTab!!.page!!, ScrollEdge.BOTTOM)
+        assertTrue(device.matches(device.awaitScreen(Device.PDF_NAVY), Device.PDF_NAVY))
+
         device.browser.openUrl(Fixtures.solid(Device.GREEN), Placement.NEW_TAB)
         device.awaitPage(Fixtures.solid(Device.GREEN))
 
@@ -64,7 +74,7 @@ class ProcessDeathTest {
     @Test
     fun verify() {
         // Restored from the database before the engine has a surface.
-        val state = device.awaitState { it.openTabCount == 3 }
+        val state = device.awaitState { it.openTabCount == 4 }
         assertEquals(Fixtures.solid(Device.GREEN), state.activeTab?.url)
         assertTrue(device.recent().filterIsInstance<RecentItem.OpenTab>().any { it.url == Fixtures.solid(Device.RED) })
         device.awaitEngine()
@@ -83,5 +93,16 @@ class ProcessDeathTest {
         device.browser.openUrl(echo, Placement.NEW_TAB)
         val echoed = device.awaitState { it.activeTab?.title?.startsWith("COOKIE:") == true }
         assertTrue("cookie header was ${echoed.activeTab?.title}", echoed.activeTab?.title?.contains("combray=$value") == true)
+
+        // The PDF opens again from a new request, on its first page.
+        val pdfTab = device.recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == PDF }
+        device.browser.selectTab(pdfTab.tabId)
+        device.awaitState { it.activeTab?.url == PDF && it.activeTab?.title == PDF_TITLE && it.activeTab?.loading == false }
+        assertTrue(device.matches(device.awaitScreen(Device.PDF_SAND), Device.PDF_SAND))
+    }
+
+    private companion object {
+        val PDF = Fixtures.pdf("pages.pdf")
+        const val PDF_TITLE = "PDF-PAGES-TITLE"
     }
 }

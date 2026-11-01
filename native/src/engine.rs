@@ -61,7 +61,7 @@ use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
 use crate::panic_policy;
-use crate::pdf::{self, PdfProtocolHandler, ViewerToken};
+use crate::pdf::{self, PdfProtocolHandler, ViewerPreferences, ViewerToken};
 use crate::profile;
 use crate::reload_pull::{
     DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
@@ -793,6 +793,7 @@ impl Engine {
         preferences.set_value("dom_fontface_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_adoptedstylesheet_enabled", PrefValue::Bool(true));
+        set_pdf_viewer_preferences(&mut preferences);
         // The application's own fetches (the media player) send what Servo sends.
         let user_agent = preferences.user_agent.clone();
 
@@ -2688,8 +2689,29 @@ impl Engine {
     }
 }
 
+/// Turns on the PDF viewer (docs/PDF.md): the engine then shows a top-level PDF in a viewer
+/// document that loads `pdf/viewer.mjs` from `combray-pdf:` under the viewer's CSP. Without the
+/// scheme's token, which [protocols] also needs, the preferences stay empty and PDFs keep
+/// Servo's stand-in page.
+fn set_pdf_viewer_preferences(preferences: &mut Preferences) {
+    let token = match ViewerToken::for_process() {
+        Ok(token) => token,
+        Err(error) => {
+            error!("no PDF viewer without a random token: {error}");
+            return;
+        },
+    };
+    let viewer = ViewerPreferences::new(token);
+    preferences.set_value("combray_pdf_viewer_module", PrefValue::Str(viewer.module));
+    preferences.set_value("combray_pdf_viewer_csp", PrefValue::Str(viewer.csp));
+    preferences.set_value(
+        "combray_pdf_viewer_max_bytes",
+        PrefValue::UInt(viewer.max_bytes),
+    );
+}
+
 /// Combray's own schemes, merged into Servo's built-in ones. `combray-pdf:` serves the PDF
-/// viewer's files; nothing requests them until the viewer preferences are set (docs/PDF.md).
+/// viewer's files to the viewer documents the engine makes (docs/PDF.md).
 fn protocols() -> ProtocolRegistry {
     let mut registry = ProtocolRegistry::default();
     let token = match ViewerToken::for_process() {

@@ -127,12 +127,22 @@ class ReaderTest {
 
     @Test
     fun aFileServoCannotShowHasNoArticle() {
-        // Servo's page in place of the PDF, "Unknown content type (application/pdf).", is no article.
-        device.browser.openUrl(Fixtures.PDF, Placement.CURRENT_TAB)
+        // Servo's page in place of the file, "Unknown content type (application/octet-stream).",
+        // is no article.
+        device.browser.openUrl(Fixtures.UNSHOWN_FILE, Placement.CURRENT_TAB)
         // The stand-in page has committed: a Servo that stopped showing one would not pass for this.
-        device.awaitState { it.activeTab?.url == Fixtures.PDF && it.activeTab?.page != null && it.activeTab?.loading == false }
+        device.awaitState { it.activeTab?.url == Fixtures.UNSHOWN_FILE && it.activeTab?.page != null && it.activeTab?.loading == false }
         device.browser.openReader()
         val reader = device.awaitState { it.reader != null && it.reader !is ReaderState.Loading }.reader
+        assertTrue("$reader", reader is ReaderState.Unavailable)
+    }
+
+    @Test
+    fun aPdfHasNoArticleYet() {
+        // A damaged PDF: once the viewer has named it, its message ("Loading PDF…", then why the
+        // file cannot be shown) is text in the page, and only reader.js's viewer check keeps that
+        // from being an article. Reading a PDF as text is a later step (docs/PDF.md).
+        val reader = openReader(Fixtures.pdf("corrupt.pdf", "reader${System.currentTimeMillis()}"), "corrupt.pdf")
         assertTrue("$reader", reader is ReaderState.Unavailable)
     }
 

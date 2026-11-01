@@ -18,9 +18,9 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `ef6beb09ab19325d597dd96f758ed359ad33ccce` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `494d7f4b13b78d64815fa191bc61705bee500347`: a candidate, the head of [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18) (`engine/pdf-viewer-document`: `combray/0.7` at `ef52ceadf57` plus the PDF viewer document), not merged yet; the pin moves to its merge commit on `combray/0.7` before the Combray PR that sets it merges | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
 | Upstream base | v0.7.0, git `aac43a3f31a259f04a574f5ec4e959c943ad7cc7` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
-| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, and resolved styles and `var()` in rasterized SVG subtrees | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, resolved styles and `var()` in rasterized SVG subtrees, and the PDF viewer document (candidate, [ENGINE_SPIKE.md section 38](ENGINE_SPIKE.md#38-pdf-viewer-document-candidate-30-october-2026)) | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
 | Reload pull | Synchronous compositor top-edge query, including nested/frame scroll chains and pinch panning | [Behavior and checks](ENGINE_SPIKE.md#35-pull-to-reload-31-october-2026) |
 | Page input | Focus defaults on shadow-root fields; context-menu paste text bound to the original document and node | [Reproduction and checks](ENGINE_SPIKE.md#33-shadow-root-fields-and-paste-30-october-2026) |
 | Scroll repaint fix | Restore scroll offsets when iframe pipelines start or exit and when a shared-context view closes | [Regression and validation](ENGINE_SPIKE.md#32-scroll-position-flicker-30-october-2026) |
@@ -204,15 +204,15 @@ python3 -I scripts/vendor-pdfium.py                 # download, check, write nat
 python3 -I scripts/vendor-pdfium.py --tarball <tgz> # the same from a tarball already downloaded
 ```
 
-The script downloads the tarball into a new empty temporary directory, checks the registry's `sha512` integrity and the SHA-256 of `pdfium.wasm` and `index.browser.js`, and writes them with `gzip -9n` (no name or time, so the output is reproducible with the same gzip) next to the package's `LICENSE` and `LICENSE.pdfium`.
+The script reads the tarball into memory, checks the registry's `sha512` integrity and the SHA-256 of `pdfium.wasm`, `index.browser.js`, `LICENSE` and `LICENSE.pdfium`, and writes the first two with GNU `gzip -9n` from `PATH` (no name or time, so the output is reproducible with the same gzip; Python's zlib would give other bytes) next to the two licence files.
 
 To move to another version:
 
 1. Read the new version's `dist.integrity` from `https://registry.npmjs.org/@embedpdf/pdfium` and set `VERSION` and `INTEGRITY` in `scripts/vendor-pdfium.py`.
-2. Download the tarball once, compute the two files' SHA-256, review the package's changes, and set both pins in the script and in the `native/src/pdf.rs` tests.
-3. Run the script, then `python3 -I -m unittest discover -s scripts/tests` and `cd native && cargo test --lib`.
+2. Download the tarball once, compute the four files' SHA-256, review the package's changes, and set the pins in the script and the two runtime files' pins in the `native/src/pdf.rs` tests.
+3. Run the script, then `python3 -I -m unittest discover -s scripts/tests`, `cd native && cargo test --lib` and `node --test native/src/pdf/test/viewer.test.mjs` (the viewer's worker against the new PDFium).
 4. Recheck the libraries built into `pdfium.wasm` and `index.browser.js` against `native/bundled-notices.toml` and [native/licenses](../native/licenses/README.md), and regenerate the notices ([Third-party notices](#third-party-notices)). Strings reveal only some of them (libpng and zlib versions, FreeType, OpenJPEG, Little CMS, libc++, musl). Read the package's build recipe (`packages/pdfium` on embed-pdf-viewer's release branch: GN arguments, the PDFium fork's `DEPS` and the `deps` of `core/fxcrt`, `core/fxcodec` and `core/fxge`, and the Emscripten image) and look for the data tables of libraries without strings, such as ICU's case-mapping tables, fast_float's power-of-five table and libjpeg's `jpeg_natural_order`.
-5. Record the version in `docs/PDF.md` and this table. Check the viewer on a device once it exists.
+5. Record the version in `docs/PDF.md` and this table. Run `PdfTest` on a device (`scripts/check-app.sh <serial> ch.lkmc.combray.PdfTest`).
 
 Rollback: revert the commit that changed the files and pins.
 

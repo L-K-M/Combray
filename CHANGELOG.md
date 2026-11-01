@@ -15,6 +15,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Tap a PDF link and read it: a top-level PDF opens in Combray's own
+  viewer inside Servo, drawn by PDFium, with its pages one under another
+  at the screen's width. The tab takes the PDF's own title when it has one,
+  else its file name. Links in a PDF work for http, https, mailto and tel,
+  and links to another page of it scroll there. Back returns to a PDF
+  without downloading it again; after Android ends the app, a PDF opens on
+  its first page. PDFs larger than 64 MB, damaged or password-protected
+  ones show a message instead, and a PDF sent as an attachment opens in
+  the viewer too. A PDF inside a frame still shows Servo's placeholder
+  page. Find in page says a PDF cannot be searched yet, and its text does
+  not reach Hister or reader view yet; Japanese, Chinese and Korean text
+  without an embedded font is not drawn yet.
 - ThemeContrastTest now also requires the five surface-container shades
   to step in brightness order in both schemes.
 - The bottom bar hides while scrolling down and returns while scrolling up,
