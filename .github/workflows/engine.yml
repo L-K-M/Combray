@@ -29,9 +29,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           APK_RUN: "41346084773"
+          APK_ARTIFACT: combray-apk-x86_64-8a4c0a5d703007831be50837a15a1f50d464cc93
           APK_SHA256: bef9bc44f39ac81a1fe450140a1db53c930d50b504fb3740f635fbfaf6a6d44e
         run: |
-          gh run download "$APK_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'combray-apk-x86_64-*' --dir "$RUNNER_TEMP/native-apk"
+          # A single named artifact extracts directly into the requested directory.
+          gh run download "$APK_RUN" --repo "$GITHUB_REPOSITORY" --name "$APK_ARTIFACT" --dir "$RUNNER_TEMP/native-apk"
           echo "$APK_SHA256  $RUNNER_TEMP/native-apk/app-debug.apk" | sha256sum -c -
           python3 - <<'PY'
           import os, pathlib, shutil, zipfile
