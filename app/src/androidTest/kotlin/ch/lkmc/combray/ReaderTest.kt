@@ -84,6 +84,20 @@ class ReaderTest {
     }
 
     @Test
+    fun aRefusedLinkKeepsTheArticleOpen() {
+        val reader = openReader(Fixtures.ARTICLE, ARTICLE_TITLE) as ReaderState.Ready
+        val link = reader.article.blocks.flatMap { it.spans }.single { it.text == "READER-REFUSED-LINK" }
+        assertEquals("https://", link.href)
+
+        tapText("READER-BODY-ONE", "READER-REFUSED-LINK")
+        device.idle()
+
+        assertEquals(reader, device.browser.browserState.value.reader)
+        assertEquals(Fixtures.ARTICLE, device.browser.browserState.value.activeTab?.url)
+        assertEquals(1, device.browser.browserState.value.openTabCount)
+    }
+
+    @Test
     fun aNumberedListKeepsThePagesNumbers() {
         val reader = openReader(Fixtures.ARTICLE, ARTICLE_TITLE) as ReaderState.Ready
         fun ordinalOf(marker: String) = reader.article.blocks.single { block -> block.spans.any { it.text == marker } }.ordinal
