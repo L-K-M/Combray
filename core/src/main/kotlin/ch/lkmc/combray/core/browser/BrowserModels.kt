@@ -193,7 +193,7 @@ data class BrowserState(
     val reloadPull: ReloadPullState? = null,
 )
 
-/** A step along the open tabs in Recent order, as a swipe along the bottom bar asks for one. */
+/** A step through fixed tab creation order, as a swipe along the bottom bar asks for one. */
 enum class TabStep { OLDER, NEWER }
 
 /**
@@ -227,6 +227,10 @@ fun List<RecentItem>.matching(query: String?, historyLimit: Int = RECENT_HISTORY
     return filter { it.matches(query) && (it !is RecentItem.Visit || history++ < historyLimit) }
 }
 
+/** Newest-created tabs first, IDs for ties; All and history keep last-use ordering. */
+fun List<RecentItem>.openTabsInCreationOrder(): List<RecentItem.OpenTab> =
+    filterIsInstance<RecentItem.OpenTab>().sortedWith(compareByDescending<RecentItem.OpenTab> { it.createdAt }.thenBy { it.tabId })
+
 /** A site the user visits often, for the new-tab page's quick links. */
 data class TopSite(
     /** The host without "www.", so both spellings of a site rank as one. */
@@ -243,7 +247,7 @@ sealed interface RecentItem {
     val url: String?
     val title: String?
 
-    /** Time used for ordering: last use for tabs (focus, or navigation in focus), last interaction for history. */
+    /** Last interaction shown in the row; All sorts by this, Open tabs by creation time. */
     val time: Long
 
     /** Whether the local Recent filter keeps this row; a blank query keeps everything. */
@@ -260,6 +264,8 @@ sealed interface RecentItem {
         override val title: String?,
         override val time: Long,
         val active: Boolean,
+        /** Fixed tab order uses creation time; [time] remains the last use shown in the row. */
+        val createdAt: Long,
     ) : RecentItem {
         override val key get() = "tab:$tabId"
     }

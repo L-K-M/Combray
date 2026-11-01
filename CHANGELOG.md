@@ -41,10 +41,9 @@ All notable changes to this project are documented here. The format follows
 - Settings › Display › Show tab count: an optional counter on the tabs
   button, off by default. The choice persists across restarts.
 - Long-press Recent to switch to the tab you used before this one (a tap
-  still opens the list), and swipe sideways along the bottom bar to step through your open tabs in
-  Recent's order. Repeated swipes keep going back; after a pause they
-  start from the tab you are on. Switching this way hides the keyboard, so
-  further typing does not reach the next tab's page.
+  still opens the list), and swipe sideways along the bottom bar to step
+  through tabs in fixed creation order, without wrapping. Switching hides
+  the keyboard, so typing does not reach the next tab's page.
 - A quiet check beside the address when Hister accepts the current page.
   It means the server acknowledged the capture, not that search indexing
   finished.
@@ -238,6 +237,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Selecting or swiping tabs no longer reorders them. Open tabs keep creation
+  order across pauses and restarts; history stays recent-first.
 - Show the keyboard for fields inside shadow roots, and offer Paste when
   you long-press an editable page field.
 - Pages retain their scroll position when embedded frames load or close,

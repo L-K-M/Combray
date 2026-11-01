@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.HomePinEntity
+import ch.lkmc.combray.core.data.SessionEntity
 import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
@@ -700,11 +701,11 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aRunOfBarSwipesWalksBackThroughRecentOrder() {
+    fun barSwipesWalkCreationOrderWithoutWrapping() {
         ready()
         val (a, b, c) = openThreeTabs()
 
-        // Each swipe focuses a tab and so reorders Recent; the run keeps walking the old order.
+        // Focusing changes recency, not the next tab's position.
         browser.stepTab(TabStep.OLDER); idle()
         assertEquals(b, state().activeTab?.id)
         browser.stepTab(TabStep.OLDER); idle()
@@ -721,16 +722,99 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aPauseBetweenSwipesStartsFromTheNewOrder() {
+    fun aPauseBetweenSwipesKeepsTheTabOrder() {
         ready()
-        val (_, b, c) = openThreeTabs()
+        val (a, b, _) = openThreeTabs()
         browser.stepTab(TabStep.OLDER); idle()
         assertEquals(b, state().activeTab?.id)
 
-        // After a pause b.test is the newest tab, so the next swipe goes back to c.test.
-        now += 4_000 // longer than a run's pause (SWIPE_RUN_MS)
+        now += TAB_ORDER_PAUSE_MS // Beyond the former swipe-run timeout.
         browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun selectionAndNavigationKeepTabOrderWhileHistoryStaysRecentFirst() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        val order = listOf(c, b, a)
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+
+        now += DAY
+        browser.selectTab(a); idle()
+        commit(1, 11, "https://a.test/next")
+        now += 1_000
+        browser.selectTab(b); idle()
+        commit(2, 21, "https://b.test/next")
+
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        assertEquals(b, recent().filterIsInstance<RecentItem.OpenTab>().first().tabId)
+        assertEquals(listOf("https://b.test/", "https://a.test/"), recent().filterIsInstance<RecentItem.Visit>().map { it.url })
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun undoRestoresTheOriginalTabPositionWithEitherFocusMode() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        browser.selectTab(a); idle()
+        browser.closeTab(b); idle()
+        assertEquals(listOf(c, a), recent().openTabsInCreationOrder().map { it.tabId })
+
+        browser.reopenTab(b, ReopenFocus.KEEP_CURRENT); idle()
+        assertEquals(a, state().activeTab?.id)
+        assertEquals(listOf(c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+        browser.closeTab(b); idle()
+        browser.reopenTab(b, ReopenFocus.FOCUS); idle()
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(listOf(c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+    }
+
+    @Test
+    fun aNewBackgroundTabJoinsTheSwipeOrderImmediately() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+
+        now += 1_000
+        browser.openUrl("https://d.test/", Placement.BACKGROUND_TAB); idle()
+        val d = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://d.test/" }.tabId
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(3, engine.created.size)
+        assertEquals(listOf(d, c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
         assertEquals(c, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(d, state().activeTab?.id)
+        assertEquals("https://d.test/", engine.created.last().second)
+    }
+
+    @Test
+    fun equalCreationTimesKeepTheSameOrderAcrossRestartAndSwipes() {
+        ready()
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                listOf("tab-z", "tab-a", "tab-m").forEachIndexed { index, id ->
+                    dao.insertTab(TabEntity(id, TabState.OPEN, null, "https://$id.test/", null, now, now + index, null))
+                }
+                dao.setSession(SessionEntity(activeTabId = "tab-z"))
+            }
+        }
+        browser = newCoordinator()
+        ready()
+        val order = listOf("tab-a", "tab-m", "tab-z")
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals("tab-m", state().activeTab?.id)
+
+        browser = newCoordinator()
+        ready()
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals("tab-a", state().activeTab?.id)
     }
 
     @Test
@@ -3077,6 +3161,7 @@ class BrowserCoordinatorTest {
         const val GATE_TIMEOUT_SECONDS = 10L
         const val TEST_WAIT_MS = 5_000L
         const val SHORT_TIMEOUT_MS = 1_000L
+        const val TAB_ORDER_PAUSE_MS = 4_000L
         /** Longer than any test: a request does not time out unless the test means it to. */
         const val LONG_TIMEOUT_MS = 10L * 60 * 1000
     }

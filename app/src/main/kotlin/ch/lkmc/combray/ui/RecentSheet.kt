@@ -80,6 +80,7 @@ import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.matching
+import ch.lkmc.combray.core.browser.openTabsInCreationOrder
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.policy.HostNames
 import java.text.DateFormat
@@ -120,8 +121,8 @@ internal fun recentEmpty(query: String, matching: List<RecentItem>, shown: List<
 }
 
 /**
- * Open tabs and recently visited pages in one most-recently-used list (R5), opening on
- * [initialScope] (normally the tabs); a new [restartKey] returns to it. Filtering them stays on
+ * Open tabs keep creation order; All shows tabs and history by last use in the same UI (R5).
+ * [initialScope] normally shows tabs; a new [restartKey] returns to it. Filtering stays on
  * the device; Hister and Karakeep are separate, labeled scopes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -152,7 +153,7 @@ fun RecentSheet(
     var forgetting by rememberSaveable(restartKey) { mutableStateOf<String?>(null) }
     val shown = remember(rows, scope) {
         val items = rows?.items.orEmpty()
-        if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
+        if (scope == RecentScope.OPEN) items.openTabsInCreationOrder() else items
     }
     // Relative times and day headers stay right while the sheet stays open.
     val now by produceState(System.currentTimeMillis()) {
@@ -223,6 +224,7 @@ fun RecentSheet(
                         LocalRecent(
                             browser = browser,
                             shown = shown,
+                            scope = scope,
                             empty = if (complete) recentEmpty(answered.query, answered.items, shown) else null,
                             query = answered.query,
                             now = now,
@@ -250,11 +252,12 @@ fun RecentSheet(
     }
 }
 
-/** Tabs and history on this device, grouped by day. [query] is the filter [shown] answers. */
+/** Only All groups by last-use day; fixed tab order can cross the same day more than once. */
 @Composable
 private fun LocalRecent(
     browser: BrowserCoordinator,
     shown: List<RecentItem>,
+    scope: RecentScope,
     empty: RecentEmpty?,
     query: String,
     now: Long,
@@ -274,7 +277,7 @@ private fun LocalRecent(
         var lastDay: Long? = null
         shown.forEachIndexed { index, item ->
             val day = days[index]
-            if (day != lastDay) {
+            if (scope == RecentScope.ALL && day != lastDay) {
                 lastDay = day
                 item(key = "day:$day") { DayHeader(day, today) }
             }

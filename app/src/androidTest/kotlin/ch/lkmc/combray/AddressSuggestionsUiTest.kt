@@ -212,7 +212,7 @@ class AddressSuggestionsUiTest {
         val WINDOW_HEIGHT = 300.dp
         val TALL_WINDOW_HEIGHT = 520.dp
 
-        val TAB_MATCH = RecentItem.OpenTab("tab-garden", "https://example.net/notes", "Garden notes", 2L, active = false)
+        val TAB_MATCH = RecentItem.OpenTab("tab-garden", "https://example.net/notes", "Garden notes", 2L, active = false, createdAt = 1L)
         val VISIT_MATCH = RecentItem.Visit("visit-1", "tab", "https://example.org/garden", "A garden through the seasons", 1L)
     }
 }

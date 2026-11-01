@@ -21,6 +21,10 @@ interface BrowserDao {
     @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC")
     suspend fun openTabs(): List<TabEntity>
 
+    /** Fixed tab order, independent of focus; IDs keep equal creation times deterministic. */
+    @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY createdAt DESC, id ASC")
+    suspend fun openTabsInCreationOrder(): List<TabEntity>
+
     /** The open-tab count without materializing every row; publish() runs this per event. */
     @Query("SELECT COUNT(*) FROM tabs WHERE state = 'OPEN'")
     suspend fun openTabCount(): Int
