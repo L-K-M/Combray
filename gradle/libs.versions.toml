@@ -13,6 +13,7 @@ room = "2.8.5"
 work = "2.12.0"
 # Media3 1.11.1 is built against OkHttp 4.12.0: move the two together (.github/dependabot.yml).
 media3 = "1.11.1"
+# 4.12.1 is a binary-compatible patch release; safe above Media3's 4.12.0 build dependency.
 okhttp = "4.12.1"
 # Above Media3's 33.3.1-android: from 33.4.8-android, Guava's Android runtime needs only Apache-2.0
 # annotation libraries (app/build.gradle.kts).
