@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RecentEmptyTest {
-    private val tab = RecentItem.OpenTab(tabId = "t1", url = "https://example.org/", title = "Example", time = 2, active = true)
+    private val tab = RecentItem.OpenTab(tabId = "t1", url = "https://example.org/", title = "Example", time = 2, active = true, createdAt = 1)
     private val visit = RecentItem.Visit(visitId = "v1", tabId = "t0", url = "https://example.org/old", title = "Old", time = 1)
 
     @Test

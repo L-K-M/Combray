@@ -7,7 +7,7 @@ import org.junit.Test
 
 class AddressSuggestionsTest {
     private fun tab(id: String, url: String?, time: Long, active: Boolean = false, title: String? = null) =
-        RecentItem.OpenTab(id, url, title, time, active)
+        RecentItem.OpenTab(id, url, title, time, active, createdAt = time)
 
     private fun visit(id: String, url: String, time: Long, title: String? = null) =
         RecentItem.Visit(id, "closed-tab", url, title, time)

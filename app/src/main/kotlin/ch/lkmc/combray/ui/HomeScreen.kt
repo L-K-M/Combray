@@ -304,7 +304,7 @@ private fun HomePreview() {
             links = listOf("library.example", "garden.example", "notes.example", "maps.example", "books.example", "archive.example").map {
                 HomeLink(id = it, site = it, url = "https://$it", title = null, pinId = null)
             },
-            continued = RecentItem.OpenTab("preview", "https://example.org/garden", "A garden through the seasons", System.currentTimeMillis(), false),
+            continued = RecentItem.OpenTab("preview", "https://example.org/garden", "A garden through the seasons", System.currentTimeMillis(), false, createdAt = 0),
             onOpenUrl = {}, onContinue = {}, onEdit = {}, onAdd = {}, onOptions = {},
         )
     }

@@ -1885,3 +1885,40 @@ private temporary directory. Local diagnostics stopped at paint/input-focus
 setup and did not validate the target gesture; temporary tracing was removed.
 KVM and a physical device remain unavailable. No personal history or live
 service was used.
+
+## 37. Stable tab ordering (1 November 2026)
+
+The owner reported that bottom-bar swipes reorder tabs. `stepTab` used a
+snapshot of last-focus order for three seconds, then rebuilt it after a
+pause. Focusing each swiped tab changed the next snapshot. The focused
+pause regression failed before the fix and passes afterward.
+
+Swipes and Recent's Open tabs now use creation time, newest first, then tab
+ID for equal timestamps. Creation time already persists in Room, so there
+is no schema change. The swipe snapshot and timer are removed. Undo returns
+a tab to its creation slot; a new background tab joins the order at once.
+All, address suggestions, previous-tab switching, close successor, Continue,
+retention and renderer eviction keep their last-use semantics. Row times
+still show last use. Only All shows last-use day headers, avoiding repeated
+header keys when fixed tab order crosses the same day more than once.
+
+Coordinator checks cover pauses, both edges, focus/navigation versus history,
+background insertion, both Undo modes, restart and tied creation times.
+`TabSwipeTest` keeps the held-feedback checks and adds a three-page walk,
+with a deliberate four-second pause, identity/count and painted-color
+assertions at both ends. Its obsolete swipe-run reset sleeps are removed.
+
+Local Linux x86_64, JDK 21 / SDK 37 commands:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew :core:testDebugUnitTest --tests 'ch.lkmc.combray.core.browser.BrowserCoordinatorTest.aPauseBetweenSwipesKeepsTheTabOrder'
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The Servo pin remains `ef6beb09ab19325d597dd96f758ed359ad33ccce`; native
+code is unchanged. Native builds and real-Servo fixtures run in the
+[Engine PR workflow](https://github.com/L-K-M/Combray/actions/workflows/engine.yml)
+before merge. No local device or physical-phone result is claimed; no
+personal history or live service was used.
