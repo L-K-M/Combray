@@ -1922,3 +1922,12 @@ code is unchanged. Native builds and real-Servo fixtures run in the
 [Engine PR workflow](https://github.com/L-K-M/Combray/actions/workflows/engine.yml)
 before merge. No local device or physical-phone result is claimed; no
 personal history or live service was used.
+
+[Initial Engine CI](https://github.com/L-K-M/Combray/actions/runs/41276183297)
+built both ABIs and passed all three tab-swipe cases (159/160 checks total).
+The unchanged `ScrollTest.scrollingDownHidesTheBarAndScrollingUpRestoresIt`
+failed its final blue-paint assertion: the bottom jump raced the previous
+upward fling. Its geometry check now uses the existing gesture cancellation
+before jumping, as the top-jump check already does. Touch, resize and paint
+assertions remain; browser/native behavior is unchanged. Follow-up CI is
+tracked in [PR #173](https://github.com/L-K-M/Combray/pull/173).

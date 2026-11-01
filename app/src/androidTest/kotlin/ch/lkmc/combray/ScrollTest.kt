@@ -54,6 +54,7 @@ class ScrollTest {
         assertEquals(page, device.browser.browserState.value.activeTab!!.page)
 
         // Both viewport changes must leave the real renderer usable.
+        cancelPageTouch() // Do not race the return fling.
         device.browser.scrollToEdge(page, ScrollEdge.BOTTOM)
         assertTrue(device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
     }
