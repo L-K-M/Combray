@@ -34,6 +34,8 @@ pub const MAX_OPTIONS: usize = 2_000;
 pub const MAX_FILE_EXTENSIONS: usize = 50;
 /// Longer link addresses are left out of a link menu rather than cut (a cut URL is wrong).
 pub const MAX_URL_CHARS: usize = 32_768;
+/// Shared with `PageClipboard.kt`: refuse large text rather than paste a truncated password.
+const MAX_PASTE_BYTES: usize = 256 * 1024;
 /// How long a leave-page question waits for an answer (proposed default). The asking page's
 /// script thread, and every same-site tab sharing it, is blocked until then, so an unanswered
 /// question is answered Stay: the page is kept and its script goes on.
@@ -76,6 +78,8 @@ pub enum ControlDescription {
         link: Option<String>,
         image: Option<String>,
     },
+    /// A text field whose native context menu permits Paste.
+    PasteMenu,
     /// HTTP authentication for a navigation. `origin` is the server asking (scheme, host and
     /// port), which may differ from the page that linked to it.
     SignIn {
@@ -152,6 +156,7 @@ impl ControlDescription {
                 "link": link.as_deref().map(strip_userinfo),
                 "image": image.as_deref().map(strip_userinfo),
             }),
+            ControlDescription::PasteMenu => json!({ "kind": "paste_menu" }),
             ControlDescription::SignIn { origin, proxy } => {
                 json!({ "kind": "sign_in", "origin": bounded(origin, MAX_LABEL_CHARS), "proxy": proxy })
             },
@@ -253,6 +258,8 @@ pub enum ControlResponse {
     Files { paths: Vec<PathBuf> },
     /// HTTP sign-in.
     Credentials { username: String, password: String },
+    /// Clipboard text read only when the user chose Paste. Never included in Debug output.
+    Paste { text: String },
     /// Cancel, Back, or no selection: Servo's default response. Stay on a leave-page question,
     /// where Servo's default would leave.
     Dismiss,
@@ -278,6 +285,7 @@ impl fmt::Debug for ControlResponse {
                 .field("username", username)
                 .field("password", &"<redacted>")
                 .finish(),
+            ControlResponse::Paste { .. } => formatter.write_str("Paste(<redacted>)"),
             ControlResponse::Dismiss => formatter.write_str("Dismiss"),
         }
     }
@@ -286,15 +294,20 @@ impl fmt::Debug for ControlResponse {
 /// Errors name the kind and position of the problem only: serde quotes offending values, and an
 /// answer may carry a password.
 pub fn parse_response(json: &str) -> Result<ControlResponse, String> {
-    serde_json::from_str(json).map_err(|error| match error.classify() {
-        // Data errors quote the offending value, which may be a password.
-        Category::Data => format!(
-            "invalid control response: data error at column {}",
-            error.column()
-        ),
-        // The others name only what the parser expected and where.
-        _ => format!("invalid control response: {error}"),
-    })
+    let response: ControlResponse =
+        serde_json::from_str(json).map_err(|error| match error.classify() {
+            // Data errors quote the offending value, which may be a password.
+            Category::Data => format!(
+                "invalid control response: data error at column {}",
+                error.column()
+            ),
+            // The others name only what the parser expected and where.
+            _ => format!("invalid control response: {error}"),
+        })?;
+    if matches!(&response, ControlResponse::Paste { text } if text.len() > MAX_PASTE_BYTES) {
+        return Err("clipboard text exceeds the paste limit".into());
+    }
+    Ok(response)
 }
 
 /// Keeps at most `max` characters, marking the cut with an ellipsis.
@@ -308,6 +321,27 @@ fn bounded(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paste_describes_only_the_action_and_redacts_its_response() {
+        assert_eq!(
+            ControlDescription::PasteMenu.to_json(),
+            json!({ "kind": "paste_menu" })
+        );
+        let response = parse_response(r#"{"type":"paste","text":"été\nsecret"}"#).unwrap();
+        assert!(matches!(&response, ControlResponse::Paste { text } if text == "été\nsecret"));
+        assert!(!format!("{response:?}").contains("secret"));
+    }
+
+    #[test]
+    fn oversized_paste_text_is_refused_whole_by_its_utf8_size() {
+        let response = |text| json!({ "type": "paste", "text": text }).to_string();
+        assert!(parse_response(&response("é".repeat(MAX_PASTE_BYTES / 2))).is_ok());
+        assert_eq!(
+            parse_response(&response("é".repeat(MAX_PASTE_BYTES / 2 + 1))).unwrap_err(),
+            "clipboard text exceeds the paste limit"
+        );
+    }
 
     #[test]
     fn dialog_messages_are_bounded_on_a_character_boundary() {

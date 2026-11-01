@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.AbsoluteAlignment
@@ -129,6 +130,8 @@ fun ReaderView(
     onClose: () -> Unit,
     /** Where the scroll button sits; BrowserScreen moves it above a shown snackbar. */
     scrollButtonPadding: PaddingValues = scrollButtonPadding(),
+    /** Reports scroll direction, excluding viewport corrections. */
+    onScroll: (ScrollEdge) -> Unit = {},
 ) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
@@ -145,7 +148,7 @@ fun ReaderView(
                     LocalLayoutDirection provides direction,
                     LocalDensity provides Density(density.density, density.fontScale * textSize.zoom),
                 ) {
-                    ArticleText(state.article, onOpenLink, onClose, scrollButtonPadding)
+                    ArticleText(state.article, onOpenLink, onClose, scrollButtonPadding, onScroll)
                 }
             }
         }
@@ -153,23 +156,37 @@ fun ReaderView(
 }
 
 @Composable
-private fun ArticleText(article: Article, onOpenLink: (String) -> Unit, onClose: () -> Unit, scrollButtonPadding: PaddingValues) {
+private fun ArticleText(
+    article: Article,
+    onOpenLink: (String) -> Unit,
+    onClose: () -> Unit,
+    scrollButtonPadding: PaddingValues,
+    onScroll: (ScrollEdge) -> Unit,
+) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var edge by remember(article) { mutableStateOf<ScrollEdge?>(null) }
     var scrollActivity by remember(article) { mutableIntStateOf(0) }
+    val latestOnScroll by rememberUpdatedState(onScroll)
     LaunchedEffect(list, article) {
         var previous = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
-        snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { position ->
-            if (list.isScrollInProgress && position != previous) {
-                edge = if (position.first > previous.first || position.first == previous.first && position.second > previous.second) {
+        var previousViewport = list.layoutInfo.viewportSize
+        snapshotFlow {
+            (list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset) to list.layoutInfo.viewportSize
+        }.collect { (position, viewport) ->
+            // Chrome resizing can clamp the list backward without an upward scroll.
+            if (list.isScrollInProgress && position != previous && viewport == previousViewport) {
+                val direction = if (position.first > previous.first || position.first == previous.first && position.second > previous.second) {
                     ScrollEdge.BOTTOM
                 } else {
                     ScrollEdge.TOP
                 }
+                edge = direction
                 scrollActivity++
+                latestOnScroll(direction)
             }
             previous = position
+            previousViewport = viewport
         }
     }
 

@@ -22,11 +22,25 @@ NOTICES = {
             {"name": "servo", "texts": [0]},
             {"name": "LLVM libc++", "texts": [1]},
             {"name": "Rust standard library", "texts": [2]},
+            {"name": "PDFium", "texts": [3]},
+            {"name": "@embedpdf/pdfium", "texts": [4]},
+            {"name": "libjpeg-turbo (PDFium)", "texts": [5]},
+            {"name": "Anti-Grain Geometry (PDFium)", "texts": [6]},
+            {"name": "ICU (PDFium)", "texts": [7]},
+            {"name": "Emscripten (PDFium)", "texts": [8]},
+            {"name": "musl libc (PDFium)", "texts": [9]},
         ],
         "texts": [
             "Mozilla Public License Version 2.0",
             "---- LLVM Exceptions to the Apache 2.0 License ----",
             "The Rust Standard Library is dual-licensed under Apache 2.0 and MIT terms.",
+            "Copyright 2014 PDFium Authors.\n\nApache License\nVersion 2.0, January 2004",
+            "MIT License",
+            "This software is based in part on the work of the Independent JPEG Group.",
+            "Copyright (C) 2002-2005 Maxim Shemanarev (McSeem)",
+            "UNICODE LICENSE V3",
+            "Copyright Joyent, Inc. and other Node contributors.",
+            "Copyright © 2005-2020 Rich Felker, et al.",
         ],
     }),
     "assets/notices/Rust-Licenses.html": "<title>Copyright notices for The Rust Standard Library</title>",
@@ -174,6 +188,20 @@ class ApkBuildTest(unittest.TestCase):
         result = self.build("--debug")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("LLVM libc++", result.stderr)
+
+    def test_the_pdf_renderers_notices_are_required(self):
+        names = (
+            "PDFium", "@embedpdf/pdfium", "libjpeg-turbo (PDFium)", "Anti-Grain Geometry (PDFium)",
+            "ICU (PDFium)", "Emscripten (PDFium)", "musl libc (PDFium)",
+        )
+        for name in names:
+            with self.subTest(name):
+                native = json.loads(NOTICES["assets/notices/native.json"])
+                native["components"] = [c for c in native["components"] if c["name"] != name]
+                self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps(native)})
+                result = self.build("--debug")
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(name, result.stderr)
 
     def test_malformed_notices_are_rejected(self):
         self.fixture(notices=NOTICES | {"assets/notices/native.json": json.dumps({"components": [{}]})})

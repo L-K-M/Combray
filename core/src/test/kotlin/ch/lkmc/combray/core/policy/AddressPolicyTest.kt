@@ -173,6 +173,14 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun thePdfViewerSchemeIsRejectedNotSearched() {
+        val viewer = "combray-pdf://viewer-00112233445566778899aabbccddeeff"
+        for (input in listOf("$viewer/pdfium/pdfium.wasm", "COMBRAY-PDF://viewer-0/", "combray-pdf:x", "$viewer/a b")) {
+            assertEquals(input, AddressInterpretation(AddressDecision.Rejected(RejectReason.UNSUPPORTED_SCHEME), null), AddressPolicy.interpret(input))
+        }
+    }
+
+    @Test
     fun credentialsInAddressesAreRejected() {
         assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("https://user:secret@example.org/"))
     }

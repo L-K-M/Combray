@@ -20,6 +20,8 @@ Pages
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
+  /shadow-input.html         nested closed-shadow password field; title SHADOW:<state>,
+                              then SHADOW:input:<value>:<paste count> after typing or pasting
   /leave.html[?auto]         link to /solid/2e6b4f.html above a <textarea>; its beforeunload handler
                              always asks to stay (title LEAVE:<times asked>); ?auto follows the link
                              by script a second after load, without any user input
@@ -115,8 +117,28 @@ TONE_SECONDS = 3
 TONE_AMPLITUDE = 8000
 FILE_TARGET = "file:///system/etc/hosts"
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+# A check's unique key (`k=`) marks the addresses it looks for in the app's log; the request log
+# leaves its value out.
+KEY_VALUE = re.compile(r"(?<=[?&]k=)[^&#]*")
 
 lock = threading.Lock()
+log_lock = threading.Lock()
+
+
+def logged_target(target):
+    """A request target as the request log shows it: each `k=` value is left out."""
+    return KEY_VALUE.sub("<key>", target)
+
+
+def log_request_line(method, target, now=None):
+    """One line per request on stdout (fixtures.log in a device-check run), in logcat's
+    `threadtime` time format so it lines up with logcat.txt. Logcat stamps the device's local
+    time: the emulator keeps the host's, while a phone's clock or zone may differ."""
+    now = time.time() if now is None else now
+    stamp = time.strftime("%m-%d %H:%M:%S", time.localtime(now)) + f".{int(now * 1000) % 1000:03d}"
+    with log_lock:
+        sys.stdout.write(f"{stamp} {method} {logged_target(target)}\n")
+        sys.stdout.flush()
 def fresh_lists():
     """List id -> bookmark ids in it. Lists that are not here answer 404."""
     return {"reading": []}
@@ -499,6 +521,23 @@ CONTROL_PAGES = {
         "q.onfocus=function(){document.title='AUTOFOCUS:focused'};"
         "q.onblur=function(){document.title='AUTOFOCUS:blurred'};q.focus()})</script>",
     ),
+    "/shadow-input.html": (
+        "SHADOW:ready",
+        "<div class='c' id='field'></div>",
+        "<script>addEventListener('load',function(){"
+        "var outer=document.getElementById('field').attachShadow({mode:'closed'});"
+        "var host=document.createElement('div');outer.appendChild(host);"
+        "var inner=host.attachShadow({mode:'closed'});"
+        "var q=document.createElement('input');q.type='password';"
+        "q.style.cssText='box-sizing:border-box;width:100%;height:70vh;font-size:32px';"
+        "inner.appendChild(q);var pastes=0;"
+        "q.onfocus=function(){document.title='SHADOW:focused'};"
+        "q.onblur=function(){document.title='SHADOW:blurred'};"
+        "q.onclick=function(){document.title='SHADOW:tapped'};"
+        "q.onpaste=function(){pastes++};"
+        "q.oninput=function(){document.title='SHADOW:input:'+q.value+':'+pastes};"
+        "q.focus()})</script>",
+    ),
 }
 
 
@@ -516,6 +555,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    # Logged as it arrives: some requests are never answered (/once.html), and a navigation
+    # that reached the server is what a missing page needs ruled in or out.
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        log_request_line(self.command, self.path)
+        return True
 
     def send(self, status, body=b"", content_type="text/html; charset=utf-8", headers=()):
         if isinstance(body, str):
@@ -589,6 +636,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "const title=edge+':'+s.scrollTop+','+innerHeight+','+s.scrollHeight;"
                 "if(document.title!==title)document.title=title;};"
                 "addEventListener('scroll',update);</script>"))
+        if path == "/pull-blocked.html":
+            return self.send(200, page("PULL-READY", "<p>Page-owned drag</p>",
+                "<style>html,body{margin:0;height:100vh}</style>"
+                "<script>addEventListener('touchmove',event=>{event.preventDefault();"
+                "document.title='PULL-PREVENTED';},{passive:false});</script>"))
+        if path == "/pull-panel.html":
+            # Bound overflow so the return drag reaches top even after a fling.
+            return self.send(200, page("PANEL-TOP",
+                "<div id='panel' style='height:100vh;overflow:auto'>"
+                "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
+                "<section style='height:50vh;background:#8a5a2b'>PANEL</section></div>"
+                "<script>const panel=document.getElementById('panel');"
+                "panel.addEventListener('scroll',()=>{document.title="
+                "panel.scrollTop<=1?'PANEL-TOP':'PANEL-MIDDLE';});</script>",
+                "<style>html,body{margin:0;height:100vh;overflow:hidden}</style>"))
         if path == "/intersection.html":
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":

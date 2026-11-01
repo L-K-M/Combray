@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.HomePinEntity
+import ch.lkmc.combray.core.data.SessionEntity
 import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
@@ -22,6 +23,7 @@ import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
+import ch.lkmc.combray.engine.ReloadPullPhase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -424,6 +426,72 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aReleasedPullReloadsItsPageOnceAndShowsLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val page = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.PULLING, 0.5f)); idle()
+        assertEquals(ReloadPullState(page, 0.5f), state().reloadPull)
+        assertTrue(engine.reloaded.isEmpty())
+
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertEquals(listOf(1L), engine.reloaded)
+        assertEquals(listOf(page), engine.reloadedPages)
+        assertTrue(state().activeTab!!.loading)
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertEquals(listOf(1L), engine.reloaded)
+    }
+
+    @Test
+    fun cancelledPullsAndReplacedDocumentsCannotReload() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val oldPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.PULLING, 1f)); idle()
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.CANCELLED, 0f)); idle()
+        assertNull(state().reloadPull)
+        assertTrue(engine.reloaded.isEmpty())
+
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.PULLING, 1f)); idle()
+        commit(1, 11, "https://a.test/")
+        loaded(1, 11)
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        val wrongGeneration = state().activeTab!!.page!!.let { it.copy(view = it.view.copy(generation = -1)) }
+        engine.emit(EngineEvent.ReloadPull(wrongGeneration, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertTrue(engine.reloaded.isEmpty())
+    }
+
+    @Test
+    fun pullsCannotReloadHiddenCrashedLoadingOrReaderPages() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val firstTab = state().activeTab!!.id
+        val firstPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.PULLING, 1f)); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        commit(2, 20, "https://b.test/")
+        val secondPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(secondPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        loaded(2, 20)
+        engine.emit(EngineEvent.Crashed(engine.view(2), "fixture")); idle()
+        engine.emit(EngineEvent.ReloadPull(secondPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        browser.selectTab(firstTab); idle()
+        browser.openReader(); idle()
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertTrue(engine.reloaded.isEmpty())
+    }
+
+    @Test
     fun edgeJumpsKeepTheirOriginalDocumentAndView() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
@@ -633,11 +701,11 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aRunOfBarSwipesWalksBackThroughRecentOrder() {
+    fun barSwipesWalkCreationOrderWithoutWrapping() {
         ready()
         val (a, b, c) = openThreeTabs()
 
-        // Each swipe focuses a tab and so reorders Recent; the run keeps walking the old order.
+        // Focusing changes recency, not the next tab's position.
         browser.stepTab(TabStep.OLDER); idle()
         assertEquals(b, state().activeTab?.id)
         browser.stepTab(TabStep.OLDER); idle()
@@ -654,16 +722,99 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aPauseBetweenSwipesStartsFromTheNewOrder() {
+    fun aPauseBetweenSwipesKeepsTheTabOrder() {
         ready()
-        val (_, b, c) = openThreeTabs()
+        val (a, b, _) = openThreeTabs()
         browser.stepTab(TabStep.OLDER); idle()
         assertEquals(b, state().activeTab?.id)
 
-        // After a pause b.test is the newest tab, so the next swipe goes back to c.test.
-        now += 4_000 // longer than a run's pause (SWIPE_RUN_MS)
+        now += TAB_ORDER_PAUSE_MS // Beyond the former swipe-run timeout.
         browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun selectionAndNavigationKeepTabOrderWhileHistoryStaysRecentFirst() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        val order = listOf(c, b, a)
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+
+        now += DAY
+        browser.selectTab(a); idle()
+        commit(1, 11, "https://a.test/next")
+        now += 1_000
+        browser.selectTab(b); idle()
+        commit(2, 21, "https://b.test/next")
+
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        assertEquals(b, recent().filterIsInstance<RecentItem.OpenTab>().first().tabId)
+        assertEquals(listOf("https://b.test/", "https://a.test/"), recent().filterIsInstance<RecentItem.Visit>().map { it.url })
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun undoRestoresTheOriginalTabPositionWithEitherFocusMode() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        browser.selectTab(a); idle()
+        browser.closeTab(b); idle()
+        assertEquals(listOf(c, a), recent().openTabsInCreationOrder().map { it.tabId })
+
+        browser.reopenTab(b, ReopenFocus.KEEP_CURRENT); idle()
+        assertEquals(a, state().activeTab?.id)
+        assertEquals(listOf(c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+        browser.closeTab(b); idle()
+        browser.reopenTab(b, ReopenFocus.FOCUS); idle()
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(listOf(c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+    }
+
+    @Test
+    fun aNewBackgroundTabJoinsTheSwipeOrderImmediately() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+
+        now += 1_000
+        browser.openUrl("https://d.test/", Placement.BACKGROUND_TAB); idle()
+        val d = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://d.test/" }.tabId
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(3, engine.created.size)
+        assertEquals(listOf(d, c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
         assertEquals(c, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(d, state().activeTab?.id)
+        assertEquals("https://d.test/", engine.created.last().second)
+    }
+
+    @Test
+    fun equalCreationTimesKeepTheSameOrderAcrossRestartAndSwipes() {
+        ready()
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                listOf("tab-z", "tab-a", "tab-m").forEachIndexed { index, id ->
+                    dao.insertTab(TabEntity(id, TabState.OPEN, null, "https://$id.test/", null, now, now + index, null))
+                }
+                dao.setSession(SessionEntity(activeTabId = "tab-z"))
+            }
+        }
+        browser = newCoordinator()
+        ready()
+        val order = listOf("tab-a", "tab-m", "tab-z")
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals("tab-m", state().activeTab?.id)
+
+        browser = newCoordinator()
+        ready()
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals("tab-a", state().activeTab?.id)
     }
 
     @Test
@@ -2133,6 +2284,46 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aSameOriginPagesMediaThatOvertakesItsCommitGetsItsOwnNotice() {
+        ready()
+        browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/one")
+        media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
+        assertTrue(state().notice is Notice.MediaPlayable)
+        shown(state().notice)
+        browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
+
+        // Credited to the page still committed, which already showed its Play notice.
+        media(1, 10, "https://example.org/two.mp4", referrer = "https://example.org")
+        assertNull(state().notice)
+        commit(1, 11, "https://example.org/two", index = 1, length = 2)
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("two.mp4"), mediaNames())
+    }
+
+    @Test
+    fun mediaHeldForAPageThatNeverCommitsGoesToThePageShown() {
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        browser = newCoordinator(navigationTimeoutMs = SHORT_TIMEOUT_MS)
+        ready()
+        browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/one")
+        browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
+
+        media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
+        assertNull(state().notice)
+        // A 204 answer commits nothing: once the app stops waiting, the report is the shown page's.
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TEST_WAIT_MS)
+        while (state().activeTab!!.loading && System.nanoTime() < deadline) {
+            Thread.sleep(50)
+            idle()
+        }
+        assertTrue(state().notice is Notice.MediaPlayable)
+        assertEquals(listOf("one.mp4"), mediaNames())
+    }
+
+    @Test
     fun aHeldReportFromAnotherOriginIsDroppedWhenThePendingPageCommits() {
         ready()
         browser.openUrl("https://a.example/", Placement.CURRENT_TAB); idle()
@@ -2400,8 +2591,8 @@ class BrowserCoordinatorTest {
         assertEquals(MediaKind.VIDEO, request.kind)
         assertEquals(FakeEngine.USER_AGENT, request.userAgent)
         assertEquals("https://example.org", request.origin.referrer)
-        assertEquals("example.org", request.origin.pageHost)
         assertTrue(request.origin.secure)
+        assertFalse(request.origin.onDevice)
         assertEquals("clip.mp4", request.name)
         assertEquals("cdn.example.org", request.site)
         // An entry the page does not have.
@@ -2970,6 +3161,7 @@ class BrowserCoordinatorTest {
         const val GATE_TIMEOUT_SECONDS = 10L
         const val TEST_WAIT_MS = 5_000L
         const val SHORT_TIMEOUT_MS = 1_000L
+        const val TAB_ORDER_PAUSE_MS = 4_000L
         /** Longer than any test: a request does not time out unless the test means it to. */
         const val LONG_TIMEOUT_MS = 10L * 60 * 1000
     }

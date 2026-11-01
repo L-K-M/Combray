@@ -195,7 +195,7 @@ class MediaPlayerTest {
     /** Check 6: the network rules, for pages the fixtures cannot serve through the engine. */
     @Test
     fun publicPagesCannotSendThePlayerToThisDevice() {
-        // Mixed content from an https page, then the private network rule from a public http page.
+        // Mixed content from an https page, then the device rule from an http page elsewhere.
         for ((page, referrer) in listOf("https://example.org/" to "https://example.org", "http://example.org/" to "http://example.org")) {
             val request = PlaybackRequest(
                 Fixtures.clip(key).toHttpUrl(),

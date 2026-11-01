@@ -9,8 +9,9 @@
 #
 # Build first: scripts/build-native.sh, then ./gradlew assembleDebug assembleDebugAndroidTest.
 # Results: build/device-checks/<UTC time>/ (or $COMBRAY_RESULTS): raw instrumentation output per
-# run, logcat and summary.md. Exits 1 when any check failed, a run produced no results or a run
-# stopped early.
+# run, logcat, the fixture server's request log (fixtures.log) and summary.md, which also lists
+# every failed report-only check and every check slower than 30 s. Exits 1 when any check failed,
+# a run produced no results or a run stopped early; a failed report or a slow check does not.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -178,6 +179,46 @@ install "$TEST_APK"
 "${ADB[@]}" logcat -v threadtime > "$RESULTS/logcat.txt" &
 PIDS+=("$!")
 
+# On a fresh emulator the global configuration once changed (screen height 648dp to 599dp) just as
+# the first class started, and AboutTest's dialog then showed nothing for its whole wait. Start
+# the classes only once the configuration has held for a few seconds; device.txt records it.
+CONFIG_STABLE_SECONDS=5
+device_configuration() {
+    "${ADB[@]}" shell am get-config 2>/dev/null | tr -d '\r' | grep "^config:" || true
+}
+
+wait_for_stable_configuration() {
+    local previous="" current held=0
+    for _ in $(seq 1 120); do
+        current="$(device_configuration)"
+        if [ -n "$current" ] && [ "$current" = "$previous" ]; then
+            held=$((held + 1))
+            [ "$held" -lt "$CONFIG_STABLE_SECONDS" ] || return 0
+        else
+            held=0
+        fi
+        previous="$current"
+        sleep 1
+    done
+    echo "!! the display configuration did not settle" >&2
+    exit 1
+}
+
+wait_for_stable_configuration
+device_configuration | sed 's/^config: /config=/' >> "$RESULTS/device.txt"
+
+# A check that fails can leave a screenshot and window list in the app's files/failure-evidence
+# (AboutTest does). Move them next to the run's output, outside the *.txt files the summary reads.
+FAILURE_EVIDENCE="files/failure-evidence"
+collect_failure_evidence() {
+    local name="$1" file
+    for file in $("${ADB[@]}" shell run-as "$PACKAGE" ls "$FAILURE_EVIDENCE" 2>/dev/null | tr -d '\r'); do
+        mkdir -p "$RESULTS/$name-failure"
+        "${ADB[@]}" exec-out run-as "$PACKAGE" cat "$FAILURE_EVIDENCE/$file" > "$RESULTS/$name-failure/$file"
+    done
+    "${ADB[@]}" shell run-as "$PACKAGE" rm -rf "$FAILURE_EVIDENCE" 2>/dev/null || true
+}
+
 # run NAME ARGS...: one instrumentation run; raw output kept for the summary.
 run() {
     local name="$1"
@@ -188,6 +229,7 @@ run() {
     "${ADB[@]}" shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null || true
     "${ADB[@]}" shell am instrument -w -r "$@" "$RUNNER" > "$RESULTS/$name.txt" 2>&1 || true
     grep -E "^(OK|FAILURES|Tests run)" "$RESULTS/$name.txt" | tail -2 || true
+    grep -q "^OK (" "$RESULTS/$name.txt" || collect_failure_evidence "$name"
 }
 
 if [ "$#" -gt 1 ]; then

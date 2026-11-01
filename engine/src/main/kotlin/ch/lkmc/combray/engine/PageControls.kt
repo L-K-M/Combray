@@ -24,6 +24,9 @@ sealed interface PageControlContent {
     /** A long-press on a link and/or image; answer with [ControlResponse.Dismiss] after acting. */
     data class LinkMenu(val link: String?, val image: String?) : PageControlContent
 
+    /** A text field whose native context menu permits Paste. */
+    data object PasteMenu : PageControlContent
+
     /**
      * HTTP authentication for a navigation. [origin] is the server asking (scheme, host, port),
      * which may not be the page that linked there. The load waits for the answer.
@@ -61,6 +64,11 @@ sealed interface ControlResponse {
         override fun toString() = "Credentials(username=$username, password=<redacted>)"
     }
 
+    /** Clipboard text read after choosing Paste; it can contain a password. */
+    data class Paste(val text: String) : ControlResponse {
+        override fun toString() = "Paste(<redacted>)"
+    }
+
     /** Cancel or Back: Servo's default response. Stay on a leave-page question, where Servo's default would leave. */
     data object Dismiss : ControlResponse
 
@@ -83,6 +91,10 @@ sealed interface ControlResponse {
                 put("type", "credentials")
                 put("username", username)
                 put("password", password)
+            }
+            is Paste -> {
+                put("type", "paste")
+                put("text", text)
             }
             Dismiss -> put("type", "dismiss")
         }
