@@ -35,6 +35,7 @@ pub mod pdf;
 mod profile;
 pub mod reload_pull;
 mod userinfo;
+mod wakeup;
 
 #[cfg(target_os = "android")]
 mod commands;
