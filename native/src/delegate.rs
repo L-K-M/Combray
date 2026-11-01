@@ -4,8 +4,10 @@
 //! `WebView` from there risks re-entrant `RefCell` borrows, so the delegate only records owned,
 //! identified copies of each notification. The engine processes the queue after the spin.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use servo::AllowOrDenyRequest;
@@ -115,14 +117,29 @@ pub enum DelegateEvent {
 
 pub type DelegateQueue = Rc<RefCell<VecDeque<DelegateEvent>>>;
 
+const MAX_DIAGNOSTIC_MESSAGES: usize = 128;
+const MAX_DIAGNOSTIC_CHARS: usize = 4096;
+const MAX_DIAGNOSTIC_BYTES: u64 = 256 * 1024;
+
 pub struct TabDelegate {
     view: ViewKey,
     queue: DelegateQueue,
+    diagnostic_path: Option<PathBuf>,
+    diagnostic_messages: Cell<usize>,
 }
 
 impl TabDelegate {
-    pub fn new(view: ViewKey, queue: DelegateQueue) -> Self {
-        Self { view, queue }
+    pub fn new(view: ViewKey, queue: DelegateQueue, profile: &Path) -> Self {
+        let diagnostic_path = profile
+            .join("capture-page-errors")
+            .is_file()
+            .then(|| profile.join("page-errors.jsonl"));
+        Self {
+            view,
+            queue,
+            diagnostic_path,
+            diagnostic_messages: Cell::new(0),
+        }
     }
 
     fn push(&self, event: DelegateEvent) {
@@ -131,6 +148,44 @@ impl TabDelegate {
 }
 
 impl WebViewDelegate for TabDelegate {
+    fn show_console_message(
+        &self,
+        _webview: WebView,
+        level: servo::ConsoleLogLevel,
+        message: String,
+    ) {
+        let Some(path) = &self.diagnostic_path else {
+            return;
+        };
+        if self.diagnostic_messages.get() >= MAX_DIAGNOSTIC_MESSAGES {
+            return;
+        }
+        self.diagnostic_messages
+            .set(self.diagnostic_messages.get() + 1);
+
+        // Private, explicitly enabled investigation output; never page text in logcat.
+        let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        else {
+            return;
+        };
+        let record = serde_json::json!({
+            "tab": self.view.tab,
+            "generation": self.view.generation,
+            "level": format!("{level:?}"),
+            "message": message.chars().take(MAX_DIAGNOSTIC_CHARS).collect::<String>(),
+        })
+        .to_string();
+        if file.metadata().map_or(true, |metadata| {
+            metadata.len().saturating_add(record.len() as u64 + 1) > MAX_DIAGNOSTIC_BYTES
+        }) {
+            return;
+        }
+        let _ = writeln!(file, "{record}");
+    }
+
     fn notify_input_event_handled(
         &self,
         _webview: WebView,
