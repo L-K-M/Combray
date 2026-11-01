@@ -239,6 +239,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A refused link in Reader keeps the article open instead of discarding it.
 - Selecting or swiping tabs no longer reorders them. Open tabs keep creation
   order across pauses and restarts; history stays recent-first.
 - Show the keyboard for fields inside shadow roots, and offer Paste when

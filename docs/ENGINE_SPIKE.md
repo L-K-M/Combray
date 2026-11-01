@@ -1931,3 +1931,33 @@ upward fling. Its geometry check now uses the existing gesture cancellation
 before jumping, as the top-jump check already does. Touch, resize and paint
 assertions remain; browser/native behavior is unchanged. Follow-up CI is
 tracked in [PR #173](https://github.com/L-K-M/Combray/pull/173).
+
+## Refused Reader links (1 November 2026)
+
+Recovered only #44's rejected-link handling. Reader extraction admits an
+http(s) prefix, not a complete address-policy decision: an anchor with
+`href="https://"` survives extraction but cannot navigate. The UI closed
+the article before checking that decision. It now closes only on acceptance;
+external schemes remain outside Reader's supported links.
+
+The real-Servo regression was committed first in [PR #176](https://github.com/L-K-M/Combray/pull/176).
+[Initial Engine CI](https://github.com/L-K-M/Combray/actions/runs/41304317615)
+built both ABIs. All seven existing Reader checks passed; the new eighth
+failed at the retained-article assertion (`Ready` expected, `null` actual),
+after confirming the extracted malformed link. The same regression checks
+the unchanged address and tab count after the fix.
+
+Local Linux x86_64, JDK 21 / SDK 37, unchanged engine pin
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests -p test_fixture_server.py
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Initial local Kotlin gates and the fixture-server checks pass. The fixed
+head reruns those gates and full Engine CI before merge. There is no local
+device or KVM; no local runtime or physical-phone result is claimed. No
+personal history or live service was used.

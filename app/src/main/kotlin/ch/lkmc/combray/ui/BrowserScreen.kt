@@ -462,8 +462,11 @@ fun BrowserScreen(
                         onScroll = { barDirection = it },
                         // A link leaves reader view and opens in the tab, through the address policy.
                         onOpenLink = { url ->
-                            browser.closeReader()
-                            (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let { browser.openUrlInTab(reader.tabId, it.url) }
+                            // Refused links must not discard the article.
+                            (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let {
+                                browser.closeReader()
+                                browser.openUrlInTab(reader.tabId, it.url)
+                            }
                         },
                         onClose = browser::closeReader,
                     )
