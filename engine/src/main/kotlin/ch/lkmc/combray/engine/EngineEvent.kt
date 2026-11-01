@@ -98,6 +98,11 @@ sealed interface EngineEvent {
 
     data class NavigationRequested(val view: ViewRef, val request: Long, val url: String) : EngineEvent
 
+    /** The retained document, or the new empty initial document. */
+    data class LoadingStopped(val view: ViewRef, val request: Long, val document: Long) : EngineEvent
+
+    data class LoadingStopFailed(val view: ViewRef, val request: Long) : EngineEvent
+
     data class PageNavigationRequested(val view: ViewRef, val url: String) : EngineEvent
 
     /** The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed. */
@@ -246,6 +251,8 @@ sealed interface EngineEvent {
                 "tab_closed" -> TabClosed(event.view())
                 "tab_opened" -> TabOpened(event.view(), ViewRef(event.long("opener_tab"), event.long("opener_generation")))
                 "navigation_requested" -> NavigationRequested(event.view(), event.long("request"), event.string("url"))
+                "loading_stopped" -> LoadingStopped(event.view(), event.long("request"), event.long("document"))
+                "loading_stop_failed" -> LoadingStopFailed(event.view(), event.long("request"))
                 "page_navigation_requested" -> PageNavigationRequested(event.view(), event.string("url"))
                 "external_link" -> ExternalLink(event.view(), event.string("url"))
                 "popup_blocked" -> PopupBlocked(event.view())

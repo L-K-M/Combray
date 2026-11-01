@@ -131,6 +131,7 @@ fun BrowserScreen(
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val tab = state.activeTab
+    val readerDisplay = if (state.reader == null) ReaderDisplay.PAGE else ReaderDisplay.ARTICLE
     val menu = remember(tab?.id) { ToolbarMenuState() }
     LaunchedEffect(sheet) { menu.dismiss() }
     val page = tab?.page
@@ -197,6 +198,7 @@ fun BrowserScreen(
                 }
                 is Notice.Problem -> snackbar.showSnackbar(notice.message)
                 Notice.AddressNotOpened -> snackbar.showSnackbar(notOpened)
+                Notice.StopFailed -> snackbar.showSnackbar(resources.getString(R.string.notice_stop_failed))
                 is Notice.OpenedInBackground -> {
                     // As for a close, a newer notice replaces the last Show instead of queuing behind it.
                     snackbar.currentSnackbarData?.dismiss()
@@ -379,7 +381,7 @@ fun BrowserScreen(
     val selectMenuAction: (MoreAction) -> Unit = select@{ action ->
         menu.dismiss()
         // A page can replace itself while the finger is held over a menu row.
-        if (action !in moreActions(tab, state.reader != null)) return@select
+        if (action !in moreActions(tab, readerDisplay)) return@select
         when (action) {
             MoreAction.FORWARD -> browser.goForward()
             MoreAction.RELOAD -> browser.reload()
@@ -510,7 +512,7 @@ fun BrowserScreen(
                 onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
                 onAddress = editAddress,
                 onCloseTab = { tab?.let { browser.closeTab(it.id) } },
-                readerOpen = state.reader != null,
+                readerDisplay = readerDisplay,
                 onStop = { tab?.let { browser.stopLoading(it.id) } },
                 onReader = { if (state.reader != null) browser.closeReader() else browser.openReader() },
                 onNewTab = newTab,
@@ -576,7 +578,7 @@ fun BrowserScreen(
                     .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
             )
         }
-        ToolbarMenu(menu, tab, state.reader != null, selectMenuAction)
+        ToolbarMenu(menu, tab, readerDisplay, selectMenuAction)
     }
 
     val dismiss = { sheet = Sheet.NONE }

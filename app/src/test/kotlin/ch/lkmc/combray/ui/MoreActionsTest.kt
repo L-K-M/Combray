@@ -20,29 +20,29 @@ class MoreActionsTest {
                 MoreAction.TEXT_SIZE,
                 MoreAction.SETTINGS,
             ),
-            moreActions(PAGE.copy(canGoForward = true), readerOpen = false),
+            moreActions(PAGE.copy(canGoForward = true), readerDisplay = ReaderDisplay.PAGE),
         )
     }
 
     @Test
     fun playAppearsOnlyWithMediaBetweenFindAndTextSize() {
-        assertEquals(false, MoreAction.PLAY_MEDIA in moreActions(PAGE, readerOpen = false))
+        assertEquals(false, MoreAction.PLAY_MEDIA in moreActions(PAGE, readerDisplay = ReaderDisplay.PAGE))
         val withMedia = PAGE.copy(
             media = listOf(PlayableMedia(1, MediaKind.VIDEO, "clip.mp4", "example.org")),
             mediaPage = MediaPageRef("tab", 1),
         )
         assertEquals(
             listOf(MoreAction.FIND, MoreAction.PLAY_MEDIA, MoreAction.TEXT_SIZE),
-            moreActions(withMedia, readerOpen = false).dropWhile { it != MoreAction.FIND }.take(3),
+            moreActions(withMedia, readerDisplay = ReaderDisplay.PAGE).dropWhile { it != MoreAction.FIND }.take(3),
         )
         // Reader view covers the page, not its media.
-        assertEquals(true, MoreAction.PLAY_MEDIA in moreActions(withMedia, readerOpen = true))
+        assertEquals(true, MoreAction.PLAY_MEDIA in moreActions(withMedia, readerDisplay = ReaderDisplay.ARTICLE))
     }
 
     /** Find searches the page, which reader view covers. */
     @Test
     fun readerViewHasNoFind() {
-        val rows = moreActions(PAGE, readerOpen = true)
+        val rows = moreActions(PAGE, readerDisplay = ReaderDisplay.ARTICLE)
         assertEquals(false, MoreAction.FIND in rows)
         assertEquals(true, MoreAction.SHARE in rows)
     }
@@ -51,13 +51,13 @@ class MoreActionsTest {
     fun aNewTabHomeHasNoPageRows() {
         assertEquals(
             listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
-            moreActions(PAGE.copy(url = null, title = null, hasView = false), readerOpen = false),
+            moreActions(PAGE.copy(url = null, title = null, hasView = false), readerDisplay = ReaderDisplay.PAGE),
         )
     }
 
     @Test
     fun withoutATabThereIsNothingToClose() {
-        assertEquals(listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerOpen = false))
+        assertEquals(listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerDisplay = ReaderDisplay.PAGE))
     }
 
     private companion object {

@@ -85,10 +85,12 @@ import ch.lkmc.combray.core.browser.TabStep
 import ch.lkmc.combray.core.integration.SaveStatus
 import kotlin.math.abs
 
+enum class ReaderDisplay { PAGE, ARTICLE }
+
 /**
  * Back, address, Save, Close tab, New tab, Recent and Menu within thumb
  * reach. On the new-tab home the bar is a dock instead: one full-width search affordance and
- * labeled Hister, Karakeep, +, Recent and More actions ([onHister] and [onKarakeep] open the
+ * labeled Hister, Karakeep, +, Recent and Menu actions ([onHister] and [onKarakeep] open the
  * Recent sheet on those scopes). A sideways swipe along the bar steps through open tabs
  * ([onSwipeTab]); the Recent sheet stays the visible way to switch, so nothing depends on the
  * gesture.
@@ -106,7 +108,7 @@ fun BottomBar(
     onAddress: () -> Unit,
     onSave: () -> Unit,
     onCloseTab: () -> Unit,
-    readerOpen: Boolean,
+    readerDisplay: ReaderDisplay,
     onStop: () -> Unit,
     onReader: () -> Unit,
     /** Recent on its Hister scope; used by the home dock. */
@@ -207,7 +209,7 @@ fun BottomBar(
                         homeSearch()
                     } else if (stacked || home) {
                         AddressChip(
-                             tab, histerStored, onAddress, onCopyAddress, readerOpen, onStop, onReader,
+                             tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader,
                             hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
                             modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
                         )
@@ -229,7 +231,7 @@ fun BottomBar(
                         IconButton(onClick = onBack, enabled = backEnabled) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
-                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, readerOpen, onStop, onReader, Modifier.weight(1f))
+                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, Modifier.weight(1f))
                         SaveButton(saveStatus, enabled = tab?.url != null, onSave)
                         IconButton(onClick = onCloseTab) {
                             Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_tab))
@@ -432,7 +434,7 @@ private fun AddressChip(
     histerStored: Boolean,
     onClick: () -> Unit,
     onCopy: () -> Unit,
-    readerOpen: Boolean,
+    readerDisplay: ReaderDisplay,
     onStop: () -> Unit,
     onReader: () -> Unit,
     modifier: Modifier,
@@ -503,8 +505,9 @@ private fun AddressChip(
                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_stop_loading))
                     }
                 } else {
-                    IconToggleButton(checked = readerOpen, onCheckedChange = { onReader() }) {
-                        Icon(ReaderIcon, contentDescription = stringResource(if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view))
+                    val article = readerDisplay == ReaderDisplay.ARTICLE
+                    IconToggleButton(checked = article, onCheckedChange = { onReader() }) {
+                        Icon(ReaderIcon, contentDescription = stringResource(if (article) R.string.action_leave_reader_view else R.string.action_reader_view))
                     }
                 }
             }

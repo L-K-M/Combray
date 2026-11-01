@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -73,6 +75,9 @@ internal class ToolbarMenuState {
     var expanded by mutableStateOf(false)
         private set
     var anchor by mutableStateOf(Rect.Zero)
+    var gestureEpoch by mutableLongStateOf(0L)
+        private set
+    val isDragging get() = pointer != null
     private var pointer by mutableStateOf<Offset?>(null)
     private val rows = mutableStateMapOf<MoreAction, Rect>()
 
@@ -93,6 +98,8 @@ internal class ToolbarMenuState {
     fun remove(action: MoreAction) { rows.remove(action) }
 
     fun dismiss() {
+        // Restart the button's handler so a held finger cannot reopen a dismissed menu.
+        gestureEpoch++
         expanded = false
         pointer = null
         rows.clear()
@@ -106,7 +113,7 @@ internal fun ToolbarMenuButton(state: ToolbarMenuState, onSelect: (MoreAction) -
         onClick = state::toggle,
         modifier = Modifier
             .onGloballyPositioned { state.anchor = it.boundsInRoot() }
-            .pointerInput(state) {
+            .pointerInput(state, state.gestureEpoch) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     var dragging = false
@@ -150,7 +157,7 @@ internal fun ToolbarMenuButton(state: ToolbarMenuState, onSelect: (MoreAction) -
 
 /** In-window overlay: no sheet transition, popup window or focus handoff delays selection. */
 @Composable
-internal fun ToolbarMenu(state: ToolbarMenuState, tab: ActiveTab?, readerOpen: Boolean, onSelect: (MoreAction) -> Unit) {
+internal fun ToolbarMenu(state: ToolbarMenuState, tab: ActiveTab?, readerDisplay: ReaderDisplay, onSelect: (MoreAction) -> Unit) {
     if (!state.expanded) return
     BackHandler(onBack = state::dismiss)
     val density = LocalDensity.current
@@ -161,7 +168,16 @@ internal fun ToolbarMenu(state: ToolbarMenuState, tab: ActiveTab?, readerOpen: B
     BoxWithConstraints(
         Modifier.fillMaxSize().imePadding()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .onGloballyPositioned { viewport = it.boundsInRoot() },
+            .onGloballyPositioned { viewport = it.boundsInRoot() }
+            .pointerInput(state) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    // The first finger belongs to the button; a new overlay press is another finger.
+                    if (!state.isDragging) return@awaitEachGesture
+                    down.consume()
+                    state.dismiss()
+                }
+            },
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = MENU_SCRIM_ALPHA))
             .clickable(interactionSource = null, indication = null, onClick = state::dismiss)
@@ -179,15 +195,15 @@ internal fun ToolbarMenu(state: ToolbarMenuState, tab: ActiveTab?, readerOpen: B
             contentColor = MaterialTheme.colorScheme.onSurface,
             shadowElevation = 8.dp,
         ) {
-            MoreActions(tab, readerOpen, onSelect, state)
+            MoreActions(tab, readerDisplay, onSelect, state)
         }
     }
 }
 
 @Composable
-internal fun MoreActions(tab: ActiveTab?, readerOpen: Boolean, onSelect: (MoreAction) -> Unit, state: ToolbarMenuState? = null) {
+internal fun MoreActions(tab: ActiveTab?, readerDisplay: ReaderDisplay, onSelect: (MoreAction) -> Unit, state: ToolbarMenuState? = null) {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-        for (action in moreActions(tab, readerOpen)) {
+        for (action in moreActions(tab, readerDisplay)) {
             DisposableEffect(state, action) { onDispose { state?.remove(action) } }
             val highlighted = state?.selected == action
             ListItem(
@@ -215,13 +231,13 @@ internal enum class MoreAction(val icon: ImageVector, @StringRes val label: Int)
     SETTINGS(Icons.Filled.Settings, R.string.action_settings),
 }
 
-internal fun moreActions(tab: ActiveTab?, readerOpen: Boolean): List<MoreAction> = buildList {
+internal fun moreActions(tab: ActiveTab?, readerDisplay: ReaderDisplay): List<MoreAction> = buildList {
     if (tab?.canGoForward == true) add(MoreAction.FORWARD)
     if (tab?.url != null) {
         add(MoreAction.RELOAD)
         add(MoreAction.SHARE)
         add(MoreAction.PAGE_INFO)
-        if (!readerOpen) add(MoreAction.FIND)
+        if (readerDisplay == ReaderDisplay.PAGE) add(MoreAction.FIND)
     }
     if (tab?.media?.isNotEmpty() == true) add(MoreAction.PLAY_MEDIA)
     add(MoreAction.TEXT_SIZE)

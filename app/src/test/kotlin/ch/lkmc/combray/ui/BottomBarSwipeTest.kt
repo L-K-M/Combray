@@ -287,7 +287,7 @@ class BottomBarSwipeTest {
                             onAddress = { clicks += "address" },
                             onSave = { clicks += "save" },
                             onCloseTab = { clicks += "close" },
-                            readerOpen = false,
+                            readerDisplay = ReaderDisplay.PAGE,
                             onStop = { clicks += "stop" },
                             onReader = { clicks += "reader" },
                             onHister = { clicks += "hister" },

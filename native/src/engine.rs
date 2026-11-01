@@ -32,8 +32,8 @@ use servo::{
     InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
     KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
     Opts, PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
-    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme, TouchEvent,
-    TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
+    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, StopLoadingError, Theme,
+    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
     WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
@@ -575,6 +575,12 @@ impl Engine {
                 }
             },
             Command::Reload { tab } => self.reload(tab),
+            Command::StopLoading { view, request } => self.stop_loading(view, request),
+            Command::LoadingStopped {
+                view,
+                request,
+                result,
+            } => self.loading_stopped(view, request, result),
             Command::ReloadPage { view, document } => {
                 let current = self.tabs.get(&view.tab).is_some_and(|tab| {
                     tab.view == view
@@ -1177,6 +1183,42 @@ impl Engine {
         found.webview.reload();
         // A reload's document is a new one, whose media loads can overtake it like any other.
         found.pending_media.navigation_requested(now_ms);
+    }
+
+    fn stop_loading(&self, view: ViewKey, request: i64) {
+        let Some(tab) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
+            self.emit(EngineEvent::LoadingStopFailed { view, request });
+            return;
+        };
+        let wake = self.wake.clone();
+        let result = tab.webview.stop_loading(move |result| {
+            // The reply may use another thread; view handles and event emission stay on their owner.
+            let _ = wake.send(Command::LoadingStopped {
+                view,
+                request,
+                result: result.map(u64::from),
+            });
+        });
+        if result.is_err() {
+            self.emit(EngineEvent::LoadingStopFailed { view, request });
+        }
+    }
+
+    fn loading_stopped(&self, view: ViewKey, request: i64, result: Result<u64, StopLoadingError>) {
+        if !self.tabs.get(&view.tab).is_some_and(|tab| tab.view == view) {
+            return;
+        }
+        match result {
+            Ok(document) => self.emit(EngineEvent::LoadingStopped {
+                view,
+                request,
+                document,
+            }),
+            Err(error) => {
+                warn!("stop loading failed: {error:?}");
+                self.emit(EngineEvent::LoadingStopFailed { view, request });
+            },
+        }
     }
 
     // --- Input (always to the active view) ---------------------------------------------------
