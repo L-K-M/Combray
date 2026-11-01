@@ -67,6 +67,7 @@ use crate::reload_pull::{
     DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
     StartPosition,
 };
+use crate::wakeup::{self, PaintRetry};
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -80,8 +81,6 @@ pub struct EngineConfig {
     pub density: f32,
 }
 
-/// Longest sleep between event loop iterations when nothing wakes the engine.
-const IDLE_TICK: Duration = Duration::from_millis(250);
 /// Reports buffered per tab for documents whose commit has not been seen yet.
 const MAX_HELD_REPORTS: usize = 64;
 /// Minimum interval between `painted` progress events per tab.
@@ -106,7 +105,12 @@ pub fn run(
 ) {
     let mut engine = Engine::new(config, wake, sink);
     loop {
-        let command = match commands.recv_timeout(engine.next_timeout()) {
+        // App commands and Servo's waker share this channel; only local deadlines need a timer.
+        let received = match engine.next_timeout() {
+            Some(timeout) => commands.recv_timeout(timeout),
+            None => commands.recv().map_err(RecvTimeoutError::from),
+        };
+        let command = match received {
             Ok(command) => Some(command),
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => break,
@@ -512,8 +516,9 @@ impl Engine {
         });
     }
 
-    fn next_timeout(&self) -> Duration {
+    fn next_timeout(&self) -> Option<Duration> {
         let now = Instant::now();
+        let now_ms = self.now_ms();
         let controls = self
             .page_controls
             .values()
@@ -531,14 +536,29 @@ impl Engine {
                     longest,
                 )
             });
-        self.pending_captures
+        let media = self
+            .tabs
+            .values()
+            .filter_map(|tab| tab.pending_media.next_expiry_ms())
+            .map(|deadline| Duration::from_millis(deadline.saturating_sub(now_ms)));
+        let pull_release = self.reload_pull_release.map(|(_, _, deadline)| deadline);
+        let until_deadline = self
+            .pending_captures
             .values()
             .map(|pending| pending.deadline)
             .chain(controls)
+            .chain(pull_release)
             .map(|deadline| deadline.saturating_duration_since(now))
             .chain(deferred)
-            .min()
-            .map_or(IDLE_TICK, |until_deadline| until_deadline.min(IDLE_TICK))
+            .chain(media)
+            .min();
+        // `pump` ends in `paint`; a usable surface with pending paint needs a retry.
+        let paint = if self.needs_paint && self.runtime.is_some() && self.surface.usable() {
+            PaintRetry::Pending
+        } else {
+            PaintRetry::NotNeeded
+        };
+        wakeup::sleep_limit(until_deadline, paint)
     }
 
     fn handle(&mut self, command: Command) -> Flow {

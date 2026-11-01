@@ -1931,3 +1931,35 @@ upward fling. Its geometry check now uses the existing gesture cancellation
 before jumping, as the top-jump check already does. Touch, resize and paint
 assertions remain; browser/native behavior is unchanged. Follow-up CI is
 tracked in [PR #173](https://github.com/L-K-M/Combray/pull/173).
+
+## Deadline-driven engine sleep (1 November 2026)
+
+Recovered only #88's idle scheduling and host-test design. Its throttling
+changes are superseded: Servo 0.7 hides/throttles whole views, including
+later documents and frames. That behavior is unchanged here.
+
+The engine waits on its command channel, which also carries Servo wakeups.
+Timed waits retain capture deadlines, deferred capture retries, leave-page
+questions, released reload pulls, media holds and failed paints. Media
+windows are inclusive; their timer wakes one millisecond after the last
+active hold ends. A usable surface retries failed paint after 250 ms;
+an absent surface waits for its lifecycle command.
+
+Local Linux x86_64, Rust 1.97.1, unchanged Servo pin
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`:
+
+```sh
+cd native
+cargo fmt --check
+cargo test --lib
+cd ..
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Two scheduling assertions failed against the extracted polling policy,
+then all four passed after removing the idle tick. All 145 native host
+checks pass, including three new media-expiry cases. Android builds and
+real-Servo fixtures remain merge gates in the Engine PR workflow. This
+host has no device or KVM; no local device, idle-CPU or battery result is
+claimed. No personal history or live service was used.
