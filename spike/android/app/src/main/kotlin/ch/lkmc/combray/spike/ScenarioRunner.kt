@@ -69,6 +69,7 @@ class ScenarioRunner(private val app: HarnessApplication) {
             awaitEngineReady()
             when (name) {
                 "core" -> core(report)
+                "page-probe" -> probePage(report, requireNotNull(argument))
                 "diag-paint" -> diagnosePaint(report)
                 "diag-tail" -> diagnoseCoreTail(report)
                 "diag-tail2" -> diagnoseLargePageDwell(report, argument)
@@ -88,6 +89,40 @@ class ScenarioRunner(private val app: HarnessApplication) {
             lastScenarioEnd = events.size()
             active = false
         }
+    }
+
+    private fun probePage(report: Report, address: String) {
+        val tab = (engine.tabs().maxOfOrNull { it.tab } ?: 0L) + 1
+        engine.createTab(tab, address)
+        select(tab)
+        SystemClock.sleep(60_000)
+        val probe = evaluate(tab, """
+            (() => ({
+                origin: location.origin,
+                ready: document.readyState,
+                title: document.title,
+                viewport: [innerWidth, innerHeight],
+                scroll: [scrollX, scrollY, document.documentElement.scrollHeight],
+                elements: Array.from(document.querySelectorAll(
+                    'body,main,header,section,#main-content,#status-card,#turnstile-container,iframe'
+                )).slice(0, 30).map(el => {
+                    const box = el.getBoundingClientRect();
+                    const style = getComputedStyle(el);
+                    return {
+                        tag: el.tagName, id: el.id.slice(0, 64),
+                        box: [box.x, box.y, box.width, box.height],
+                        display: style.display, visibility: style.visibility,
+                        opacity: style.opacity, color: style.color,
+                        background: style.backgroundColor, position: style.position,
+                        transform: style.transform, overflow: style.overflow
+                    };
+                })
+            }))()
+        """.trimIndent())
+        File(app.filesDir, "page-probe.json").writeText(probe.toString())
+        report.record("page-probe-captured", CheckStatus.PASSED,
+            JSONObject().put("observations_only", true))
+        report.screenshot("page-probe")
     }
 
     // --- Core scenario ----------------------------------------------------------------------------
