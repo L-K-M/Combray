@@ -22,6 +22,9 @@ import java.util.concurrent.TimeUnit
 
 const val DEFAULT_CAPTURE_BYTES = 256 * 1024
 const val CAPTURE_TIMEOUT_MS = 30_000
+private const val PAGE_PROBE_SETTLE_MS = 60_000L
+private const val MAX_PROBE_ELEMENTS = 30
+private const val MAX_PROBE_RESOURCES = 100
 
 /**
  * M0 checks against the real engine. `core` runs inside the app; lifecycle phases are
@@ -69,6 +72,7 @@ class ScenarioRunner(private val app: HarnessApplication) {
             awaitEngineReady()
             when (name) {
                 "core" -> core(report)
+                "page-probe" -> probePage(report, requireNotNull(argument))
                 "diag-paint" -> diagnosePaint(report)
                 "diag-tail" -> diagnoseCoreTail(report)
                 "diag-tail2" -> diagnoseLargePageDwell(report, argument)
@@ -88,6 +92,49 @@ class ScenarioRunner(private val app: HarnessApplication) {
             lastScenarioEnd = events.size()
             active = false
         }
+    }
+
+    private fun probePage(report: Report, address: String) {
+        val tab = (engine.tabs().maxOfOrNull { it.tab } ?: 0L) + 1
+        engine.createTab(tab, address)
+        select(tab)
+        SystemClock.sleep(PAGE_PROBE_SETTLE_MS)
+        val probe = evaluate(tab, """
+            (() => ({
+                origin: location.origin, ready: document.readyState, title: document.title,
+                viewport: [innerWidth, innerHeight],
+                scroll: [scrollX, scrollY, document.documentElement.scrollHeight],
+                statuses: ['issue-title','status-content','turnstile-status','progress-count','progress-text']
+                    .map(id => ({id, text: document.getElementById(id)?.innerText?.slice(0,2048)})),
+                frames: Array.from(document.querySelectorAll('iframe')).map(frame => ({
+                    origin: new URL(frame.src || 'about:blank', location.href).origin,
+                    title: frame.title, sandbox: frame.getAttribute('sandbox')
+                })),
+                resources: performance.getEntriesByType('resource').slice(0,$MAX_PROBE_RESOURCES).map(entry => ({
+                    origin: new URL(entry.name,location.href).origin,
+                    kind: entry.initiatorType, duration: entry.duration,
+                    status: entry.responseStatus, bytes: entry.encodedBodySize
+                })),
+                elements: Array.from(document.querySelectorAll(
+                    'body,main,header,section,h1,#background-pattern,#main-content,#status-card,#turnstile-container,.main-wrapper,.main-content,iframe'
+                )).slice(0,$MAX_PROBE_ELEMENTS).map(el => {
+                    const box = el.getBoundingClientRect();
+                    const style = getComputedStyle(el);
+                    return {
+                        tag: el.tagName, id: el.id.slice(0,64),
+                        box: [box.x,box.y,box.width,box.height],
+                        display: style.display, visibility: style.visibility,
+                        opacity: style.opacity, color: style.color,
+                        background: style.backgroundColor, position: style.position,
+                        transform: style.transform, overflow: style.overflow
+                    };
+                })
+            }))()
+        """.trimIndent())
+        File(app.filesDir, "page-probe.json").writeText(probe.toString())
+        report.record("page-probe-captured", CheckStatus.PASSED,
+            JSONObject().put("observations_only", true))
+        report.screenshot("page-probe")
     }
 
     // --- Core scenario ----------------------------------------------------------------------------
