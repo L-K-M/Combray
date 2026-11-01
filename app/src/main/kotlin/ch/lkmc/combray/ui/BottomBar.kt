@@ -35,8 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Badge
@@ -45,6 +44,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -86,7 +86,7 @@ import ch.lkmc.combray.core.integration.SaveStatus
 import kotlin.math.abs
 
 /**
- * Back, address, Save, Share, New tab, Recent and More: every routine action within thumb
+ * Back, address, Save, Close tab, New tab, Recent and Menu within thumb
  * reach. On the new-tab home the bar is a dock instead: one full-width search affordance and
  * labeled Hister, Karakeep, +, Recent and More actions ([onHister] and [onKarakeep] open the
  * Recent sheet on those scopes). A sideways swipe along the bar steps through open tabs
@@ -105,7 +105,10 @@ fun BottomBar(
     onBack: () -> Unit,
     onAddress: () -> Unit,
     onSave: () -> Unit,
-    onShare: () -> Unit,
+    onCloseTab: () -> Unit,
+    readerOpen: Boolean,
+    onStop: () -> Unit,
+    onReader: () -> Unit,
     /** Recent on its Hister scope; used by the home dock. */
     onHister: () -> Unit,
     /** Recent on its Karakeep scope; used by the home dock. */
@@ -115,7 +118,7 @@ fun BottomBar(
     onRecent: () -> Unit,
     /** Long-press shortcut: focus the tab used before the focused one. */
     onRecentLongPress: () -> Unit,
-    onMore: () -> Unit,
+    menuButton: @Composable () -> Unit,
     onCopyAddress: () -> Unit,
     onSwipeTab: (TabStep) -> Unit,
     homeSearch: (@Composable () -> Unit)? = null,
@@ -204,14 +207,14 @@ fun BottomBar(
                         homeSearch()
                     } else if (stacked || home) {
                         AddressChip(
-                            tab, histerStored, onAddress, onCopyAddress,
+                             tab, histerStored, onAddress, onCopyAddress, readerOpen, onStop, onReader,
                             hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
                             modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
                         )
                     }
                     if (home) {
                         if (homeMode == AddressEditorMode.IDLE) {
-                            HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, onMore)
+                            HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, menuButton)
                         }
                         return@Column
                     }
@@ -226,10 +229,10 @@ fun BottomBar(
                         IconButton(onClick = onBack, enabled = backEnabled) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
-                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, Modifier.weight(1f))
+                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, readerOpen, onStop, onReader, Modifier.weight(1f))
                         SaveButton(saveStatus, enabled = tab?.url != null, onSave)
-                        IconButton(onClick = onShare, enabled = tab?.url != null) {
-                            Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                        IconButton(onClick = onCloseTab) {
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_tab))
                         }
                         IconButton(onClick = onNewTab) {
                             Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_new_tab))
@@ -266,9 +269,7 @@ fun BottomBar(
                                 Icon(TabStackIcon, contentDescription = null)
                             }
                         }
-                        IconButton(onClick = onMore) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
-                        }
+                        menuButton()
                     }
                 }
             }
@@ -307,7 +308,7 @@ private fun HomeActions(
     onNewTab: () -> Unit,
     onRecent: () -> Unit,
     onRecentLongPress: () -> Unit,
-    onMore: () -> Unit,
+    menuButton: @Composable () -> Unit,
 ) {
     FlowRow(
         Modifier.fillMaxWidth().heightIn(min = STACKED_ACTION_ROW_HEIGHT).padding(horizontal = 4.dp),
@@ -321,7 +322,7 @@ private fun HomeActions(
             }
             RecentDockAction(openTabs, tabCounter, onRecent, onRecentLongPress)
         }
-        DockAction(stringResource(R.string.action_more), onMore)
+        menuButton()
     }
 }
 
@@ -431,6 +432,9 @@ private fun AddressChip(
     histerStored: Boolean,
     onClick: () -> Unit,
     onCopy: () -> Unit,
+    readerOpen: Boolean,
+    onStop: () -> Unit,
+    onReader: () -> Unit,
     modifier: Modifier,
     @StringRes hint: Int = R.string.address_placeholder,
 ) {
@@ -450,21 +454,22 @@ private fun AddressChip(
         contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = if (url != null) onCopy else null,
-                    onLongClickLabel = if (url != null) stringResource(R.string.action_copy_address) else null,
-                    role = Role.Button,
-                )
-                .semantics(mergeDescendants = true) {
-                    contentDescription = label
-                }
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Separate targets: stopping or toggling Reader must not edit or copy the address.
+            Row(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = ACTION_TARGET)
+                    .combinedClickable(
+                        onClick = onClick,
+                        onLongClick = if (url != null) onCopy else null,
+                        onLongClickLabel = if (url != null) stringResource(R.string.action_copy_address) else null,
+                        role = Role.Button,
+                    )
+                    .semantics(mergeDescendants = true) { contentDescription = label }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             if (url != null && (tab.loadFailed || cleartext)) {
                 Icon(
                     if (tab.loadFailed) Icons.Filled.Warning else Icons.Outlined.Info,
@@ -479,6 +484,7 @@ private fun AddressChip(
                 maxLines = 1,
                 overflow = if (host != null) TextOverflow.StartEllipsis else TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
             )
             // A quiet mark that Hister accepted this page; the address stays the chip's main text.
             if (histerStored) {
@@ -489,6 +495,18 @@ private fun AddressChip(
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     modifier = Modifier.size(14.dp),
                 )
+            }
+            }
+            if (url != null) {
+                if (tab.loading) {
+                    IconButton(onClick = onStop) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_stop_loading))
+                    }
+                } else {
+                    IconToggleButton(checked = readerOpen, onCheckedChange = { onReader() }) {
+                        Icon(ReaderIcon, contentDescription = stringResource(if (readerOpen) R.string.action_leave_reader_view else R.string.action_reader_view))
+                    }
+                }
             }
         }
     }
@@ -501,10 +519,10 @@ private val BAR_HEIGHT = 64.dp
 private val ACTION_TARGET = 48.dp
 
 /** The room the address needs beside the actions to still name a site. */
-private val ADDRESS_MIN_WIDTH = 132.dp
+private val ADDRESS_MIN_WIDTH = 132.dp + ACTION_TARGET
 
 /**
- * Below this width the address gets its own row: six actions (Back, Save, Share, New tab,
+ * Below this width the address gets its own row: six actions (Back, Save, Close tab, New tab,
  * Recent, More) need 6 · 48dp, and the field needs its room beside them. The old five-action
  * rule was 400dp.
  */

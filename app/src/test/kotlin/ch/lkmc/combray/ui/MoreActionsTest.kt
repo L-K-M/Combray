@@ -14,9 +14,8 @@ class MoreActionsTest {
             listOf(
                 MoreAction.FORWARD,
                 MoreAction.RELOAD,
-                MoreAction.CLOSE_TAB,
+                MoreAction.SHARE,
                 MoreAction.PAGE_INFO,
-                MoreAction.READER,
                 MoreAction.FIND,
                 MoreAction.TEXT_SIZE,
                 MoreAction.SETTINGS,
@@ -45,13 +44,13 @@ class MoreActionsTest {
     fun readerViewHasNoFind() {
         val rows = moreActions(PAGE, readerOpen = true)
         assertEquals(false, MoreAction.FIND in rows)
-        assertEquals(true, MoreAction.READER in rows)
+        assertEquals(true, MoreAction.SHARE in rows)
     }
 
     @Test
-    fun aNewTabHomeCanBeClosedButHasNoPageRows() {
+    fun aNewTabHomeHasNoPageRows() {
         assertEquals(
-            listOf(MoreAction.CLOSE_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
+            listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
             moreActions(PAGE.copy(url = null, title = null, hasView = false), readerOpen = false),
         )
     }

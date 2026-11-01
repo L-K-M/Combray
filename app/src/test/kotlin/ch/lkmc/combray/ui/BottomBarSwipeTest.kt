@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -230,7 +231,7 @@ class BottomBarSwipeTest {
 
     private fun swipeEveryControl() {
         val bar = compose.onNodeWithTag("bar").fetchSemanticsNode().boundsInRoot
-        val controls = listOf(address()) + listOf("Back", "Save", "Share", "New tab", "Recent, 3 open tabs", "More")
+        val controls = listOf(address()) + listOf("Back", "Save", "Close tab", "New tab", "Recent, 3 open tabs", "Menu", "Reader view")
             .map { compose.onNodeWithContentDescription(it) }
         val expected = mutableListOf<TabStep>()
         controls.forEach { control ->
@@ -285,13 +286,16 @@ class BottomBarSwipeTest {
                             onBack = { clicks += "back" },
                             onAddress = { clicks += "address" },
                             onSave = { clicks += "save" },
-                            onShare = { clicks += "share" },
+                            onCloseTab = { clicks += "close" },
+                            readerOpen = false,
+                            onStop = { clicks += "stop" },
+                            onReader = { clicks += "reader" },
                             onHister = { clicks += "hister" },
                             onKarakeep = { clicks += "karakeep" },
                             onNewTab = { clicks += "new" },
                             onRecent = { clicks += "recent" },
                             onRecentLongPress = { clicks += "previous" },
-                            onMore = { clicks += "more" },
+                            menuButton = { ToolbarMenuButton(remember { ToolbarMenuState() }) { clicks += "menu" } },
                             onCopyAddress = { clicks += "copy" },
                             onSwipeTab = { steps += it },
                             homeMode = mode,

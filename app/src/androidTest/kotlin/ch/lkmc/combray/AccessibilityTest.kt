@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -55,6 +56,8 @@ import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.HomeContent
 import ch.lkmc.combray.ui.MediaEntries
 import ch.lkmc.combray.ui.MoreActions
+import ch.lkmc.combray.ui.ToolbarMenuButton
+import ch.lkmc.combray.ui.ToolbarMenuState
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
 import ch.lkmc.combray.ui.QuickLinks
@@ -92,7 +95,7 @@ class AccessibilityTest {
         }
 
         assertTargetsAreAccessible()
-        for (label in listOf("Back", "Saving to Karakeep", "Share", "New tab", "Recent, 3 open tabs", "More")) {
+        for (label in listOf("Back", "Saving to Karakeep", "Close tab", "New tab", "Recent, 3 open tabs", "Menu", "Reader view")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
@@ -106,10 +109,11 @@ class AccessibilityTest {
 
         val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
         val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
-        val more = compose.onNodeWithContentDescription("More").getUnclippedBoundsInRoot()
+        val more = compose.onNodeWithContentDescription("Menu").getUnclippedBoundsInRoot()
+        val reader = compose.onNodeWithContentDescription("Reader view").getUnclippedBoundsInRoot()
         assertTrue(address.bottom <= back.top)
         // The chip spans the actions under it.
-        assertTrue(address.left <= back.left && address.right >= more.right)
+        assertTrue(address.left <= back.left && reader.right >= more.right)
     }
 
     @Test
@@ -209,7 +213,7 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {}, {})
+                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), readerOpen = false, onSelect = {})
             }
         }
 
@@ -490,13 +494,16 @@ class AccessibilityTest {
         onBack = {},
         onAddress = onAddress,
         onSave = {},
-        onShare = {},
+        onCloseTab = {},
+        readerOpen = false,
+        onStop = {},
+        onReader = {},
         onHister = {},
         onKarakeep = {},
         onNewTab = {},
         onRecent = {},
         onRecentLongPress = {},
-        onMore = {},
+        menuButton = { ToolbarMenuButton(remember { ToolbarMenuState() }, {}) },
         onCopyAddress = onCopyAddress,
         onSwipeTab = {},
         // Required, not just preferred: the reference emulator is 360dp wide, and a wider bar must
@@ -516,7 +523,7 @@ class AccessibilityTest {
         val NARROW_WIDTH = 320.dp
 
         /** Wide enough for the single-row bar: six 48dp actions plus a usable address field. */
-        val WIDE_WIDTH = 440.dp
+        val WIDE_WIDTH = 520.dp
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp
