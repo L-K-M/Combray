@@ -64,6 +64,27 @@ class ToolbarMenuTest {
     }
 
     @Test
+    fun homeKeepsTheMenuActionLabeled() {
+        showMenu(PAGE.copy(url = null, title = null))
+        compose.onNodeWithText("Menu").assertIsDisplayed()
+    }
+
+    @Test
+    fun theLabeledHomeButtonKeepsDragSelection() {
+        showMenu(PAGE.copy(url = null, title = null))
+        startDrag()
+        val target = row("Settings").fetchSemanticsNode().boundsInRoot.center
+        compose.onRoot().performTouchInput {
+            moveTo(0, target)
+            up(0)
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(MoreAction.SETTINGS), selected)
+            assertFalse(state.expanded)
+        }
+    }
+
+    @Test
     fun aRowTapPerformsItsActionOnce() {
         showMenu()
         menu().performTouchInput { click() }
@@ -288,7 +309,9 @@ class ToolbarMenuTest {
                         onNewTab = {},
                         onRecent = {},
                         onRecentLongPress = {},
-                        menuButton = { ToolbarMenuButton(state, onSelect) },
+                        menuButton = {
+                            ToolbarMenuButton(state, onSelect, if (tab.url == null) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON)
+                        },
                         onCopyAddress = {},
                         onSwipeTab = { steps += it },
                         modifier = Modifier.align(Alignment.BottomCenter),

@@ -2020,18 +2020,25 @@ Local Linux x86_64, JDK 17, SDK 37 results:
 
 - Both new wire-message tests failed before decoding was added. Engine's
   47 tests and core's 454 tests then passed.
-- Eleven real-composable Menu tests pass. Two added regressions first
+- Twelve real-composable Menu tests and fourteen swipe tests pass. Two regressions first
   reproduced actions after a second finger and after Back while dragging.
   An overlay press now cancels an existing drag; dismissing invalidates its
   handler, so a held finger cannot reopen or activate a dismissed menu.
 - Four fixture-server checks pass, after the new endpoint first returned
   404. Per-check gates isolate delayed responses. The page heartbeat reports
   actual `document.readyState`; changing native UI state cannot complete it.
-- Native host tests pass: 139 tests using an isolated Cargo target. This
+- Native host tests pass: 147 tests after integrating #178, using an isolated Cargo target. This
   checks pure bridge logic, not the Android-only Servo adapter.
 - `assembleDebugAndroidTest` passes, including three real-Servo Stop checks.
   These checks are compiled, not run locally. They require retained article
   content, a cancelled blocking script, and navigation after initial Stop.
+
+Home retains its labeled Menu action; a missing-label test failed before
+sharing gesture handling between icon and labeled buttons. A thirteenth
+Menu test covers Home's drag path. Four activity tests cover native-page
+drag selection, Share placement, Home's label and second-finger cancellation.
+They still require device execution. The latest full local gate lost its
+Gradle daemon; a reduced-memory retry is pending, not a pass.
 
 Commands:
 

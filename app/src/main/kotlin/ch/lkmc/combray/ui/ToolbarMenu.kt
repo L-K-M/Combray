@@ -38,6 +38,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -106,52 +107,67 @@ internal class ToolbarMenuState {
     }
 }
 
+// Home keeps its labeled dock action; pages use the compact toolbar.
+internal enum class MenuButtonDisplay { ICON, LABEL }
+
 @Composable
-internal fun ToolbarMenuButton(state: ToolbarMenuState, onSelect: (MoreAction) -> Unit) {
+internal fun ToolbarMenuButton(
+    state: ToolbarMenuState,
+    onSelect: (MoreAction) -> Unit,
+    display: MenuButtonDisplay = MenuButtonDisplay.ICON,
+) {
     val select by rememberUpdatedState(onSelect)
-    IconButton(
-        onClick = state::toggle,
-        modifier = Modifier
-            .onGloballyPositioned { state.anchor = it.boundsInRoot() }
-            .pointerInput(state, state.gestureEpoch) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    var dragging = false
-                    try {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.changes.size != 1) return@awaitEachGesture
-                            val change = event.changes.single()
-                            if (change.id != down.id || change.isConsumed) return@awaitEachGesture
+    val modifier = Modifier
+        .onGloballyPositioned { state.anchor = it.boundsInRoot() }
+        .pointerInput(state, state.gestureEpoch) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var dragging = false
+                try {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.size != 1) return@awaitEachGesture
+                        val change = event.changes.single()
+                        if (change.id != down.id || change.isConsumed) return@awaitEachGesture
 
-                            val distance = change.position - down.position
-                            if (!dragging) {
-                                if (distance.getDistance() <= viewConfiguration.touchSlop) {
-                                    if (!change.pressed) return@awaitEachGesture
-                                    continue
-                                }
-                                // Sideways drags still belong to the toolbar's tab switcher.
-                                if (distance.y >= -abs(distance.x)) return@awaitEachGesture
-                                dragging = true
+                        val distance = change.position - down.position
+                        if (!dragging) {
+                            if (distance.getDistance() <= viewConfiguration.touchSlop) {
+                                if (!change.pressed) return@awaitEachGesture
+                                continue
                             }
-
-                            change.consume()
-                            state.drag(state.anchor.topLeft + change.position)
-                            if (change.pressed) continue
-
-                            val action = state.selected
-                            state.dismiss()
-                            action?.let(select)
-                            break
+                            // Sideways drags still belong to the toolbar's tab switcher.
+                            if (distance.y >= -abs(distance.x)) return@awaitEachGesture
+                            dragging = true
                         }
-                    } finally {
-                        // A cancellation or second finger never triggers the highlighted entry.
-                        if (dragging) state.dismiss()
+
+                        change.consume()
+                        state.drag(state.anchor.topLeft + change.position)
+                        if (change.pressed) continue
+
+                        val action = state.selected
+                        state.dismiss()
+                        action?.let(select)
+                        break
                     }
+                } finally {
+                    // A cancellation or second finger never triggers the highlighted entry.
+                    if (dragging) state.dismiss()
                 }
-            },
-    ) {
-        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+            }
+        }
+
+    val label = stringResource(R.string.action_more)
+    when (display) {
+        MenuButtonDisplay.ICON -> IconButton(onClick = state::toggle, modifier = modifier) {
+            Icon(Icons.Filled.MoreVert, contentDescription = label)
+        }
+        MenuButtonDisplay.LABEL -> TextButton(
+            onClick = state::toggle,
+            modifier = modifier.semantics { contentDescription = label },
+        ) {
+            Text(label)
+        }
     }
 }
 

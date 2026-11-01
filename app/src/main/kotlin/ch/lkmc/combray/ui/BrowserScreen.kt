@@ -551,7 +551,9 @@ fun BrowserScreen(
                     )
                 },
                 modifier = Modifier.onSizeChanged { barHeight = with(density) { it.height.toDp() } },
-                menuButton = { ToolbarMenuButton(menu, selectMenuAction) },
+                menuButton = {
+                    ToolbarMenuButton(menu, selectMenuAction, if (home) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON)
+                },
                 onCopyAddress = {
                     // The rendered address as shown (a recovery URL before a commit), copied whole.
                     tab?.url?.let { url ->

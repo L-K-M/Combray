@@ -295,7 +295,13 @@ class BottomBarSwipeTest {
                             onNewTab = { clicks += "new" },
                             onRecent = { clicks += "recent" },
                             onRecentLongPress = { clicks += "previous" },
-                            menuButton = { ToolbarMenuButton(remember { ToolbarMenuState() }) { clicks += "menu" } },
+                            menuButton = {
+                                ToolbarMenuButton(
+                                    remember { ToolbarMenuState() },
+                                    { clicks += "menu" },
+                                    if (tab.url == null) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON,
+                                )
+                            },
                             onCopyAddress = { clicks += "copy" },
                             onSwipeTab = { steps += it },
                             homeMode = mode,

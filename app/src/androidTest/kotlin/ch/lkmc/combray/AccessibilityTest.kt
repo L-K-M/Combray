@@ -59,6 +59,7 @@ import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.HomeContent
 import ch.lkmc.combray.ui.MediaEntries
+import ch.lkmc.combray.ui.MenuButtonDisplay
 import ch.lkmc.combray.ui.ReaderDisplay
 import ch.lkmc.combray.ui.MoreActions
 import ch.lkmc.combray.ui.ToolbarMenuButton
@@ -255,7 +256,7 @@ class AccessibilityTest {
         // The home dock: one search affordance and labeled actions, reflowed at 200% font.
         assertTargetsAreAccessible()
         compose.onNodeWithText("Search with Kagi or enter address").assertIsDisplayed()
-        for (label in listOf("Hister", "Karakeep", "Recent", "More")) {
+        for (label in listOf("Hister", "Karakeep", "Recent", "Menu")) {
             compose.onNodeWithText(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
@@ -271,11 +272,12 @@ class AccessibilityTest {
 
         assertTargetsAreAccessible()
         // The rows scroll when they outgrow the window: bring each into view before checking it.
-        for (label in listOf("Close tab", "Play audio or video", "Settings")) {
+        for (label in listOf("Share", "Play audio or video", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
-        // New tab is the bar's +, no longer a More row.
+        // New tab and Close tab belong to the bar, not the menu.
         compose.onNodeWithText("New tab").assertDoesNotExist()
+        compose.onNodeWithText("Close tab").assertDoesNotExist()
         compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
@@ -558,7 +560,12 @@ class AccessibilityTest {
         onNewTab = {},
         onRecent = {},
         onRecentLongPress = {},
-        menuButton = { ToolbarMenuButton(remember { ToolbarMenuState() }, {}) },
+        menuButton = {
+            ToolbarMenuButton(
+                remember { ToolbarMenuState() }, {},
+                if (tab?.url == null) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON,
+            )
+        },
         onCopyAddress = onCopyAddress,
         onSwipeTab = {},
         // Required, not just preferred: the reference emulator is 360dp wide, and a wider bar must
