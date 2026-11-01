@@ -1950,12 +1950,15 @@ The client routes Stop through the coordinator, engine port and JNI to the
 Servo owner thread. Replies carry view generation, request and retained
 document identity. Tests cover delayed view creation, callback/commit order,
 new navigation, equal-address replacement, renderer replacement, failure and
-retry. Stopping does not close the logical tab or change the committed URL.
+retry. A reply ahead of its retained document waits for the commit to become
+durable before ending loading; two regressions failed before this guard.
+Restart must not reopen a cancelled target under a completed Stop. Stopping
+does not close the logical tab or change an existing committed URL.
 
 Local Linux x86_64, JDK 17, SDK 37 results:
 
 - Both new wire-message tests failed before decoding was added. Engine's
-  47 tests and core's 452 tests then passed.
+  47 tests and core's 454 tests then passed.
 - Eleven real-composable Menu tests pass. Two added regressions first
   reproduced actions after a second finger and after Back while dragging.
   An overlay press now cancels an existing drag; dismissing invalidates its

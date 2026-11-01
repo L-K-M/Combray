@@ -95,7 +95,7 @@ class StopLoadingTest {
         browser.openUrl(URL, Placement.NEW_TAB); idle()
         browser.stopLoading(state().activeTab!!.id); idle()
         acknowledge(document = BLANK_DOCUMENT)
-        assertFalse(state().activeTab!!.loading)
+        assertTrue(state().activeTab!!.loading)
 
         commit(1, BLANK_DOCUMENT, BLANK_URL)
         engine.emit(EngineEvent.LoadStatus(engine.view(1), BLANK_DOCUMENT, LoadPhase.STARTED, Attribution.CURRENT)); idle()
@@ -179,6 +179,8 @@ class StopLoadingTest {
         engine.emit(EngineEvent.TabCreated(engine.view(1))); idle()
         assertEquals(1, engine.stopRequests.size)
         acknowledge(document = BLANK_DOCUMENT)
+        assertTrue(state().activeTab!!.loading)
+        commit(1, BLANK_DOCUMENT, BLANK_URL)
         assertFalse(state().activeTab!!.loading)
     }
 
@@ -204,6 +206,32 @@ class StopLoadingTest {
 
         assertEquals(null, state().notice)
         assertTrue(state().activeTab!!.loading)
+    }
+
+    @Test
+    fun aStopReplyWaitsForItsRetainedDocumentToCommit() {
+        browser.openUrl(URL, Placement.NEW_TAB); idle()
+        browser.stopLoading(state().activeTab!!.id); idle()
+        acknowledge(document = BLANK_DOCUMENT)
+
+        assertTrue(state().activeTab!!.loading)
+        commit(1, BLANK_DOCUMENT, BLANK_URL)
+        assertFalse(state().activeTab!!.loading)
+        assertEquals(BLANK_URL, runBlocking { database.browser().tab(state().activeTab!!.id) }!!.url)
+    }
+
+    @Test
+    fun aReplyForANewerRetainedDocumentWaitsForItsCommit() {
+        val tab = openLoadingPage()
+        browser.openUrl(NEXT_URL, Placement.CURRENT_TAB); idle()
+        browser.stopLoading(tab); idle()
+        acknowledge(document = NEXT_DOCUMENT)
+
+        assertTrue(state().activeTab!!.loading)
+        assertEquals(URL, state().activeTab!!.url)
+        commit(1, NEXT_DOCUMENT, NEXT_URL)
+        assertFalse(state().activeTab!!.loading)
+        assertEquals(NEXT_URL, runBlocking { database.browser().tab(tab) }!!.url)
     }
 
     @Test

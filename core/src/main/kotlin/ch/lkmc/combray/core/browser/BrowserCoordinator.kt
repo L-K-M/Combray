@@ -589,9 +589,16 @@ class BrowserCoordinator(
         val pending = view.pendingStop?.takeIf {
             it.request == event.request && it.navigation == view.commitRequests
         } ?: return
+        if (view.currentDocument != pending.document && view.currentDocument != event.document) {
+            view.pendingStop = null
+            return
+        }
+        if (view.currentDocument != event.document) {
+            // Persist the retained document before reporting completion or allowing a recovery load.
+            pending.acknowledgement = event
+            return
+        }
         view.pendingStop = null
-        if (view.currentDocument != pending.document && view.currentDocument != event.document) return
-
         view.loading = false
         view.stoppedDocument = event.document
         // Reports held for the cancelled navigation cannot become the retained page's media.
@@ -1041,7 +1048,10 @@ class BrowserCoordinator(
                 tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
             )
         }
-        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) releaseHeldMedia(view, event.document)
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) {
+            releaseHeldMedia(view, event.document)
+            view.pendingStop?.acknowledgement?.let { onLoadingStopped(view, it) }
+        }
     }
 
     /**
@@ -1643,7 +1653,9 @@ class BrowserCoordinator(
 
     private fun documentKey(view: LiveView, document: Long) = "$processKey:${view.generation}:$document"
 
-    private data class PendingStop(val request: Long, val navigation: Long, val document: Long?)
+    private class PendingStop(val request: Long, val navigation: Long, val document: Long?) {
+        var acknowledgement: EngineEvent.LoadingStopped? = null
+    }
 
     /** One native view incarnation for a logical tab. */
     private class LiveView(val tabId: String, val nativeTab: Long) {
