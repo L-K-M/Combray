@@ -27,6 +27,8 @@ All notable changes to this project are documented here. The format follows
   page. Find in page says a PDF cannot be searched yet, and its text does
   not reach Hister or reader view yet; Japanese, Chinese and Korean text
   without an embedded font is not drawn yet.
+- ThemeContrastTest now also requires the five surface-container shades
+  to step in brightness order in both schemes.
 - The bottom bar hides while scrolling down and returns while scrolling up,
   on pages and in Reader. Editing and accessibility controls stay visible.
 - Pull down at the page's top and release to reload. A progress ring shows
