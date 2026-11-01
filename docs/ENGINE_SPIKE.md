@@ -1963,3 +1963,32 @@ checks pass, including three new media-expiry cases. Android builds and
 real-Servo fixtures remain merge gates in the Engine PR workflow. This
 host has no device or KVM; no local device, idle-CPU or battery result is
 claimed. No personal history or live service was used.
+
+### Wake-source audit after PR review
+
+At the unchanged pin, every receiver in `Servo` is built with the supplied
+`ChannelWaker`: paint, embedder, network and constellation. Native app
+commands use the same `mpsc` sender. Sending before `recv` is safe: the
+message remains queued. No native/tab state is mutated from other threads.
+
+| Producer | Wake or owner-thread path |
+| --- | --- |
+| Surface, resize, input, IME, foreground, profile writes, controls | JNI `send` uses the engine command sender |
+| Network and constellation results | `GenericEmbedderProxy::send` enqueues, then calls the event-loop waker |
+| Script notifications | `ScriptToEmbedderChan::new` routes to the embedder sender and wakes it; the raw sender clone in `constellation/event_loop.rs` is used only by this wrapper |
+| Compositor and renderer | `PaintProxy::send` and `Servo::create_paint_channel`'s IPC callback both wake after enqueueing |
+| View delegates | `Rc<RefCell>` queue, owner-thread only, drained after `spin_event_loop` in the same `pump` |
+| Capture, Find, tap checks and evaluation results | Owner-thread JavaScript callbacks, drained later in that same `pump` |
+
+`next_timeout` covers pending capture expiry, deferred/touch-quiet retries,
+leave-page questions, released pulls, pending-media expiry and failed paint.
+All `Instant`/elapsed uses were checked: user-activation eligibility and
+paint-error log throttling require no proactive work; the startup clock
+only stamps events. Profile scheduling is app-owned and posts a command.
+
+`paint` clears `needs_paint` after a usable context is made current. A
+missing context/surface waits for lifecycle commands; `make_current`
+failure retains the flag and the bounded retry. No extra native deadline
+or wake-less state producer was found. A zero-duration deadline now has an
+explicit regression against paint retry. No debug polling clamp was added:
+it would hide missed wakeups from the full fixture suite's timeouts.

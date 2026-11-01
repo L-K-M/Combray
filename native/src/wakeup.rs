@@ -49,6 +49,14 @@ mod tests {
     }
 
     #[test]
+    fn a_due_deadline_beats_the_paint_retry() {
+        assert_eq!(
+            sleep_limit(Some(Duration::ZERO), PaintRetry::Pending),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
     fn the_nearer_of_a_deadline_and_a_paint_retry_wins() {
         let near = Duration::from_millis(10);
         let far = Duration::from_secs(3);

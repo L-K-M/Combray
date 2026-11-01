@@ -105,7 +105,8 @@ pub fn run(
 ) {
     let mut engine = Engine::new(config, wake, sink);
     loop {
-        // App commands and Servo's waker share this channel; only local deadlines need a timer.
+        // JNI commands and Servo's paint/embedder/net/constellation proxies all wake this channel.
+        // Delegate/evaluation queues drain inside pump; only the native deadlines below need timers.
         let received = match engine.next_timeout() {
             Some(timeout) => commands.recv_timeout(timeout),
             None => commands.recv().map_err(RecvTimeoutError::from),
@@ -516,6 +517,8 @@ impl Engine {
         });
     }
 
+    /// All native timed work: captures, touch-quiet retries, controls, pull release, media and paint.
+    /// New timer-owned work must join this chain; eligibility/log throttles need no wakeup.
     fn next_timeout(&self) -> Option<Duration> {
         let now = Instant::now();
         let now_ms = self.now_ms();
