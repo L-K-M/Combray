@@ -1,0 +1,49 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POLICY:PENDING</title>
+<div id="before">Nonce before insertion</div>
+<div id="after">Nonce after insertion, before text</div>
+<script nonce="dGVzdC1ub25jZQ==">
+(async () => {
+  const NONCE = "dGVzdC1ub25jZQ==";
+  const EXPECTED_COLOR = "rgb(17, 34, 51)";
+  const EMPTY_WASM_MODULE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
+  const results = [];
+  const record = (name, actual, expected) => results.push({ name, actual, expected, pass: actual === expected });
+
+  const before = document.createElement("style");
+  before.nonce = NONCE;
+  before.textContent = "#before { color: " + EXPECTED_COLOR + " }";
+  document.head.appendChild(before);
+  record("nonce-before-style", getComputedStyle(document.getElementById("before")).color, EXPECTED_COLOR);
+  record("nonce-before-hidden", before.getAttribute("nonce"), "");
+  record("nonce-before-slot", before.nonce, NONCE);
+
+  const after = document.createElement("style");
+  document.head.appendChild(after);
+  after.nonce = NONCE;
+  after.textContent = "#after { color: " + EXPECTED_COLOR + " }";
+  record("nonce-after-style", getComputedStyle(document.getElementById("after")).color, EXPECTED_COLOR);
+  record("nonce-after-hidden", after.getAttribute("nonce"), "");
+  record("nonce-after-slot", after.nonce, NONCE);
+
+  let evalBlocked = false;
+  try { eval("1 + 1"); } catch (error) { evalBlocked = error.name === "EvalError"; }
+  record("javascript-eval-blocked", evalBlocked, true);
+
+  try {
+    await WebAssembly.compile(EMPTY_WASM_MODULE);
+    record("wasm-unsafe-eval-allowed", "compiled", "compiled");
+  } catch (error) {
+    record("wasm-unsafe-eval-allowed", error.name + ":" + error.message, "compiled");
+  }
+
+  for (const result of results) console.info(JSON.stringify({ fixture: "policy-probe", ...result }));
+  const pass = results.every(result => result.pass);
+  document.title = pass ? "POLICY:PASS" : "POLICY:FAIL";
+  if (!pass) throw new Error("POLICY_PROBE_FAILURE");
+})().catch(error => {
+  document.title = "POLICY:FAIL";
+  console.error(error.name + ":" + error.message);
+});
+</script>

@@ -1,0 +1,35 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>child</title>
+<style>html, body { margin: 0; height: 100%; }</style>
+<body>
+<script>
+'use strict';
+
+// Case parameters come from the parent; same code path for same- and cross-origin.
+var q = new URLSearchParams(location.search);
+var CASE_ID = q.get('case') || 'unknown';
+var PARENT_ORIGIN = q.get('parent') || '*';
+var COLOR = /^[0-9a-f]{6}$/i.test(q.get('color') || '') ? q.get('color') : 'ff00ff';
+
+// Solid color fills the whole iframe viewport so a missing paint shows host gray.
+document.documentElement.style.background = '#' + COLOR;
+document.body.style.background = '#' + COLOR;
+
+function onReply(ev) {
+  var d = ev.data;
+  if (!d || d.type !== 'parent-reply' || d.case !== CASE_ID) return;   // not our reply
+  window.removeEventListener('message', onReply);                     // one reply per handshake
+  var sourceIsParent = ev.source === window.parent;
+  var originOk = ev.origin === PARENT_ORIGIN;
+  document.title = CASE_ID + (sourceIsParent && originOk ? ':ok' : ':fail');
+  window.parent.postMessage({
+    type: 'child-result', case: CASE_ID,
+    sourceIsParent: sourceIsParent, originOk: originOk
+  }, PARENT_ORIGIN);
+}
+
+window.addEventListener('message', onReply);   // listener armed before ready is sent
+window.parent.postMessage({ type: 'child-ready', case: CASE_ID }, PARENT_ORIGIN);
+</script>
+</body>

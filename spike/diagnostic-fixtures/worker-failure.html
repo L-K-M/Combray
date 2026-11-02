@@ -1,0 +1,13 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WORKER:PENDING</title>
+<script>
+const worker = new Worker("worker-throws.js");
+worker.addEventListener("error", event => {
+  // Swallow the DOM event so the trace must observe the worker's own error.
+  event.preventDefault();
+  document.title = "WORKER:OBSERVED";
+  console.info("WORKER_ERROR_EVENT_OBSERVED");
+});
+worker.postMessage("throw");
+</script>

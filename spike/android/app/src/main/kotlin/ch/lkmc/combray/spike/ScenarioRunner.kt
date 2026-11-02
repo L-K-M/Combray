@@ -23,6 +23,9 @@ import java.util.concurrent.TimeUnit
 const val DEFAULT_CAPTURE_BYTES = 256 * 1024
 const val CAPTURE_TIMEOUT_MS = 30_000
 private const val PAGE_PROBE_SETTLE_MS = 60_000L
+private const val PAGE_PROBE_TIMEOUT_MS = 360_000L
+private const val PAGE_PROBE_RETRY_MS = 10_000L
+private val PENDING_TURNSTILE_STATES = setOf("loading", "not_started")
 private const val MAX_PROBE_ELEMENTS = 30
 private const val MAX_PROBE_RESOURCES = 100
 
@@ -95,13 +98,17 @@ class ScenarioRunner(private val app: HarnessApplication) {
     }
 
     private fun probePage(report: Report, address: String) {
+        val started = SystemClock.uptimeMillis()
+        val deadline = started + PAGE_PROBE_TIMEOUT_MS
         val tab = (engine.tabs().maxOfOrNull { it.tab } ?: 0L) + 1
         engine.createTab(tab, address)
         select(tab)
         SystemClock.sleep(PAGE_PROBE_SETTLE_MS)
-        val probe = evaluate(tab, """
+        val script = """
             (() => ({
                 origin: location.origin, ready: document.readyState, title: document.title,
+                turnstileState: Array.from(document.querySelectorAll('#technical-details span'))
+                    .find(el => el.textContent === 'Turnstile Status:')?.nextElementSibling?.textContent ?? null,
                 viewport: [innerWidth, innerHeight],
                 scroll: [scrollX, scrollY, document.documentElement.scrollHeight],
                 statuses: ['issue-title','status-content','turnstile-status','progress-count','progress-text']
@@ -130,7 +137,15 @@ class ScenarioRunner(private val app: HarnessApplication) {
                     };
                 })
             }))()
-        """.trimIndent())
+        """.trimIndent()
+        var probe = evaluate(tab, script)
+        while (SystemClock.uptimeMillis() < deadline &&
+            (probe as? JSONObject)?.optString("turnstileState").orEmpty() in PENDING_TURNSTILE_STATES
+        ) {
+            SystemClock.sleep(PAGE_PROBE_RETRY_MS)
+            probe = evaluate(tab, script)
+        }
+        (probe as? JSONObject)?.put("elapsedMs", SystemClock.uptimeMillis() - started)
         File(app.filesDir, "page-probe.json").writeText(probe.toString())
         report.record("page-probe-captured", CheckStatus.PASSED,
             JSONObject().put("observations_only", true))

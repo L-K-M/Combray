@@ -1,0 +1,137 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PENDING</title>
+<style>
+  body { margin: 8px; background: #fff; }
+  /* 2x2 grid of 120px tiles fits inside a 360px viewport */
+  #grid { display: grid; grid-template-columns: repeat(2, 120px); gap: 8px; }
+  /* gray placeholder stays visible wherever iframe paint is missing */
+  .tile { width: 120px; height: 120px; background: #808080; }
+</style>
+<div id="grid"></div>
+<script>
+'use strict';
+
+// Named limits and endpoints.
+var PORT = 8768;
+var TILE_PX = 120;
+var TIMEOUT_MS = 10000;
+var SAME_ORIGIN = location.origin;               // parent runs on http://localhost:8768
+var CROSS_ORIGIN = 'http://127.0.0.1:' + PORT;   // same files, second origin
+var CHILD_PATH = location.pathname.replace(/[^/]*$/, 'message-child.html');
+
+// Four probes: light DOM vs closed shadow root, same- vs cross-origin.
+var CASES = [
+  { id: 'light-same',   dom: 'light',  origin: SAME_ORIGIN,  color: 'c62828' },
+  { id: 'light-cross',  dom: 'light',  origin: CROSS_ORIGIN, color: '1565c0' },
+  { id: 'shadow-same',  dom: 'shadow', origin: SAME_ORIGIN,  color: '2e7d32' },
+  { id: 'shadow-cross', dom: 'shadow', origin: CROSS_ORIGIN, color: '6a1b9a' }
+];
+
+function HandshakeError(message) {
+  var e = new Error(message);
+  e.name = 'HandshakeError';
+  return e;
+}
+
+var grid = document.getElementById('grid');
+var pending = new Map();   // caseId -> { cfg, frame, win, done, ...check booleans }
+var settled = false;
+var timer = setTimeout(function () {
+  var done = 0;
+  pending.forEach(function (st) { if (st.done) done += 1; });
+  fail('timeout after ' + TIMEOUT_MS + 'ms: ' + done + '/' + CASES.length + ' handshakes done');
+}, TIMEOUT_MS);
+
+function buildCase(cfg) {
+  var tile = document.createElement('div');
+  tile.className = 'tile';
+  var frame = document.createElement('iframe');
+  frame.style.cssText = 'width:' + TILE_PX + 'px;height:' + TILE_PX + 'px;border:0;display:block';
+  if (cfg.dom === 'shadow') tile.attachShadow({ mode: 'closed' }).appendChild(frame);
+  else tile.appendChild(frame);
+  grid.appendChild(tile);   // connect first so contentWindow exists before src
+  pending.set(cfg.id, { cfg: cfg, frame: frame, win: frame.contentWindow, done: false });
+  frame.src = cfg.origin + CHILD_PATH +
+    '?case=' + cfg.id + '&color=' + cfg.color + '&parent=' + encodeURIComponent(SAME_ORIGIN);
+}
+
+function onMessage(ev) {
+  var d = ev.data;
+  if (!d || typeof d !== 'object' || !pending.has(d.case)) return;   // not one of ours
+  var st = pending.get(d.case);
+  if (st.done) return;
+  if (d.type === 'child-ready') onReady(ev, st);
+  else if (d.type === 'child-result') onResult(ev, st, d);
+}
+
+function onReady(ev, st) {
+  // HTML-standard identity: MessageEvent.source must be the frame's WindowProxy.
+  st.readySourceOk = ev.source === st.win;
+  st.readyOriginOk = ev.origin === st.cfg.origin;
+  st.readyOrigin = ev.origin;
+  if (!st.readySourceOk || !st.readyOriginOk) {
+    logCase(st, false);
+    fail('ready handshake mismatch in ' + st.cfg.id);
+  }
+  // reply through the stored contentWindow with the child's exact origin
+  st.win.postMessage({ type: 'parent-reply', case: st.cfg.id }, st.cfg.origin);
+}
+
+function onResult(ev, st, d) {
+  st.resultSourceOk = ev.source === st.win;
+  st.resultOriginOk = ev.origin === st.cfg.origin;
+  st.resultOrigin = ev.origin;
+  st.childSourceIsParent = d.sourceIsParent === true;
+  st.childOriginOk = d.originOk === true;
+  var ok = st.readySourceOk && st.resultSourceOk && st.resultOriginOk &&
+           st.childSourceIsParent && st.childOriginOk;
+  logCase(st, ok);
+  if (!ok) fail('result handshake mismatch in ' + st.cfg.id);
+  st.done = true;
+  if (allDone()) finish();
+}
+
+function rectOf(el) {
+  var r = el.getBoundingClientRect();
+  return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+}
+
+function logCase(st, ok) {
+  console.log(JSON.stringify({
+    fixture: 'message-identity', kind: 'case', case: st.cfg.id, dom: st.cfg.dom,
+    crossOrigin: st.cfg.origin !== SAME_ORIGIN,
+    readySourceOk: !!st.readySourceOk, readyOriginOk: !!st.readyOriginOk,
+    resultSourceOk: !!st.resultSourceOk, resultOriginOk: !!st.resultOriginOk,
+    childSourceIsParent: !!st.childSourceIsParent, childOriginOk: !!st.childOriginOk,
+    expectedOrigin: st.cfg.origin,
+    readyOrigin: st.readyOrigin || null, resultOrigin: st.resultOrigin || null,
+    rect: rectOf(st.frame), pass: !!ok
+  }));
+}
+
+function allDone() {
+  var done = true;
+  pending.forEach(function (st) { if (!st.done) done = false; });
+  return done;
+}
+
+function finish() {
+  settled = true;
+  clearTimeout(timer);
+  document.title = 'PASS';
+  console.log(JSON.stringify({ fixture: 'message-identity', kind: 'final', result: 'PASS', cases: CASES.length }));
+}
+
+function fail(reason) {
+  if (settled) return;
+  settled = true;
+  clearTimeout(timer);
+  document.title = 'FAIL';
+  console.log(JSON.stringify({ fixture: 'message-identity', kind: 'final', result: 'FAIL', reason: reason }));
+  throw HandshakeError(reason);   // uncaught: native console capture records it
+}
+
+window.addEventListener('message', onMessage);   // armed before any iframe is created
+CASES.forEach(buildCase);
+</script>
