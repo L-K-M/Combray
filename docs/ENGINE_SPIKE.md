@@ -1995,11 +1995,11 @@ it would hide missed wakeups from the full fixture suite's timeouts.
 
 ## 38. Inline CSP nonce properties (2 November 2026)
 
-Candidate: `e4710ec93581bd90cbd3980ccc8af508b1ed2803`, downstream
-[PR #22](https://github.com/L-K-M/servo/pull/22), based on published
-`combray/0.7` tip `ef52ceadf57a3d51a917c6a40362265ccf8475f4`.
-App [PR #180](https://github.com/L-K-M/Combray/pull/180) remains draft.
-This is a CSP fix candidate, not a demonstrated verification fix.
+Validated source: `e4710ec93581bd90cbd3980ccc8af508b1ed2803`, downstream
+[PR #22](https://github.com/L-K-M/servo/pull/22), merged as
+`8e791033712f825edb4b6b4e7b257f0f940b4047` on `combray/0.7`.
+App integration: [PR #180](https://github.com/L-K-M/Combray/pull/180).
+This fixes CSP authorization, not the verification failure.
 
 ### Reproduction before the fix
 
@@ -2038,8 +2038,28 @@ checks for existing attributes, matching external-script preparation.
 
 Eight downstream WPT assertions cover matching, missing and wrong nonces,
 attribute controls, inline scripts and rejection of style attributes.
-Syntax checks are not engine execution. Rust formatting and whitespace
-checks pass; native builds, baseline/fixed WPT execution, live verification
-and independent review remain pending. The first review attempt could not
-read the worktree because its harness rejected the directory; it is not
-approval. Local native host checks pass: 146 tests. No phone test is claimed.
+Using the real WPT harness and HTTP CSP header:
+
+- Unchanged Servo run `41371925127`: five pass, three targeted failures.
+- Chromium run `41371923177`: eight pass.
+- Patched Servo run `41374714293`: eight pass.
+
+Both ABI builds and all 160 emulator fixture checks pass in Engine run
+`41372328020`; routine CI run `41372327945` passes. The former ScrollTest
+failure does not recur. Local native host checks pass: 146 tests; notice
+checks: 17. The full local script suite timed out after 180 seconds and
+is not claimed as passed.
+
+Local `scripts/build-native.sh` succeeds for x86_64 in 67m59s: Linux,
+Rust 1.97.1, NDK 29.0.14206865, Zig host wrappers with UBSan disabled,
+`CARGO_BUILD_JOBS=1`. Rust formatting, documentation and whitespace checks
+pass. Independent GLM review completes one minor-only round with no
+important findings after one harness-permission failure. Extra duplicate
+parse-error and nonce-slot resynchronization cases are deferred; existing
+attribute-bearing nonceability checks remain unchanged.
+
+The patched live diagnostic still fails `300031` after about 70 seconds;
+the article loads. This is not a verification fix. A temporary manual-only
+branch is tracing CSP/resource failures and frame-local layout, with
+private encrypted captures. It must not merge. The arm64 APK from run
+`41372328020` was offered for phone confirmation; no phone result is claimed.
