@@ -2198,15 +2198,18 @@ are unchanged.
 
 ## 40. PDF viewer document, candidate (30 October 2026)
 
-The pin is `dab4d6a8bfa0db7636c3e60a505c2825539a4c64`, the head of
+The pin is `ee5d4c6254ad5f15cff0eea796020a4087576d7d`, the head of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
 (`engine/pdf-viewer-document`): `combray/0.7` at `f1b105495` plus the
 PDF viewer change, upstream base still v0.7.0. `f1b105495` has the
 same tree as `4eb8b125d`, main's pin before this one, which carries
 the engine fixes of sections 32, 33, 35, 38 and 39. The branch's
 first-parent history over `combray/0.7`
-(`git log --oneline --first-parent origin/combray/0.7..dab4d6a8bfa`):
+(`git log --oneline --first-parent origin/combray/0.7..ee5d4c625`):
 
+- `ee5d4c625` Script: narrow the navigations that abort a PDF viewer load
+- `496f63151` Docs: describe Stop for the PDF viewer in DOWNSTREAM.md
+- `65f0f01c1` Script: fail a PDF viewer load that Stop aborts
 - `dab4d6a8b` Merge combray/0.7 into the PDF viewer document branch
 - `494d7f4b1` Merge combray/0.7 into the PDF viewer document branch
 - `05027c941` Docs: list the PDF viewer document in DOWNSTREAM.md
@@ -2218,18 +2221,19 @@ first-parent history over `combray/0.7`
 - `0bce9843c` Config: add the Combray PDF viewer preferences
 - `d1e33448d` Add the GLM review workflow
 
-`0bce9843c` to `05027c941` are the engine change. `d1e33448d` adds the
+`0bce9843c` to `05027c941` are the engine change, and `65f0f01c1` to
+`ee5d4c625` its handling of Stop (below). `d1e33448d` adds the
 downstream GLM review workflow (`.github/workflows/zai-code-review.yml`,
 owner decision of 29 October 2026, recorded in its `DOWNSTREAM.md`) and
 is no engine build input. The merges `494d7f4b1` (of `combray/0.7` at
 `ef52ceadf57`) and `dab4d6a8b` (at `f1b105495`) add nothing of their
-own: over `combray/0.7` the head changes the same 12 files with the
+own: over `combray/0.7`, `dab4d6a8b` changes the same 12 files with the
 same lines (1937 added, 6 removed) as `05027c941` over its base
 `6d3218a2a94`. The added and removed lines are byte-identical, so
 merging `combray/0.7` changed no PDF line. This section first pinned
 `05027c9413a`, the branch head before the owner merged `combray/0.7`
-into it, then `494d7f4b13b`. **It is a candidate.** #18 is
-not merged yet; before the Combray PR that sets this pin merges, #18
+into it, then `494d7f4b13b` and `dab4d6a8bfa`. **It is a candidate.**
+#18 is not merged yet; before the Combray PR that sets this pin merges, #18
 merges with a merge commit, the pin moves to that commit on
 `combray/0.7`, and the Engine workflow runs again on it.
 
@@ -2246,8 +2250,11 @@ What the engine change does (its `DOWNSTREAM.md` row has the details):
   (`loading`, `ready`, `too-large`, `failed`), `data-pdf-src`,
   `data-pdf-length` and `data-pdf-limit` tell the viewer where it is.
 - A body over `combray_pdf_viewer_max_bytes` is refused at the headers
-  or mid-stream, and the navigation fetch is cancelled; leaving a viewer
-  while its body still arrives cancels it too. A body shorter than its
+  or mid-stream, and the navigation fetch is cancelled. Aborting a viewer
+  while its body still arrives (Stop, `window.stop()`, a navigation the
+  page starts) drops the body, cancels the fetch at once and sets
+  `data-pdf-state` to `failed`, which the viewer shows as a failed load
+  (`65f0f01c1`). A body shorter than its
   `Content-Length` is `failed`.
 - The blob is released when the document unloads unsalvageable or leaves
   session history, so Back to a viewer in the back-forward cache reads
@@ -2280,16 +2287,16 @@ review of the Combray PR):
   viewport without a `resize` event, and Back queues only `pageshow`. The
   viewer lays its pages out again whenever it opens the PDF.
 
-Evidence for the engine change is in #18: 24 tests in
-`components/servo/tests/pdf_viewer.rs` and its review. At `dab4d6a8bfa`,
-its `pdf_viewer` (24), `stop_loading` (7) and `input_events` (2) suites
-pass. On this Linux x86_64 host, for the pin:
+Evidence for the engine change is in #18: 25 tests in
+`components/servo/tests/pdf_viewer.rs` and its reviews. At `ee5d4c625`,
+its `pdf_viewer` (25), `stop_loading` (7) and `input_events` (2) suites
+pass; the Stop test failed on `dab4d6a8b` before the fix. On this Linux x86_64 host, for the pin:
 
-- `git diff --name-only 6d3218a2a94 dab4d6a8bfa`, main's engine fixes
+- `git diff --name-only 6d3218a2a94 ee5d4c625`, main's engine fixes
   and the PDF change together, touches no `Cargo.toml`, `Cargo.lock`,
   toolchain or default resource; Servo's `Cargo.lock` is byte-identical
   at `6d3218a2a94`, `ef6beb09ab1`, `05027c9413a`, `494d7f4b13b`,
-  `4eb8b125d` and `dab4d6a8bfa`. `cargo test --lib` in `native/` against
+  `4eb8b125d`, `dab4d6a8bfa` and `ee5d4c625`. `cargo test --lib` in `native/` against
   the candidate checkout: 157 passed, and `native/Cargo.lock` did not
   change. Host builds compile only the pure modules (Servo is an
   Android-only dependency), so this checks the lockfile against the
@@ -2302,7 +2309,7 @@ pass. On this Linux x86_64 host, for the pin:
 - `scripts/m0/fetch-servo.sh` refused this host's checkout because
   `servo-checkout/servo` is a symbolic link to a checkout elsewhere on the
   same disk (space). Its fetch and checkout steps were run by hand on that
-  checkout: `git fetch --no-tags --depth=1` of `dab4d6a8bfa` from a local
+  checkout: `git fetch --no-tags --depth=1` of `ee5d4c625` from a local
   clone of L-K-M/servo, then `git checkout --force --detach` and
   `git clean -ffd`. Its mach Python preparation was not run; the host
   tests do not need it.
@@ -2316,7 +2323,14 @@ Engine runs
 (head `41ca252`) and
 [41356434589](https://github.com/L-K-M/Combray/actions/runs/41356434589)
 (head `0de24d9`) passed all 173 checks, with no report-only failures.
-The Engine workflow has not run on `dab4d6a8bfa` yet.
+On `dab4d6a8bfa`, Engine run
+[41412055823](https://github.com/L-K-M/Combray/actions/runs/41412055823)
+(head `0243cda`) passed all 184 checks, with no report-only failures.
+The Engine workflow has not run on `ee5d4c625` yet.
 
-Open follow-up for #18: the toolbar's Stop on a PDF that is still
-downloading leaves the root element's `data-pdf-state` at `loading`.
+Open follow-ups for #18: a load the embedder starts away from a PDF
+that is still downloading, as Combray's address bar does, does not
+abort it (Servo keeps the old document in session history), so that
+download continues in the background up to the cap; the network layer
+notices a cancelled fetch only when the next chunk arrives; and the
+referrer-policy finding of #18's review is still open.
