@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Bottom controls gain Close tab, inline Reader/Stop and an instant Menu.
+  Share moves into Menu; swipe up from Menu and release over an entry.
 - ThemeContrastTest now also requires the five surface-container shades
   to step in brightness order in both schemes.
 - The bottom bar hides while scrolling down and returns while scrolling up,

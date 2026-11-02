@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -18,6 +22,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
@@ -54,7 +59,11 @@ import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.HomeContent
 import ch.lkmc.combray.ui.MediaEntries
+import ch.lkmc.combray.ui.MenuButtonDisplay
+import ch.lkmc.combray.ui.ReaderDisplay
 import ch.lkmc.combray.ui.MoreActions
+import ch.lkmc.combray.ui.ToolbarMenuButton
+import ch.lkmc.combray.ui.ToolbarMenuState
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
 import ch.lkmc.combray.ui.QuickLinks
@@ -92,24 +101,27 @@ class AccessibilityTest {
         }
 
         assertTargetsAreAccessible()
-        for (label in listOf("Back", "Saving to Karakeep", "Share", "New tab", "Recent, 3 open tabs", "More")) {
+        // The page is loading: the chip's inline control is Stop, not the Reader toggle.
+        for (label in listOf("Back", "Saving to Karakeep", "Close tab", "New tab", "Recent, 3 open tabs", "Menu", "Stop loading")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
+        compose.onNodeWithContentDescription("Reader view").assertDoesNotExist()
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
     }
 
     @Test
     fun aNarrowBarGivesTheAddressARowAboveTheActions() {
         show(DEFAULT_FONT) {
-            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
+            Bar(PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved)
         }
 
         val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
         val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
-        val more = compose.onNodeWithContentDescription("More").getUnclippedBoundsInRoot()
+        val more = compose.onNodeWithContentDescription("Menu").getUnclippedBoundsInRoot()
+        val reader = compose.onNodeWithContentDescription("Reader view").getUnclippedBoundsInRoot()
         assertTrue(address.bottom <= back.top)
         // The chip spans the actions under it.
-        assertTrue(address.left <= back.left && address.right >= more.right)
+        assertTrue(address.left <= back.left && reader.right >= more.right)
     }
 
     @Test
@@ -180,6 +192,51 @@ class AccessibilityTest {
         assertEquals(0, copies)
     }
 
+    /** Stopping is its own target: it must not edit or copy the address under it. */
+    @Test
+    fun stoppingALoadDoesNotEditOrCopyTheAddress() {
+        var stops = 0
+        var edits = 0
+        var copies = 0
+        show(LARGE_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, onAddress = { edits++ }, onCopyAddress = { copies++ }, onStop = { stops++ })
+        }
+
+        compose.onNodeWithContentDescription("Stop loading").assertIsDisplayed().performClick()
+        assertEquals(1, stops)
+        assertEquals(0, edits)
+        assertEquals(0, copies)
+    }
+
+    /** The inline toggle tracks the display: unchecked as a page, checked as an article. */
+    @Test
+    fun theReaderToggleFollowsReaderDisplay() {
+        var display by mutableStateOf(ReaderDisplay.PAGE)
+        var readers = 0
+        var edits = 0
+        var copies = 0
+        show(LARGE_FONT) {
+            Bar(
+                PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved,
+                onAddress = { edits++ }, onCopyAddress = { copies++ },
+                readerDisplay = display, onReader = { readers++; display = ReaderDisplay.ARTICLE },
+            )
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Stop loading").assertDoesNotExist()
+        val enter = compose.onNodeWithContentDescription("Reader view").assertIsDisplayed()
+        assertEquals(ToggleableState.Off, enter.fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
+
+        enter.performClick()
+        assertEquals(1, readers)
+        assertEquals(0, edits)
+        assertEquals(0, copies)
+
+        val leave = compose.onNodeWithContentDescription("Leave reader view").assertIsDisplayed()
+        assertEquals(ToggleableState.On, leave.fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
+    }
+
     @Test
     fun aSaveWaitingForKarakeepIsLabeledAsSuch() {
         show(LARGE_FONT) {
@@ -199,7 +256,7 @@ class AccessibilityTest {
         // The home dock: one search affordance and labeled actions, reflowed at 200% font.
         assertTargetsAreAccessible()
         compose.onNodeWithText("Search with Kagi or enter address").assertIsDisplayed()
-        for (label in listOf("Hister", "Karakeep", "Recent", "More")) {
+        for (label in listOf("Hister", "Karakeep", "Recent", "Menu")) {
             compose.onNodeWithText(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
@@ -209,17 +266,18 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {}, {})
+                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), readerDisplay = ReaderDisplay.PAGE, onSelect = {})
             }
         }
 
         assertTargetsAreAccessible()
         // The rows scroll when they outgrow the window: bring each into view before checking it.
-        for (label in listOf("Close tab", "Play audio or video", "Settings")) {
+        for (label in listOf("Share", "Play audio or video", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
-        // New tab is the bar's +, no longer a More row.
+        // New tab and Close tab belong to the bar, not the menu.
         compose.onNodeWithText("New tab").assertDoesNotExist()
+        compose.onNodeWithText("Close tab").assertDoesNotExist()
         compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
@@ -479,6 +537,9 @@ class AccessibilityTest {
         histerStored: Boolean = false,
         onAddress: () -> Unit = {},
         onCopyAddress: () -> Unit = {},
+        readerDisplay: ReaderDisplay = ReaderDisplay.PAGE,
+        onStop: () -> Unit = {},
+        onReader: () -> Unit = {},
         width: Dp = NARROW_WIDTH,
     ) = BottomBar(
         tab = tab,
@@ -490,13 +551,21 @@ class AccessibilityTest {
         onBack = {},
         onAddress = onAddress,
         onSave = {},
-        onShare = {},
+        onCloseTab = {},
+        readerDisplay = readerDisplay,
+        onStop = onStop,
+        onReader = onReader,
         onHister = {},
         onKarakeep = {},
         onNewTab = {},
         onRecent = {},
         onRecentLongPress = {},
-        onMore = {},
+        menuButton = {
+            ToolbarMenuButton(
+                remember { ToolbarMenuState() }, {},
+                if (tab?.url == null) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON,
+            )
+        },
         onCopyAddress = onCopyAddress,
         onSwipeTab = {},
         // Required, not just preferred: the reference emulator is 360dp wide, and a wider bar must
@@ -516,7 +585,7 @@ class AccessibilityTest {
         val NARROW_WIDTH = 320.dp
 
         /** Wide enough for the single-row bar: six 48dp actions plus a usable address field. */
-        val WIDE_WIDTH = 440.dp
+        val WIDE_WIDTH = 520.dp
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp

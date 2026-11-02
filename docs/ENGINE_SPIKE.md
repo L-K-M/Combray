@@ -1992,3 +1992,74 @@ failure retains the flag and the bounded retry. No extra native deadline
 or wake-less state producer was found. A zero-duration deadline now has an
 explicit regression against paint retry. No debug polling clamp was added:
 it would hide missed wakeups from the full fixture suite's timeouts.
+
+## 38. Toolbar recovery (1 November 2026)
+
+Recovered the interrupted owner request: inline Stop while loading, Reader
+otherwise; Back, Save, Close tab, New tab, Recent and Menu; Share in Menu;
+an instant menu with upward-drag release selection. The old task stopped
+with an unresolved `browser.stopLoading` call: Servo 0.7 exposes no such
+embedder API. No UI-only loading flag is accepted as cancellation.
+
+Draft [PR #179](https://github.com/L-K-M/Combray/pull/179) preserves the UI
+on current main, including gesture feedback, fixed tab order, pull reload
+and scroll-hiding controls. The original worktree remains untouched. After
+a session restart removed temporary worktrees, staged UI was recovered from
+Git's index; new development and evidence now use persistent directories.
+
+The client routes Stop through the coordinator, engine port and JNI to the
+Servo owner thread. Replies carry view generation, request and retained
+document identity. Tests cover delayed view creation, callback/commit order,
+new navigation, equal-address replacement, renderer replacement, failure and
+retry. A reply ahead of its retained document waits for the commit to become
+durable before ending loading; two regressions failed before this guard.
+Restart must not reopen a cancelled target under a completed Stop. Stopping
+does not close the logical tab or change an existing committed URL.
+
+Local Linux x86_64, JDK 17, SDK 37 results:
+
+- Both new wire-message tests failed before decoding was added. Engine's
+  47 tests and core's 454 tests then passed.
+- Thirteen real-composable Menu tests and fourteen swipe tests pass. Two regressions first
+  reproduced actions after a second finger and after Back while dragging.
+  An overlay press now cancels an existing drag; dismissing invalidates its
+  handler, so a held finger cannot reopen or activate a dismissed menu.
+- Four fixture-server checks pass, after the new endpoint first returned
+  404. Per-check gates isolate delayed responses. The page heartbeat reports
+  actual `document.readyState`; changing native UI state cannot complete it.
+- Native host tests pass: 147 tests after integrating #178, using an isolated Cargo target. This
+  checks pure bridge logic, not the Android-only Servo adapter.
+- `assembleDebugAndroidTest` passes, including three real-Servo Stop checks.
+  These checks are compiled, not run locally. They require retained article
+  content, a cancelled blocking script, and navigation after initial Stop.
+
+Home retains its labeled Menu action; a missing-label test failed before
+sharing gesture handling between icon and labeled buttons. A thirteenth
+Menu test covers Home's drag path. Four activity tests cover native-page
+drag selection, Share placement, Home's label and second-finger cancellation.
+They compile but still require device execution. The normal full local gate
+lost its Gradle daemon. The same tasks then passed with bounded Gradle memory:
+651 JVM tests (app 150, core 454, engine 47), lint and both APK assemblies.
+
+Commands:
+
+```sh
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx2g testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew :app:testDebugUnitTest --tests ch.lkmc.combray.ui.ToolbarMenuTest :app:assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests -p test_fixture_server.py
+(cd native && CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=$HOME/.cache/combray-toolbar-host-target cargo +1.97.1 test --lib)
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) preserves the
+Stop prototype at `e873299425f`. Its build is unproven. Source review found a
+callback-reentry panic: completion invokes the client while holding the mutable
+registry borrow. A real-Servo regression is added; its baseline is pending.
+
+Still pending: corrected and validated Stop API, an exact pin and notices,
+both native ABIs, full emulator fixtures and actual final-head GLM review. The
+old pin `ef6beb09ab19325d597dd96f758ed359ad33ccce` cannot build the new
+Stop bridge. Keep the PR draft until those gates pass. No local device,
+physical-phone, battery or idle-CPU result is claimed; no personal history
+or service was used.

@@ -94,7 +94,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
-private enum class Sheet { NONE, ADDRESS, RECENT, MORE, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA }
+private enum class Sheet { NONE, ADDRESS, RECENT, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -131,6 +131,9 @@ fun BrowserScreen(
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val tab = state.activeTab
+    val readerDisplay = if (state.reader == null) ReaderDisplay.PAGE else ReaderDisplay.ARTICLE
+    val menu = remember(tab?.id) { ToolbarMenuState() }
+    LaunchedEffect(sheet) { menu.dismiss() }
     val page = tab?.page
     val reloadPull = state.reloadPull?.takeIf { it.page == page }
     val home = tab?.url == null
@@ -195,6 +198,7 @@ fun BrowserScreen(
                 }
                 is Notice.Problem -> snackbar.showSnackbar(notice.message)
                 Notice.AddressNotOpened -> snackbar.showSnackbar(notOpened)
+                Notice.StopFailed -> snackbar.showSnackbar(resources.getString(R.string.notice_stop_failed))
                 is Notice.OpenedInBackground -> {
                     // As for a close, a newer notice replaces the last Show instead of queuing behind it.
                     snackbar.currentSnackbarData?.dismiss()
@@ -317,6 +321,7 @@ fun BrowserScreen(
     val pendingLaunch by launchRequest.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     LaunchedEffect(pendingLaunch) {
         val request = pendingLaunch ?: return@LaunchedEffect
+        menu.dismiss()
         launches++
         when (request) {
             is LaunchRequest.EditNewTab -> editNewTabWith(request.text)
@@ -373,6 +378,23 @@ fun BrowserScreen(
     val snackbarReach = (snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp).coerceAtLeast(0.dp)
     val scrollButtonPadding = scrollButtonPadding(snackbarReach)
     val openSettings = { sheet = Sheet.SETTINGS }
+    val selectMenuAction: (MoreAction) -> Unit = select@{ action ->
+        menu.dismiss()
+        // A page can replace itself while the finger is held over a menu row.
+        if (action !in moreActions(tab, readerDisplay)) return@select
+        when (action) {
+            MoreAction.FORWARD -> browser.goForward()
+            MoreAction.RELOAD -> browser.reload()
+            MoreAction.SHARE -> tab?.let { page ->
+                page.url?.let { url -> share(context, url, resources.getString(R.string.share_chooser), page.title.takeUnless { page.loadFailed }) }
+            }
+            MoreAction.PAGE_INFO -> sheet = Sheet.PAGE_INFO
+            MoreAction.FIND -> browser.openFind()
+            MoreAction.PLAY_MEDIA -> tab?.mediaPage?.let(playMedia)
+            MoreAction.TEXT_SIZE -> sheet = Sheet.TEXT_SIZE
+            MoreAction.SETTINGS -> sheet = Sheet.SETTINGS
+        }
+    }
     val changeHome: (suspend () -> Unit) -> Unit = { change ->
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
@@ -489,6 +511,10 @@ fun BrowserScreen(
                 // Like system Back: Reader view closes first, then Back moves through the page.
                 onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
                 onAddress = editAddress,
+                onCloseTab = { tab?.let { browser.closeTab(it.id) } },
+                readerDisplay = readerDisplay,
+                onStop = { tab?.let { browser.stopLoading(it.id) } },
+                onReader = { if (state.reader != null) browser.closeReader() else browser.openReader() },
                 onNewTab = newTab,
                 onHister = { openRecent(RecentScope.HISTER) },
                 onKarakeep = { openRecent(RecentScope.KARAKEEP) },
@@ -500,9 +526,6 @@ fun BrowserScreen(
                         // The Save icon shows a queued save of the page itself.
                         reportSave(graph.integrations.save(url, title), snackbar, resources, queued = null, onOpenSettings = openSettings)
                     }
-                },
-                onShare = {
-                    tab?.let { page -> page.url?.let { url -> share(context, url, resources.getString(R.string.share_chooser), page.title.takeUnless { page.loadFailed }) } }
                 },
                 onRecent = { openRecent(RecentScope.OPEN) },
                 onRecentLongPress = { browser.focusPreviousTab() },
@@ -528,7 +551,9 @@ fun BrowserScreen(
                     )
                 },
                 modifier = Modifier.onSizeChanged { barHeight = with(density) { it.height.toDp() } },
-                onMore = { sheet = Sheet.MORE },
+                menuButton = {
+                    ToolbarMenuButton(menu, selectMenuAction, if (home) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON)
+                },
                 onCopyAddress = {
                     // The rendered address as shown (a recovery URL before a commit), copied whole.
                     tab?.url?.let { url ->
@@ -555,6 +580,7 @@ fun BrowserScreen(
                     .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
             )
         }
+        ToolbarMenu(menu, tab, readerDisplay, selectMenuAction)
     }
 
     val dismiss = { sheet = Sheet.NONE }
@@ -589,30 +615,6 @@ fun BrowserScreen(
             onNewTab = newTab,
             snackbar = snackbar,
             onSettings = openSettings,
-            onDismiss = dismiss,
-        )
-        Sheet.MORE -> MoreSheet(
-            tab = tab,
-            onForward = { dismiss(); browser.goForward() },
-            onReload = { dismiss(); browser.reload() },
-            // The sheet closes so it does not cover the Undo notice in the main window.
-            onCloseTab = { dismiss(); tab?.let { browser.closeTab(it.id) } },
-            onPageInfo = { sheet = Sheet.PAGE_INFO },
-            onSettings = { sheet = Sheet.SETTINGS },
-            readerOpen = state.reader != null,
-            onReader = {
-                dismiss()
-                if (state.reader != null) browser.closeReader() else browser.openReader()
-            },
-            onTextSize = { sheet = Sheet.TEXT_SIZE },
-            onFind = {
-                dismiss()
-                browser.openFind()
-            },
-            onPlayMedia = {
-                dismiss()
-                tab?.mediaPage?.let(playMedia)
-            },
             onDismiss = dismiss,
         )
         Sheet.MEDIA -> {

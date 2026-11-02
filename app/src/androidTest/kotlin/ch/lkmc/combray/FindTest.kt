@@ -96,7 +96,7 @@ class FindTest {
         compose.onNodeWithContentDescription("Close find in page").performClick()
         device.awaitState { it.find == null }
         awaitReport { it.selection.isEmpty() }
-        compose.onNodeWithContentDescription("More").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Menu").assertIsDisplayed()
     }
 
     @Test

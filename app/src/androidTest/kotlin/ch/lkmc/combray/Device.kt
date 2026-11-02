@@ -25,6 +25,9 @@ enum class LinkTrigger { TAP, SCRIPT }
 /** Where a fixture's link opens: in its own page or in a new window (`target=_blank`). */
 enum class LinkTarget { SAME_WINDOW, NEW_WINDOW }
 
+/** Whether Stop retains a parsed article or cancels a response before any commit. */
+enum class StopFixtureStage { COMMITTED, PENDING }
+
 /** Synthetic pages and fake services from testing/fixtures/server.py, through `adb reverse`. */
 object Fixtures {
     /** Pages (through `adb reverse`). */
@@ -92,6 +95,19 @@ object Fixtures {
     /** A page the server answers only after several seconds. */
     const val SLOW = "$BASE/slow.html"
 
+    fun stopPage(key: String, stage: StopFixtureStage): String {
+        val path = when (stage) {
+            StopFixtureStage.COMMITTED -> "stop-loading.html"
+            StopFixtureStage.PENDING -> "stop-loading-pending.html"
+        }
+        return "$BASE/$path?k=$key"
+    }
+
+    fun finishStopLoad(key: String) = request(HTTP_POST, "/_admin/finish-stop-load?k=$key")
+
+    fun stopLoadRequested(key: String): Boolean =
+        state().getJSONObject("stop_loads").optJSONObject(key)?.optInt("requested", 0)?.let { it > 0 } == true
+
     /** A `<video>` and an `<audio>` element; titled `MEDIA:errors:2` once both failed. */
     const val MEDIA = "$BASE/media.html"
 
@@ -138,6 +154,8 @@ object Fixtures {
     fun reset() = request("POST", "/_admin/reset")
 
     fun fault(service: String, kind: String, count: Int) = request("POST", "/_admin/fault?service=$service&kind=$kind&count=$count")
+
+    private const val HTTP_POST = "POST"
 
     private fun request(method: String, path: String): String {
         val connection = URL(BASE + path).openConnection() as HttpURLConnection

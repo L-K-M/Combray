@@ -74,6 +74,8 @@ object NativeEngine {
 
     @JvmStatic external fun reload(tab: Long)
 
+    @JvmStatic external fun stopLoading(tab: Long, generation: Long, request: Long)
+
     @JvmStatic external fun reloadPage(tab: Long, generation: Long, document: Long)
 
     /** Root-page jump, guarded by view generation and document identity. */

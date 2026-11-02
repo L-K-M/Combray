@@ -16,6 +16,8 @@ Pages
                              (a reload that fails like a lost connection)
   /private.html              page for exclusion checks
   /slow.html                 answers after SLOW_PAGE_SECONDS; title SLOW
+  /stop-loading.html?k=<key>  committed article, heartbeat title and held parser-blocking script
+  /stop-loading-pending.html?k=<key> holds the document response before its first commit
   /screen.html               title SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth> (CSS px)
   /select.html               page-filling <select>; title SELECT:<value> after a change
   /dialogs.html              page-filling button: confirm, prompt, alert; title DIALOGS:<confirm>:<prompt>
@@ -111,6 +113,9 @@ CLIP_PATH = pathlib.Path(__file__).resolve().parent / "media" / "clip.mp4"
 CLIP_SHA256 = "ec7875cf658a2ea68bd825088fe8a09d30cc7090fbc5d0561f726aead61488f5"
 # Requests whose headers /_admin/state keeps per media file, newest last.
 MEDIA_SEEN_LIMIT = 20
+STOP_LOAD_TIMEOUT_SECONDS = 60
+STOP_HEARTBEAT_MS = 100
+STOP_KEY = re.compile(r"[a-zA-Z0-9]{1,32}\Z")
 TONE_HZ = 440
 TONE_RATE = 8000
 TONE_SECONDS = 3
@@ -154,10 +159,21 @@ def fresh_media():
     return {"requests": 0, "completed": 0, "clip": fresh_served(), "tone": fresh_served(), "redirects": 0}
 
 
-state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media()}
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media(), "stop_loads": {}}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 scroll_load_finished = threading.Event()
+stop_load_gates = {}
+
+
+def stop_load(key):
+    """One gate and counters per check: a late response cannot affect the next check."""
+    with lock:
+        if key not in stop_load_gates:
+            counts = {"requested": 0, "finished": 0}
+            state["stop_loads"][key] = counts
+            stop_load_gates[key] = (threading.Event(), counts)
+        return stop_load_gates[key]
 
 
 def pdf_document(text):
@@ -657,6 +673,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, ANIMATE_PAGE)
         if path == "/apis.html":
             return self.send(200, APIS_PAGE)
+        if path in {"/stop-loading.html", "/stop-loading.js", "/stop-loading-pending.html"}:
+            key = query.get("k", [""])[0]
+            if not STOP_KEY.fullmatch(key):
+                return self.send(http.HTTPStatus.BAD_REQUEST, "invalid stop key")
+            gate, counts = stop_load(key)
+            if path == "/stop-loading.html":
+                article = ARTICLE_BODY.replace("READER-BODY-ONE", "STOP-COMMITTED READER-BODY-ONE", 1)
+                heartbeat = (
+                    "<script>window.stopProbe={ran:false,tick:0};setInterval(function(){"
+                    "document.title='STOP:'+document.readyState+':'+Number(stopProbe.ran)+':'+(++stopProbe.tick)"
+                    f";}},{STOP_HEARTBEAT_MS});</script>"
+                )
+                return self.send(http.HTTPStatus.OK, page("STOP-READY",
+                    article + f"<script src='/stop-loading.js?k={key}'></script>",
+                    "<style>html,body{background:#2e6b4f}</style>" + heartbeat))
+            if path == "/stop-loading.js":
+                body = "stopProbe.ran=true;document.body.style.backgroundColor='#3b4f8a';"
+                return self.send_held_stop_resource(gate, counts, body, "text/javascript; charset=utf-8")
+            return self.send_held_stop_resource(gate, counts,
+                page("STOP-CANCELLED-TARGET", "<p>Cancelled target</p>"), "text/html; charset=utf-8")
         if path == "/slow.html":
             time.sleep(SLOW_PAGE_SECONDS)
             return self.send(200, page("SLOW", "<p>SLOW</p>"))
@@ -815,6 +851,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/_admin/reset":
             scroll_load_finished.clear()
             with lock:
+                for gate, _ in stop_load_gates.values():
+                    gate.set()
+                stop_load_gates.clear()
+                state["stop_loads"].clear()
+            with lock:
                 state["bookmarks"].clear()
                 state["lists"].clear()
                 state["lists"].update(fresh_lists())
@@ -825,6 +866,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})
+        if path == "/_admin/finish-stop-load":
+            key = query.get("k", [""])[0]
+            with lock:
+                held = stop_load_gates.get(key)
+            if held is None:
+                return self.send_json(http.HTTPStatus.NOT_FOUND, {"error": "unknown stop key"})
+            held[0].set()
+            return self.send_json(http.HTTPStatus.OK, {"ok": True})
         if path == "/_admin/finish-scroll-load":
             scroll_load_finished.set()
             return self.send_json(http.HTTPStatus.OK, {"ok": True})
@@ -924,6 +973,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "servo_agent": "Servo/" in self.headers.get("User-Agent", ""),
             })
             del served["seen"][:-MEDIA_SEEN_LIMIT]
+
+    def send_held_stop_resource(self, gate, counts, body, content_type):
+        with lock:
+            counts["requested"] += 1
+        if not gate.wait(STOP_LOAD_TIMEOUT_SECONDS):
+            return self.send(http.HTTPStatus.GATEWAY_TIMEOUT, "stop fixture gate timed out")
+        try:
+            self.send(http.HTTPStatus.OK, body, content_type)
+        except ConnectionError:
+            self.close_connection = True
+        finally:
+            with lock:
+                counts["finished"] += 1
 
     def send_slow_media(self):
         with lock:
