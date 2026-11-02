@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Known issues
 
-- Some Cloudflare-protected pages stay at security verification. The cause
-  remains unresolved; see the [engine investigation](docs/ENGINE_SPIKE.md#34-cloudflare-verification-31-october-2026).
+- Cloudflare verification no longer stalls, but whether its checkbox passes
+  on a phone is unconfirmed; see the [engine investigation](docs/ENGINE_SPIKE.md#40-verification-stall-and-automation-signals-2-november-2026).
 - The page Copy button and manual text selection are reported broken;
   tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
 
@@ -255,6 +255,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Cloudflare security verification no longer stalls until it reports error
+  `300031`. Servo now delivers worker and port messages with an empty
+  origin, as browsers do.
+- Console logging no longer runs page code, and Servo's WebDriver helpers
+  appear only under WebDriver. Pages could use either to tell Combray from
+  an ordinary browser.
+- A refused link in Reader keeps the article open instead of discarding it.
 - Keep pull-to-reload working through coalesced touch moves without
   overriding a page's refusal.
 - Honor matching CSP nonce properties on inline styles and scripts in Servo.

@@ -1993,6 +1993,39 @@ or wake-less state producer was found. A zero-duration deadline now has an
 explicit regression against paint retry. No debug polling clamp was added:
 it would hide missed wakeups from the full fixture suite's timeouts.
 
+## Refused Reader links (1 November 2026)
+
+Recovered only #44's rejected-link handling. Reader extraction admits an
+http(s) prefix, not a complete address-policy decision: an anchor with
+`href="https://"` survives extraction but cannot navigate. The UI closed
+the article before checking that decision. It now closes only on acceptance;
+external schemes remain outside Reader's supported links.
+
+The real-Servo regression was committed first in [PR #176](https://github.com/L-K-M/Combray/pull/176).
+[Initial Engine CI](https://github.com/L-K-M/Combray/actions/runs/41304317615)
+built both ABIs. All seven existing Reader checks passed; the new eighth
+failed at the retained-article assertion (`Ready` expected, `null` actual),
+after confirming the extracted malformed link. The same regression checks
+the unchanged address and tab count after the fix.
+
+Local Linux x86_64, JDK 21 / SDK 37, unchanged engine pin
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`:
+
+```sh
+ANDROID_HOME=$HOME/android-sdk ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests -p test_fixture_server.py
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Initial local Kotlin gates and the fixture-server checks pass. Two later
+full Engine runs lost the emulator before `ReaderTest` ran; neither counts
+as a pass. The branch was then refreshed onto main `370cc68` (engine pin
+`4eb8b125d8cc984e0e4d09b69ea183dd0cda2bb7`), which reruns those gates and
+full Engine CI before merge. There is no local device or KVM; no local
+runtime or physical-phone result is claimed. No personal history or live
+service was used.
+
 ## 38. Inline CSP nonce properties (2 November 2026)
 
 Validated source: `e4710ec93581bd90cbd3980ccc8af508b1ed2803`, downstream
@@ -2196,7 +2229,88 @@ No local device, physical-phone, battery or idle-CPU result is claimed;
 no personal history or service was used. Reader, PDF and compatibility holds
 are unchanged.
 
-## 40. PDF viewer document, candidate (30 October 2026)
+## 40. Verification stall and automation signals (2 November 2026)
+
+Validated source: `6fbfc3d70ad83df5443445d3ff4c43871aae41dd` on `combray/0.7`, which merges downstream
+[PR #23](https://github.com/L-K-M/servo/pull/23) (message origins),
+[PR #24](https://github.com/L-K-M/servo/pull/24) (console formatting) and
+[PR #25](https://github.com/L-K-M/servo/pull/25) (WebDriver helpers).
+App integration: [PR #182](https://github.com/L-K-M/Combray/pull/182).
+This fixes the stall that §34 and §38 reported as `300031`. Whether the
+owner's phone then passes the checkbox is not yet established.
+
+### Reproduction
+
+Desktop servoshell, headless, with Combray's prefs, the Android user agent
+and WebDriver, against Cloudflare's diagnostic. Official v0.7.0 reproduces
+the stall: the widget's watchdog reports `300031` after about 50 seconds.
+A userscript logging the widget's protocol messages showed the challenge
+stopping before its interactive step. A userscript that delivered port and
+worker messages with an empty origin let it continue.
+
+### Mechanism
+
+The challenge runs a worker built from a blob URL. That worker evaluates
+only messages for which `isTrusted` holds, `origin` is the empty string
+and `source` is null. `Worker.postMessage` and `MessagePort.postMessage`
+run the HTML port post message steps, which set no origin. Servo set the
+sender's origin, so the worker discarded every message and the widget
+waited until its watchdog gave up. The engine change leaves `origin`
+empty for both; `BroadcastChannel` keeps the sender's origin, as its
+steps require. A five-case downstream WPT test fails its three port and
+worker cases on v0.7.0 and passes with the fix; the upstream
+`postMessage_event_properties.htm` no longer fails.
+
+With the fix and no workaround, the diagnostic reaches its interactive
+checkbox under mouse and touch input and with Android, desktop, Servo-only,
+Chrome and Firefox user agents. Clicking it then fails with `600010` in
+every variant. Official headless Firefox 159, driven by WebDriver on the
+same host with `navigator.webdriver` hidden, fails the same way. That
+environment cannot judge the click, so it is no evidence of a further
+Servo defect.
+
+### Automation signals
+
+Two Servo behaviours would let a page tell Combray apart from an ordinary
+browser on a phone, where the environment no longer masks them:
+
+- Console formatting ran page script: getters, proxy traps, `toString`,
+  `toJSON` and numeric conversions, plus devtools previews built with no
+  client attached. Bot checks log trap objects to detect open developer
+  tools, and the diagnostic logs such objects. The fix formats from
+  property descriptors and engine state, and builds devtools previews only
+  for an attached client. A 26-case WPT test fails 24 cases on official
+  v0.7.0, two of them because it lacks `console.table` and
+  `console.dirxml`, and passes with the fix. Making the console fully inert did not change the
+  desktop click result, so this is a hardening measure, not a proven cause.
+- `window.webdriverElement`, `webdriverFrame`, `webdriverWindow` and
+  `webdriverShadowRoot` were enumerable on every global. They now exist
+  only when servoshell runs WebDriver. A five-case WPT test fails all five
+  on v0.7.0 and passes with the fix.
+
+### Checks
+
+- The merged tree is the tree built and tested locally:
+  `./mach build --profile medium --media-stack dummy`, with the `script`
+  crate at opt-level 0 for the final build because the host's 16 GiB
+  container limit kills it at opt-level 2.
+- WPT with that build: 186 tests as expected. They cover the three new
+  downstream tests, `console/`, `webmessaging/` and the worker
+  event-properties test. WebDriver's Execute Script argument and node tests
+  pass. An earlier origin-only build ran `webmessaging/` and `workers/`:
+  499 tests, 498 as expected, plus one unexpected pass that the change cannot
+  affect ([PR #23](https://github.com/L-K-M/servo/pull/23)).
+- Devin SWE-2 and Pi MiMo V2.6 Pro reviewed each change; the PRs record the
+  findings and what was done with them.
+- The Engine workflow (both ABIs and the emulator fixtures) and routine CI
+  run on the app integration PR.
+
+Limitations: all engine evidence is from desktop servoshell. The host's
+network and headless WebDriver environment fail the checkbox for every
+browser tried. The phone result is pending, with the arm64 APK from the app
+integration PR's Engine workflow.
+
+## 41. PDF viewer document, candidate (30 October 2026)
 
 The pin is `ee5d4c6254ad5f15cff0eea796020a4087576d7d`, the head of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
