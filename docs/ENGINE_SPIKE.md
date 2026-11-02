@@ -1992,3 +1992,75 @@ failure retains the flag and the bounded retry. No extra native deadline
 or wake-less state producer was found. A zero-duration deadline now has an
 explicit regression against paint retry. No debug polling clamp was added:
 it would hide missed wakeups from the full fixture suite's timeouts.
+
+## 38. Inline CSP nonce properties (2 November 2026)
+
+Validated source: `e4710ec93581bd90cbd3980ccc8af508b1ed2803`, downstream
+[PR #22](https://github.com/L-K-M/servo/pull/22), merged as
+`8e791033712f825edb4b6b4e7b257f0f940b4047` on `combray/0.7`.
+App integration: [PR #180](https://github.com/L-K-M/Combray/pull/180).
+This fixes CSP authorization, not the verification failure.
+
+### Reproduction before the fix
+
+A fresh API-30 x86_64 KVM emulator used the diagnostic native APK from
+Engine run `41346084773`, pinned to
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`. Manual probe run
+[41367137326](https://github.com/L-K-M/Combray/actions/runs/41367137326)
+found:
+
+- Same-origin and cross-origin iframe message identity passes in light DOM
+  and closed shadow roots; all four frames paint their expected colors.
+- A worker's deliberate exception reaches the existing trace even when its
+  DOM error handler cancels propagation. Missing worker errors are not
+  established as the cause.
+- Styles with a matching `.nonce` property remain black instead of the
+  requested `rgb(17, 34, 51)`, both before insertion and after insertion
+  before text. Reading a missing nonce content attribute as `null` is
+  correct, not a nonce-hiding defect.
+- JavaScript evaluation remains blocked and `wasm-unsafe-eval` works.
+- The live diagnostic reaches `failed` after about 70 seconds; the supplied
+  article loads. The phone failure still needs direct confirmation.
+
+Independent Chromium run
+[41369435474](https://github.com/L-K-M/Combray/actions/runs/41369435474)
+applies both nonce-property styles. Its attribute-nonce control, wrong-nonce
+rejection, blocked JavaScript evaluation and allowed Wasm compilation pass.
+Only synthetic cases and manually supplied public targets were read.
+Uploaded captures are encrypted; raw session data stays private.
+
+### Mechanism and pending proof
+
+The shared inline CSP check discarded the cryptographic nonce unless a
+nonce content attribute existed. The IDL setter deliberately creates no
+such attribute. The candidate reads that slot while retaining nonceability
+checks for existing attributes, matching external-script preparation.
+
+Eight downstream WPT assertions cover matching, missing and wrong nonces,
+attribute controls, inline scripts and rejection of style attributes.
+Using the real WPT harness and HTTP CSP header:
+
+- Unchanged Servo run `41371925127`: five pass, three targeted failures.
+- Chromium run `41371923177`: eight pass.
+- Patched Servo run `41374714293`: eight pass.
+
+Both ABI builds and all 160 emulator fixture checks pass in Engine run
+`41372328020`; routine CI run `41372327945` passes. The former ScrollTest
+failure does not recur. Local native host checks pass: 146 tests; notice
+checks: 17. The full local script suite timed out after 180 seconds and
+is not claimed as passed.
+
+Local `scripts/build-native.sh` succeeds for x86_64 in 67m59s: Linux,
+Rust 1.97.1, NDK 29.0.14206865, Zig host wrappers with UBSan disabled,
+`CARGO_BUILD_JOBS=1`. Rust formatting, documentation and whitespace checks
+pass. Independent GLM review completes one minor-only round with no
+important findings after one harness-permission failure. Extra duplicate
+parse-error and nonce-slot resynchronization cases are deferred; existing
+attribute-bearing nonceability checks remain unchanged.
+
+The patched live diagnostic still fails `300031` after about 70 seconds;
+the article loads. This is not a verification fix. A temporary manual-only
+branch is tracing CSP/resource failures and frame-local layout, with
+private encrypted captures. It must not merge. Diagnostic console and
+probe prototypes are excluded from the app integration. The arm64 APK from run
+`41372328020` was offered for phone confirmation; no phone result is claimed.
