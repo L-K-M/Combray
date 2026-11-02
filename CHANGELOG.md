@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Bottom controls gain Close tab, inline Reader/Stop and an instant Menu.
+  Share moves into Menu; swipe up from Menu and release over an entry.
 - ThemeContrastTest now also requires the five surface-container shades
   to step in brightness order in both schemes.
 - The bottom bar hides while scrolling down and returns while scrolling up,
@@ -242,6 +244,10 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - A refused link in Reader keeps the article open instead of discarding it.
+- Keep pull-to-reload working through coalesced touch moves without
+  overriding a page's refusal.
+- Honor matching CSP nonce properties on inline styles and scripts in Servo.
+  Live verification remains under investigation.
 - Selecting or swiping tabs no longer reorders them. Open tabs keep creation
   order across pauses and restarts; history stays recent-first.
 - Show the keyboard for fields inside shadow roots, and offer Paste when
