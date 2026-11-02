@@ -3,6 +3,8 @@
 <title>POLICY:PENDING</title>
 <div id="before">Nonce before insertion</div>
 <div id="after">Nonce after insertion, before text</div>
+<div id="attribute">Nonce content attribute</div>
+<div id="wrong">Wrong nonce</div>
 <script nonce="dGVzdC1ub25jZQ==">
 (async () => {
   const NONCE = "dGVzdC1ub25jZQ==";
@@ -16,7 +18,7 @@
   before.textContent = "#before { color: " + EXPECTED_COLOR + " }";
   document.head.appendChild(before);
   record("nonce-before-style", getComputedStyle(document.getElementById("before")).color, EXPECTED_COLOR);
-  record("nonce-before-hidden", before.getAttribute("nonce"), "");
+  record("nonce-before-content-absent", before.getAttribute("nonce"), null);
   record("nonce-before-slot", before.nonce, NONCE);
 
   const after = document.createElement("style");
@@ -24,8 +26,20 @@
   after.nonce = NONCE;
   after.textContent = "#after { color: " + EXPECTED_COLOR + " }";
   record("nonce-after-style", getComputedStyle(document.getElementById("after")).color, EXPECTED_COLOR);
-  record("nonce-after-hidden", after.getAttribute("nonce"), "");
+  record("nonce-after-content-absent", after.getAttribute("nonce"), null);
   record("nonce-after-slot", after.nonce, NONCE);
+
+  const attribute = document.createElement("style");
+  attribute.setAttribute("nonce", NONCE);
+  attribute.textContent = "#attribute { color: " + EXPECTED_COLOR + " }";
+  document.head.appendChild(attribute);
+  record("nonce-attribute-style", getComputedStyle(document.getElementById("attribute")).color, EXPECTED_COLOR);
+
+  const wrong = document.createElement("style");
+  wrong.nonce = "d3Jvbmc=";
+  wrong.textContent = "#wrong { color: " + EXPECTED_COLOR + " }";
+  document.head.appendChild(wrong);
+  record("wrong-nonce-blocked", getComputedStyle(document.getElementById("wrong")).color, "rgb(0, 0, 0)");
 
   let evalBlocked = false;
   try { eval("1 + 1"); } catch (error) { evalBlocked = error.name === "EvalError"; }
@@ -38,6 +52,10 @@
     record("wasm-unsafe-eval-allowed", error.name + ":" + error.message, "compiled");
   }
 
+  const output = document.createElement("pre");
+  output.id = "policy-results";
+  output.textContent = JSON.stringify(results);
+  document.body.appendChild(output);
   for (const result of results) console.info(JSON.stringify({ fixture: "policy-probe", ...result }));
   const pass = results.every(result => result.pass);
   document.title = pass ? "POLICY:PASS" : "POLICY:FAIL";
