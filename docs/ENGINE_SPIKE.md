@@ -2061,5 +2061,6 @@ attribute-bearing nonceability checks remain unchanged.
 The patched live diagnostic still fails `300031` after about 70 seconds;
 the article loads. This is not a verification fix. A temporary manual-only
 branch is tracing CSP/resource failures and frame-local layout, with
-private encrypted captures. It must not merge. The arm64 APK from run
+private encrypted captures. It must not merge. Diagnostic console and
+probe prototypes are excluded from the app integration. The arm64 APK from run
 `41372328020` was offered for phone confirmation; no phone result is claimed.

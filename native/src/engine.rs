@@ -904,11 +904,7 @@ impl Engine {
             .url(url)
             .hidpi_scale_factor(Scale::new(self.config.density))
             .user_content_manager(runtime.user_content.clone())
-            .delegate(Rc::new(TabDelegate::new(
-                view,
-                self.delegate_queue.clone(),
-                &self.config.profile_dir,
-            )))
+            .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
 
         let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
@@ -997,11 +993,7 @@ impl Engine {
             .builder(rendering_context)
             .hidpi_scale_factor(Scale::new(self.config.density))
             .user_content_manager(runtime.user_content.clone())
-            .delegate(Rc::new(TabDelegate::new(
-                view,
-                self.delegate_queue.clone(),
-                &self.config.profile_dir,
-            )))
+            .delegate(Rc::new(TabDelegate::new(view, self.delegate_queue.clone())))
             .build();
         // The window's first navigation is still the tap's: a target=_blank app link opens its app.
         self.insert_tab(view, webview, Some(opener), OpeningTap::at(tapped_at));
