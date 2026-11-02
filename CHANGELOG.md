@@ -243,6 +243,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Honor matching CSP nonce properties on inline styles and scripts in Servo.
+  Live verification remains under investigation.
 - Selecting or swiping tabs no longer reorders them. Open tabs keep creation
   order across pauses and restarts; history stays recent-first.
 - Show the keyboard for fields inside shadow roots, and offer Paste when
