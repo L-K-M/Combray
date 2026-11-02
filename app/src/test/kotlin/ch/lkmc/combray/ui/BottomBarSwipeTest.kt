@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -128,6 +129,19 @@ class BottomBarSwipeTest {
     }
 
     @Test
+    fun aNarrowAddressSpansTheActionRow() {
+        showBar(320.dp)
+        val address = address().fetchSemanticsNode().boundsInRoot
+        val reader = compose.onNodeWithContentDescription("Reader view").fetchSemanticsNode().boundsInRoot
+        val back = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
+        val menu = compose.onNodeWithContentDescription("Menu").fetchSemanticsNode().boundsInRoot
+
+        assertTrue("address=$address, back=$back", address.bottom <= back.top)
+        assertTrue("address=$address, back=$back", address.left <= back.left)
+        assertTrue("reader=$reader, menu=$menu", reader.right >= menu.right)
+    }
+
+    @Test
     fun swipesStartOnTheAddressAndEveryButtonInTheSingleRowBar() {
         showBar(600.dp)
         swipeEveryControl()
@@ -230,7 +244,7 @@ class BottomBarSwipeTest {
 
     private fun swipeEveryControl() {
         val bar = compose.onNodeWithTag("bar").fetchSemanticsNode().boundsInRoot
-        val controls = listOf(address()) + listOf("Back", "Save", "Share", "New tab", "Recent, 3 open tabs", "More")
+        val controls = listOf(address()) + listOf("Back", "Save", "Close tab", "New tab", "Recent, 3 open tabs", "Menu", "Reader view")
             .map { compose.onNodeWithContentDescription(it) }
         val expected = mutableListOf<TabStep>()
         controls.forEach { control ->
@@ -285,13 +299,22 @@ class BottomBarSwipeTest {
                             onBack = { clicks += "back" },
                             onAddress = { clicks += "address" },
                             onSave = { clicks += "save" },
-                            onShare = { clicks += "share" },
+                            onCloseTab = { clicks += "close" },
+                            readerDisplay = ReaderDisplay.PAGE,
+                            onStop = { clicks += "stop" },
+                            onReader = { clicks += "reader" },
                             onHister = { clicks += "hister" },
                             onKarakeep = { clicks += "karakeep" },
                             onNewTab = { clicks += "new" },
                             onRecent = { clicks += "recent" },
                             onRecentLongPress = { clicks += "previous" },
-                            onMore = { clicks += "more" },
+                            menuButton = {
+                                ToolbarMenuButton(
+                                    remember { ToolbarMenuState() },
+                                    { clicks += "menu" },
+                                    if (tab.url == null) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON,
+                                )
+                            },
                             onCopyAddress = { clicks += "copy" },
                             onSwipeTab = { steps += it },
                             homeMode = mode,

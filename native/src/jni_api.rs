@@ -325,6 +325,23 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_reload<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_stopLoading<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    request: jlong,
+) {
+    let Ok(generation) = u64::try_from(generation) else {
+        return;
+    };
+    send(Command::StopLoading {
+        view: crate::events::ViewKey { tab, generation },
+        request,
+    });
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_reloadPage<'local>(
     _env: EnvUnowned<'local>,
     _class: JClass<'local>,

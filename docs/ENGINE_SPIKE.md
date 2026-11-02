@@ -1993,7 +1993,210 @@ or wake-less state producer was found. A zero-duration deadline now has an
 explicit regression against paint retry. No debug polling clamp was added:
 it would hide missed wakeups from the full fixture suite's timeouts.
 
-## 38. PDF viewer document, candidate (30 October 2026)
+## 38. Inline CSP nonce properties (2 November 2026)
+
+Validated source: `e4710ec93581bd90cbd3980ccc8af508b1ed2803`, downstream
+[PR #22](https://github.com/L-K-M/servo/pull/22), merged as
+`8e791033712f825edb4b6b4e7b257f0f940b4047` on `combray/0.7`.
+App integration: [PR #180](https://github.com/L-K-M/Combray/pull/180).
+This fixes CSP authorization, not the verification failure.
+
+### Reproduction before the fix
+
+A fresh API-30 x86_64 KVM emulator used the diagnostic native APK from
+Engine run `41346084773`, pinned to
+`ef6beb09ab19325d597dd96f758ed359ad33ccce`. Manual probe run
+[41367137326](https://github.com/L-K-M/Combray/actions/runs/41367137326)
+found:
+
+- Same-origin and cross-origin iframe message identity passes in light DOM
+  and closed shadow roots; all four frames paint their expected colors.
+- A worker's deliberate exception reaches the existing trace even when its
+  DOM error handler cancels propagation. Missing worker errors are not
+  established as the cause.
+- Styles with a matching `.nonce` property remain black instead of the
+  requested `rgb(17, 34, 51)`, both before insertion and after insertion
+  before text. Reading a missing nonce content attribute as `null` is
+  correct, not a nonce-hiding defect.
+- JavaScript evaluation remains blocked and `wasm-unsafe-eval` works.
+- The live diagnostic reaches `failed` after about 70 seconds; the supplied
+  article loads. The phone failure still needs direct confirmation.
+
+Independent Chromium run
+[41369435474](https://github.com/L-K-M/Combray/actions/runs/41369435474)
+applies both nonce-property styles. Its attribute-nonce control, wrong-nonce
+rejection, blocked JavaScript evaluation and allowed Wasm compilation pass.
+Only synthetic cases and manually supplied public targets were read.
+Uploaded captures are encrypted; raw session data stays private.
+
+### Mechanism and pending proof
+
+The shared inline CSP check discarded the cryptographic nonce unless a
+nonce content attribute existed. The IDL setter deliberately creates no
+such attribute. The candidate reads that slot while retaining nonceability
+checks for existing attributes, matching external-script preparation.
+
+Eight downstream WPT assertions cover matching, missing and wrong nonces,
+attribute controls, inline scripts and rejection of style attributes.
+Using the real WPT harness and HTTP CSP header:
+
+- Unchanged Servo run `41371925127`: five pass, three targeted failures.
+- Chromium run `41371923177`: eight pass.
+- Patched Servo run `41374714293`: eight pass.
+
+Both ABI builds and all 160 emulator fixture checks pass in Engine run
+`41372328020`; routine CI run `41372327945` passes. The former ScrollTest
+failure does not recur. Local native host checks pass: 146 tests; notice
+checks: 17. The full local script suite timed out after 180 seconds and
+is not claimed as passed.
+
+Local `scripts/build-native.sh` succeeds for x86_64 in 67m59s: Linux,
+Rust 1.97.1, NDK 29.0.14206865, Zig host wrappers with UBSan disabled,
+`CARGO_BUILD_JOBS=1`. Rust formatting, documentation and whitespace checks
+pass. Independent GLM review completes one minor-only round with no
+important findings after one harness-permission failure. Extra duplicate
+parse-error and nonce-slot resynchronization cases are deferred; existing
+attribute-bearing nonceability checks remain unchanged.
+
+The patched live diagnostic still fails `300031` after about 70 seconds;
+the article loads. This is not a verification fix. A temporary manual-only
+branch is tracing CSP/resource failures and frame-local layout, with
+private encrypted captures. It must not merge. Diagnostic console and
+probe prototypes are excluded from the app integration. The arm64 APK from run
+`41372328020` was offered for phone confirmation; no phone result is claimed.
+
+## 39. Toolbar recovery (1 November 2026)
+
+Recovered the interrupted owner request: inline Stop while loading, Reader
+otherwise; Back, Save, Close tab, New tab, Recent and Menu; Share in Menu;
+an instant menu with upward-drag release selection. The old task stopped
+with an unresolved `browser.stopLoading` call: Servo 0.7 exposes no such
+embedder API. No UI-only loading flag is accepted as cancellation.
+
+Draft [PR #179](https://github.com/L-K-M/Combray/pull/179) preserves the UI
+on current main, including gesture feedback, fixed tab order, pull reload
+and scroll-hiding controls. The original worktree remains untouched. After
+a session restart removed temporary worktrees, staged UI was recovered from
+Git's index; new development and evidence now use persistent directories.
+
+The client routes Stop through the coordinator, engine port and JNI to the
+Servo owner thread. Replies carry view generation, request and retained
+document identity. Tests cover delayed view creation, callback/commit order,
+new navigation, equal-address replacement, renderer replacement, failure and
+retry. A reply ahead of its retained document waits for the commit to become
+durable before ending loading; two regressions failed before this guard.
+Restart must not reopen a cancelled target under a completed Stop. Stopping
+does not close the logical tab or change an existing committed URL.
+
+Local Linux x86_64, JDK 17, SDK 37 results:
+
+- Both new wire-message tests failed before decoding was added. Engine's
+  47 tests and core's 454 tests then passed.
+- Thirteen real-composable Menu tests and fourteen swipe tests pass. Two regressions first
+  reproduced actions after a second finger and after Back while dragging.
+  An overlay press now cancels an existing drag; dismissing invalidates its
+  handler, so a held finger cannot reopen or activate a dismissed menu.
+- Four fixture-server checks pass, after the new endpoint first returned
+  404. Per-check gates isolate delayed responses. The page heartbeat reports
+  actual `document.readyState`; changing native UI state cannot complete it.
+- Native host tests pass: 147 tests after integrating #178, using an isolated Cargo target. This
+  checks pure bridge logic, not the Android-only Servo adapter.
+- `assembleDebugAndroidTest` passes, including three real-Servo Stop checks.
+  These checks are compiled, not run locally. They require retained article
+  content, a cancelled blocking script, and navigation after initial Stop.
+
+Home retains its labeled Menu action; a missing-label test failed before
+sharing gesture handling between icon and labeled buttons. A thirteenth
+Menu test covers Home's drag path. Four activity tests cover native-page
+drag selection, Share placement, Home's label and second-finger cancellation.
+All seven new activity checks passed on the API-30 x86_64 emulator at
+`f0ad26a` (Engine run `41377744676`). The normal full local gate
+lost its Gradle daemon. The same tasks then passed with bounded Gradle memory:
+651 JVM tests (app 150, core 454, engine 47), lint and both APK assemblies.
+The coalescing candidate passes 652 JVM tests (app 151, core 454, engine 47),
+lint, both APK assemblies, 147 native host checks and 17 notice checks.
+
+Commands:
+
+```sh
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx2g testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew :app:testDebugUnitTest --tests ch.lkmc.combray.ui.ToolbarMenuTest :app:assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests -p test_fixture_server.py
+(cd native && CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=$HOME/.cache/combray-toolbar-host-target cargo +1.97.1 test --lib)
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) now supplies
+candidate `4eb8b125d8cc984e0e4d09b69ea183dd0cda2bb7`. Its `efd55be7` merge
+preserves Stop head `a3badf8` and published nonce handling `8e79103`.
+All 45 serial SDK checks pass: 36 existing WebView checks, seven Stop checks
+and two input-completion regressions. Android requalification remains required.
+A real-Servo callback test
+first failed with `RefCell already borrowed`; taking the callback before
+invoking it fixed that failure. Seven regressions passed on `a3badf8`:
+retained partial content, pending navigation and iframe cancellation, reusable
+initial Stop, late approval, close and callback reentry. A separate, explicitly
+enabled failure probe suppresses fallback creation: it timed out before the
+guard and then returned `DocumentUnavailable`. The shipping call is restored;
+the manual probe stays ignored without that documented fault setup.
+
+The SDK uses process-global options, so its normal runner is Nextest. A plain
+multi-case `cargo test` fails initialization. A parallel `28e41c8` Nextest run
+hit the existing 20-second timeout; `--test-threads 1` passed all seven on that
+head and the guarded candidate without changing assertions or timeouts. Later-navigation checks wait
+for a new document, not late completion from the stopped one.
+
+Host: Linux x86_64, Rust 1.97.1, Zig 0.17.0, Nextest 0.9.150 and Mesa 22.3.6.
+Debian 12 runtime packages were extracted into an isolated test sysroot; no
+system packages were installed. Local linker wrappers supply font libraries
+and SpiderMonkey's GNU C++ runtime. Reproduction:
+
+```sh
+cargo +1.97.1 nextest run --cargo-profile medium -p servo --test stop_loading --test-threads 1
+```
+
+At `f0ad26a`, both native ABIs passed and actual GLM source reviews completed
+without a confirmed blocker: two SDK rounds at final head `a3badf8`, one app
+round. The full emulator suite failed: 167 passed, two failed. The narrow-bar
+check found a doubled chip gutter; a new JVM regression failed first and
+passes after removing that gutter. The other failure is
+`ScrollTest.aPullRevealsHiddenControlsAndStillReloads`: no reload request
+reached the fixture. A slow allowed/prevented touch fixture isolates that path.
+
+At `1c8844d` (Engine run `41386360583`), both ABIs passed; 170 of 171 emulator
+checks passed, including narrow geometry, hidden-controls reload, Stop and Menu.
+The slow allowed drag failed. It armed at the top, then received
+`prevented=false, dispatch_failed=true, decision=Cancelled` after 90 ms;
+release was still at the top. Servo had coalesced a move, not seen a page veto.
+
+The candidate reports intentional coalescing as `Consumed`, while real target,
+shutdown and channel failures remain `DispatchFailed`. The dispatched move
+still carries the page veto. The native failure gate is unchanged. A desktop
+consumed-result assertion failed first; both new regressions now pass, also
+checking page refusal and genuine hit-test failure. Temporary tracing is removed.
+The 100 ms handler delay, assertions and existing timeouts remain unchanged.
+
+### Final qualification (2 November 2026)
+
+[Engine run `41393285172`](https://github.com/L-K-M/Combray/actions/runs/41393285172)
+passed both Android ABIs and all 171 API-30 x86_64 emulator checks at
+`04e9f9d3559f82c5b52dae31aa8bc127d6589c1f`, pinned to the candidate above.
+Both slow-drag cases, three Stop cases and four Menu cases executed and passed.
+No assertion or timeout was weakened.
+
+SDK [#21](https://github.com/L-K-M/servo/pull/21) merged as `f1b1054`;
+app [#179](https://github.com/L-K-M/Combray/pull/179) merged as `7162cf1`.
+Actual final-head GLM reviews found no confirmed blocker: three SDK rounds,
+two app rounds. The hosted hybrid review also completed; its major claims
+were disproved by the shared dismiss callback, retained rows and compiled
+activity tests. Minor cleanup is deferred under the review stopping rule.
+
+No local device, physical-phone, battery or idle-CPU result is claimed;
+no personal history or service was used. Reader, PDF and compatibility holds
+are unchanged.
+
+## 40. PDF viewer document, candidate (30 October 2026)
 
 The pin is `494d7f4b13b78d64815fa191bc61705bee500347`, the head of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)

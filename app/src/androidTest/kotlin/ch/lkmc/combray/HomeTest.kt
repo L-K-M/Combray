@@ -94,7 +94,7 @@ class HomeTest {
         open(Device.GREEN)
 
         device.dismissSystemDialogs()
-        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithContentDescription("Menu").performClick()
         awaitText("Settings")
         compose.onNodeWithText("New tab").assertDoesNotExist()
         back()

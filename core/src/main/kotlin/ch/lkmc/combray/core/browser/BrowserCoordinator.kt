@@ -479,6 +479,18 @@ class BrowserCoordinator(
         engine.scrollToEdge(page, edge)
     }
 
+    /** Cancels only the tab whose loading control was pressed, awaiting an engine result. */
+    fun stopLoading(tabId: String) = submit {
+        if (activeTab()?.id != tabId) return@submit
+        val view = liveByTab[tabId]?.takeIf { !it.crashed } ?: return@submit
+        if ((!view.loading && !view.awaitingCommit) || view.pendingStop != null) return@submit
+
+        val request = nextRequest++
+        view.pendingStop = PendingStop(request, view.commitRequests, view.currentDocument)
+        // A first-frame tap can precede TabCreated. Keep its intent until the view is identified.
+        view.generation?.let { engine.stopLoading(ViewRef(view.nativeTab, it), request) }
+    }
+
     /** Reloads the page; a crashed renderer is replaced by a new one at the tab's address. */
     fun reload() = submit {
         val tab = activeTab() ?: return@submit
@@ -571,6 +583,30 @@ class BrowserCoordinator(
     /** The text size setting changed: every page, open or opened later, lays out at it. */
     fun applyTextSize() = submit {
         if (engineReady) engine.setPageZoom(textSize().zoom)
+    }
+
+    private fun onLoadingStopped(view: LiveView, event: EngineEvent.LoadingStopped) {
+        val pending = view.pendingStop?.takeIf {
+            it.request == event.request && it.navigation == view.commitRequests
+        } ?: return
+        if (view.currentDocument != pending.document && view.currentDocument != event.document) {
+            view.pendingStop = null
+            return
+        }
+        if (view.currentDocument != event.document) {
+            // Persist the retained document before reporting completion or allowing a recovery load.
+            pending.acknowledgement = event
+            return
+        }
+        view.pendingStop = null
+        view.loading = false
+        view.stoppedDocument = event.document
+        // Reports held for the cancelled navigation cannot become the retained page's media.
+        view.heldMedia.clear()
+        stopAwaitingCommit(view)
+        view.awaitedRequest = null
+        view.awaitedUrl = null
+        if (view.currentDocument == event.document) scheduleCapture(view, event.document, captureTiming.debounceMs)
     }
 
     /**
@@ -721,12 +757,23 @@ class BrowserCoordinator(
                 engine.setAppearance(appearance)
                 reconcile()
             }
-            is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { it.generation = event.view.generation }
+            is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { live ->
+                live.generation = event.view.generation
+                live.pendingStop?.let { engine.stopLoading(event.view, it.request) }
+            }
             is EngineEvent.TabOpened -> onTabOpened(event)
             is EngineEvent.TabClosed -> view(event.view)?.let { onClosedByPage(it) }
             is EngineEvent.HistoryChanged -> view(event.view)?.let { onHistory(it, event) }
+            is EngineEvent.LoadingStopped -> view(event.view)?.let { onLoadingStopped(it, event) }
+            is EngineEvent.LoadingStopFailed -> view(event.view)?.let { live ->
+                val pending = live.pendingStop
+                if (pending?.request == event.request && pending.navigation == live.commitRequests) {
+                    live.pendingStop = null
+                    state.update { it.copy(notice = Notice.StopFailed) }
+                }
+            }
             is EngineEvent.LoadStatus -> view(event.view)?.let {
-                if (event.document == it.currentDocument && event.attribution != Attribution.STALE) {
+                if (event.document == it.currentDocument && event.document != it.stoppedDocument && event.attribution != Attribution.STALE) {
                     it.loading = event.phase != LoadPhase.COMPLETE
                     if (event.phase == LoadPhase.COMPLETE) {
                         scheduleCapture(it, event.document, captureTiming.settleMs)
@@ -766,6 +813,7 @@ class BrowserCoordinator(
                 it.crashed = true
                 it.loading = false
                 it.awaitingCommit = false
+                it.pendingStop = null
                 it.controls.clear()
                 it.dialogDocument = null
                 it.dialogCount = 0
@@ -968,10 +1016,11 @@ class BrowserCoordinator(
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.awaitingCommit = false
                     view.currentDocument = event.document
+                    if (view.stoppedDocument != event.document) view.stoppedDocument = null
                     // Find searched the replaced document, and its selection went with it.
                     if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
-                    view.loading = event.document !in view.documentVisits
+                    view.loading = event.document != view.stoppedDocument && event.document !in view.documentVisits
                     scheduleCapture(view, event.document, captureTiming.fallbackMs)
                     if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
@@ -999,7 +1048,10 @@ class BrowserCoordinator(
                 tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
             )
         }
-        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) releaseHeldMedia(view, event.document)
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) {
+            releaseHeldMedia(view, event.document)
+            view.pendingStop?.acknowledgement?.let { onLoadingStopped(view, it) }
+        }
     }
 
     /**
@@ -1128,6 +1180,7 @@ class BrowserCoordinator(
      * answer, a download) stops showing after [navigationTimeoutMs].
      */
     private fun awaitCommit(view: LiveView) {
+        view.pendingStop = null
         view.awaitingCommit = true
         view.awaitedRequest = null
         view.awaitedUrl = null
@@ -1600,6 +1653,10 @@ class BrowserCoordinator(
 
     private fun documentKey(view: LiveView, document: Long) = "$processKey:${view.generation}:$document"
 
+    private class PendingStop(val request: Long, val navigation: Long, val document: Long?) {
+        var acknowledgement: EngineEvent.LoadingStopped? = null
+    }
+
     /** One native view incarnation for a logical tab. */
     private class LiveView(val tabId: String, val nativeTab: Long) {
         var generation: Long? = null
@@ -1615,6 +1672,8 @@ class BrowserCoordinator(
 
         /** The awaited address, when the app navigated to one; a reload or a new view awaits none. */
         var awaitedUrl: String? = null
+        var pendingStop: PendingStop? = null
+        var stoppedDocument: Long? = null
         var canGoBack = false
         var canGoForward = false
         var crashed = false

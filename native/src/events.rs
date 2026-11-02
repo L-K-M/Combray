@@ -226,6 +226,15 @@ pub enum EngineEvent {
         view: ViewKey,
         url: String,
     },
+    LoadingStopped {
+        view: ViewKey,
+        request: i64,
+        document: u64,
+    },
+    LoadingStopFailed {
+        view: ViewKey,
+        request: i64,
+    },
     /// The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed.
     ExternalLink {
         view: ViewKey,
@@ -386,6 +395,18 @@ impl EngineEvent {
                     "request": request,
                     "url": strip_userinfo(url),
                 }),
+            ),
+            EngineEvent::LoadingStopped {
+                view,
+                request,
+                document,
+            } => with_view(
+                view,
+                json!({ "type": "loading_stopped", "request": request, "document": document }),
+            ),
+            EngineEvent::LoadingStopFailed { view, request } => with_view(
+                view,
+                json!({ "type": "loading_stop_failed", "request": request }),
             ),
             EngineEvent::PageNavigationRequested { view, url } => with_view(
                 view,
@@ -632,6 +653,28 @@ fn capture_json(report: &CaptureReport) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_loading_keeps_the_view_request_and_retained_document() {
+        let view = ViewKey {
+            tab: 3,
+            generation: 4,
+        };
+        let stopped = EngineEvent::LoadingStopped {
+            view,
+            request: 11,
+            document: 7,
+        };
+        let failed = EngineEvent::LoadingStopFailed { view, request: 11 };
+        assert_eq!(
+            serde_json::from_str::<Value>(&stopped.to_json()).unwrap(),
+            json!({ "schema": 1, "type": "loading_stopped", "tab": 3, "generation": 4, "request": 11, "document": 7 }),
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&failed.to_json()).unwrap(),
+            json!({ "schema": 1, "type": "loading_stop_failed", "tab": 3, "generation": 4, "request": 11 }),
+        );
+    }
 
     #[test]
     fn find_result_carries_view_document_and_bounded_counts() {

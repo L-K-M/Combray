@@ -26,6 +26,7 @@ class FakeEngine : EnginePort {
     val selected = mutableListOf<Long>()
     val closed = mutableListOf<Long>()
     val navigated = mutableListOf<Triple<Long, Long, String>>()
+    var reportCreated = true
 
     /** (tab, throttled) throttle commands, in order. */
     val throttling = mutableListOf<Pair<Long, Boolean>>()
@@ -56,7 +57,7 @@ class FakeEngine : EnginePort {
             return
         }
         generations[tab] = nextGeneration++
-        emit(EngineEvent.TabCreated(view(tab)))
+        if (reportCreated) emit(EngineEvent.TabCreated(view(tab)))
     }
 
     override fun selectView(tab: Long) {
@@ -92,6 +93,10 @@ class FakeEngine : EnginePort {
     override fun goBack(tab: Long) = Unit
 
     override fun goForward(tab: Long) = Unit
+
+    data class Stop(val view: ViewRef, val request: Long)
+    val stopRequests = mutableListOf<Stop>()
+    override fun stopLoading(view: ViewRef, request: Long) { stopRequests += Stop(view, request) }
 
     val reloaded = mutableListOf<Long>()
     override fun reload(tab: Long) { reloaded += tab }
