@@ -243,6 +243,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A refused link in Reader keeps the article open instead of discarding it.
 - Keep pull-to-reload working through coalesced touch moves without
   overriding a page's refusal.
 - Honor matching CSP nonce properties on inline styles and scripts in Servo.
