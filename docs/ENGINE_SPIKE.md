@@ -2198,15 +2198,16 @@ are unchanged.
 
 ## 40. PDF viewer document, candidate (30 October 2026)
 
-The pin is `494d7f4b13b78d64815fa191bc61705bee500347`, the head of
+The pin is `dab4d6a8bfa0db7636c3e60a505c2825539a4c64`, the head of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
-(`engine/pdf-viewer-document`): `combray/0.7` at `ef52ceadf57` plus the
-PDF viewer change, upstream base still v0.7.0. `ef52ceadf57` has the
-same tree as `ef6beb09ab1`, main's pin before this one, which carries
-the engine fixes of sections 32, 33 and 35. The branch's first-parent
-history over `combray/0.7`
-(`git log --oneline --first-parent origin/combray/0.7..494d7f4b13b`):
+(`engine/pdf-viewer-document`): `combray/0.7` at `f1b105495` plus the
+PDF viewer change, upstream base still v0.7.0. `f1b105495` has the
+same tree as `4eb8b125d`, main's pin before this one, which carries
+the engine fixes of sections 32, 33, 35, 38 and 39. The branch's
+first-parent history over `combray/0.7`
+(`git log --oneline --first-parent origin/combray/0.7..dab4d6a8bfa`):
 
+- `dab4d6a8b` Merge combray/0.7 into the PDF viewer document branch
 - `494d7f4b1` Merge combray/0.7 into the PDF viewer document branch
 - `05027c941` Docs: list the PDF viewer document in DOWNSTREAM.md
 - `5c92900d5` Servo: test the PDF viewer document
@@ -2220,11 +2221,14 @@ history over `combray/0.7`
 `0bce9843c` to `05027c941` are the engine change. `d1e33448d` adds the
 downstream GLM review workflow (`.github/workflows/zai-code-review.yml`,
 owner decision of 29 October 2026, recorded in its `DOWNSTREAM.md`) and
-is no engine build input. The merge `494d7f4b1` adds nothing of its own:
-over `combray/0.7` it changes the same 12 files with the same lines
-(1937 added, 6 removed) as `05027c941` over its base `6d3218a2a94`.
-This section first pinned `05027c9413a`, the branch head before the
-owner merged `combray/0.7` into it. **It is a candidate.** #18 is
+is no engine build input. The merges `494d7f4b1` (of `combray/0.7` at
+`ef52ceadf57`) and `dab4d6a8b` (at `f1b105495`) add nothing of their
+own: over `combray/0.7` the head changes the same 12 files with the
+same lines (1937 added, 6 removed) as `05027c941` over its base
+`6d3218a2a94`. The added and removed lines are byte-identical, so
+merging `combray/0.7` changed no PDF line. This section first pinned
+`05027c9413a`, the branch head before the owner merged `combray/0.7`
+into it, then `494d7f4b13b`. **It is a candidate.** #18 is
 not merged yet; before the Combray PR that sets this pin merges, #18
 merges with a merge commit, the pin moves to that commit on
 `combray/0.7`, and the Engine workflow runs again on it.
@@ -2277,17 +2281,19 @@ review of the Combray PR):
   viewer lays its pages out again whenever it opens the PDF.
 
 Evidence for the engine change is in #18: 24 tests in
-`components/servo/tests/pdf_viewer.rs` and its review. On this Linux
-x86_64 host, for the pin:
+`components/servo/tests/pdf_viewer.rs` and its review. At `dab4d6a8bfa`,
+its `pdf_viewer` (24), `stop_loading` (7) and `input_events` (2) suites
+pass. On this Linux x86_64 host, for the pin:
 
-- `git diff --name-only 6d3218a2a94 494d7f4b13b`, main's engine fixes
+- `git diff --name-only 6d3218a2a94 dab4d6a8bfa`, main's engine fixes
   and the PDF change together, touches no `Cargo.toml`, `Cargo.lock`,
   toolchain or default resource; Servo's `Cargo.lock` is byte-identical
-  at `6d3218a2a94`, `ef6beb09ab1`, `05027c9413a` and `494d7f4b13b`.
-  `cargo test --lib` in `native/` against the candidate checkout: 148
-  passed, and `native/Cargo.lock` did not change. Host builds compile
-  only the pure modules (Servo is an Android-only dependency), so this
-  checks the lockfile against the checkout, not the engine API. The
+  at `6d3218a2a94`, `ef6beb09ab1`, `05027c9413a`, `494d7f4b13b`,
+  `4eb8b125d` and `dab4d6a8bfa`. `cargo test --lib` in `native/` against
+  the candidate checkout: 157 passed, and `native/Cargo.lock` did not
+  change. Host builds compile only the pure modules (Servo is an
+  Android-only dependency), so this checks the lockfile against the
+  checkout, not the engine API. The
   notices' content is the same; only their input hash of
   `scripts/m0/servo-pin.sh` and the compare link in
   `THIRD_PARTY_NOTICES.md` follow the pin. `scripts/generate-notices.py`
@@ -2296,7 +2302,7 @@ x86_64 host, for the pin:
 - `scripts/m0/fetch-servo.sh` refused this host's checkout because
   `servo-checkout/servo` is a symbolic link to a checkout elsewhere on the
   same disk (space). Its fetch and checkout steps were run by hand on that
-  checkout: `git fetch --no-tags --depth=1` of `494d7f4b13b` from a local
+  checkout: `git fetch --no-tags --depth=1` of `dab4d6a8bfa` from a local
   clone of L-K-M/servo, then `git checkout --force --detach` and
   `git clean -ffd`. Its mach Python preparation was not run; the host
   tests do not need it.
@@ -2304,4 +2310,13 @@ x86_64 host, for the pin:
 No native build or emulator ran on this host: both native ABI builds,
 packaging and the fixture checks are the Engine workflow's evidence on the
 PR that sets this pin. Combray turns the viewer on in the same PR
-([PDF.md](PDF.md#phases)).
+([PDF.md](PDF.md#phases)). On the previous candidate `494d7f4b13b`,
+Engine runs
+[41311662496](https://github.com/L-K-M/Combray/actions/runs/41311662496)
+(head `41ca252`) and
+[41356434589](https://github.com/L-K-M/Combray/actions/runs/41356434589)
+(head `0de24d9`) passed all 173 checks, with no report-only failures.
+The Engine workflow has not run on `dab4d6a8bfa` yet.
+
+Open follow-up for #18: the toolbar's Stop on a PDF that is still
+downloading leaves the root element's `data-pdf-state` at `loading`.
