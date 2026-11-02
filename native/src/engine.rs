@@ -1215,7 +1215,7 @@ impl Engine {
         };
         let wake = self.wake.clone();
         let result = tab.webview.stop_loading(move |result| {
-            // The reply may use another thread; view handles and event emission stay on their owner.
+            // Queue completion until Servo releases its event-loop borrows.
             let _ = wake.send(Command::LoadingStopped {
                 view,
                 request,

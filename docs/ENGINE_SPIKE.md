@@ -2052,14 +2052,32 @@ python3 scripts/check_docs.py
 git diff --check
 ```
 
-Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) preserves the
-Stop prototype at `e873299425f`. Its build is unproven. Source review found a
-callback-reentry panic: completion invokes the client while holding the mutable
-registry borrow. A real-Servo regression is added; its baseline is pending.
+Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) now supplies
+candidate `a3badf8807b00d8f7d6c1a06c519f5289b42bee1`. A real-Servo callback test
+first failed with `RefCell already borrowed`; taking the callback before
+invoking it fixed that failure. Seven regressions pass on the committed head:
+retained partial content, pending navigation and iframe cancellation, reusable
+initial Stop, late approval, close and callback reentry. A separate, explicitly
+enabled failure probe suppresses fallback creation: it timed out before the
+guard and then returned `DocumentUnavailable`. The shipping call is restored;
+the manual probe stays ignored without that documented fault setup.
 
-Still pending: corrected and validated Stop API, an exact pin and notices,
-both native ABIs, full emulator fixtures and actual final-head GLM review. The
-old pin `ef6beb09ab19325d597dd96f758ed359ad33ccce` cannot build the new
-Stop bridge. Keep the PR draft until those gates pass. No local device,
-physical-phone, battery or idle-CPU result is claimed; no personal history
-or service was used.
+The SDK uses process-global options, so its normal runner is Nextest. A plain
+multi-case `cargo test` fails initialization. A parallel `28e41c8` Nextest run
+hit the existing 20-second timeout; `--test-threads 1` passed all seven on that
+head and the guarded candidate without changing assertions or timeouts. Later-navigation checks wait
+for a new document, not late completion from the stopped one.
+
+Host: Linux x86_64, Rust 1.97.1, Zig 0.17.0, Nextest 0.9.150 and Mesa 22.3.6.
+Debian 12 runtime packages were extracted into an isolated test sysroot; no
+system packages were installed. Local linker wrappers supply font libraries
+and SpiderMonkey's GNU C++ runtime. Reproduction:
+
+```sh
+cargo +1.97.1 nextest run --cargo-profile medium -p servo --test stop_loading --test-threads 1
+```
+
+This draft pins that candidate for Android qualification. Both native ABIs,
+full emulator fixtures and actual final-head GLM review remain gates. Do not
+merge either PR before those gates pass. No local device, physical-phone,
+battery or idle-CPU result is claimed; no personal history or service was used.
