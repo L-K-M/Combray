@@ -2177,6 +2177,21 @@ consumed-result assertion failed first; both new regressions now pass, also
 checking page refusal and genuine hit-test failure. Temporary tracing is removed.
 The 100 ms handler delay, assertions and existing timeouts remain unchanged.
 
-Both PRs remain draft. Final-head Android qualification and source review
-are required after fixes; no gate is waived. No local device, physical-phone,
-battery or idle-CPU result is claimed; no personal history or service was used.
+### Final qualification (2 November 2026)
+
+[Engine run `41393285172`](https://github.com/L-K-M/Combray/actions/runs/41393285172)
+passed both Android ABIs and all 171 API-30 x86_64 emulator checks at
+`04e9f9d3559f82c5b52dae31aa8bc127d6589c1f`, pinned to the candidate above.
+Both slow-drag cases, three Stop cases and four Menu cases executed and passed.
+No assertion or timeout was weakened.
+
+SDK [#21](https://github.com/L-K-M/servo/pull/21) merged as `f1b1054`;
+app [#179](https://github.com/L-K-M/Combray/pull/179) merged as `7162cf1`.
+Actual final-head GLM reviews found no confirmed blocker: three SDK rounds,
+two app rounds. The hosted hybrid review also completed; its major claims
+were disproved by the shared dismiss callback, retained rows and compiled
+activity tests. Minor cleanup is deferred under the review stopping rule.
+
+No local device, physical-phone, battery or idle-CPU result is claimed;
+no personal history or service was used. Reader, PDF and compatibility holds
+are unchanged.
