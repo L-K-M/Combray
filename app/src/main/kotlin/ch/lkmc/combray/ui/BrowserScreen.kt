@@ -482,9 +482,9 @@ fun BrowserScreen(
                         textSize = textSize,
                         scrollButtonPadding = scrollButtonPadding,
                         onScroll = { barDirection = it },
-                        // A link leaves reader view and opens in the tab, through the address policy.
+                        // A link the address policy accepts leaves reader view and opens in the tab;
+                        // a refused one (e.g. href="https://") keeps the article open.
                         onOpenLink = { url ->
-                            // Refused links must not discard the article.
                             (AddressPolicy.interpret(url).primary as? AddressDecision.Navigate)?.let {
                                 browser.closeReader()
                                 browser.openUrlInTab(reader.tabId, it.url)
