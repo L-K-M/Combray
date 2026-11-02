@@ -657,6 +657,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "<style>html,body{margin:0;height:100vh}</style>"
                 "<script>addEventListener('touchmove',event=>{event.preventDefault();"
                 "document.title='PULL-PREVENTED';},{passive:false});</script>"))
+        if path == "/pull-slow.html":
+            # Outlast the device test's 30 ms moves so Servo coalesces pending input.
+            prevent = "event.preventDefault();" if query.get("prevent") == ["1"] else ""
+            title = "PULL-SLOW-PREVENTED" if prevent else "PULL-SLOW-ALLOWED"
+            return self.send(http.HTTPStatus.OK, page("PULL-SLOW-READY", "<p>Delayed touch handler</p>",
+                "<style>html,body{margin:0;height:100vh;background:#2e6b4f}</style>"
+                "<script>const TOUCH_DELAY_MS=100;addEventListener('touchmove',event=>{"
+                "const until=performance.now()+TOUCH_DELAY_MS;while(performance.now()<until){}"
+                f"{prevent}document.title='{title}';"
+                "},{passive:false});</script>"))
         if path == "/pull-panel.html":
             # Bound overflow so the return drag reaches top even after a fling.
             return self.send(200, page("PANEL-TOP",

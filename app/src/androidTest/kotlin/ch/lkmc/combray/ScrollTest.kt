@@ -143,6 +143,30 @@ class ScrollTest {
     }
 
     @Test
+    fun aDelayedAllowedDragStillReloads() {
+        device.browser.openUrl("${Fixtures.BASE}/pull-slow.html", Placement.CURRENT_TAB)
+        awaitTitle("PULL-SLOW-READY")
+        assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        val page = device.browser.browserState.value.activeTab!!.page
+
+        swipe(0.25f, 0.65f)
+        device.awaitState { it.activeTab?.page != page && it.activeTab?.loading == false }
+    }
+
+    @Test
+    fun aDelayedPreventedDragDoesNotReload() {
+        device.browser.openUrl("${Fixtures.BASE}/pull-slow.html?prevent=1", Placement.CURRENT_TAB)
+        awaitTitle("PULL-SLOW-READY")
+        assertTrue(device.matches(device.awaitScreen(Device.GREEN), Device.GREEN))
+        val page = device.browser.browserState.value.activeTab!!.page
+
+        swipe(0.25f, 0.65f)
+        awaitTitle("PULL-SLOW-PREVENTED")
+        device.awaitState { it.reloadPull == null }
+        assertEquals(page, device.browser.browserState.value.activeTab!!.page)
+    }
+
+    @Test
     fun aScrolledPanelKeepsItsOwnDownwardDrag() {
         device.browser.openUrl("${Fixtures.BASE}/pull-panel.html", Placement.CURRENT_TAB)
         awaitTitle("PANEL-TOP")

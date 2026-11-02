@@ -211,7 +211,8 @@ fun BottomBar(
                         AddressChip(
                              tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader,
                             hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
-                            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
+                            // The chip supplies its gutter; do not inset it past the actions.
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         )
                     }
                     if (home) {

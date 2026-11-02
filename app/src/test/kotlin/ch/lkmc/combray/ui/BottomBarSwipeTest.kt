@@ -129,6 +129,19 @@ class BottomBarSwipeTest {
     }
 
     @Test
+    fun aNarrowAddressSpansTheActionRow() {
+        showBar(320.dp)
+        val address = address().fetchSemanticsNode().boundsInRoot
+        val reader = compose.onNodeWithContentDescription("Reader view").fetchSemanticsNode().boundsInRoot
+        val back = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
+        val menu = compose.onNodeWithContentDescription("Menu").fetchSemanticsNode().boundsInRoot
+
+        assertTrue("address=$address, back=$back", address.bottom <= back.top)
+        assertTrue("address=$address, back=$back", address.left <= back.left)
+        assertTrue("reader=$reader, menu=$menu", reader.right >= menu.right)
+    }
+
+    @Test
     fun swipesStartOnTheAddressAndEveryButtonInTheSingleRowBar() {
         showBar(600.dp)
         swipeEveryControl()

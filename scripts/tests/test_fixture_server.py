@@ -9,6 +9,7 @@ from pathlib import Path
 import threading
 import time
 import unittest
+from unittest.mock import Mock
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +43,21 @@ class RequestLogTest(unittest.TestCase):
         line = output.getvalue()
         self.assertRegex(line, r"^\d\d-\d\d \d\d:\d\d:\d\d\.250 GET /video\.html\?k=<key>\n$")
         self.assertNotIn("0123abcd", line)
+
+
+class PullFixtureTest(unittest.TestCase):
+    def test_slow_handlers_differ_only_in_whether_the_page_refuses_the_drag(self):
+        fixture = load_server()
+        for query, prevents in [("", False), ("?prevent=1", True)]:
+            with self.subTest(query=query):
+                request = Mock(path="/pull-slow.html" + query)
+                fixture.Handler.do_GET(request)
+                status, document = request.send.call_args.args
+                self.assertEqual(http.HTTPStatus.OK, status)
+                self.assertIn("TOUCH_DELAY_MS", document)
+                self.assertIn("while(performance.now()<until)", document)
+                self.assertEqual(prevents, "event.preventDefault();" in document)
+                self.assertIn("{passive:false}", document)
 
 
 class StopFixtureTest(unittest.TestCase):

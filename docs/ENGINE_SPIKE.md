@@ -2037,7 +2037,8 @@ Home retains its labeled Menu action; a missing-label test failed before
 sharing gesture handling between icon and labeled buttons. A thirteenth
 Menu test covers Home's drag path. Four activity tests cover native-page
 drag selection, Share placement, Home's label and second-finger cancellation.
-They compile but still require device execution. The normal full local gate
+All seven new activity checks passed on the API-30 x86_64 emulator at
+`f0ad26a` (Engine run `41377744676`). The normal full local gate
 lost its Gradle daemon. The same tasks then passed with bounded Gradle memory:
 651 JVM tests (app 150, core 454, engine 47), lint and both APK assemblies.
 
@@ -2077,7 +2078,16 @@ and SpiderMonkey's GNU C++ runtime. Reproduction:
 cargo +1.97.1 nextest run --cargo-profile medium -p servo --test stop_loading --test-threads 1
 ```
 
-This draft pins that candidate for Android qualification. Both native ABIs,
-full emulator fixtures and actual final-head GLM review remain gates. Do not
-merge either PR before those gates pass. No local device, physical-phone,
+At `f0ad26a`, both native ABIs passed and actual GLM source reviews completed
+without a confirmed blocker: two SDK rounds at final head `a3badf8`, one app
+round. The full emulator suite failed: 167 passed, two failed. The narrow-bar
+check found a doubled chip gutter; a new JVM regression failed first and
+passes after removing that gutter. The other failure is
+`ScrollTest.aPullRevealsHiddenControlsAndStillReloads`: no reload request
+reached the fixture. Slow allowed/prevented touch handlers and temporary
+input-result tracing distinguish coalescing, edge-query refusal and a pull
+that never armed. No pull behavior change is accepted without that evidence.
+
+Both PRs remain draft. Final-head Android qualification and source review
+are required after fixes; no gate is waived. No local device, physical-phone,
 battery or idle-CPU result is claimed; no personal history or service was used.

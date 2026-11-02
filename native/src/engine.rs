@@ -1388,6 +1388,9 @@ impl Engine {
                 PullUpdate::Cancelled
             },
         };
+        if matches!(phase, TouchPhase::Down | TouchPhase::Up) {
+            log::info!("pull_probe phase={phase:?} edge={position:?} update={update:?}");
+        }
         if update == PullUpdate::Released {
             self.reload_pull_inputs.release();
             self.reload_pull_release = Some((x, y, Instant::now() + PULL_INPUT_TIMEOUT));
@@ -1417,7 +1420,13 @@ impl Engine {
         } else {
             DefaultAction::Allowed
         };
-        match self.reload_pull_inputs.handled(id, action) {
+        let decision = self.reload_pull_inputs.handled(id, action);
+        log::info!(
+            "pull_probe prevented={} dispatch_failed={} decision={decision:?}",
+            result.contains(InputEventResult::DefaultPrevented),
+            result.contains(InputEventResult::DispatchFailed)
+        );
+        match decision {
             InputDecision::Waiting => return,
             InputDecision::Cancelled => {
                 self.reject_reload_pull();
@@ -1440,6 +1449,10 @@ impl Engine {
             tab.webview
                 .can_scroll_up_at_point(DevicePoint::new(x, y).into())
         }) == Some(false);
+        log::info!(
+            "pull_probe release_at_top={at_top} expired={}",
+            Instant::now() >= deadline
+        );
         if Instant::now() >= deadline || !at_top {
             self.reject_reload_pull();
             return;
