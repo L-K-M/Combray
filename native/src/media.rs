@@ -301,6 +301,19 @@ impl PendingMedia {
         std::mem::take(&mut self.held).into()
     }
 
+    /// Both holds are inclusive; wake just after the last one stops awaiting its document.
+    pub(crate) fn next_expiry_ms(&self) -> Option<u64> {
+        let after_window = |since: u64, window: u64| since.saturating_add(window).saturating_add(1);
+        self.requested
+            .map(|since| after_window(since, REQUESTED_DOCUMENT_MS))
+            .into_iter()
+            .chain(
+                self.started
+                    .map(|(_, since)| after_window(since, PENDING_COMMIT_MS)),
+            )
+            .max()
+    }
+
     fn awaiting(&self, now_ms: u64) -> bool {
         let within = |since: u64, window: u64| now_ms.saturating_sub(since) <= window;
         self.requested
@@ -417,6 +430,56 @@ mod tests {
         assert_eq!(pending.expire(late), vec![load("c")]);
         assert_eq!(pending.admit(load("d"), late), Some(load("d")));
         assert_eq!(pending.committed(11), Vec::new());
+    }
+
+    #[test]
+    fn a_media_hold_wakes_just_after_its_inclusive_window() {
+        let mut pending = PendingMedia::default();
+        assert_eq!(pending.next_expiry_ms(), None);
+
+        pending.navigation_requested(1_000);
+        pending.admit(load("a"), 1_010);
+        let requested = 1_000 + REQUESTED_DOCUMENT_MS;
+        assert_eq!(pending.next_expiry_ms(), Some(requested + 1));
+        assert!(pending.expire(requested).is_empty());
+        assert_eq!(pending.expire(requested + 1), vec![load("a")]);
+        assert_eq!(pending.next_expiry_ms(), None);
+
+        pending.document_started(7, 2_000);
+        assert_eq!(
+            pending.next_expiry_ms(),
+            Some(2_000 + PENDING_COMMIT_MS + 1)
+        );
+        pending.committed(7);
+        assert_eq!(pending.next_expiry_ms(), None);
+    }
+
+    #[test]
+    fn the_last_of_two_media_holds_bounds_sleep() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        pending.navigation_requested(1_010);
+        pending.admit(load("a"), 1_020);
+
+        // The earlier start can expire while the later request still holds the loads.
+        let expiry = 1_010 + REQUESTED_DOCUMENT_MS + 1;
+        assert_eq!(pending.next_expiry_ms(), Some(expiry));
+        assert!(pending.expire(1_000 + PENDING_COMMIT_MS + 1).is_empty());
+        assert_eq!(pending.next_expiry_ms(), Some(expiry));
+        assert_eq!(pending.expire(expiry), vec![load("a")]);
+        assert_eq!(pending.next_expiry_ms(), None);
+    }
+
+    #[test]
+    fn a_start_replaces_the_requested_media_deadline() {
+        let mut pending = PendingMedia::default();
+        pending.navigation_requested(1_000);
+        pending.document_started(7, 1_020);
+
+        assert_eq!(
+            pending.next_expiry_ms(),
+            Some(1_020 + PENDING_COMMIT_MS + 1)
+        );
     }
 
     #[test]
