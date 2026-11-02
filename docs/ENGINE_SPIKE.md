@@ -2064,3 +2064,119 @@ branch is tracing CSP/resource failures and frame-local layout, with
 private encrypted captures. It must not merge. Diagnostic console and
 probe prototypes are excluded from the app integration. The arm64 APK from run
 `41372328020` was offered for phone confirmation; no phone result is claimed.
+
+## 39. Toolbar recovery (1 November 2026)
+
+Recovered the interrupted owner request: inline Stop while loading, Reader
+otherwise; Back, Save, Close tab, New tab, Recent and Menu; Share in Menu;
+an instant menu with upward-drag release selection. The old task stopped
+with an unresolved `browser.stopLoading` call: Servo 0.7 exposes no such
+embedder API. No UI-only loading flag is accepted as cancellation.
+
+Draft [PR #179](https://github.com/L-K-M/Combray/pull/179) preserves the UI
+on current main, including gesture feedback, fixed tab order, pull reload
+and scroll-hiding controls. The original worktree remains untouched. After
+a session restart removed temporary worktrees, staged UI was recovered from
+Git's index; new development and evidence now use persistent directories.
+
+The client routes Stop through the coordinator, engine port and JNI to the
+Servo owner thread. Replies carry view generation, request and retained
+document identity. Tests cover delayed view creation, callback/commit order,
+new navigation, equal-address replacement, renderer replacement, failure and
+retry. A reply ahead of its retained document waits for the commit to become
+durable before ending loading; two regressions failed before this guard.
+Restart must not reopen a cancelled target under a completed Stop. Stopping
+does not close the logical tab or change an existing committed URL.
+
+Local Linux x86_64, JDK 17, SDK 37 results:
+
+- Both new wire-message tests failed before decoding was added. Engine's
+  47 tests and core's 454 tests then passed.
+- Thirteen real-composable Menu tests and fourteen swipe tests pass. Two regressions first
+  reproduced actions after a second finger and after Back while dragging.
+  An overlay press now cancels an existing drag; dismissing invalidates its
+  handler, so a held finger cannot reopen or activate a dismissed menu.
+- Four fixture-server checks pass, after the new endpoint first returned
+  404. Per-check gates isolate delayed responses. The page heartbeat reports
+  actual `document.readyState`; changing native UI state cannot complete it.
+- Native host tests pass: 147 tests after integrating #178, using an isolated Cargo target. This
+  checks pure bridge logic, not the Android-only Servo adapter.
+- `assembleDebugAndroidTest` passes, including three real-Servo Stop checks.
+  These checks are compiled, not run locally. They require retained article
+  content, a cancelled blocking script, and navigation after initial Stop.
+
+Home retains its labeled Menu action; a missing-label test failed before
+sharing gesture handling between icon and labeled buttons. A thirteenth
+Menu test covers Home's drag path. Four activity tests cover native-page
+drag selection, Share placement, Home's label and second-finger cancellation.
+All seven new activity checks passed on the API-30 x86_64 emulator at
+`f0ad26a` (Engine run `41377744676`). The normal full local gate
+lost its Gradle daemon. The same tasks then passed with bounded Gradle memory:
+651 JVM tests (app 150, core 454, engine 47), lint and both APK assemblies.
+The coalescing candidate passes 652 JVM tests (app 151, core 454, engine 47),
+lint, both APK assemblies, 147 native host checks and 17 notice checks.
+
+Commands:
+
+```sh
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx2g testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew :app:testDebugUnitTest --tests ch.lkmc.combray.ui.ToolbarMenuTest :app:assembleDebugAndroidTest
+python3 -I -m unittest discover -s scripts/tests -p test_fixture_server.py
+(cd native && CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=$HOME/.cache/combray-toolbar-host-target cargo +1.97.1 test --lib)
+python3 scripts/check_docs.py
+git diff --check
+```
+
+Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) now supplies
+candidate `4eb8b125d8cc984e0e4d09b69ea183dd0cda2bb7`. Its `efd55be7` merge
+preserves Stop head `a3badf8` and published nonce handling `8e79103`.
+All 45 serial SDK checks pass: 36 existing WebView checks, seven Stop checks
+and two input-completion regressions. Android requalification remains required.
+A real-Servo callback test
+first failed with `RefCell already borrowed`; taking the callback before
+invoking it fixed that failure. Seven regressions passed on `a3badf8`:
+retained partial content, pending navigation and iframe cancellation, reusable
+initial Stop, late approval, close and callback reentry. A separate, explicitly
+enabled failure probe suppresses fallback creation: it timed out before the
+guard and then returned `DocumentUnavailable`. The shipping call is restored;
+the manual probe stays ignored without that documented fault setup.
+
+The SDK uses process-global options, so its normal runner is Nextest. A plain
+multi-case `cargo test` fails initialization. A parallel `28e41c8` Nextest run
+hit the existing 20-second timeout; `--test-threads 1` passed all seven on that
+head and the guarded candidate without changing assertions or timeouts. Later-navigation checks wait
+for a new document, not late completion from the stopped one.
+
+Host: Linux x86_64, Rust 1.97.1, Zig 0.17.0, Nextest 0.9.150 and Mesa 22.3.6.
+Debian 12 runtime packages were extracted into an isolated test sysroot; no
+system packages were installed. Local linker wrappers supply font libraries
+and SpiderMonkey's GNU C++ runtime. Reproduction:
+
+```sh
+cargo +1.97.1 nextest run --cargo-profile medium -p servo --test stop_loading --test-threads 1
+```
+
+At `f0ad26a`, both native ABIs passed and actual GLM source reviews completed
+without a confirmed blocker: two SDK rounds at final head `a3badf8`, one app
+round. The full emulator suite failed: 167 passed, two failed. The narrow-bar
+check found a doubled chip gutter; a new JVM regression failed first and
+passes after removing that gutter. The other failure is
+`ScrollTest.aPullRevealsHiddenControlsAndStillReloads`: no reload request
+reached the fixture. A slow allowed/prevented touch fixture isolates that path.
+
+At `1c8844d` (Engine run `41386360583`), both ABIs passed; 170 of 171 emulator
+checks passed, including narrow geometry, hidden-controls reload, Stop and Menu.
+The slow allowed drag failed. It armed at the top, then received
+`prevented=false, dispatch_failed=true, decision=Cancelled` after 90 ms;
+release was still at the top. Servo had coalesced a move, not seen a page veto.
+
+The candidate reports intentional coalescing as `Consumed`, while real target,
+shutdown and channel failures remain `DispatchFailed`. The dispatched move
+still carries the page veto. The native failure gate is unchanged. A desktop
+consumed-result assertion failed first; both new regressions now pass, also
+checking page refusal and genuine hit-test failure. Temporary tracing is removed.
+The 100 ms handler delay, assertions and existing timeouts remain unchanged.
+
+Both PRs remain draft. Final-head Android qualification and source review
+are required after fixes; no gate is waived. No local device, physical-phone,
+battery or idle-CPU result is claimed; no personal history or service was used.
