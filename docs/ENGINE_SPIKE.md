@@ -2020,7 +2020,7 @@ Local Linux x86_64, JDK 17, SDK 37 results:
 
 - Both new wire-message tests failed before decoding was added. Engine's
   47 tests and core's 454 tests then passed.
-- Twelve real-composable Menu tests and fourteen swipe tests pass. Two regressions first
+- Thirteen real-composable Menu tests and fourteen swipe tests pass. Two regressions first
   reproduced actions after a second finger and after Back while dragging.
   An overlay press now cancels an existing drag; dismissing invalidates its
   handler, so a held finger cannot reopen or activate a dismissed menu.
@@ -2037,13 +2037,14 @@ Home retains its labeled Menu action; a missing-label test failed before
 sharing gesture handling between icon and labeled buttons. A thirteenth
 Menu test covers Home's drag path. Four activity tests cover native-page
 drag selection, Share placement, Home's label and second-finger cancellation.
-They still require device execution. The latest full local gate lost its
-Gradle daemon; a reduced-memory retry is pending, not a pass.
+They compile but still require device execution. The normal full local gate
+lost its Gradle daemon. The same tasks then passed with bounded Gradle memory:
+651 JVM tests (app 150, core 454, engine 47), lint and both APK assemblies.
 
 Commands:
 
 ```sh
-JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew :engine:testDebugUnitTest :core:testDebugUnitTest :app:testDebugUnitTest
+JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx2g testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 JAVA_HOME=$HOME/jdk17 ANDROID_HOME=$HOME/android-sdk ./gradlew :app:testDebugUnitTest --tests ch.lkmc.combray.ui.ToolbarMenuTest :app:assembleDebugAndroidTest
 python3 -I -m unittest discover -s scripts/tests -p test_fixture_server.py
 (cd native && CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=$HOME/.cache/combray-toolbar-host-target cargo +1.97.1 test --lib)
@@ -2051,8 +2052,13 @@ python3 scripts/check_docs.py
 git diff --check
 ```
 
-Still pending: downstream Stop API, a validated exact pin and notices, both
-native ABIs, full emulator fixtures and actual final-head GLM review. The
+Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) preserves the
+Stop prototype at `e873299425f`. Its build is unproven. Source review found a
+callback-reentry panic: completion invokes the client while holding the mutable
+registry borrow. A real-Servo regression is added; its baseline is pending.
+
+Still pending: corrected and validated Stop API, an exact pin and notices,
+both native ABIs, full emulator fixtures and actual final-head GLM review. The
 old pin `ef6beb09ab19325d597dd96f758ed359ad33ccce` cannot build the new
 Stop bridge. Keep the PR draft until those gates pass. No local device,
 physical-phone, battery or idle-CPU result is claimed; no personal history
