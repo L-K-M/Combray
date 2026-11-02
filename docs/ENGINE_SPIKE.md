@@ -2113,6 +2113,8 @@ All seven new activity checks passed on the API-30 x86_64 emulator at
 `f0ad26a` (Engine run `41377744676`). The normal full local gate
 lost its Gradle daemon. The same tasks then passed with bounded Gradle memory:
 651 JVM tests (app 150, core 454, engine 47), lint and both APK assemblies.
+The coalescing candidate passes 652 JVM tests (app 151, core 454, engine 47),
+lint, both APK assemblies, 147 native host checks and 17 notice checks.
 
 Commands:
 
@@ -2126,9 +2128,10 @@ git diff --check
 ```
 
 Downstream [draft #21](https://github.com/L-K-M/servo/pull/21) now supplies
-candidate `efd55be7cf4ff3cbc03fb9291135c61ce49838fe`, a merge of Stop head
-`a3badf8` and published nonce handling `8e79103`. Both histories remain ancestors.
-The seven Stop regressions last passed at `a3badf8`; requalification is required.
+candidate `4eb8b125d8cc984e0e4d09b69ea183dd0cda2bb7`. Its `efd55be7` merge
+preserves Stop head `a3badf8` and published nonce handling `8e79103`.
+All 45 serial SDK checks pass: 36 existing WebView checks, seven Stop checks
+and two input-completion regressions. Android requalification remains required.
 A real-Servo callback test
 first failed with `RefCell already borrowed`; taking the callback before
 invoking it fixed that failure. Seven regressions passed on `a3badf8`:
@@ -2159,9 +2162,20 @@ round. The full emulator suite failed: 167 passed, two failed. The narrow-bar
 check found a doubled chip gutter; a new JVM regression failed first and
 passes after removing that gutter. The other failure is
 `ScrollTest.aPullRevealsHiddenControlsAndStillReloads`: no reload request
-reached the fixture. Slow allowed/prevented touch handlers and temporary
-input-result tracing distinguish coalescing, edge-query refusal and a pull
-that never armed. No pull behavior change is accepted without that evidence.
+reached the fixture. A slow allowed/prevented touch fixture isolates that path.
+
+At `1c8844d` (Engine run `41386360583`), both ABIs passed; 170 of 171 emulator
+checks passed, including narrow geometry, hidden-controls reload, Stop and Menu.
+The slow allowed drag failed. It armed at the top, then received
+`prevented=false, dispatch_failed=true, decision=Cancelled` after 90 ms;
+release was still at the top. Servo had coalesced a move, not seen a page veto.
+
+The candidate reports intentional coalescing as `Consumed`, while real target,
+shutdown and channel failures remain `DispatchFailed`. The dispatched move
+still carries the page veto. The native failure gate is unchanged. A desktop
+consumed-result assertion failed first; both new regressions now pass, also
+checking page refusal and genuine hit-test failure. Temporary tracing is removed.
+The 100 ms handler delay, assertions and existing timeouts remain unchanged.
 
 Both PRs remain draft. Final-head Android qualification and source review
 are required after fixes; no gate is waived. No local device, physical-phone,

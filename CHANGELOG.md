@@ -243,6 +243,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Keep pull-to-reload working through coalesced touch moves without
+  overriding a page's refusal.
 - Honor matching CSP nonce properties on inline styles and scripts in Servo.
   Live verification remains under investigation.
 - Selecting or swiping tabs no longer reorders them. Open tabs keep creation
