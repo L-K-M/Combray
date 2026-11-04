@@ -2309,3 +2309,27 @@ Limitations: all engine evidence is from desktop servoshell. The host's
 network and headless WebDriver environment fail the checkbox for every
 browser tried. The phone result is pending, with the arm64 APK from the app
 integration PR's Engine workflow.
+
+## 41. HTTP/2 response header list limit (4 November 2026)
+
+Validated source: `3423e2b538029a6c5585b7244ecce281dbdceaea` on `combray/0.7`, which merges downstream
+[PR #26](https://github.com/L-K-M/servo/pull/26) on top of the §40 source.
+
+### Reproduction
+
+hyper's HTTP/2 client advertises and enforces a 16 KiB `SETTINGS_MAX_HEADER_LIST_SIZE`
+(RFC 9113, section 6.5.2). A server that negotiates `h2` and answers with a decoded header list
+above that (synthetic case: ten 10 KiB headers) has its stream reset with `PROTOCOL_ERROR`; the
+fetch fails with `client error (SendRequest)` and a navigation shows Servo's network error page.
+The same response over HTTP/1.1 loads. Servo now sets the limit to 256 KiB, Chromium's value.
+
+### Checks
+
+- Downstream, on desktop servoshell: the new `servo-net` test
+  `fetch::test_fetch_http2_response_with_large_header_list` fails before the change and passes
+  after it; `servo-net` integration tests 392 of 393 (the remaining `test_filemanager` failure
+  is the same on the previous pin and passes alone); fetch WPT `api/basic` and `api/headers`
+  167 as expected; no new `./mach test-tidy` findings; independent review without findings.
+- Here: `native/Cargo.lock` is unchanged (the engine change touches no dependency); notices
+  regenerated. Host tests, both native ABI builds and the x86_64 emulator checks run in the
+  Engine workflow of this pin's PR; no local device or phone result is claimed.
