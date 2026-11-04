@@ -2310,15 +2310,31 @@ network and headless WebDriver environment fail the checkbox for every
 browser tried. The phone result is pending, with the arm64 APK from the app
 integration PR's Engine workflow.
 
-## 41. PDF viewer document, candidate (30 October 2026)
+## 41. PDF viewer document (30 October 2026)
 
-The pin is `71b94369bf82d19e61121a8bc9c9a079ba4e8d30`, the head of
+The pin is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on `combray/0.7`,
+the merge commit of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
-(`engine/pdf-viewer-document`): `combray/0.7` at `6fbfc3d70` plus the
-PDF viewer change, upstream base still v0.7.0. `6fbfc3d70` is main's
-pin, which carries the engine fixes of sections 32, 33, 35, 38, 39
-and 40. The branch's first-parent history over `combray/0.7`
-(`git log --oneline --first-parent origin/combray/0.7..71b94369b`):
+(`engine/pdf-viewer-document`), merged on 4 November 2026; upstream base
+still v0.7.0. Its parents are `3423e2b53`, `combray/0.7` with the
+HTTP/2 header-list fix of
+[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) over main's
+pin `6fbfc3d70` (the engine fixes of sections 32, 33, 35, 38, 39 and
+40), and `71b94369b`, #18's head and this section's previous pin.
+`git diff 3423e2b53 6b44b9b2a` is exactly the 12 files of the PDF
+change and `git diff 71b94369b 6b44b9b2a` only the HTTP/2 fix
+(`DOWNSTREAM.md`, `components/net/connector.rs`, `test_util.rs` and
+`tests/fetch.rs`), each with the same patch ID as its side over the
+merge base `6fbfc3d70`, so the merge adds nothing of its own.
+
+#18 merged on the owner's waiver of the independent review that
+L-K-M/servo's `AGENTS.md` requires, for its commits after `494d7f4b1`
+([PR comment](https://github.com/L-K-M/servo/pull/18#issuecomment-6640382806)).
+GLM-5.3 reviewed and approved the branch up to `494d7f4b1`; the later
+commits were reviewed only by the model that wrote them.
+
+The branch's first-parent history
+(`git log --oneline --first-parent 3423e2b53..6b44b9b2a^2`):
 
 - `71b94369b` Docs: note the PDF viewer's charset follow-up
 - `80540fca2` Servo: accept no Referer from the PDF viewer in its test
@@ -2346,19 +2362,12 @@ downstream GLM review workflow (`.github/workflows/zai-code-review.yml`,
 owner decision of 29 October 2026, recorded in its `DOWNSTREAM.md`) and
 is no engine build input. The merges `494d7f4b1` (of `combray/0.7` at
 `ef52ceadf57`), `dab4d6a8b` (at `f1b105495`) and `d3ff19f14` (at
-`6fbfc3d70`) add nothing of their own: over `combray/0.7`, `dab4d6a8b`
-changes the same 12 files with the same lines (1937 added, 6 removed)
-as `05027c941` over its base `6d3218a2a94`, and `d3ff19f14` the same
-12 files with the same lines (2073 added, 6 removed) as `ee5d4c625`
-over `f1b105495`. The added and removed lines are byte-identical, so
-merging `combray/0.7` changed no PDF line. This section first pinned
-`05027c9413a`, the branch head before the owner merged `combray/0.7`
-into it, then `494d7f4b13b`, `dab4d6a8bfa`, `ee5d4c625` and
-`d3ff19f14`.
-**It is a candidate.** #18 is not merged yet; before the Combray PR
-that sets this pin merges, #18 merges with a merge commit, the pin
-moves to that commit on `combray/0.7`, and the Engine workflow runs
-again on it.
+`6fbfc3d70`) changed no PDF line: over `combray/0.7`, `dab4d6a8b` has
+the same added and removed lines as `05027c941` over its base
+`6d3218a2a94`, and `d3ff19f14` the same as `ee5d4c625` over
+`f1b105495`. Before the merge this section pinned `05027c9413a`,
+`494d7f4b13b`, `dab4d6a8bfa`, `ee5d4c625`, `d3ff19f14` and
+`71b94369b`.
 
 What the engine change does (its `DOWNSTREAM.md` row has the details):
 
@@ -2425,28 +2434,31 @@ and again at `d3ff19f14`, its `pdf_viewer` (25), `stop_loading` (7) and
 process. The Stop test failed on `dab4d6a8b` before the fix, and the
 referrer-policy and `Content-Language` tests failed on `d3ff19f14`
 before `42ab59b22`; the referrer-policy test as `80540fca2` left it
-still fails with `42ab59b22`'s fix reverted. On this Linux x86_64 host,
-for the pin:
+still fails with `42ab59b22`'s fix reverted. These suites did not run
+again on the merge commit here. On this Linux x86_64 host, for the pin:
 
-- `git diff --name-only 6d3218a2a94 71b94369b`, main's engine fixes
-  and the PDF change together, touches no `Cargo.toml`, `Cargo.lock`,
-  toolchain or default resource; Servo's `Cargo.lock` is byte-identical
-  at `6d3218a2a94`, `ef6beb09ab1`, `05027c9413a`, `494d7f4b13b`,
-  `4eb8b125d`, `dab4d6a8bfa`, `ee5d4c625`, `6fbfc3d70`, `d3ff19f14` and
-  `71b94369b`.
-  `cargo test --lib` in `native/` against the candidate checkout: 157
+- `git diff --name-only 6d3218a2a94 6b44b9b2a`, main's engine fixes,
+  the HTTP/2 fix and the PDF change together, touches no `Cargo.toml`,
+  `Cargo.lock`, toolchain, default resource or license text; Servo's
+  `Cargo.lock` is byte-identical at `6d3218a2a94`, `ef6beb09ab1`,
+  `05027c9413a`, `494d7f4b13b`, `4eb8b125d`, `dab4d6a8bfa`,
+  `ee5d4c625`, `6fbfc3d70`, `d3ff19f14`, `71b94369b`, `3423e2b53` and
+  `6b44b9b2a`.
+  `cargo test --lib` in `native/` against the pinned checkout: 157
   passed, and `native/Cargo.lock` did not change. Host builds compile
   only the pure modules (Servo is an Android-only dependency), so this
   checks the lockfile against the checkout, not the engine API. The
   notices' content is the same; only their input hash of
   `scripts/m0/servo-pin.sh` and the compare link in
-  `THIRD_PARTY_NOTICES.md` follow the pin. `scripts/generate-notices.py`
-  (`cargo about` 0.9.2, NDK r29) produced exactly that `native.json` and
-  an unchanged `Rust-Licenses.html`.
+  `THIRD_PARTY_NOTICES.md` follow the pin. At `71b94369b`,
+  `scripts/generate-notices.py` (`cargo about` 0.9.2, NDK r29) produced
+  exactly that `native.json` and an unchanged `Rust-Licenses.html`; for
+  `6b44b9b2a` the hash was set to the new file's SHA-256 by hand, as
+  this host has no `cargo about` or NDK.
 - `scripts/m0/fetch-servo.sh` refused this host's checkout because
   `servo-checkout/servo` is a symbolic link to a checkout elsewhere on the
   same disk (space). Its fetch and checkout steps were run by hand on that
-  checkout: `git fetch --no-tags --depth=1` of `71b94369b` from a local
+  checkout: `git fetch --no-tags --depth=1` of `6b44b9b2a` from a local
   clone of L-K-M/servo, then `git checkout --force --detach` and
   `git clean -ffd`. Its mach Python preparation was not run; the host
   tests do not need it.
@@ -2454,8 +2466,7 @@ for the pin:
 No native build or emulator ran on this host: both native ABI builds,
 packaging and the fixture checks are the Engine workflow's evidence on the
 PR that sets this pin. Combray turns the viewer on in the same PR
-([PDF.md](PDF.md#phases)). On the previous candidate `494d7f4b13b`,
-Engine runs
+([PDF.md](PDF.md#phases)). On `494d7f4b13b`, Engine runs
 [41311662496](https://github.com/L-K-M/Combray/actions/runs/41311662496)
 (head `41ca252`) and
 [41356434589](https://github.com/L-K-M/Combray/actions/runs/41356434589)
@@ -2468,13 +2479,14 @@ On `ee5d4c625`, Engine run
 (head `98ec510`) passed all 184 checks. On `d3ff19f14`, Engine run
 [41508955098](https://github.com/L-K-M/Combray/actions/runs/41508955098)
 (head `76bc681`) passed all 185 checks, with no report-only failures.
-The Engine workflow has not run on `71b94369b` yet.
+The Engine workflow has not run on `6b44b9b2a` yet.
 
-Open follow-ups for #18: a load the embedder starts away from a PDF
-that is still downloading, as Combray's address bar does, does not
-abort it (Servo keeps the old document in session history), so that
-download continues in the background up to the cap; the network layer
-notices a cancelled fetch only when the next chunk arrives; and a
-`charset` on the PDF's `Content-Type` still sets the viewer document's
-encoding, and with it how the viewer encodes URL queries, once the body
-ends (found by reading the code, not tested).
+Open follow-ups for L-K-M/servo: a `charset` on the PDF's
+`Content-Type` still sets the viewer document's encoding, and with it
+how the viewer encodes URL queries, once the body ends (found by
+reading the code, not tested); a load the embedder starts with
+`WebView::load` away from a PDF that is still downloading, as
+Combray's address bar does, does not abort it (Servo keeps the old
+document in session history), so that download continues in the
+background up to the cap; and the network layer notices a cancelled
+fetch only when the next chunk arrives.
