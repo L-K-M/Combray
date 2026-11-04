@@ -2354,11 +2354,12 @@ had room. The candidate backports upstream's fix (`f80ad0305e2`).
   the fix. The upstream `gap-006` tests and `flexbox-column-row-gap-001`
   pass with the backport.
 - WPT `css-flexbox`, `css-grid`, `css-sizing`, `css-tables` and `css-align`
-  (5192 tests) with the previous and the candidate engine. 22 results
-  newly pass, among them Chromium's compat case for this bug in
-  `row-compat-001.html`. Ten flex-fraction subtests of `row-005.html` and
-  `row-008.html` newly fail; Chromium 156 fails all ten too. Nothing else
-  changed.
+  (5192 tests) with the previous and the candidate engine. Twelve results
+  newly pass: the new cases, the gap tests and two compat cases, among them
+  Chromium's case for this bug in `row-compat-001.html`. Ten flex-fraction
+  subtests of `row-005.html` and `row-008.html` newly fail; Chromium 156
+  fails all ten too. Nothing else changed beyond load flakes in the
+  baseline run.
 - The article and the synthetic pages match Chromium's widths, byline
   included. `FitWidthTest` loads the fixture on the device and requires a
   page no wider than its viewport.
