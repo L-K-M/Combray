@@ -243,6 +243,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages served over HTTP/2 with large response headers (long security
+  policies, for example) load instead of showing a network error. Servo
+  now accepts header lists up to 256 KiB, as Chromium does, instead of
+  hyper's 16 KiB.
 - Cloudflare security verification no longer stalls until it reports error
   `300031`. Servo now delivers worker and port messages with an empty
   origin, as browsers do.
