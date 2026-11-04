@@ -2310,7 +2310,32 @@ network and headless WebDriver environment fail the checkbox for every
 browser tried. The phone result is pending, with the arm64 APK from the app
 integration PR's Engine workflow.
 
-## 41. PDF viewer document (30 October 2026)
+## 41. HTTP/2 response header list limit (4 November 2026)
+
+Validated source: `3423e2b538029a6c5585b7244ecce281dbdceaea` on `combray/0.7`, which merges downstream
+[PR #26](https://github.com/L-K-M/servo/pull/26) on top of the §40 source.
+
+### Reproduction
+
+hyper's HTTP/2 client advertises and enforces a 16 KiB `SETTINGS_MAX_HEADER_LIST_SIZE`
+(RFC 9113, section 6.5.2). A server that negotiates `h2` and answers with a decoded header list
+above that (synthetic case: ten 10 KiB headers) has its stream reset with `PROTOCOL_ERROR`; the
+fetch fails with `client error (SendRequest)` and a navigation shows Servo's network error page.
+The same response over HTTP/1.1 loads. Servo now sets the limit to 256 KiB, Chromium's value.
+
+### Checks
+
+- Downstream, on desktop servoshell: the new `servo-net` test
+  `fetch::test_fetch_http2_response_with_large_header_list` fails before the change and passes
+  after it; `servo-net` integration tests 392 of 393 (the remaining `test_filemanager` failure
+  is the same on the previous pin and passes alone); fetch WPT `api/basic` and `api/headers`
+  167 as expected; no new `./mach test-tidy` findings; independent review without findings.
+- Here: Combray takes this fix with `6b44b9b2a`, the PDF viewer merge of §42, whose first parent
+  is `3423e2b53`; `native/Cargo.lock` and the notices' content are unchanged (§42). Host tests,
+  both native ABI builds and the x86_64 emulator checks run in the Engine workflow of the PR that
+  sets that pin; no local device or phone result is claimed.
+
+## 42. PDF viewer document (30 October 2026)
 
 The pin is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on `combray/0.7`,
 the merge commit of
@@ -2318,8 +2343,8 @@ the merge commit of
 (`engine/pdf-viewer-document`), merged on 4 November 2026; upstream base
 still v0.7.0. Its parents are `3423e2b53`, `combray/0.7` with the
 HTTP/2 header-list fix of
-[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) over main's
-pin `6fbfc3d70` (the engine fixes of sections 32, 33, 35, 38, 39 and
+[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) (section 41)
+over `6fbfc3d70` (the engine fixes of sections 32, 33, 35, 38, 39 and
 40), and `71b94369b`, #18's head and this section's previous pin.
 `git diff 3423e2b53 6b44b9b2a` is exactly the 12 files of the PDF
 change and `git diff 71b94369b 6b44b9b2a` only the HTTP/2 fix
@@ -2450,11 +2475,10 @@ again on the merge commit here. On this Linux x86_64 host, for the pin:
   checks the lockfile against the checkout, not the engine API. The
   notices' content is the same; only their input hash of
   `scripts/m0/servo-pin.sh` and the compare link in
-  `THIRD_PARTY_NOTICES.md` follow the pin. At `71b94369b`,
-  `scripts/generate-notices.py` (`cargo about` 0.9.2, NDK r29) produced
-  exactly that `native.json` and an unchanged `Rust-Licenses.html`; for
-  `6b44b9b2a` the hash was set to the new file's SHA-256 by hand, as
-  this host has no `cargo about` or NDK.
+  `THIRD_PARTY_NOTICES.md` follow the pin. At `71b94369b` and again at
+  `6b44b9b2a`, `scripts/generate-notices.py` (`cargo about` 0.9.2, NDK
+  r29) produced exactly that `native.json` and an unchanged
+  `Rust-Licenses.html`.
 - `scripts/m0/fetch-servo.sh` refused this host's checkout because
   `servo-checkout/servo` is a symbolic link to a checkout elsewhere on the
   same disk (space). Its fetch and checkout steps were run by hand on that
@@ -2479,7 +2503,10 @@ On `ee5d4c625`, Engine run
 (head `98ec510`) passed all 184 checks. On `d3ff19f14`, Engine run
 [41508955098](https://github.com/L-K-M/Combray/actions/runs/41508955098)
 (head `76bc681`) passed all 185 checks, with no report-only failures.
-The Engine workflow has not run on `6b44b9b2a` yet.
+Engine run
+[41881346624](https://github.com/L-K-M/Combray/actions/runs/41881346624)
+on `71b94369b` (head `2a5a42f`) had not finished when #18 merged. The
+Engine workflow has not run on `6b44b9b2a` yet.
 
 Open follow-ups for L-K-M/servo: a `charset` on the PDF's
 `Content-Type` still sets the viewer document's encoding, and with it
