@@ -243,6 +243,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages that close a message port right after transferring it load and
+  scroll again. Servo's script thread crashed on that call, leaving the
+  page frozen on screen.
+- When a page's script engine crashes, Combray shows "This page stopped
+  working" with Reload instead of a page that no longer scrolls or
+  responds. Servo now hears of the crash and no longer exits the app.
 - Cloudflare security verification no longer stalls until it reports error
   `300031`. Servo now delivers worker and port messages with an empty
   origin, as browsers do.
