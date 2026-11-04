@@ -6,6 +6,7 @@
 //!
 //! Integer codes are shared with `NativeEngine.kt`; keep both sides in sync.
 
+use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +29,7 @@ use crate::commands::{
 use crate::engine::{self, EngineConfig, EventSink};
 use crate::events::EngineEvent;
 use crate::native_window::NativeWindow;
-use crate::panic_policy::{self, PanicAction, ThreadRole};
+use crate::panic_policy::{self, PanicAction, ServoRecovery, ThreadRole};
 
 /// Servo writes its profile while shutting down. Under software emulation a shutdown took
 /// 157 s; callers must not block Android's main thread on it.
@@ -136,13 +137,32 @@ fn init_logging() {
         } else {
             ThreadRole::Other
         };
-        if !servo::should_panic_hook_suppress_termination()
-            && panic_policy::action(role) == PanicAction::Abort
-        {
-            error!("engine thread panicked outside a recoverable operation; aborting");
-            std::process::abort();
+        let recovery = if servo::should_panic_hook_suppress_termination() {
+            ServoRecovery::Recovers
+        } else {
+            ServoRecovery::DoesNotRecover
+        };
+        match panic_policy::action(role, recovery) {
+            PanicAction::Unwind => {},
+            // A script thread's pages would otherwise stay on screen without script or input.
+            PanicAction::ReportAndUnwind => engine::report_panic(panic_message(info)),
+            PanicAction::Abort => {
+                error!("engine thread panicked outside a recoverable operation; aborting");
+                std::process::abort();
+            },
         }
     }));
+}
+
+/// The panic's message, as servoshell's panic hook reports it.
+fn panic_message<'a>(info: &'a PanicHookInfo<'_>) -> &'a str {
+    if let Some(message) = info.payload().downcast_ref::<&'static str>() {
+        return message;
+    }
+    if let Some(message) = info.payload().downcast_ref::<String>() {
+        return message;
+    }
+    "Box<Any>"
 }
 
 fn java_string(env: &mut Env<'_>, value: JString<'_>) -> jni::errors::Result<String> {
