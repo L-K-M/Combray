@@ -2312,10 +2312,12 @@ integration PR's Engine workflow.
 
 ## 41. Flex rows wider than the screen (4 November 2026)
 
-Candidate source: `dbf53b7e4e1f9a79096f323227bb6a98cfa5d12c`, the head of
-downstream [PR #27](https://github.com/L-K-M/servo/pull/27) on `combray/0.7`
-(`6b44b9b2a43`, which also brings the HTTP/2 header list limit and the
-inert PDF viewer document). An article the owner opened on the phone
+Validated source: `825ef1f0356fd4adb6184207ffdb84f572241ef0` on
+`combray/0.7`, which merges downstream
+[PR #27](https://github.com/L-K-M/servo/pull/27) onto `6b44b9b2a43`. That
+base also brings the HTTP/2 header list limit and the inert PDF viewer
+document. The merge differs from the tested PR commit `dbf53b7e4e1` only in
+a comment of the new test. An article the owner opened on the phone
 scrolled sideways instead of fitting the screen.
 
 ### Reproduction
@@ -2363,6 +2365,11 @@ had room. The candidate backports upstream's fix (`f80ad0305e2`).
 - The article and the synthetic pages match Chromium's widths, byline
   included. `FitWidthTest` loads the fixture on the device and requires a
   page no wider than its viewport.
+- The fixture's sentence is over 2500 CSS px wide on one line, so the
+  check also holds at tablet widths: at 1280 px the previous engine lays
+  the page out 3159 px wide, the candidate and Chromium 1280 px.
+- Reviews: Devin SWE-2 and two GLM rounds on the downstream PR; their
+  findings and the responses are recorded there.
 - Builds: `./mach build --profile medium --media-stack dummy` on macOS
   arm64. The Engine workflow builds both Android ABIs and runs the emulator
   fixtures on the app PR.
