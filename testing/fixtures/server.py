@@ -378,9 +378,14 @@ ZOOM_PAGE = page(
 
 # A row of an icon that cannot shrink and a long sentence, in an auto grid column: the sentence
 # must wrap, so the page stays as wide as the viewport. Servo once sized such a row's min-content
-# width to the whole sentence on one line, and the column widened the page.
+# width to the whole sentence on one line, and the column widened the page. On one line the
+# sentence is far wider than any screen (over 2500 CSS px at 16px), so the check means the same
+# on a phone, a tablet in landscape or a desktop window.
 FIT_WIDTH_SENTENCE = ("This caption is a single long sentence that needs several lines on a phone, "
-                      "because no screen is wide enough to show all of it on one line at a readable size.")
+                      "because no screen is wide enough to show all of it on one line at a readable size, "
+                      "not a phone held sideways, not a tablet in landscape and not a desktop monitor either, "
+                      "so the text has to wrap however the device is held and whichever screen runs the check, "
+                      "and a page that holds it fits its viewport only when the row wraps.")
 FIT_WIDTH_PAGE = page(
     "FIT-WAITING",
     "<main><figure><figcaption class='row'><span class='icon'></span>"
