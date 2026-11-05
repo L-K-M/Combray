@@ -424,9 +424,8 @@ fun BrowserScreen(
                 }
                 // Before any sheet or keyboard: the keyboard shrinks the page, which lays out again.
                 val frame = if (blocker == null && view != null) copyFrame(view) else FrameCopy.Unavailable(blocker ?: ScreenshotOmission.NOT_SHOWN)
-                // An equal address is not the same document: only the page shown at the tap may be sent.
-                val sameDocument = browser.browserState.value.activeTab?.page == reported.page
-                val checked = if (frame is FrameCopy.Copied && !sameDocument) FrameCopy.Unavailable(ScreenshotOmission.PAGE_CHANGED) else frame
+                // Only the page shown at the tap may be sent.
+                val checked = checkedFrame(frame, reported = reported.page, shown = browser.browserState.value.activeTab?.page)
                 reportDraftId = graph.reportDrafts.start(createdAt, snapshot, displayHost(service.baseUrl), checked).id
                 sheet = Sheet.REPORT
             } finally {

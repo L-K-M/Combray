@@ -47,6 +47,25 @@ class ReportCaptureTest {
         assertEquals(ScreenshotOmission.NOT_SHOWN, screenshotBlocker(SHOWN, surface = false))
     }
 
+    /** An equal address is not the same document: a reload or a same-address navigation drops the copy. */
+    @Test
+    fun aCopyIsKeptOnlyForTheReportedDocument() {
+        val copied = FrameCopy.Copied(Bitmap.createBitmap(4, 8, Bitmap.Config.ARGB_8888))
+        assertSame(copied, checkedFrame(copied, reported = PAGE.page, shown = PAGE.page))
+        val reloaded = PageRef(ViewRef(tab = 1, generation = 1), document = 2)
+        assertEquals(FrameCopy.Unavailable(ScreenshotOmission.PAGE_CHANGED), checkedFrame(copied, reported = PAGE.page, shown = reloaded))
+        val recreated = PageRef(ViewRef(tab = 1, generation = 2), document = 1)
+        assertEquals(FrameCopy.Unavailable(ScreenshotOmission.PAGE_CHANGED), checkedFrame(copied, reported = PAGE.page, shown = recreated))
+        assertEquals(FrameCopy.Unavailable(ScreenshotOmission.PAGE_CHANGED), checkedFrame(copied, reported = PAGE.page, shown = null))
+    }
+
+    /** No copy keeps its own reason: the page changing does not hide why there was none. */
+    @Test
+    fun aMissingCopyKeepsItsReason() {
+        val failed = FrameCopy.Unavailable(ScreenshotOmission.COPY_FAILED)
+        assertSame(failed, checkedFrame(failed, reported = PAGE.page, shown = null))
+    }
+
     /** The core checks the signature and that the header's size is the declared one. */
     @Test
     fun theDefaultEncoderWritesAPngOfTheFramesSize() {

@@ -8,6 +8,7 @@ import ch.lkmc.combray.core.browser.SessionState
 import ch.lkmc.combray.core.integration.EncodedScreenshot
 import ch.lkmc.combray.core.integration.ScreenshotOmission
 import ch.lkmc.combray.core.integration.SiteReports
+import ch.lkmc.combray.engine.PageRef
 import java.io.ByteArrayOutputStream
 
 /**
@@ -25,6 +26,14 @@ internal fun screenshotBlocker(state: BrowserState, surface: Boolean): Screensho
         else -> null
     }
 }
+
+/**
+ * [frame] if the document [reported] at the tap is still the one [shown] after the copy;
+ * otherwise the copy may show another page and is not sent. Documents are compared by
+ * [PageRef], never by address: a reload or a navigation to the same address is another page.
+ */
+internal fun checkedFrame(frame: FrameCopy, reported: PageRef?, shown: PageRef?): FrameCopy =
+    if (frame is FrameCopy.Copied && shown != reported) FrameCopy.Unavailable(ScreenshotOmission.PAGE_CHANGED) else frame
 
 /**
  * [frame] as a PNG within [maxBytes]. A larger one is halved in each direction and encoded
