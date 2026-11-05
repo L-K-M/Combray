@@ -177,6 +177,7 @@ internal class ReportDrafts(
             Log.w(LOG_TAG, "preparing the screenshot failed: ${failure.javaClass.name}")
             ReportShot.Omitted(ScreenshotOmission.COPY_FAILED)
         } catch (tooLarge: OutOfMemoryError) {
+            Log.w(LOG_TAG, "preparing the screenshot ran out of memory")
             // A report without a screenshot is better than a crashed browser.
             ReportShot.Omitted(ScreenshotOmission.COPY_FAILED)
         }
