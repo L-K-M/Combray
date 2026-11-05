@@ -2781,7 +2781,7 @@ then reads the next request on it and closes the connection without answering.
 
 ## 46. Pages wider than the screen (5 November 2026)
 
-Candidate source: `089646422e1d0e1bc2e7b20998353ab0f3e93396`, the head of downstream
+Candidate source: `47f51554ad76924ff6a22c52feb42487d8818ffd`, the head of downstream
 [PR #32](https://github.com/L-K-M/servo/pull/32) (`fix/zoom-out-to-content-width`) on §45's pin
 `0bf44ec270a0`.
 
@@ -2809,15 +2809,19 @@ viewport at device pixel ratio 2.
 - Downstream (PR #32): layout grows the root scrollport (the layout viewport) to the width of the
   page's content, keeping its aspect ratio, by at most `initial-scale` over `minimum-scale` (over
   0.25, Chrome's default, without one). The initial containing block, media queries, `vw` and
-  `innerWidth` keep their size, so the page does not lay out again; a root with `overflow-x: hidden`
-  or `clip` does not grow; the page background covers the larger viewport. Paint shows the whole
+  `innerWidth` keep their size, so the page does not lay out again. A root that hides overflow in
+  either axis (`overflow: hidden` or `clip`) does not grow, since the larger viewport would show what
+  it hides, and overflow to the left (right-to-left pages), which the page cannot scroll to, does
+  not count. The page background covers the larger viewport. Paint shows the whole
   layout viewport at a pinch zoom of 1.0, so pinch zoom reaches the content's full width, with the
   page's `<meta viewport>` limits applied to the page scale. A page without `initial-scale` (or
   without a viewport meta tag) opens zoomed out to its width, like Chrome's "auto" initial scale, and
-  follows its content as it loads until the user zooms; a page with one opens at it. `<meta
-  viewport>` descriptions now belong to their document and pinch zoom resets when another document
-  becomes the root (both carried over to the next page before), and pinch steps that arrive in one
-  frame multiply instead of only the last counting.
+  follows its content as it loads until the user zooms; a page with one opens at it. Once the user
+  zooms, Paint keeps the chosen page scale through later viewport changes where the limits allow.
+  `<meta viewport>` descriptions now belong to their document and pinch zoom resets when another
+  document becomes the root (both carried over to the next page before; desktop servoshell keeps
+  its pinch zoom), pinch steps that arrive in one frame multiply instead of only the last counting,
+  and a viewport zoom of zero no longer parses (Servo divided by it).
 - Here: the pin, the fixture `/wide.html` (a 1080 CSS px row, red on its left half and green on its
   right; `?initial-scale=1` adds `width=device-width, initial-scale=1`), and `ZoomOutTest`: the page
   without an initial scale shows green at the screen's right edge, and the `initial-scale=1` page
@@ -2842,14 +2846,24 @@ viewport at device pixel ratio 2.
 
 ### Checks
 
-- Downstream, `--profile medium`: six new embedder tests in `components/servo/tests/webview.rs`
-  (`test_viewport_*`, each in its own process) pass; on the tests-only commit `2b3b6de206` the four
-  that zoom out failed (pinch zoom stayed at 1), the 25% default opened at 10% before its commit, and
-  the `overflow-x: hidden` guard passes either way. The `webview` (42), `accessibility` (32) and
+- Downstream, `--profile medium`: ten new embedder tests in `components/servo/tests/webview.rs`
+  (`test_viewport_*` and `test_desktop_pinch_zoom_survives_navigation`, each in its own process) and
+  two `viewport_description` unit tests pass. Each failed before its change: on the tests-only commit
+  `2b3b6de206` the four that zoom out stayed at 1, the 25% default opened at 10%, a `<meta viewport>`
+  added after the user zoomed out to 0.5 left 0.8, `overflow-y: hidden` and right-to-left pages
+  zoomed out to 0.4, and desktop lost its pinch zoom on navigation; the `overflow-x: hidden` guard
+  passes either way. The `webview` (42), `accessibility` (32) and
   `input_events` (2) suites, each test in its own process, pass except `test_svg_document_styles_paint`,
   which fails the same way on `0bf44ec270`; `test_accessibility_click_link` caught an extra
   accessibility update after navigations, fixed before review. `servo-paint-api` compositor tests
   pass (11); `./mach test-tidy` has no new findings.
+- Reviews: GLM 5.3 on the downstream PR, and independent helper reviews (Devin SWE-2 max, GLM 5.3,
+  DeepSeek V4.1 Flash) with each finding checked by a second model. Real findings, fixed: a viewport
+  zoom of zero, the user's scale lost to a later `<meta viewport>`, hidden vertical overflow revealed
+  when zoomed out, right-to-left overflow counted, and desktop's pinch zoom reset on navigation.
+  Refuted: a missing green background in the pixel test (the shared helper paints it) and
+  `background-attachment: fixed` against the larger layout viewport (that is the layout viewport,
+  as in Chrome).
 - Desktop servoshell with the change, the synthetic page: opens at 0.379 with a 1088x2271 visual
   viewport, as Chromium does; with `initial-scale=1` it opens at 1.0 and a WebDriver touch pinch zooms
   it out to 0.379.
