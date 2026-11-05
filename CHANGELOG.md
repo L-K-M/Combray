@@ -248,6 +248,10 @@ All notable changes to this project are documented here. The format follows
   column, table cell or float. Servo now sizes such rows as other browsers do.
 - Wrapped rows of short labels with gaps between them, such as an article's
   byline, no longer break each label onto two lines while the row has room.
+- Animations given as one object per property (`{opacity: [0, 1],
+  offset: [0, 0.4]}`) start instead of failing with "Keyframe offsets
+  must be numbers.": Combray spreads the offset, easing and composite
+  lists over the keyframes as the Web Animations spec does.
 - Cloudflare security verification no longer stalls until it reports error
   `300031`. Servo now delivers worker and port messages with an empty
   origin, as browsers do.
