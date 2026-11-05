@@ -58,7 +58,8 @@ internal data class ReportForm(val url: String, val title: String, val comment: 
 
 /**
  * One report being previewed. [id] is a new lowercase UUIDv4 that becomes the report's id on
- * the service; [serviceHost] names the service it will go to, read when the report started.
+ * the service; [serviceHost] names the service configured when the report started. Send uses
+ * the one configured at the tap on Send, which Settings opened over the sheet can change.
  */
 internal class ReportDraftState(
     val id: String,

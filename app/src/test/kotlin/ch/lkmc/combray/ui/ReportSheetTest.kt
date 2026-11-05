@@ -211,6 +211,14 @@ class ReportSheetTest {
         assertEquals(1, settingsOpened)
     }
 
+    /** Settings opened over the sheet can change the service: the sheet names the current one. */
+    @Test
+    fun theSheetNamesTheServiceItIsGiven() {
+        show(serviceHost = "new.example.org")
+        compose.onNodeWithText("Sends what you see here to your report service, new.example.org. Your report service and the agents that read it get everything shown here.")
+            .assertIsDisplayed()
+    }
+
     @Test
     fun whileStoringSendIsDisabled() {
         val draft = draft()
@@ -259,7 +267,7 @@ class ReportSheetTest {
         return label.firstOrNull { it.isNotBlank() }
     }
 
-    private fun show(draft: ReportDraftState = draft(), fontScale: Float = 1f) {
+    private fun show(draft: ReportDraftState = draft(), fontScale: Float = 1f, serviceHost: String = draft.serviceHost) {
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
@@ -270,6 +278,7 @@ class ReportSheetTest {
                         onSend = { sent += it },
                         onCancel = { cancelled++ },
                         onOpenSettings = { settingsOpened++ },
+                        serviceHost = serviceHost,
                     )
                 }
             }

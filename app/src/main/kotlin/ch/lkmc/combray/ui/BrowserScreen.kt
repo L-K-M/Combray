@@ -741,13 +741,29 @@ fun BrowserScreen(
         Sheet.REPORT -> {
             val draft = reportDraft?.takeIf { it.id == reportDraftId }
             if (draft != null) {
+                // The problem's Settings button opens Settings over the sheet, not in its place:
+                // another sheet would end the report, and the text typed so far with it.
+                var settingsOverReport by rememberSaveable(draft.id) { mutableStateOf(false) }
+                // Settings can set the service up or change it: name the one Send would use now.
+                val service by graph.integrations.reports.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
                 ReportSheet(
                     draft = draft,
+                    serviceHost = service?.let { displayHost(it.baseUrl) } ?: draft.serviceHost,
                     environment = graph.reportEnvironment,
                     onSend = { report -> sendReport(draft, report) },
-                    onOpenSettings = openSettings,
+                    onOpenSettings = { settingsOverReport = true },
                     onDismiss = dismiss,
                 )
+                if (settingsOverReport) {
+                    SettingsSheet(
+                        integrations = graph.integrations,
+                        settings = graph.settings,
+                        retention = graph.retention,
+                        onUnusedTabsChanged = browser::runMaintenance,
+                        notices = graph.notices,
+                        onDismiss = { settingsOverReport = false },
+                    )
+                }
             } else {
                 // Queued, or the process died since: the draft is gone, so the sheet closes too.
                 LaunchedEffect(Unit) { dismiss() }

@@ -96,13 +96,14 @@ internal enum class ReportProblem(
 @Composable
 internal fun ReportSheet(
     draft: ReportDraftState,
+    serviceHost: String,
     environment: ReportEnvironment,
     onSend: (ReportDraft) -> Unit,
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        ReportSheetContent(draft, environment, onSend = onSend, onCancel = onDismiss, onOpenSettings = onOpenSettings)
+        ReportSheetContent(draft, environment, onSend = onSend, onCancel = onDismiss, onOpenSettings = onOpenSettings, serviceHost = serviceHost)
     }
 }
 
@@ -115,6 +116,8 @@ internal fun ReportSheetContent(
     onCancel: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The service Send would use now; Settings opened over the sheet can change it. */
+    serviceHost: String = draft.serviceHost,
 ) {
     val shot by draft.shot.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val progress by draft.progress.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
@@ -136,7 +139,7 @@ internal fun ReportSheetContent(
     ) {
         Text(stringResource(R.string.report_title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
         // Proposed default (open question 2): reports may reach the agents' model provider; say so.
-        Text(stringResource(R.string.report_recipient, draft.serviceHost))
+        Text(stringResource(R.string.report_recipient, serviceHost))
 
         when (val current = shot) {
             // A live region: encoding can still drop the screenshot, which removes the checkbox.
