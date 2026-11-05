@@ -7,7 +7,6 @@
   --background: #e4e4e7;
   --text: #1c1c1e;
   --muted: #5c5c63;
-  --focus: #1f5fbf;
   --shadow: rgba(0, 0, 0, 0.28);
 }
 
@@ -16,7 +15,6 @@
     --background: #1c1c1e;
     --text: #ececf0;
     --muted: #a6a6ad;
-    --focus: #8ab4f8;
     --shadow: rgba(0, 0, 0, 0.6);
   }
 }
@@ -51,9 +49,11 @@ body {
   display: block;
 }
 
+/* Links sit on white paper in both appearances, so the ring keeps one colour. It is drawn inside
+   the link, where the page's overflow: hidden leaves it whole on a link at the page's edge. */
 .page .link:focus {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline: 2px solid #1f5fbf;
+  outline-offset: -2px;
 }
 
 .page-error {
