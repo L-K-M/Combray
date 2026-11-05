@@ -50,6 +50,12 @@ Pages
                              requests that arrived and the responses sent in full
   /video.html?k=<alnum>      <video src=/media/clip.mp4?k=...>; title VIDEO:errors:<n>
   /audio.html                <audio src=/media/tone.wav>; title AUDIO:errors:<n>
+  /canplay.html?k=<alnum>    <video> that attaches /media/clip.mp4?k=... only when canPlayType
+                             claims the MP4 codecs, as capability-driven sites do; title
+                             CANPLAY:errors:<n>, or CANPLAY:unsupported when the claim is No
+  /media-source.html?k=<alnum>
+                             <video> whose only <source> is clip.mp4 typed video/mp4 with
+                             codecs; skipped when the engine claims no MP4; title TYPED:errors:<n>
   /media-redirect.html?to=clip|file[&k=<alnum>]
                              <video> from /media/redirect; title REDIRECT:errors:<n>
   /media-local.html          a data: and a file: <video>, neither of them a web address; title LOCAL:errors:<n>
@@ -436,6 +442,34 @@ def media_page(title, element, src):
         title,
         f"<{element} src='{html.escape(src, quote=True)}' controls onerror='failed()'></{element}>",
         f"<script>var errors = 0; function failed() {{ errors++; document.title = '{title}:errors:' + errors; }}</script>",
+    )
+
+
+# The codecs the claim table calls supported; what capability-driven pages ask about (docs/VIDEO.md).
+MP4_CODECS = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'
+
+
+def canplay_page(key):
+    """A <video> that asks canPlayType before attaching its source: no answer, no fetch."""
+    return page(
+        "CANPLAY",
+        "<video controls onerror='failed()'></video>"
+        "<script>var v = document.querySelector('video');"
+        f" if (v.canPlayType('{MP4_CODECS}') === '') {{"
+        " document.title = 'CANPLAY:unsupported'; }"
+        f" else {{ v.src = '/media/clip.mp4?k={key}'; }}</script>",
+        "<script>var errors = 0; function failed() { errors++; document.title = 'CANPLAY:errors:' + errors; }</script>",
+    )
+
+
+def typed_source_page(key):
+    """A <video> whose only <source> has a codec-claiming type; a No skips it before its fetch."""
+    return page(
+        "TYPED",
+        "<video controls onerror='failed()'>"
+        f"<source src='/media/clip.mp4?k={key}' type='{MP4_CODECS}' onerror='failed()'>"
+        "</video>",
+        "<script>var errors = 0; function failed() { errors++; document.title = 'TYPED:errors:' + errors; }</script>",
     )
 
 
@@ -981,6 +1015,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, media_page("VIDEO", "video", f"/media/clip.mp4?k={media_key(query)}"))
         if path == "/audio.html":
             return self.send(200, media_page("AUDIO", "audio", "/media/tone.wav"))
+        if path == "/canplay.html":
+            return self.send(200, canplay_page(media_key(query)))
+        if path == "/media-source.html":
+            return self.send(200, typed_source_page(media_key(query)))
         if path == "/media-redirect.html":
             to = query.get("to", ["clip"])[0]
             return self.send(200, media_page("REDIRECT", "video", f"/media/redirect?to={urllib.parse.quote(to)}&k={media_key(query)}"))

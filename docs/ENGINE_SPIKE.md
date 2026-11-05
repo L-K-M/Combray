@@ -2778,3 +2778,61 @@ then reads the next request on it and closes the connection without answering.
   connection. The new device check and the rest of the fixture suite run on the x86_64 emulator in
   this PR's Engine workflow; that run is the evidence for this pin. Resource timing and devtools
   still show one attempt for a request sent again (follow-up).
+
+## 46. canPlayType answers backed by the player (5 November 2026)
+
+### Report
+
+The owner reported a mobile video page (not named here) that renders but never plays: its
+player mounts a `<video>` and shows its own error card, and Combray's notice never appears
+because no media request is made.
+
+Probe on the desktop servoshell (`servo-sitecheck` at `--profile medium`, the sitecheck
+harness's Combray preferences and Android user agent, an injected userscript that logs
+`canPlayType` calls, media-element events and the site's player data):
+
+- Baseline: `MediaSource`, `ManagedMediaSource` and `SourceBuffer` are undefined, and every
+  `canPlayType` answer is the dummy backend's `""`. The page probes HLS, MP4 and WebM forms,
+  leaves the `<video>` sourceless (`networkState` 0, `readyState` 0) and shows its error card.
+  No media request reaches the delegate, so the offer flow cannot start.
+- Claiming only the HLS MIME types (`application/(x-|vnd.apple.)mpegurl`, `audio/(x-)?mpegurl`)
+  makes those probes answer `maybe`, and the page still attaches no source; the site's player
+  response offers this client no `hlsManifestUrl` or `dashManifestUrl` at all.
+- Adding the H.264/AAC MP4 claim removes the error card (the muted-autoplay UI mounts), and
+  once the page's own player API is told to play, `video.src` becomes a progressive
+  `itag=18` `video/mp4` address (H.264 + AAC, no cipher): a `video` load the delegate cancels
+  and reports.
+
+The claim that unlocks a progressive source there is MP4, not HLS. HLS stays unclaimed until
+the player gains an HLS source (VIDEO.md's firm rule); the table claims only what Media3's
+progressive source reads through the decoders Android requires.
+
+### Changes
+
+- `native/src/media.rs` gains `MediaSupport` and `claimed_support`: `Maybe` for the MIME
+  types the progressive player reads, `Probably` when `codecs` names only device-mandated
+  codecs (H.264 `avc1`/`avc3`, AAC `mp4a.40.*`, MP3 `mp4a.69`/`6b` and `mp3`, WAV's PCM
+  family, FLAC, Vorbis/Opus/FLAC in Ogg), `No` for everything else.
+- `native/src/media_backend.rs` installs that answer as the `ServoMedia` backend before
+  `ServoBuilder::build` — the option-B installation VIDEO.md describes: every `Backend`
+  method forwards to `DummyBackend` except `can_play_type`; the factory is panic-safe and
+  `ServoMedia::get()` waits for it, so Servo's own `media_platform::init` is a no-op.
+- `native/Cargo.toml` gains path dependencies on `servo-base`, `servo-media` and
+  `servo-media-dummy`; `engine.rs` installs the backend next to `ServoBuilder`.
+- `testing/fixtures/server.py` gains `/canplay.html` (a `<video>` that attaches the clip only
+  when `canPlayType` claims the MP4 codecs; title `CANPLAY:unsupported` without it) and
+  `/media-source.html` (a single `<source>` typed `video/mp4; codecs=...`), and
+  `MediaPlayerTest` checks 11 and 12 open them, see Play offered with no clip request before
+  the tap, and reach `READY` after it.
+
+### Checks
+
+- `cargo test --lib` in `native/` passes: 163 host tests including the claim table's four
+  (claimed and rejected codec lists, the audio tables, the unclaimed types).
+- `cargo check --target x86_64-linux-android --locked` passes: the shim compiles against the
+  pinned Servo's `Backend` trait with the dummy's 14 other methods forwarded.
+- `cargo fmt --check` passes. The new device checks and the rest of the fixture suite run in
+  this PR's Engine workflow; that run is the evidence for the claim end to end.
+- Not run: the reported page itself on a phone; whether its progressive URL plays in Media3
+  on device is verified by the fixture clip's identical path, and the owner's own run closes
+  the rest.

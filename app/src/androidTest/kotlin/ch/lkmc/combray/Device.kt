@@ -156,6 +156,15 @@ object Fixtures {
     /** A `<video>` playing [clip] with [key]; titled `VIDEO:errors:<n>`. */
     fun video(key: String) = "$BASE/video.html?k=$key"
 
+    /**
+     * A `<video>` that attaches [clip] with [key] only when `canPlayType` claims the MP4
+     * codecs; titled `CANPLAY:errors:<n>`, or `CANPLAY:unsupported` when the claim is empty.
+     */
+    fun canPlay(key: String) = "$BASE/canplay.html?k=$key"
+
+    /** A `<video>` whose only `<source>` is [clip] with [key] typed `video/mp4`; titled `TYPED:errors:<n>`. */
+    fun typedSource(key: String) = "$BASE/media-source.html?k=$key"
+
     /** The 6 s fixture clip, [Device.GREEN] then [Device.BLUE]; "media" › "clip" in [state] records its requests. */
     fun clip(key: String) = "$BASE/media/clip.mp4?k=$key"
 

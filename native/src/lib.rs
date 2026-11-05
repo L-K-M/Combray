@@ -46,6 +46,8 @@ mod engine;
 #[cfg(target_os = "android")]
 mod jni_api;
 #[cfg(target_os = "android")]
+mod media_backend;
+#[cfg(target_os = "android")]
 mod native_window;
 
 // Links jemalloc as the global allocator (see Cargo.toml).
