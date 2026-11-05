@@ -54,6 +54,9 @@ object Fixtures {
     /** Titled `WA:ok` once Element.animate() behaves, `WA:missing` without it, `WA:fail:<why>` otherwise. */
     const val ANIMATE = "$BASE/animate.html"
 
+    /** Titled `PC:ok` once a message reaches a port whose transferred-away object was closed. */
+    const val PORT_CLOSE = "$BASE/port-close.html"
+
     /** Titled `XP:ok` once FontFace, adoptedStyleSheets and IndexedDB work, `XP:fail:<why>` otherwise. */
     const val APIS = "$BASE/apis.html"
 

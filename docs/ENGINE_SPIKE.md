@@ -2377,7 +2377,92 @@ had room. The candidate backports upstream's fix (`f80ad0305e2`).
 Limitations: engine evidence is from desktop servoshell and the API 30
 emulator. The phone result is pending.
 
-## 42. HTTP/2 response header list limit (4 November 2026)
+## 42. Frozen pages after a script thread panic (4 November 2026)
+
+Validated source: `7c7e2069db9eb6c90e34333cc43928acb5390c2b` on `combray/0.7`,
+which merges downstream [PR #28](https://github.com/L-K-M/servo/pull/28) onto
+the §41 source `825ef1f0356`. The "before" evidence below comes from the pin
+before §41, `6fbfc3d70ad`; neither has the port fixes.
+
+### Report and reproduction
+
+The owner reported an article page (not named here) that did not scroll and
+sometimes crashed Combray. With the CI arm64 APK of `6fbfc3d70ad` on an arm64
+API 36 emulator:
+
+- 2 to 6 seconds after the page loads, a script thread panics:
+  `close_message_port called on an unknown port` (`globalscope.rs:854`).
+  The page's bot-detection script transfers a `MessagePort` and then calls
+  `close()` on the object it keeps.
+- The page stays on screen, but swipes move only the bottom bar; later frames
+  lose the page's text. "This page stopped working" never appears.
+- Served through a local proxy that leaves out that one script, the same
+  build loads the page and scrolls it to the footer. The frozen page is the
+  panic's consequence, not a layout or input problem.
+
+Synthetic case: `const {port1} = new MessageChannel(); window.postMessage("x",
+"*", [port1]); port1.close();`, or the same with `MessagePort.postMessage` or
+`Worker.postMessage`. Desktop servoshell at `6fbfc3d70ad` crashes on all
+three.
+
+### Mechanism
+
+- v0.7.0 panics when `close()` reaches a port its global no longer manages.
+  Upstream fixed this on 4 November 2026 (`20b7ad33607`).
+- Even without the panic, closing the object a transfer leaves behind
+  disentangled the channel: the remote port got a `close` event and stopped
+  delivering to the transferred port.
+- Servo learns that a script thread died only from a panic report sent by its
+  own logger (`Servo::setup_logging`). Combray installs Android's logger, so
+  the report never reached the constellation: no crash page, no
+  `notify_crashed`, and the dead page kept its last frame.
+
+### Changes
+
+- Downstream: the upstream fix, cherry-picked; `close()` on a detached port
+  does nothing, as in Chromium and Gecko; `Servo::panic_reporter` returns a
+  `PanicReporter` whose `report_panic` sends the panic report from an
+  embedder's own panic hook.
+- Here: the panic hook reports panics on Servo's threads through that
+  reporter while Servo runs (`PanicAction::ReportAndUnwind` in
+  `native/src/panic_policy.rs`). Panics Servo recovers from stay unreported;
+  an engine thread panic outside a recoverable operation still aborts. Servo
+  then crashes the thread's pages, and the app shows its existing "This page
+  stopped working" notice with Reload. Servo's default options exit the
+  process once a reported panic reaches the constellation (`hard_fail`, meant
+  for test runners); Combray turns that off, as servoshell does by default.
+
+### Checks
+
+- Downstream, desktop servoshell (`--profile medium`): the new WPT test
+  `messageport-close-after-transfer.html` crashes at `6fbfc3d70ad`; with
+  only the backport its channel subtest times out; with both changes it
+  passes. `webmessaging/`, the upstream crash test and the port-origin test:
+  165 as expected. `streams/transferable/`, the worker event-properties test
+  and `structured-clone/`: 18 as expected. The validated source, rebuilt after
+  merging the flex change: the same port tests with `streams/transferable/`,
+  162 as expected. The new `panic_reporter`
+  integration test passes, and fails after its 30-second bound when the hook
+  does not call `report_panic`; the existing `crash` test passes. No new
+  `./mach test-tidy` findings.
+- Site check against Chromium: the reported page is `crash` at `6fbfc3d70ad`
+  and `ok` with the change.
+- Here: `cargo test --lib` (149 passed) and `cargo fmt --check` on the host.
+- Android, arm64 API 36 emulator, CI-built APKs of a temporary probe (the
+  `PanicReporter` commit without the port fixes, with this hook): the page's
+  panic now reaches `handle_panic` (`hard_fail=false`, one WebView, two
+  pipelines), the delegate gets `notify_crashed`, and the app shows "This page
+  stopped working" with Reload instead of the frozen page. Reload replaces
+  the renderer; that engine panics again and the notice returns, with the
+  process alive throughout. The probe's x86_64 fixture checks all passed.
+- New device check: `BrowsingTest#closingATransferredMessagePortKeepsThePageRunning`
+  opens the fixture `/port-close.html`, which transfers a port, closes the
+  object left behind and expects a message through the channel (`PC:ok`).
+  Desktop servoshell at `6fbfc3d70ad` panics on it; at this pin it reaches
+  `PC:ok`. On the emulator it runs in this PR's Engine workflow with the other
+  fixture checks.
+
+## 43. HTTP/2 response header list limit (4 November 2026)
 
 Validated source: `3423e2b538029a6c5585b7244ecce281dbdceaea` on `combray/0.7`, which merges downstream
 [PR #26](https://github.com/L-K-M/servo/pull/26) on top of the §40 source.
@@ -2397,27 +2482,31 @@ The same response over HTTP/1.1 loads. Servo now sets the limit to 256 KiB, Chro
   after it; `servo-net` integration tests 392 of 393 (the remaining `test_filemanager` failure
   is the same on the previous pin and passes alone); fetch WPT `api/basic` and `api/headers`
   167 as expected; no new `./mach test-tidy` findings; independent review without findings.
-- Here: Combray takes this fix with `6b44b9b2a`, the PDF viewer merge of §43, whose first parent
-  is `3423e2b53`, and with the §41 pin built on it; `native/Cargo.lock` and the notices' content
-  are unchanged (§43). Host tests, both native ABI builds and the x86_64 emulator checks run in
-  the Engine workflow of the PRs that set those pins; no local device or phone result is claimed.
+- Here: Combray takes this fix with `6b44b9b2a`, the PDF viewer merge of §44, whose first parent
+  is `3423e2b53`, and with the §41 and §42 pins built on it; `native/Cargo.lock` and the
+  notices' content are unchanged (§44). Host tests, both native ABI builds and the x86_64
+  emulator checks run in the Engine workflow of the PRs that set those pins; no local device or
+  phone result is claimed.
 
-## 43. PDF viewer document (30 October 2026)
+## 44. PDF viewer document (30 October 2026)
 
 The engine change is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on
 `combray/0.7`, the merge commit of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
 (`engine/pdf-viewer-document`), merged on 4 November 2026; upstream base
-still v0.7.0. Combray pins `825ef1f0356f` (section 41), which adds only
+still v0.7.0. Combray pins `7c7e2069db9e` (section 42), which adds only
 the flex sizing fix of
-[L-K-M/servo#27](https://github.com/L-K-M/servo/pull/27) on top of it:
-`git diff 6b44b9b2a 825ef1f03` touches `components/layout/flexbox`,
-WPT metadata and tests and `DOWNSTREAM.md`, no PDF, parser or document
-file and no `Cargo.lock`, `Cargo.toml` or toolchain file. Main set that pin
-with the viewer's preferences still unset, so the viewer turns on with
-this section's app change. The parents of `6b44b9b2a` are `3423e2b53`,
+[L-K-M/servo#27](https://github.com/L-K-M/servo/pull/27) (section 41) and
+the port close and panic report fixes of
+[L-K-M/servo#28](https://github.com/L-K-M/servo/pull/28) on top of it:
+`git diff 6b44b9b2a 7c7e2069d` touches `components/layout/flexbox`,
+`globalscope.rs`, `messageport.rs`, Servo's `lib.rs`, `servo.rs` and
+panic reporter, their tests, WPT metadata and `DOWNSTREAM.md`, no PDF,
+parser or document file and no `Cargo.lock`, `Cargo.toml` or toolchain
+file. Main set those pins with the viewer's preferences still unset, so
+the viewer turns on with this section's app change. The parents of `6b44b9b2a` are `3423e2b53`,
 `combray/0.7` with the HTTP/2 header-list fix of
-[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) (section 42)
+[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) (section 43)
 over `6fbfc3d70` (the engine fixes of sections 32, 33, 35, 38, 39 and
 40), and `71b94369b`, #18's head and this section's previous pin.
 `git diff 3423e2b53 6b44b9b2a` is exactly the 12 files of the PDF
@@ -2587,9 +2676,16 @@ every check through `TabCounterTest` passed, `PdfTest` (10) and
 `StopLoadingTest` (3) included. A second after `TabCounterTest`'s app
 process ended normally, logcat stops and adb then reported the emulator
 offline, with no crash in either log; the remaining suites (`TabSwipeTest`, `TextSizeTest`,
-`ToolbarMenuTest` and the process-death checks) did not run. The Engine
-run on the merge of main that moves the pin to `825ef1f0356f` is the
-evidence for that pin.
+`ToolbarMenuTest` and the process-death checks) did not run. On
+`825ef1f0356f`, Engine run
+[41952234622](https://github.com/L-K-M/Combray/actions/runs/41952234622)
+(head `4c8fb3c`) lost the emulator the same way after `HisterTest`, as
+main's own flex sizing PR did once without the viewer; its re-run was
+cancelled by the next push. Engine run
+[41960527435](https://github.com/L-K-M/Combray/actions/runs/41960527435)
+(head `f09199d`, with the fixes from the PR's GLM review) passed all
+186 checks, with no report-only failures. The Engine run on the merge of
+main that moves the pin to `7c7e2069db9e` is the evidence for that pin.
 
 Open follow-ups for L-K-M/servo: a `charset` on the PDF's
 `Content-Type` still sets the viewer document's encoding, and with it

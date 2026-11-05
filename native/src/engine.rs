@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use dpi::PhysicalSize;
@@ -31,7 +32,7 @@ use servo::{
     DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent,
     InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
     KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
-    Opts, PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
+    Opts, PanicReporter, PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
     SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, StopLoadingError, Theme,
     TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
     WebViewBuilder, WebViewPoint, WindowRenderingContext,
@@ -96,6 +97,29 @@ const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
 const PULL_INPUT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How the panic hook reaches Servo while it runs (see `panic_policy`). Combray installs its own
+/// logger, so Servo's `setup_logging`, which would report panics, is never called.
+static PANIC_REPORTER: Mutex<Option<PanicReporter>> = Mutex::new(None);
+
+/// Reports the current thread's panic to Servo, if Servo is running. Called by the panic hook;
+/// for a script thread, Servo crashes its pages, which the app then offers to reload.
+pub(crate) fn report_panic(message: &str) {
+    // Reporting sends to the constellation and records a backtrace: not under the lock.
+    let reporter = PANIC_REPORTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some(reporter) = reporter {
+        reporter.report_panic(message);
+    }
+}
+
+fn set_panic_reporter(reporter: Option<PanicReporter>) {
+    *PANIC_REPORTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = reporter;
+}
 
 pub fn run(
     config: EngineConfig,
@@ -787,6 +811,10 @@ impl Engine {
         }
         let mut opts = Opts::default();
         opts.config_dir = Some(self.config.profile_dir.clone());
+        // Servo's default, meant for test runners, exits the process when a reported thread
+        // panic reaches the constellation. Crash the thread's pages instead, so the app can offer
+        // Reload (the panic hook reports these panics; see `panic_policy`).
+        opts.hard_fail = false;
         let mut preferences = Preferences::default();
         preferences.set_value("viewport_meta_enabled", PrefValue::Bool(true));
         // Off by default in Servo 0.6.0 (servoshell lists it as experimental), but sites built
@@ -809,6 +837,7 @@ impl Engine {
             .protocol_registry(protocols())
             .event_loop_waker(Box::new(ChannelWaker(self.wake.clone())))
             .build();
+        set_panic_reporter(Some(servo.panic_reporter()));
 
         let user_content = Rc::new(UserContentManager::new(&servo));
         user_content.add_script(Rc::new(UserScript::from(animations::page_script())));
@@ -2708,6 +2737,7 @@ impl Engine {
                 rendering_context,
                 user_content,
             } = runtime;
+            set_panic_reporter(None);
             // The user content manager holds a Servo handle of its own.
             drop(user_content);
             // Dropping the last handle asks the constellation to exit and spins until it has;
