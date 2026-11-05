@@ -152,7 +152,7 @@ class FromEnvTest(unittest.TestCase):
     def test_numbers_out_of_range_stop_start_up(self) -> None:
         cases = {
             "REPORTS_MAX_REQUEST_MB": ("0", "65", "-1", "1.5", "12MB", "1234567", "\u0661\u0662"),
-            "REPORTS_MAX_SCREENSHOT_MB": ("0", "49"),
+            "REPORTS_MAX_SCREENSHOT_MB": ("0", "48"),
             "REPORTS_MAX_STORAGE_MB": ("0", str(2**20 + 1)),
             "REPORTS_MAX_REPORTS_PER_HOUR": ("0", "10001"),
             "REPORTS_RESOLVED_RETENTION_DAYS": ("0", "3651"),
@@ -171,6 +171,8 @@ class FromEnvTest(unittest.TestCase):
             "REPORTS_MAX_SCREENSHOT_MB",
         )
         Config.from_env(environment(REPORTS_MAX_REQUEST_MB="11", REPORTS_MAX_SCREENSHOT_MB="8"))
+        # The largest screenshot limit fits the largest request limit.
+        Config.from_env(environment(REPORTS_MAX_REQUEST_MB="64", REPORTS_MAX_SCREENSHOT_MB="47"))
 
     def test_the_listen_host_must_be_an_ip_address(self) -> None:
         for value in ("localhost", "reports.example", "127.0.0.1:80"):

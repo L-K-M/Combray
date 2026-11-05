@@ -142,7 +142,7 @@ class Config:
 
         host, port = listen_address(env)
         max_request = _whole_number(env, MAX_REQUEST_MB, default=12, maximum=64) * MIB
-        max_screenshot = _whole_number(env, MAX_SCREENSHOT_MB, default=8, maximum=48) * MIB
+        max_screenshot = _whole_number(env, MAX_SCREENSHOT_MB, default=8, maximum=47) * MIB
         if _base64_length(max_screenshot) >= max_request:
             raise ConfigError(
                 f"{MAX_REQUEST_MB} must exceed the base64 size of {MAX_SCREENSHOT_MB}"
