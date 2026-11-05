@@ -58,7 +58,8 @@ class ZoomOutTest {
             Thread.sleep(1_000)
             seen = device.screenColor(RIGHT_EDGE, PAGE_ROW)
         }
-        assertTrue("the screen's right edge shows %06x, expected %06x".format(seen ?: -1, color), device.matches(seen, color))
+        val shown = seen?.let { "%06x".format(it) } ?: "no screenshot"
+        assertTrue("the screen's right edge shows $shown, expected %06x".format(color), device.matches(seen, color))
     }
 
     /** Two fingers move from the screen's sides to its middle: a pinch that zooms out. */
