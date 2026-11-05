@@ -132,7 +132,11 @@ internal fun ReportSheetContent(
         Text(stringResource(R.string.report_recipient, draft.serviceHost))
 
         when (val current = shot) {
-            is ReportShot.Omitted -> Text(stringResource(omissionMessage(current.reason)))
+            // A live region: encoding can still drop the screenshot, which removes the checkbox.
+            is ReportShot.Omitted -> Text(
+                stringResource(omissionMessage(current.reason)),
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
             else -> {
                 // One accessibility node per row: TalkBack reads the label with the checkbox state.
                 Row(

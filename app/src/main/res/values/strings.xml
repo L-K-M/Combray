@@ -341,7 +341,7 @@
     <string name="report_address_sensitive">This address seems to contain a sign-in or session code.</string>
     <string name="report_address_blank">Enter the page’s address.</string>
     <string name="report_address_too_long">This address is too long to send.</string>
-    <string name="report_address_control">Remove the line breaks from the address.</string>
+    <string name="report_address_control">Remove line breaks, tabs and other invisible characters from the address.</string>
     <string name="report_page_title">Page title</string>
     <string name="report_comment">What went wrong? (optional)</string>
     <string name="report_details_title">Details</string>

@@ -5,9 +5,11 @@ import android.graphics.Bitmap
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -33,6 +35,7 @@ import ch.lkmc.combray.core.integration.ReportDraft
 import ch.lkmc.combray.core.integration.ReportEnvironment
 import ch.lkmc.combray.core.integration.ScreenshotOmission
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -129,6 +132,16 @@ class ReportSheetTest {
         compose.onNodeWithText(SENSITIVE_WARNING).assertDoesNotExist()
     }
 
+    /** The service refuses every control character, not only line breaks; the field says so. */
+    @Test
+    fun aTabInTheAddressCannotBeSent() {
+        show()
+        address().performTextClearance()
+        address().performTextInput("https://example.org/\t")
+        compose.onNodeWithText("Remove line breaks, tabs and other invisible characters from the address.").assertExists()
+        sendButton().assertIsNotEnabled()
+    }
+
     @Test
     fun aBlankAddressCannotBeSent() {
         show()
@@ -158,6 +171,17 @@ class ReportSheetTest {
         compose.onNodeWithText("Include screenshot").performScrollTo().performClick()
         send()
         assertEquals(ScreenshotOmission.USER, sent.single().omitted)
+    }
+
+    /** A screenshot dropped after encoding replaces the checkbox: TalkBack has to hear why. */
+    @Test
+    fun aScreenshotDroppedWhileEncodingIsAnnounced() {
+        val shots = MutableStateFlow<ReportShot>(ReportShot.Pending(preview))
+        show(draft(shots = shots))
+        shots.value = ReportShot.Omitted(ScreenshotOmission.TOO_LARGE)
+        compose.onNodeWithText("No screenshot: it is too large to send, even scaled down.")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        compose.onNodeWithText("Include screenshot").assertDoesNotExist()
     }
 
     @Test
@@ -263,8 +287,11 @@ class ReportSheetTest {
         compose.waitForIdle()
     }
 
-    private fun draft(snapshot: ReportSnapshot = SNAPSHOT, shot: ReportShot = ReportShot.Ready(preview, SCREENSHOT)) =
-        ReportDraftState("6f1c2b9e-1d2a-4a5b-9c3d-2e1f0a9b8c7d", 1_762_247_564_123L, snapshot, "reports.example.org", MutableStateFlow(shot), preparation = null)
+    private fun draft(
+        snapshot: ReportSnapshot = SNAPSHOT,
+        shot: ReportShot = ReportShot.Ready(preview, SCREENSHOT),
+        shots: StateFlow<ReportShot> = MutableStateFlow(shot),
+    ) = ReportDraftState("6f1c2b9e-1d2a-4a5b-9c3d-2e1f0a9b8c7d", 1_762_247_564_123L, snapshot, "reports.example.org", shots, preparation = null)
 
     private companion object {
         const val PAGE_URL = "https://example.org/article?x=1#part"
