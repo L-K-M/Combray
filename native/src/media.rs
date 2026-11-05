@@ -109,7 +109,11 @@ pub(crate) fn claimed_support(media_type: &str) -> MediaSupport {
         (name.trim() == "codecs").then(|| value.trim().trim_matches('"').trim())
     });
     match mime {
-        "video/mp4" | "audio/mp4" | "audio/x-m4a" | "audio/aac" => support(codecs, mp4_codec),
+        "video/mp4" | "audio/mp4" | "audio/x-m4a" => support(codecs, mp4_codec),
+        // ADTS carries AAC only, so a named codec must be one (`mp4a.40.*` or a bare `mp4a`).
+        "audio/aac" => support(codecs, |codec| {
+            codec == "mp4a" || codec.starts_with("mp4a.40")
+        }),
         "audio/mpeg" | "audio/mp3" | "audio/x-mp3" | "audio/mpeg3" | "audio/x-mpeg3" => {
             support(codecs, mp3_codec)
         },
@@ -819,6 +823,7 @@ mod tests {
         assert_eq!(Maybe, claimed_support("audio/x-m4a"));
         assert_eq!(Maybe, claimed_support("audio/aac"));
         assert_eq!(Probably, claimed_support("audio/aac; codecs=\"mp4a.40.5\""));
+        assert_eq!(No, claimed_support("audio/aac; codecs=\"avc1.42E01E\""));
         // Case and spacing are the page's, not the table's.
         assert_eq!(
             Probably,
