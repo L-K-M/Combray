@@ -470,18 +470,19 @@ class Store:
                 record = _select(conn, report_id)
                 if record is None:
                     return False
-                if record["status"] == Status.DELETED:
-                    return True
-                conn.execute(
-                    "UPDATE reports SET status = 'deleted', status_note = NULL,"
-                    " report_json = NULL, screenshot_bytes = NULL, screenshot_sha256 = NULL,"
-                    " purged_at = COALESCE(purged_at, ?), updated_at = ? WHERE seq = ?",
-                    (now, now, record["seq"]),
-                )
-                conn.execute(
-                    "UPDATE history SET note = NULL WHERE report_seq = ?", (record["seq"],)
-                )
-                _record(conn, record["seq"], now, Status.DELETED, actor, None)
+                if record["status"] != Status.DELETED:
+                    conn.execute(
+                        "UPDATE reports SET status = 'deleted', status_note = NULL,"
+                        " report_json = NULL, screenshot_bytes = NULL, screenshot_sha256 = NULL,"
+                        " purged_at = COALESCE(purged_at, ?), updated_at = ? WHERE seq = ?",
+                        (now, now, record["seq"]),
+                    )
+                    conn.execute(
+                        "UPDATE history SET note = NULL WHERE report_seq = ?", (record["seq"],)
+                    )
+                    _record(conn, record["seq"], now, Status.DELETED, actor, None)
+            # Also on a repeat: a tombstone holds no screenshot, so a file left by a
+            # failed unlink is an orphan, and the retry should finish removing it.
             self._remove_screenshot(report_id)
         return True
 

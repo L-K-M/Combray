@@ -578,6 +578,16 @@ class DeleteTest(StoreTestCase):
         self.assertFalse(self.store.delete(str(uuid.uuid4()), Actor.AGENT))
         self.assertEqual(len(self.store.history(report.id)), 2)
 
+    def test_a_repeated_delete_removes_a_screenshot_left_by_a_failed_unlink(self) -> None:
+        report = self.add()
+        self.assertTrue(self.store.delete(report.id, Actor.AGENT))
+        self.screenshot_path(report).write_bytes(PNG)  # As if the unlink had failed.
+
+        self.assertTrue(self.store.delete(report.id, Actor.AGENT))
+
+        self.assertEqual(self.files("screenshots"), set())
+        self.assertEqual(len(self.store.history(report.id)), 2)
+
 
 class SweepFilesTest(StoreTestCase):
     def test_orphans_and_staging_files_are_removed(self) -> None:
