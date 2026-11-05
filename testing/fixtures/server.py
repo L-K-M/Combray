@@ -59,6 +59,8 @@ Pages
                              User-Agent names Servo ("servo_agent"); and "redirects", the redirects sent
   /zoom.html                 title ZOOM:<innerWidth>:<devicePixelRatio>, on load and on every resize
                              (page zoom checks)
+  /fit-width.html            a row of an icon and a long sentence in an auto grid column; title
+                             FIT:<scrollWidth>:<innerWidth>, on load and on every resize
   /fixed-scroll.html         transparent fixed scroll box over a red/green page
                               (?loading=1 holds an image until /_admin/finish-scroll-load)
   /document.pdf              one-page PDF (application/pdf) whose page reads PDF-FIXTURE-TEXT
@@ -380,6 +382,27 @@ ZOOM_PAGE = page(
     "<p>zoom</p><script>"
     "function report() { document.title = 'ZOOM:' + innerWidth + ':' + devicePixelRatio; }"
     "addEventListener('load', report); addEventListener('resize', report);</script>",
+)
+
+# A row of an icon that cannot shrink and a long sentence, in an auto grid column: the sentence
+# must wrap, so the page stays as wide as the viewport. Servo once sized such a row's min-content
+# width to the whole sentence on one line, and the column widened the page. On one line the
+# sentence is far wider than any screen (over 2500 CSS px at 16px), so the check means the same
+# on a phone, a tablet in landscape or a desktop window.
+FIT_WIDTH_SENTENCE = ("This caption is a single long sentence that needs several lines on a phone, "
+                      "because no screen is wide enough to show all of it on one line at a readable size, "
+                      "not a phone held sideways, not a tablet in landscape and not a desktop monitor either, "
+                      "so the text has to wrap however the device is held and whichever screen runs the check, "
+                      "and a page that holds it fits its viewport only when the row wraps.")
+FIT_WIDTH_PAGE = page(
+    "FIT-WAITING",
+    "<main><figure><figcaption class='row'><span class='icon'></span>"
+    f"<span>{FIT_WIDTH_SENTENCE}</span></figcaption></figure></main><script>"
+    "function report() {"
+    " document.title = 'FIT:' + document.documentElement.scrollWidth + ':' + innerWidth; }"
+    "addEventListener('load', report); addEventListener('resize', report);</script>",
+    "<style>html,body{margin:0}main{display:grid;padding:0 16px}figure{margin:0}"
+    ".row{display:flex;gap:16px}.icon{flex-shrink:0;width:24px;height:24px;background:#1f6f78}</style>",
 )
 
 # A fixed drawer's scroll node is beside the viewport in Servo's spatial tree. An empty drawer
@@ -754,6 +777,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(302, b"", headers=[("Location", location)])
         if path == "/zoom.html":
             return self.send(200, ZOOM_PAGE)
+        if path == "/fit-width.html":
+            return self.send(200, FIT_WIDTH_PAGE)
         if path == "/fixed-scroll.html":
             pending_image = "<img hidden src='/scroll-pending-image'>" if query.get("loading") == ["1"] else ""
             return self.send(http.HTTPStatus.OK, fixed_scroll_page(pending_image))

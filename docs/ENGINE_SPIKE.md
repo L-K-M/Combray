@@ -2309,3 +2309,70 @@ Limitations: all engine evidence is from desktop servoshell. The host's
 network and headless WebDriver environment fail the checkbox for every
 browser tried. The phone result is pending, with the arm64 APK from the app
 integration PR's Engine workflow.
+
+## 41. Flex rows wider than the screen (4 November 2026)
+
+Validated source: `825ef1f0356fd4adb6184207ffdb84f572241ef0` on
+`combray/0.7`, which merges downstream
+[PR #27](https://github.com/L-K-M/servo/pull/27) onto `6b44b9b2a43`. That
+base also brings the HTTP/2 header list limit and the inert PDF viewer
+document. The merge differs from the tested PR commit `dbf53b7e4e1` only in
+a comment of the new test. An article the owner opened on the phone
+scrolled sideways instead of fitting the screen.
+
+### Reproduction
+
+Desktop servoshell at 745 CSS px laid the article out 1183 px wide;
+Chromium 156 fits it to 745 px. The page's main column is a grid with one
+`auto` track. A figure caption in it is a flex row: a label that cannot
+shrink (an icon and a few words) and a long sentence. A synthetic page with
+that structure, the `fit-width.html` fixture, lays out 1268 px wide in a
+412 px viewport; Chromium keeps it at 412 px.
+
+### Mechanism
+
+Servo computed a single-line flex container's min-content size with the
+flex-fraction ideal algorithm of CSS Flexbox §9.9.1.1. The specification
+says that algorithm is not Web-compatible and allows the Web-compatible
+one of §9.9.1.2. Under the ideal algorithm, an item whose desired flex
+fraction is zero, such as a single word, an icon or the label above, makes
+the line's chosen fraction zero. Every other item then contributes its
+flex base size, its max-content width. The caption's min-content width
+became the whole sentence on one line, and the grid track grew to it.
+
+The engine change sums the items' min-content contributions instead, each
+clamped by the item's flex base size and min/max main size as §9.9.3 says.
+Multi-line containers and the max-content size are unchanged.
+
+With the page fitting, its byline showed a second defect. In a wrapped flex
+row with column gaps, v0.7.0 counted the gaps twice when deciding whether a
+line's items shrink, so each label broke onto two lines although the line
+had room. The candidate backports upstream's fix (`f80ad0305e2`).
+
+### Checks
+
+- A seven-case downstream WPT test fails five cases on the previous engine,
+  with the widths the ideal algorithm predicts, and passes all seven with
+  the fix. The upstream `gap-006` tests and `flexbox-column-row-gap-001`
+  pass with the backport.
+- WPT `css-flexbox`, `css-grid`, `css-sizing`, `css-tables` and `css-align`
+  (5192 tests) with the previous and the candidate engine. Twelve results
+  newly pass: the new cases, the gap tests and two compat cases, among them
+  Chromium's case for this bug in `row-compat-001.html`. Ten flex-fraction
+  subtests of `row-005.html` and `row-008.html` newly fail; Chromium 156
+  fails all ten too. Nothing else changed beyond load flakes in the
+  baseline run.
+- The article and the synthetic pages match Chromium's widths, byline
+  included. `FitWidthTest` loads the fixture on the device and requires a
+  page no wider than its viewport.
+- The fixture's sentence is over 2500 CSS px wide on one line, so the
+  check also holds at tablet widths: at 1280 px the previous engine lays
+  the page out 3159 px wide, the candidate and Chromium 1280 px.
+- Reviews: Devin SWE-2 and two GLM rounds on the downstream PR; their
+  findings and the responses are recorded there.
+- Builds: `./mach build --profile medium --media-stack dummy` on macOS
+  arm64. The Engine workflow builds both Android ABIs and runs the emulator
+  fixtures on the app PR.
+
+Limitations: engine evidence is from desktop servoshell and the API 30
+emulator. The phone result is pending.
