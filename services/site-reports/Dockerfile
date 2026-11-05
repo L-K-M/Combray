@@ -13,6 +13,9 @@ RUN groupadd --system --gid 10001 reports \
 
 WORKDIR /app
 COPY site_reports/ /app/site_reports/
+# COPY keeps the checkout's modes, which a umask of 077 makes unreadable to the
+# service user. (RUN, not COPY --chmod, which the legacy builder lacks.)
+RUN chmod -R u=rwX,go=rX /app/site_reports
 USER reports
 EXPOSE 8787
 
