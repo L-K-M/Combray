@@ -264,6 +264,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages wider than the screen can be seen whole: a pinch zooms out until the
+  page's full width fits, and a page that sets no initial zoom, such as an
+  older page with a fixed-width table, opens zoomed out that way, as in other
+  mobile browsers. Pinch zoom stopped at 100% before, so only the left part
+  of such pages showed. Zoom no longer carries over to the next page.
 - Pages no longer fail with "client error (SendRequest)" when Combray sends
   a request on a connection that the site or the network has already
   closed, as after the phone sleeps or switches between Wi-Fi and mobile

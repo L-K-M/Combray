@@ -33,6 +33,22 @@ def load_server():
     return module
 
 
+class WidePageTest(unittest.TestCase):
+    """The wide page sets an initial scale only when asked: without one, it opens zoomed out."""
+
+    def test_only_the_initial_scale_variant_has_a_viewport_meta_tag(self):
+        fixture = load_server()
+        for query, initial_scale in [("", False), ("?initial-scale=1", True)]:
+            with self.subTest(query=query):
+                request = Mock(path="/wide.html" + query)
+                fixture.Handler.do_GET(request)
+                status, document = request.send.call_args.args
+                self.assertEqual(http.HTTPStatus.OK, status)
+                self.assertIn("<title>WIDE</title>", document)
+                self.assertIn("width:1080px", document)
+                self.assertEqual(initial_scale, "name='viewport'" in document)
+
+
 class RequestLogTest(unittest.TestCase):
     def setUp(self):
         self.server = load_server()
