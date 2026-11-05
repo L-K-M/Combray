@@ -181,6 +181,30 @@ class BrowsingTest {
     }
 
     @Test
+    fun aRequestOnAConnectionTheServerDroppedIsSentAgain() {
+        // The first page leaves its kept-alive connection in the engine's pool. The fixture drops
+        // the next request on that connection unanswered, as a server whose idle timeout races the
+        // request does; the engine sends it again on a new connection instead of failing the load.
+        open(Device.GREEN)
+        val key = System.currentTimeMillis().toString()
+        val url = Fixtures.reusedClose(key)
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        // Either outcome ends the wait, so a failed load fails the check below rather than timing out.
+        device.awaitState {
+            val tab = it.activeTab
+            tab?.url == url && !tab.loading && (tab.title == Fixtures.FRESH_TITLE || tab.loadFailed)
+        }
+
+        val tab = device.browser.browserState.value.activeTab!!
+        assertFalse(tab.loadFailed)
+        assertEquals(Fixtures.FRESH_TITLE, tab.title)
+        val counts = Fixtures.state().getJSONObject("reused_close").getJSONObject(key)
+        // A request sent on a new connection from the start would prove nothing.
+        assertEquals(1, counts.getInt("dropped"))
+        assertEquals(1, counts.getInt("answered"))
+    }
+
+    @Test
     fun tenTabsCanBeSwitched() {
         val colors = (0 until 10).map { 0x204060 + it * 0x101010 }
         val tabs = colors.mapIndexed { index, color ->
