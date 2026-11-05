@@ -75,6 +75,9 @@ Pages
                              FIT:<scrollWidth>:<innerWidth>, on load and on every resize
   /fixed-scroll.html         transparent fixed scroll box over a red/green page
                               (?loading=1 holds an image until /_admin/finish-scroll-load)
+  /wide.html                 title WIDE; no viewport meta tag; a 1080 CSS px row, red on its left
+                             half and green on its right (?initial-scale=1 adds a viewport meta tag
+                             with width=device-width, initial-scale=1)
   /document.pdf              one-page PDF (application/pdf) whose page reads PDF-FIXTURE-TEXT
   /document.bin              the same PDF as application/octet-stream with nosniff (Servo's stand-in page)
   /pdf/<name>.pdf            generated PDFs (pdf_fixtures; --write-pdfs DIR writes them for the viewer's
@@ -668,6 +671,22 @@ FIT_WIDTH_PAGE = page(
     ".row{display:flex;gap:16px}.icon{flex-shrink:0;width:24px;height:24px;background:#1f6f78}</style>",
 )
 
+# Content wider than a phone's screen: a 1080 CSS px row, red on its left half and green on its
+# right. Without a viewport meta tag (or `initial-scale`) the page opens zoomed out to its full
+# width, as in mobile browsers, so green shows at the screen's right edge; with initial-scale=1 it
+# opens at 100%, showing only red, until a pinch zooms out. Built without page(), whose viewport
+# meta tag would set the initial scale.
+def wide_page(initial_scale):
+    meta = "<meta name='viewport' content='width=device-width, initial-scale=1'>" if initial_scale else ""
+    return (
+        f"<!doctype html><html><head><meta charset='utf-8'>{meta}<title>WIDE</title>"
+        "<style>html,body{margin:0}.row{display:flex;width:1080px}"
+        ".row div{flex:none;width:540px;height:4000px}</style></head><body>"
+        "<div class='row'><div style='background:#b03a2e'></div>"
+        "<div style='background:#2e6b4f'></div></div></body></html>"
+    )
+
+
 # A fixed drawer's scroll node is beside the viewport in Servo's spatial tree. An empty drawer
 # must pass a swipe to the page, including while an unrelated image still holds its load event.
 def fixed_scroll_page(pending_image):
@@ -1053,6 +1072,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/fixed-scroll.html":
             pending_image = "<img hidden src='/scroll-pending-image'>" if query.get("loading") == ["1"] else ""
             return self.send(http.HTTPStatus.OK, fixed_scroll_page(pending_image))
+        if path == "/wide.html":
+            return self.send(http.HTTPStatus.OK, wide_page(query.get("initial-scale") == ["1"]))
         if path == "/scroll-pending-image":
             scroll_load_finished.wait()
             return self.send(http.HTTPStatus.NOT_FOUND)

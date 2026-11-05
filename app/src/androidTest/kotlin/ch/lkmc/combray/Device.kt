@@ -192,6 +192,15 @@ object Fixtures {
     /** A transparent fixed drawer over the page, optionally held loading by an image. */
     const val FIXED_SCROLL = "$BASE/fixed-scroll.html"
 
+    /**
+     * Titled `WIDE`: a 1080 CSS px row, red on its left half and green on its right, without a
+     * viewport meta tag, so it opens zoomed out to its full width.
+     */
+    const val WIDE = "$BASE/wide.html"
+
+    /** [WIDE] with `width=device-width, initial-scale=1`, so it opens at 100%. */
+    const val WIDE_AT_INITIAL_SCALE = "$BASE/wide.html?initial-scale=1"
+
     fun finishScrollLoad() = request("POST", "/_admin/finish-scroll-load")
 
     /** "combraneedle" three times far apart; titled `FIND:<scrollY>:<selected text>`. */
