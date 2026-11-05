@@ -22,6 +22,7 @@
     <string name="reader_loading">Preparing reader view…</string>
     <string name="reader_unavailable">Reader view found no article on this page.</string>
     <string name="reader_truncated">The article continues on the page: reader view shows only its first part.</string>
+    <string name="action_report_site">Report this site</string>
     <string name="action_text_size">Text size</string>
     <string name="text_size_smaller">Smaller text</string>
     <string name="text_size_larger">Larger text</string>
@@ -319,6 +320,45 @@
     </plurals>
     <string name="action_discard_parked_reports">Discard the reports queued for the previous address</string>
     <string name="discard_parked_reports_title">Discard these reports?</string>
+
+    <!-- Report this site -->
+    <string name="report_title">Report this site</string>
+    <!-- %1$s is the report service's host, from Settings. -->
+    <string name="report_recipient">Sends what you see here to your report service, %1$s. Your report service and the agents that read it get everything shown here.</string>
+    <string name="report_include_screenshot">Include screenshot</string>
+    <string name="report_screenshot_description">Screenshot of the page</string>
+    <string name="report_screenshot_preparing">Preparing the screenshot…</string>
+    <string name="report_no_screenshot_user">No screenshot: you left it out.</string>
+    <string name="report_no_screenshot_reader">No screenshot: reader view covers the page. Leave reader view to include one.</string>
+    <string name="report_no_screenshot_not_shown">No screenshot: the page was not on screen.</string>
+    <string name="report_no_screenshot_page_changed">No screenshot: another page was on screen by the time it was taken. Report again to include one.</string>
+    <string name="report_no_screenshot_copy_failed">No screenshot: the page could not be copied.</string>
+    <string name="report_no_screenshot_too_large">No screenshot: it is too large to send, even scaled down.</string>
+    <string name="report_address">Address</string>
+    <string name="report_address_trim">Remove query and fragment</string>
+    <string name="report_address_restore">Restore the full address</string>
+    <string name="report_address_trimmed">The part from ? or # on was removed because the address seems to contain a sign-in or session code.</string>
+    <string name="report_address_sensitive">This address seems to contain a sign-in or session code.</string>
+    <string name="report_address_blank">Enter the page’s address.</string>
+    <string name="report_address_too_long">This address is too long to send.</string>
+    <string name="report_address_control">Remove the line breaks from the address.</string>
+    <string name="report_page_title">Page title</string>
+    <string name="report_comment">What went wrong? (optional)</string>
+    <string name="report_details_title">Details</string>
+    <!-- App version, build type, engine version, short engine commit, Android release, API level. -->
+    <string name="report_details_versions">Combray %1$s (%2$s) · Servo %3$s at %4$s · Android %5$s (API %6$d)</string>
+    <string name="report_details_display">Text size %1$d%% · Display density %2$s</string>
+    <string name="report_details_load_failed">The page did not load.</string>
+    <string name="report_details_crashed">The tab had crashed.</string>
+    <string name="action_send">Send</string>
+    <string name="report_queued">Report queued.</string>
+    <string name="report_not_set_up">Reporting needs your report service. Set it up in Settings.</string>
+    <string name="report_too_many">Too many reports are waiting to be sent. See Settings.</string>
+    <string name="report_not_stored">The report could not be stored. Try again.</string>
+    <string name="report_invalid_address">This address cannot be sent. Check it and try again.</string>
+    <string name="report_comment_too_long">The comment is too long.</string>
+    <string name="report_screenshot_invalid">The screenshot cannot be sent. Untick it and try again.</string>
+    <string name="report_invalid">This report cannot be sent. Report the page again.</string>
 
     <!-- Search all history -->
     <string name="search_all_hint">Words you remember, searched in Hister…</string>

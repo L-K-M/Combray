@@ -243,6 +243,7 @@ internal enum class MoreAction(val icon: ImageVector, @StringRes val label: Int)
     PAGE_INFO(Icons.Outlined.Info, R.string.action_page_info),
     FIND(Icons.Filled.Search, R.string.action_find_in_page),
     PLAY_MEDIA(Icons.Filled.PlayArrow, R.string.action_play_media),
+    REPORT_SITE(OutlinedFlagIcon, R.string.action_report_site),
     TEXT_SIZE(TextSizeIcon, R.string.action_text_size),
     SETTINGS(Icons.Filled.Settings, R.string.action_settings),
 }
@@ -256,6 +257,8 @@ internal fun moreActions(tab: ActiveTab?, readerDisplay: ReaderDisplay): List<Mo
         if (readerDisplay == ReaderDisplay.PAGE) add(MoreAction.FIND)
     }
     if (tab?.media?.isNotEmpty() == true) add(MoreAction.PLAY_MEDIA)
+    // Also in reader view, on error pages and in crashed tabs: those are worth reporting too.
+    if (tab?.url != null) add(MoreAction.REPORT_SITE)
     add(MoreAction.TEXT_SIZE)
     add(MoreAction.SETTINGS)
 }

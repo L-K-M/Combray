@@ -76,7 +76,11 @@ import ch.lkmc.combray.core.browser.Notice
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.SessionState
 import ch.lkmc.combray.core.browser.HomeLink
+import ch.lkmc.combray.core.integration.ReportDisplay
+import ch.lkmc.combray.core.integration.ReportDraft
+import ch.lkmc.combray.core.integration.ReportRequest
 import ch.lkmc.combray.core.integration.SaveRequest
+import ch.lkmc.combray.core.integration.ScreenshotOmission
 import ch.lkmc.combray.core.integration.SaveStatus
 import ch.lkmc.combray.core.integration.SensitiveUrls
 import ch.lkmc.combray.core.policy.AddressDecision
@@ -84,6 +88,7 @@ import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.EngineSurfaceView
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.player.PlayerActivity
@@ -94,7 +99,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
-private enum class Sheet { NONE, ADDRESS, RECENT, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA }
+private enum class Sheet { NONE, ADDRESS, RECENT, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA, REPORT }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -124,6 +129,10 @@ fun BrowserScreen(
     var homeEditLink by remember { mutableStateOf<HomeLink?>(null) }
     var homeEditPage by rememberSaveable { mutableStateOf(HomeEditPage.OVERVIEW) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
+    // The report sheet keeps only its draft's id: the draft itself lives in the process.
+    var reportDraftId by rememberSaveable { mutableStateOf<String?>(null) }
+    var reportStarting by remember { mutableStateOf(false) }
+    val reportDraft by graph.reportDrafts.current.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -378,6 +387,69 @@ fun BrowserScreen(
     val snackbarReach = (snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp).coerceAtLeast(0.dp)
     val scrollButtonPadding = scrollButtonPadding(snackbarReach)
     val openSettings = { sheet = Sheet.SETTINGS }
+    // Cancel, Back, a swipe or another sheet ends a report: its draft and screenshot go.
+    LaunchedEffect(sheet) {
+        if (sheet == Sheet.REPORT) return@LaunchedEffect
+        reportDraftId?.let(graph.reportDrafts::remove)
+        reportDraftId = null
+    }
+    val startReport: () -> Unit = start@{
+        // Snapshot at the tap (invariant 6): the report describes what was shown then.
+        val shown = browser.browserState.value
+        val reported = shown.activeTab ?: return@start
+        val url = reported.url ?: return@start
+        if (reportStarting) return@start
+        val createdAt = System.currentTimeMillis()
+        val snapshot = ReportSnapshot(
+            url = url,
+            // As for Share: an error page's title is the engine's, not the page's.
+            title = reported.title.takeUnless { reported.loadFailed },
+            display = if (shown.reader != null) ReportDisplay.READER else ReportDisplay.PAGE,
+            loadFailed = reported.loadFailed,
+            crashed = reported.crashed,
+            zoomPercent = graph.settings.textSize.value.percent,
+            density = resources.displayMetrics.density,
+        )
+        val view = surfaceView
+        val blocker = screenshotBlocker(shown, surface = view != null)
+        reportStarting = true
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                // Nothing is captured for a report that cannot be sent.
+                val service = graph.integrations.reports.service.first()
+                if (service == null) {
+                    // Its own coroutine: a waiting snackbar must not hold up the next report.
+                    scope.launch { offerSettings(snackbar, resources.getString(R.string.report_not_set_up), resources, openSettings) }
+                    return@launch
+                }
+                // Before any sheet or keyboard: the keyboard shrinks the page, which lays out again.
+                val frame = if (blocker == null && view != null) copyFrame(view) else FrameCopy.Unavailable(blocker ?: ScreenshotOmission.NOT_SHOWN)
+                // An equal address is not the same document: only the page shown at the tap may be sent.
+                val sameDocument = browser.browserState.value.activeTab?.page == reported.page
+                val checked = if (frame is FrameCopy.Copied && !sameDocument) FrameCopy.Unavailable(ScreenshotOmission.PAGE_CHANGED) else frame
+                reportDraftId = graph.reportDrafts.start(createdAt, snapshot, displayHost(service.baseUrl), checked).id
+                sheet = Sheet.REPORT
+            } finally {
+                reportStarting = false
+            }
+        }
+    }
+    val sendReport: (ReportDraftState, ReportDraft) -> Unit = { draft, report ->
+        // Stored in the process scope; this screen only tells the user how it went.
+        graph.reportDrafts.send(draft, report)?.let { stored ->
+            scope.launch {
+                val result = stored.await()
+                when {
+                    result == ReportRequest.Queued -> {
+                        if (reportDraftId == draft.id) sheet = Sheet.NONE
+                        snackbar.showSnackbar(resources.getString(R.string.report_queued))
+                    }
+                    // The sheet shows the problem; once it is gone, a snackbar has to.
+                    reportDraftId != draft.id -> ReportProblem.of(result)?.let { snackbar.showSnackbar(resources.getString(it.message)) }
+                }
+            }
+        }
+    }
     val selectMenuAction: (MoreAction) -> Unit = select@{ action ->
         menu.dismiss()
         // A page can replace itself while the finger is held over a menu row.
@@ -391,6 +463,7 @@ fun BrowserScreen(
             MoreAction.PAGE_INFO -> sheet = Sheet.PAGE_INFO
             MoreAction.FIND -> browser.openFind()
             MoreAction.PLAY_MEDIA -> tab?.mediaPage?.let(playMedia)
+            MoreAction.REPORT_SITE -> startReport()
             MoreAction.TEXT_SIZE -> sheet = Sheet.TEXT_SIZE
             MoreAction.SETTINGS -> sheet = Sheet.SETTINGS
         }
@@ -666,6 +739,21 @@ fun BrowserScreen(
                 LaunchedEffect(Unit) { dismiss() }
             }
         }
+        Sheet.REPORT -> {
+            val draft = reportDraft?.takeIf { it.id == reportDraftId }
+            if (draft != null) {
+                ReportSheet(
+                    draft = draft,
+                    environment = graph.reportEnvironment,
+                    onSend = { report -> sendReport(draft, report) },
+                    onOpenSettings = openSettings,
+                    onDismiss = dismiss,
+                )
+            } else {
+                // Queued, or the process died since: the draft is gone, so the sheet closes too.
+                LaunchedEffect(Unit) { dismiss() }
+            }
+        }
         Sheet.TEXT_SIZE -> {
             TextSizeDialog(
                 size = textSize,
@@ -748,6 +836,14 @@ private suspend fun reportSave(
         }
         SaveRequest.Queued -> queued?.let { snackbar.showSnackbar(it) }
     }
+}
+
+/** [message] with a Settings action, for a feature that needs a service set up there. */
+private suspend fun offerSettings(snackbar: SnackbarHostState, message: String, resources: Resources, onOpenSettings: () -> Unit) {
+    // Timed, not Indefinite (the default with an action): it must not block later notices.
+    snackbar.currentSnackbarData?.dismiss()
+    val result = snackbar.showSnackbar(message, actionLabel = resources.getString(R.string.action_open_settings), duration = SnackbarDuration.Long)
+    if (result == SnackbarResult.ActionPerformed) onOpenSettings()
 }
 
 /** What covers the page area when there is no page to show, or the page cannot be shown. */
