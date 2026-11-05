@@ -2461,3 +2461,238 @@ three.
   Desktop servoshell at `6fbfc3d70ad` panics on it; at this pin it reaches
   `PC:ok`. On the emulator it runs in this PR's Engine workflow with the other
   fixture checks.
+
+## 43. HTTP/2 response header list limit (4 November 2026)
+
+Validated source: `3423e2b538029a6c5585b7244ecce281dbdceaea` on `combray/0.7`, which merges downstream
+[PR #26](https://github.com/L-K-M/servo/pull/26) on top of the §40 source.
+
+### Reproduction
+
+hyper's HTTP/2 client advertises and enforces a 16 KiB `SETTINGS_MAX_HEADER_LIST_SIZE`
+(RFC 9113, section 6.5.2). A server that negotiates `h2` and answers with a decoded header list
+above that (synthetic case: ten 10 KiB headers) has its stream reset with `PROTOCOL_ERROR`; the
+fetch fails with `client error (SendRequest)` and a navigation shows Servo's network error page.
+The same response over HTTP/1.1 loads. Servo now sets the limit to 256 KiB, Chromium's value.
+
+### Checks
+
+- Downstream, on desktop servoshell: the new `servo-net` test
+  `fetch::test_fetch_http2_response_with_large_header_list` fails before the change and passes
+  after it; `servo-net` integration tests 392 of 393 (the remaining `test_filemanager` failure
+  is the same on the previous pin and passes alone); fetch WPT `api/basic` and `api/headers`
+  167 as expected; no new `./mach test-tidy` findings; independent review without findings.
+- Here: Combray takes this fix with `6b44b9b2a`, the PDF viewer merge of §44, whose first parent
+  is `3423e2b53`, and with the §41 and §42 pins built on it; `native/Cargo.lock` and the
+  notices' content are unchanged (§44). Host tests, both native ABI builds and the x86_64
+  emulator checks run in the Engine workflow of the PRs that set those pins; no local device or
+  phone result is claimed.
+
+## 44. PDF viewer document (30 October 2026)
+
+The engine change is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on
+`combray/0.7`, the merge commit of
+[L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
+(`engine/pdf-viewer-document`), merged on 4 November 2026; upstream base
+still v0.7.0. Combray pins `7c7e2069db9e` (section 42), which adds only
+the flex sizing fix of
+[L-K-M/servo#27](https://github.com/L-K-M/servo/pull/27) (section 41) and
+the port close and panic report fixes of
+[L-K-M/servo#28](https://github.com/L-K-M/servo/pull/28) on top of it:
+`git diff 6b44b9b2a 7c7e2069d` touches `components/layout/flexbox`,
+`globalscope.rs`, `messageport.rs`, Servo's `lib.rs`, `servo.rs` and
+panic reporter, their tests, WPT metadata and `DOWNSTREAM.md`, no PDF,
+parser or document file and no `Cargo.lock`, `Cargo.toml` or toolchain
+file. Main set those pins with the viewer's preferences still unset, so
+the viewer turns on with this section's app change. The parents of `6b44b9b2a` are `3423e2b53`,
+`combray/0.7` with the HTTP/2 header-list fix of
+[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) (section 43)
+over `6fbfc3d70` (the engine fixes of sections 32, 33, 35, 38, 39 and
+40), and `71b94369b`, #18's head and this section's previous pin.
+`git diff 3423e2b53 6b44b9b2a` is exactly the 12 files of the PDF
+change and `git diff 71b94369b 6b44b9b2a` only the HTTP/2 fix
+(`DOWNSTREAM.md`, `components/net/connector.rs`, `test_util.rs` and
+`tests/fetch.rs`), each with the same patch ID as its side over the
+merge base `6fbfc3d70`, so the merge adds nothing of its own.
+
+#18 merged on the owner's waiver of the independent review that
+L-K-M/servo's `AGENTS.md` requires, for its commits after `494d7f4b1`
+([PR comment](https://github.com/L-K-M/servo/pull/18#issuecomment-6640382806)).
+GLM-5.3 reviewed and approved the branch up to `494d7f4b1`; the later
+commits were reviewed only by the model that wrote them.
+
+The branch's first-parent history
+(`git log --oneline --first-parent 3423e2b53..6b44b9b2a^2`):
+
+- `71b94369b` Docs: note the PDF viewer's charset follow-up
+- `80540fca2` Servo: accept no Referer from the PDF viewer in its test
+- `a0cbb4e55` Docs: list the PDF viewer policy container commit
+- `42ab59b22` Script: give the PDF viewer a new policy container
+- `d3ff19f14` Merge combray/0.7 into the PDF viewer document branch
+- `ee5d4c625` Script: narrow the navigations that abort a PDF viewer load
+- `496f63151` Docs: describe Stop for the PDF viewer in DOWNSTREAM.md
+- `65f0f01c1` Script: fail a PDF viewer load that Stop aborts
+- `dab4d6a8b` Merge combray/0.7 into the PDF viewer document branch
+- `494d7f4b1` Merge combray/0.7 into the PDF viewer document branch
+- `05027c941` Docs: list the PDF viewer document in DOWNSTREAM.md
+- `5c92900d5` Servo: test the PDF viewer document
+- `92e06d5d5` Net: report the bytes in-memory blob URL entries hold
+- `ec2452bc4` Script: refuse PDF bodies larger than the viewer accepts
+- `16ec03de4` Script: release a PDF viewer's body when it is discarded
+- `273a0430c` Script: show top-level PDFs in a viewer document
+- `0bce9843c` Config: add the Combray PDF viewer preferences
+- `d1e33448d` Add the GLM review workflow
+
+`0bce9843c` to `05027c941` are the engine change, `65f0f01c1` to
+`ee5d4c625` its handling of Stop and `42ab59b22` to `71b94369b` its
+isolation from the PDF response (below). `d1e33448d` adds the
+downstream GLM review workflow (`.github/workflows/zai-code-review.yml`,
+owner decision of 29 October 2026, recorded in its `DOWNSTREAM.md`) and
+is no engine build input. The merges `494d7f4b1` (of `combray/0.7` at
+`ef52ceadf57`), `dab4d6a8b` (at `f1b105495`) and `d3ff19f14` (at
+`6fbfc3d70`) changed no PDF line: over `combray/0.7`, `dab4d6a8b` has
+the same added and removed lines as `05027c941` over its base
+`6d3218a2a94`, and `d3ff19f14` the same as `ee5d4c625` over
+`f1b105495`. Before the merge this section pinned `05027c9413a`,
+`494d7f4b13b`, `dab4d6a8bfa`, `ee5d4c625`, `d3ff19f14` and
+`71b94369b`.
+
+What the engine change does (its `DOWNSTREAM.md` row has the details):
+
+- With the `combray_pdf_viewer_module` and `combray_pdf_viewer_csp`
+  preferences set, a top-level `application/pdf` response becomes a viewer
+  document at the PDF's own URL: a fresh opaque origin, Combray's policy
+  in place of the response's, and markup that loads Combray's viewer
+  module as soon as the headers arrive. Without them, PDFs keep Servo's
+  stand-in page, as before.
+- The body is fetched once. At its end it moves into the blob URL store
+  under the document's origin, and the root element's `data-pdf-state`
+  (`loading`, `ready`, `too-large`, `failed`), `data-pdf-src`,
+  `data-pdf-length` and `data-pdf-limit` tell the viewer where it is.
+- A body over `combray_pdf_viewer_max_bytes` is refused at the headers
+  or mid-stream, and the navigation fetch is cancelled. Aborting a viewer
+  while its body still arrives (Stop, `window.stop()`, a navigation the
+  page starts) drops the body, cancels the fetch at once and sets
+  `data-pdf-state` to `failed`, which the viewer shows as a failed load
+  (`65f0f01c1`). A body shorter than its
+  `Content-Length` is `failed`.
+- The viewer gets a new policy container (`42ab59b22`): the response's
+  `Referrer-Policy`, embedder policy and `Content-Language` no longer
+  apply, so a PDF served with `Referrer-Policy: unsafe-url` cannot make a
+  font or a navigation the viewer starts send the PDF's full URL across
+  origins. `80540fca2` lets that test also accept no `Referer`, which the
+  specifications give for the viewer's opaque origin.
+- The blob is released when the document unloads unsalvageable or leaves
+  session history, so Back to a viewer in the back-forward cache reads
+  the same blob without a request.
+- PDFs in frames, and popups of scripts-sandboxed documents, keep the
+  stand-in page. `Content-Disposition: attachment` is ignored, so
+  attachment PDFs open in the viewer.
+
+Engine behaviour the viewer works around (source at the pin, found in
+review of the Combray PR):
+
+- `Worker.terminate()` does not end an idle worker. `Worker::Terminate`
+  (`components/script/dom/workers/worker.rs`) only sets the closing flag
+  and requests a JavaScript interrupt, which fires only while script
+  runs; it sends nothing. A worker waiting in `run_worker_event_loop`
+  (`abstractworkerglobalscope.rs`) keeps its runtime, here PDFium's wasm
+  heap (at least 17.75 MiB) and the PDF, until its document is discarded,
+  and a document in the back-forward cache is kept. `postMessage` still
+  sends after `Terminate`, and the woken worker's `handle_mixed_message`
+  (`dedicatedworkerglobalscope.rs`) sees the flag, leaves its loop and
+  clears its runtime, so the viewer posts an empty message after
+  `terminate()`. Follow-up for L-K-M/servo, not done here: make
+  `Terminate` send the worker its `WakeUp` message itself.
+- A canvas resized to 0 × 0 cannot be painted, so
+  `CanvasState::set_bitmap_dimensions` sends no `Recreate`, and the
+  canvas paint thread keeps the old pixmap and WebRender image until
+  garbage collection drops the context. The viewer shrinks a page's
+  canvas to 1 × 1 instead.
+- A pipeline in session history gets `ResizeInactive`, which updates its
+  viewport without a `resize` event, and Back queues only `pageshow`. The
+  viewer lays its pages out again whenever it opens the PDF.
+
+Evidence for the engine change is in #18: 27 tests in
+`components/servo/tests/pdf_viewer.rs` and its reviews. At `ee5d4c625`
+and again at `d3ff19f14`, its `pdf_viewer` (25), `stop_loading` (7) and
+`input_events` (2) suites pass; at `71b94369b`, `pdf_viewer` (27),
+`stop_loading` (7) and `input_events` (2) pass. At `d3ff19f14` and
+`71b94369b` each `stop_loading` and `input_events` test ran in its own
+process. The Stop test failed on `dab4d6a8b` before the fix, and the
+referrer-policy and `Content-Language` tests failed on `d3ff19f14`
+before `42ab59b22`; the referrer-policy test as `80540fca2` left it
+still fails with `42ab59b22`'s fix reverted. These suites did not run
+again on the merge commit here. On this Linux x86_64 host, for the pin:
+
+- `git diff --name-only 6d3218a2a94 6b44b9b2a`, main's engine fixes,
+  the HTTP/2 fix and the PDF change together, touches no `Cargo.toml`,
+  `Cargo.lock`, toolchain, default resource or license text; Servo's
+  `Cargo.lock` is byte-identical at `6d3218a2a94`, `ef6beb09ab1`,
+  `05027c9413a`, `494d7f4b13b`, `4eb8b125d`, `dab4d6a8bfa`,
+  `ee5d4c625`, `6fbfc3d70`, `d3ff19f14`, `71b94369b`, `3423e2b53` and
+  `6b44b9b2a`.
+  `cargo test --lib` in `native/` against the pinned checkout: 157
+  passed, and `native/Cargo.lock` did not change. Host builds compile
+  only the pure modules (Servo is an Android-only dependency), so this
+  checks the lockfile against the checkout, not the engine API. The
+  notices' content is the same; only their input hash of
+  `scripts/m0/servo-pin.sh` and the compare link in
+  `THIRD_PARTY_NOTICES.md` follow the pin. At `71b94369b` and again at
+  `6b44b9b2a`, `scripts/generate-notices.py` (`cargo about` 0.9.2, NDK
+  r29) produced exactly that `native.json` and an unchanged
+  `Rust-Licenses.html`.
+- `scripts/m0/fetch-servo.sh` refused this host's checkout because
+  `servo-checkout/servo` is a symbolic link to a checkout elsewhere on the
+  same disk (space). Its fetch and checkout steps were run by hand on that
+  checkout: `git fetch --no-tags --depth=1` of `6b44b9b2a` from a local
+  clone of L-K-M/servo, then `git checkout --force --detach` and
+  `git clean -ffd`. Its mach Python preparation was not run; the host
+  tests do not need it.
+
+No native build or emulator ran on this host: both native ABI builds,
+packaging and the fixture checks are the Engine workflow's evidence on the
+PR that sets this pin. Combray turns the viewer on in the same PR
+([PDF.md](PDF.md#phases)). On `494d7f4b13b`, Engine runs
+[41311662496](https://github.com/L-K-M/Combray/actions/runs/41311662496)
+(head `41ca252`) and
+[41356434589](https://github.com/L-K-M/Combray/actions/runs/41356434589)
+(head `0de24d9`) passed all 173 checks, with no report-only failures.
+On `dab4d6a8bfa`, Engine run
+[41412055823](https://github.com/L-K-M/Combray/actions/runs/41412055823)
+(head `0243cda`) passed all 184 checks, with no report-only failures.
+On `ee5d4c625`, Engine run
+[41419351117](https://github.com/L-K-M/Combray/actions/runs/41419351117)
+(head `98ec510`) passed all 184 checks. On `d3ff19f14`, Engine run
+[41508955098](https://github.com/L-K-M/Combray/actions/runs/41508955098)
+(head `76bc681`) passed all 185 checks, with no report-only failures.
+Engine run
+[41881346624](https://github.com/L-K-M/Combray/actions/runs/41881346624)
+on `71b94369b` (head `2a5a42f`) was cancelled by the next push before its
+emulator job ran. On `6b44b9b2a`, Engine run
+[41903858889](https://github.com/L-K-M/Combray/actions/runs/41903858889)
+(head `d650c1b`) built both ABIs and passed host tests; on the emulator,
+every check through `TabCounterTest` passed, `PdfTest` (10) and
+`StopLoadingTest` (3) included. A second after `TabCounterTest`'s app
+process ended normally, logcat stops and adb then reported the emulator
+offline, with no crash in either log; the remaining suites (`TabSwipeTest`, `TextSizeTest`,
+`ToolbarMenuTest` and the process-death checks) did not run. On
+`825ef1f0356f`, Engine run
+[41952234622](https://github.com/L-K-M/Combray/actions/runs/41952234622)
+(head `4c8fb3c`) lost the emulator the same way after `HisterTest`, as
+main's own flex sizing PR did once without the viewer; its re-run was
+cancelled by the next push. Engine run
+[41960527435](https://github.com/L-K-M/Combray/actions/runs/41960527435)
+(head `f09199d`, with the fixes from the PR's GLM review) passed all
+186 checks, with no report-only failures. The Engine run on the merge of
+main that moves the pin to `7c7e2069db9e` is the evidence for that pin.
+
+Open follow-ups for L-K-M/servo: a `charset` on the PDF's
+`Content-Type` still sets the viewer document's encoding, and with it
+how the viewer encodes URL queries, once the body ends (found by
+reading the code, not tested); a load the embedder starts with
+`WebView::load` away from a PDF that is still downloading, as
+Combray's address bar does, does not abort it (Servo keeps the old
+document in session history), so that download continues in the
+background up to the cap; and the network layer notices a cancelled
+fetch only when the next chunk arrives.

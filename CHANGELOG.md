@@ -15,6 +15,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Tap a PDF link and read it: a top-level PDF opens in Combray's own
+  viewer inside Servo, drawn by PDFium, with its pages one under another
+  at the screen's width. The tab takes the PDF's own title when it has one,
+  else its file name. Links in a PDF work for http, https, mailto and tel,
+  and links to another page of it scroll there. Back returns to a PDF
+  without downloading it again; after Android ends the app, a PDF opens on
+  its first page. PDFs larger than 64 MB, damaged or password-protected
+  ones show a message instead, and a PDF sent as an attachment opens in
+  the viewer too. A PDF inside a frame still shows Servo's placeholder
+  page. Find in page says a PDF cannot be searched yet, and its text does
+  not reach Hister or reader view yet; Japanese, Chinese and Korean text
+  without an embedded font is not drawn yet.
 - Bottom controls gain Close tab, inline Reader/Stop and an instant Menu.
   Share moves into Menu; swipe up from Menu and release over an entry.
 - ThemeContrastTest now also requires the five surface-container shades
@@ -252,6 +264,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages served over HTTP/2 with large response headers (long security
+  policies, for example) load instead of showing a network error. Servo
+  now accepts header lists up to 256 KiB, as Chromium does, instead of
+  hyper's 16 KiB.
 - Pages no longer grow wider than the screen and scroll sideways when a row
   of an icon or a short word beside a long text sits in an auto-sized grid
   column, table cell or float. Servo now sizes such rows as other browsers do.

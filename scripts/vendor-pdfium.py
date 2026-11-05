@@ -8,11 +8,12 @@
                                   ──SHA-256 pins──▶ gzip -9n ──▶ native/src/pdf/vendor/*.gz
                                                     package/LICENSE, LICENSE.pdfium ──▶ *.LICENSE
 
-The package is downloaded into a new, empty temporary directory and read from memory; nothing
-from it is extracted to disk except the four files above. `gzip -9n` stores no name or time, so
-the same input gives the same output with the same gzip. native/src/pdf.rs embeds the .gz
-files and its host tests inflate them against the same SHA-256 pins. To update PDFium, change
-VERSION and all four pins together (docs/BUILDING.md, "Updating PDFium").
+The package is read into memory; nothing from it reaches the disk except the four files above,
+each checked against its SHA-256 pin. Compressing needs GNU gzip on PATH: `gzip -9n` stores no
+name or time, so the same input gives the same output with the same gzip (Python's zlib would
+give other bytes than the committed files). native/src/pdf.rs embeds the .gz files and its host
+tests inflate them against the same SHA-256 pins. To update PDFium, change VERSION and all the
+pins together (docs/BUILDING.md, "Updating PDFium").
 """
 
 import argparse
@@ -20,10 +21,10 @@ import base64
 import hashlib
 import io
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import urllib.request
 
 
@@ -35,15 +36,15 @@ VERSION = "2.15.1"
 TARBALL_URL = f"https://registry.npmjs.org/{PACKAGE}/-/pdfium-{VERSION}.tgz"
 # The `dist.integrity` the registry publishes for this version.
 INTEGRITY = "sha512-qDH4gEkGSQT0iM+07Hpm3LyvoB7PEFbW3Qyk6+LPkEYLJYfHagkHM1OzYlDq2EDOhJRguykTkzdMOT3/w27x5Q=="
-# Tarball member -> (file written under VENDOR, SHA-256 of the uncompressed member). The license
-# texts below rely on the tarball's integrity check alone.
+# Tarball member -> (file written under VENDOR, SHA-256 of the uncompressed member).
 COMPRESSED = {
     "package/dist/pdfium.wasm": ("pdfium.wasm.gz", "5e4cd023c3dad4a895b3571ca573d3fc51bac6de48360d95283134385b954eaa"),
     "package/dist/index.browser.js": ("index.browser.js.gz", "2b8b6db33451f2599385697fe5bf634abdfbb093fec497febd7fb60b5aeea8ca"),
 }
+# Written as they are; the notices quote them (native/bundled-notices.toml).
 LICENSES = {
-    "package/LICENSE": "embedpdf-pdfium.LICENSE",
-    "package/LICENSE.pdfium": "pdfium.LICENSE",
+    "package/LICENSE": ("embedpdf-pdfium.LICENSE", "f5031b66adba8ef5ef57666deff980a7f2ccff5c8a8c22a8117e854d2b8dfcd3"),
+    "package/LICENSE.pdfium": ("pdfium.LICENSE", "b033ffb8fc19c23ca81f7e98019ab658cc6f4cf14587c7c6a2a67fb0f6ac0f5a"),
 }
 MAX_TARBALL_BYTES = 64 * 1024 * 1024
 DOWNLOAD_TIMEOUT_SECONDS = 120
@@ -65,14 +66,12 @@ def check_sha256(name: str, data: bytes, expected: str) -> None:
         raise ValueError(f"{name}: SHA-256 {actual} does not match the pinned {expected}")
 
 
-def download(directory: Path) -> bytes:
-    """The package tarball, saved in [directory] (new and empty) and returned."""
-    path = directory / f"pdfium-{VERSION}.tgz"
+def download() -> bytes:
+    """The package tarball, read into memory."""
     with urllib.request.urlopen(TARBALL_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
         data = response.read(MAX_TARBALL_BYTES + 1)
     if len(data) > MAX_TARBALL_BYTES:
         raise ValueError(f"{TARBALL_URL} is larger than {MAX_TARBALL_BYTES} bytes")
-    path.write_bytes(data)
     return data
 
 
@@ -94,6 +93,8 @@ def members(tarball: bytes, names: list[str]) -> dict[str, bytes]:
 
 def gzip_n9(data: bytes) -> bytes:
     """`gzip -9n`: best compression, no file name or time stamp in the header."""
+    if shutil.which("gzip") is None:
+        raise OSError("gzip is not on PATH; GNU gzip writes the committed files (see the module help)")
     return subprocess.run(["gzip", "-9n"], input=data, check=True, capture_output=True).stdout
 
 
@@ -102,15 +103,11 @@ def main() -> None:
     parser.add_argument("--tarball", type=Path, help=f"use this downloaded {PACKAGE} {VERSION} tarball")
     args = parser.parse_args()
 
-    if args.tarball:
-        tarball = args.tarball.read_bytes()
-    else:
-        with tempfile.TemporaryDirectory(prefix="combray-pdfium-") as directory:
-            tarball = download(Path(directory))
+    tarball = args.tarball.read_bytes() if args.tarball else download()
     check_integrity(tarball, INTEGRITY)
 
     files = members(tarball, list(COMPRESSED) + list(LICENSES))
-    for name, (_, digest) in COMPRESSED.items():
+    for name, (_, digest) in (COMPRESSED | LICENSES).items():
         check_sha256(name, files[name], digest)
 
     VENDOR.mkdir(parents=True, exist_ok=True)
@@ -118,7 +115,7 @@ def main() -> None:
         compressed = gzip_n9(files[name])
         (VENDOR / output).write_bytes(compressed)
         print(f"{(VENDOR / output).relative_to(ROOT)}: {len(files[name])} -> {len(compressed)} bytes")
-    for name, output in LICENSES.items():
+    for name, (output, _) in LICENSES.items():
         (VENDOR / output).write_bytes(files[name])
         print(f"{(VENDOR / output).relative_to(ROOT)}: from {name}")
 

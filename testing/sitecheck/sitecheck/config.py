@@ -82,6 +82,18 @@ ENGINE_PREFS: Mapping[str, bool] = MappingProxyType(
     }
 )
 
+# Preferences engine.rs sets that work only inside Combray: the PDF viewer loads its
+# files from the app's `combray-pdf:` scheme, which servoshell lacks, so the harness
+# leaves them at Servo's defaults and PDFs keep Servo's stand-in page. Every other
+# preference engine.rs sets belongs in ENGINE_PREFS.
+APP_ONLY_PREFS: frozenset[str] = frozenset(
+    {
+        "combray_pdf_viewer_module",
+        "combray_pdf_viewer_csp",
+        "combray_pdf_viewer_max_bytes",
+    }
+)
+
 # A common Android phone viewport in CSS px (Pixel 7 class), at device pixel ratio 1
 # so screenshots from both engines have the same pixel size and compare directly.
 VIEWPORT_WIDTH = 412

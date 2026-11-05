@@ -26,7 +26,7 @@ ENGINE_SOURCE = REPO_ROOT / "native" / "src" / "engine.rs"
 _BOOL_PREF_CALL = re.compile(
     r"\.set_value\(\s*\"(?P<name>[A-Za-z0-9_.]+)\"\s*,\s*PrefValue::Bool\(\s*(?P<value>true|false)\s*\)\s*,?\s*\)"
 )
-_ANY_PREF_CALL = re.compile(r"\.set_value\(\s*\"")
+_ANY_PREF_CALL = re.compile(r"\.set_value\(\s*\"(?P<name>[A-Za-z0-9_.]+)\"")
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 
 
@@ -313,8 +313,15 @@ class EnginePrefsTest(unittest.TestCase):
         found = {
             match["name"]: match["value"] == "true" for match in _BOOL_PREF_CALL.finditer(source)
         }
+        names = [match["name"] for match in _ANY_PREF_CALL.finditer(source)]
+        self.assertLessEqual(
+            config.APP_ONLY_PREFS,
+            set(names),
+            "APP_ONLY_PREFS names a preference engine.rs no longer sets",
+        )
+        shared = [name for name in names if name not in config.APP_ONLY_PREFS]
         self.assertEqual(
-            len(_ANY_PREF_CALL.findall(source)),
+            len(shared),
             len(found),
             "engine.rs sets a non-Bool preference; teach ENGINE_PREFS and the runners about it",
         )

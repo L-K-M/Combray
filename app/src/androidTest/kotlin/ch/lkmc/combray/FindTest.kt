@@ -123,6 +123,22 @@ class FindTest {
         assertEquals(Fixtures.FIND, device.browser.browserState.value.activeTab?.url)
     }
 
+    @Test
+    fun aPdfSaysItCannotBeSearchedYet() {
+        // The viewer draws pages as images; searching their text is a later step (docs/PDF.md).
+        // The page says so instead of reporting no matches for text it does have.
+        val pdf = Fixtures.pdf("plain.pdf", "find${System.currentTimeMillis()}")
+        device.browser.openUrl(pdf, Placement.CURRENT_TAB)
+        device.awaitState { it.activeTab?.url == pdf && it.activeTab?.title == Fixtures.PDF_PLAIN_TITLE && it.activeTab?.loading == false }
+        device.browser.openFind()
+        device.awaitState { it.find != null }
+
+        compose.onNode(hasSetTextAction()).performTextInput("PDF")
+        compose.mainClock.advanceTimeBy(TYPING_PAUSE_MS)
+        device.awaitState { it.find?.outcome == FindOutcome.Failed }
+        compose.onNodeWithText("This page cannot be searched").assertIsDisplayed()
+    }
+
     private companion object {
         const val NEEDLE = "combraneedle"
         val REPORT = Regex("FIND:(\\d+):(.*)")
