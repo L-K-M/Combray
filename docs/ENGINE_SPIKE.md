@@ -2781,9 +2781,9 @@ then reads the next request on it and closes the connection without answering.
 
 ## 46. Pages wider than the screen (5 November 2026)
 
-Candidate source: `53179536a4f2b357eb836e57416f925c5bbf7a69`, the head of downstream
-[PR #32](https://github.com/L-K-M/servo/pull/32) (`fix/zoom-out-to-content-width`) on §45's pin
-`0bf44ec270a0`.
+Validated source: `e05945443307f38620138c5bd1c38ba07b768aaf` on `combray/0.7`, which merges downstream
+[PR #32](https://github.com/L-K-M/servo/pull/32) onto §45's pin `0bf44ec270a0`. Its tree is that of
+the PR's head `53179536a4`, which the device checks below ran on.
 
 ### Report
 
@@ -2890,7 +2890,10 @@ viewport at device pixel ratio 2.
   and the scroll-to-top button left it there, so the pull did not arm. The x86_64 CI emulator's
   integer width hid this. Both causes are fixed in `349266dd3a` (exact fit; script scrolls to an edge
   bring the pinch zoom viewport along) with regression tests above; this pin's Engine run and a
-  repeat of the arm64 run check them.
+  repeat of the arm64 run check them. On `53179536a4` the Engine workflow passed (both ABIs, full
+  x86_64 emulator suite), and on the arm64 emulator `ZoomOutTest` (2), `ScrollTest` (14, the pull
+  after the scroll-to-top button included), `FixedLayerScrollTest` (2), `TextSizeTest`,
+  `FitWidthTest`, `KeyboardTest` (7), `PdfTest` (10) and `BrowsingTest` (30) passed.
 - Here: `cargo metadata --locked` in `native/` passes (no lockfile change); the regenerated notices
   differ only in the pin's hash; `scripts/tests/test_fixture_server.py` covers `/wide.html`. The
   device checks run in this PR's Engine workflow.
