@@ -52,6 +52,7 @@ Keep the agent token in a header file, readable only by you, so it never appears
 ROOT=https://reports.example.ts.net:8443
 H="$HOME/.config/paseo/site-reports.headers"   # one line: Authorization: Bearer <agent token>
 chmod 600 "$H"
+D="$(mktemp -d)"   # report data stays out of any Git checkout; delete it when done
 
 # Open reports, oldest first; pass the answer's "next" as &after= for the next page
 curl -sS --fail-with-body -H @"$H" "$ROOT/v1/reports?status=open&limit=20"
@@ -62,9 +63,9 @@ curl -sS --fail-with-body -H @"$H" -H 'Content-Type: application/json' \
   "$ROOT/v1/reports/$ID/status"
 
 # Details and screenshot; compare the digest with .screenshot.sha256
-curl -sS --fail-with-body -H @"$H" "$ROOT/v1/reports/$ID" > "$ID.json"
-curl -sS --fail-with-body -H @"$H" -o "$ID.png" "$ROOT/v1/reports/$ID/screenshot"
-sha256sum "$ID.png"
+curl -sS --fail-with-body -H @"$H" "$ROOT/v1/reports/$ID" > "$D/$ID.json"
+curl -sS --fail-with-body -H @"$H" -o "$D/$ID.png" "$ROOT/v1/reports/$ID/screenshot"
+sha256sum "$D/$ID.png"
 
 # Resolve (or "rejected"); either can be reopened with "open"
 curl -sS --fail-with-body -H @"$H" -H 'Content-Type: application/json' \
@@ -204,11 +205,12 @@ The service sweeps at start and every hour:
 
 ## Backup
 
-Reports are short-lived work items, so the proposed default is no backup. If you want one, remember that a backup holds the same private browsing data as the service: store it encrypted and delete it when it is no longer needed.
+Reports are short-lived work items, so the proposed default is no backup. If you want one, remember that a backup holds the same private browsing data as the service: store it encrypted, outside the Git checkout so it is never committed, and delete it when it is no longer needed.
 
 ```sh
 docker compose exec site-reports python -m site_reports backup /data/backup-2026-11-05
-docker compose cp site-reports:/data/backup-2026-11-05 ./backup-2026-11-05
+mkdir -p -m 700 "$HOME/site-reports-backups"
+docker compose cp site-reports:/data/backup-2026-11-05 "$HOME/site-reports-backups/backup-2026-11-05"
 docker compose exec site-reports rm -r /data/backup-2026-11-05
 ```
 
