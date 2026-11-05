@@ -54,10 +54,17 @@ import ch.lkmc.combray.core.integration.SensitiveUrls
 import ch.lkmc.combray.core.integration.SiteReports
 import kotlinx.coroutines.Dispatchers
 
-/** Why a report was not queued, as the sheet (or a snackbar, once the sheet is gone) says it. */
-internal enum class ReportProblem(@StringRes val message: Int, val offersSettings: Boolean = false) {
-    NOT_SET_UP(R.string.report_not_set_up, offersSettings = true),
-    TOO_MANY(R.string.report_too_many, offersSettings = true),
+/**
+ * Why a report was not queued: [message] as the sheet says it, [withoutSheet] as a snackbar
+ * says it once the sheet, and the draft with it, is gone.
+ */
+internal enum class ReportProblem(
+    @StringRes val message: Int,
+    @StringRes val withoutSheet: Int = R.string.report_lost,
+    val offersSettings: Boolean = false,
+) {
+    NOT_SET_UP(R.string.report_not_set_up, R.string.report_lost_not_set_up, offersSettings = true),
+    TOO_MANY(R.string.report_too_many, R.string.report_lost_too_many, offersSettings = true),
     NOT_STORED(R.string.report_not_stored),
     ADDRESS(R.string.report_invalid_address),
     COMMENT(R.string.report_comment_too_long),

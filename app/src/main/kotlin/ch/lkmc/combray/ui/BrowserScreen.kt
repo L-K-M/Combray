@@ -444,7 +444,7 @@ fun BrowserScreen(
                         snackbar.showSnackbar(resources.getString(R.string.report_queued))
                     }
                     // The sheet shows the problem; once it is gone, a snackbar has to.
-                    reportDraftId != draft.id -> ReportProblem.of(result)?.let { snackbar.showSnackbar(resources.getString(it.message)) }
+                    reportDraftId != draft.id -> ReportProblem.of(result)?.let { reportLost(it, snackbar, resources, openSettings) }
                 }
             }
         }
@@ -835,6 +835,15 @@ private suspend fun reportSave(
         }
         SaveRequest.Queued -> queued?.let { snackbar.showSnackbar(it) }
     }
+}
+
+/**
+ * Tells the user that a report was not stored after its sheet closed. The draft went with the
+ * sheet, so nothing can be tried again; a problem Settings can fix offers Settings.
+ */
+internal suspend fun reportLost(problem: ReportProblem, snackbar: SnackbarHostState, resources: Resources, onOpenSettings: () -> Unit) {
+    val message = resources.getString(problem.withoutSheet)
+    if (problem.offersSettings) offerSettings(snackbar, message, resources, onOpenSettings) else snackbar.showSnackbar(message)
 }
 
 /** [message] with a Settings action, for a feature that needs a service set up there. */
