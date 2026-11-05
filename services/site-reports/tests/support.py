@@ -1,27 +1,41 @@
-"""Shared test helpers: a tiny PNG builder, the golden request, a fake clock and stores."""
+"""Shared test helpers: a tiny PNG builder, the golden request, a fake clock, stores,
+and a real server on 127.0.0.1:0 with a client and a log capture."""
 
 from __future__ import annotations
 
 import base64
 import copy
 import hashlib
+import http.client
 import json
+import logging
+import socket
 import struct
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from site_reports import validation
+from site_reports.api import ReportServer, ServerLimits, make_server
+from site_reports.config import Config, Tokens, hash_token
 from site_reports.store import Limits, Store
 
 GOLDEN_PATH = Path(__file__).resolve().parent / "data" / "report-v1.json"
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 START = datetime(2026, 11, 4, 9, 12, 45, tzinfo=UTC)
+SERVICE_ROOT = Path(__file__).resolve().parent.parent
+# Synthetic tokens; the server only ever sees their hashes.
+REPORTER_TOKEN = "reporter-token-synthetic-0001"
+AGENT_TOKEN = "agent-token-synthetic-0001"
+WAIT_SECONDS = 5.0
 
 
 def chunk(kind: bytes, data: bytes = b"", *, crc: int | None = None) -> bytes:
@@ -190,3 +204,178 @@ def open_store(
     store = Store(data_dir, clock, limits or Limits())
     test.addCleanup(store.close)
     return store
+
+
+def tokens(
+    reporter: tuple[str, ...] = (REPORTER_TOKEN,), agent: tuple[str, ...] = (AGENT_TOKEN,)
+) -> Tokens:
+    return Tokens([hash_token(t) for t in reporter], [hash_token(t) for t in agent])
+
+
+def config(data_dir: Path, **overrides: Any) -> Config:
+    """A configuration for a server on 127.0.0.1 and a free port."""
+    values: dict[str, Any] = {
+        "tokens": tokens(),
+        "data_dir": data_dir,
+        "listen_host": "127.0.0.1",
+        "listen_port": 0,
+    }
+    values.update(overrides)
+    return Config(**values)
+
+
+class RunningServer:
+    """A ReportServer serving from a thread; ``stop`` waits for every handler thread."""
+
+    def __init__(self, server: ReportServer) -> None:
+        self.server = server
+        self.port: int = server.server_address[1]
+        self._thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+        )
+        self._thread.start()
+        self._stopped = False
+
+    def stop(self) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
+        self.server.shutdown()
+        self.server.server_close()
+        self._thread.join(WAIT_SECONDS)
+
+
+def start_server(
+    test: unittest.TestCase,
+    server_config: Config,
+    store: Store,
+    clock: Callable[[], datetime],
+    limits: ServerLimits | None = None,
+) -> RunningServer:
+    server = make_server(server_config, store, clock, limits)
+    # server_close then joins the handler threads, so none outlives its test's store.
+    server.block_on_close = True
+    running = RunningServer(server)
+    test.addCleanup(running.stop)
+    return running
+
+
+@dataclass(frozen=True)
+class Response:
+    status: int
+    headers: http.client.HTTPMessage
+    body: bytes
+
+    def json(self) -> Any:
+        return json.loads(self.body)
+
+
+class Client:
+    """One HTTP connection per request to the test server."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        *,
+        token: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        content_type: str = "application/json",
+    ) -> Response:
+        sent: dict[str, str] = {}
+        if token is not None:
+            sent["Authorization"] = f"Bearer {token}"
+        if body is not None:
+            sent["Content-Type"] = content_type
+        sent.update(headers or {})
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=WAIT_SECONDS)
+        try:
+            connection.request(method, path, body=body, headers=sent)
+            response = connection.getresponse()
+            return Response(response.status, response.headers, response.read())
+        finally:
+            connection.close()
+
+    def connect(self, test: unittest.TestCase, timeout: float = WAIT_SECONDS) -> socket.socket:
+        """A raw connection, closed when the test ends."""
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=timeout)
+        test.addCleanup(sock.close)
+        return sock
+
+
+def read_response(sock: socket.socket, method: str = "GET") -> Response:
+    response = http.client.HTTPResponse(sock, method=method)
+    try:
+        response.begin()
+        return Response(response.status, response.headers, response.read())
+    finally:
+        response.close()
+
+
+def is_closed(sock: socket.socket) -> bool:
+    """Whether the server closed the connection (after any response was read)."""
+    try:
+        return sock.recv(1) == b""
+    except ConnectionResetError:
+        return True
+
+
+class LogCapture(logging.Handler):
+    """Records of the service's loggers, formatted with any exception text."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        line = self.format(record)
+        with self._lock:
+            self._lines.append(line)
+
+    @property
+    def lines(self) -> list[str]:
+        with self._lock:
+            return list(self._lines)
+
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+    def wait_for(self, predicate: Callable[[list[str]], bool]) -> list[str]:
+        """Lines once ``predicate`` holds; handlers log after the response is sent."""
+        deadline = time.monotonic() + WAIT_SECONDS
+        while not predicate(lines := self.lines):
+            if time.monotonic() > deadline:
+                raise AssertionError(f"log lines never matched: {lines}")
+            time.sleep(0.01)
+        return lines
+
+
+def capture_logs(test: unittest.TestCase) -> LogCapture:
+    logger = logging.getLogger("site_reports")
+    capture = LogCapture()
+    previous = (logger.level, logger.propagate)
+    logger.addHandler(capture)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    def restore() -> None:
+        logger.removeHandler(capture)
+        logger.setLevel(previous[0])
+        logger.propagate = previous[1]
+
+    test.addCleanup(restore)
+    return capture
+
+
+def wait_until(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + WAIT_SECONDS
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition never held")
+        time.sleep(0.01)

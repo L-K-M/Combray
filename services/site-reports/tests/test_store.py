@@ -619,14 +619,32 @@ class ScreenshotTest(StoreTestCase):
 
         self.assertIsNone(self.store.open_screenshot(report.id))
 
-    def test_a_symbolic_link_is_not_followed(self) -> None:
+    def test_a_symbolic_link_out_of_screenshots_is_corrupt(self) -> None:
         report = self.add()
         outside = self.root / "outside.png"
         outside.write_bytes(PNG)
         self.screenshot_path(report).unlink()
         self.screenshot_path(report).symlink_to(outside)
 
+        with self.assertRaises(CorruptStore):
+            self.store.open_screenshot(report.id)
+
+    def test_a_symbolic_link_within_screenshots_is_not_followed(self) -> None:
+        report = self.add()
+        other = self.screenshot_path(report).with_name("other.png")
+        self.screenshot_path(report).rename(other)
+        self.screenshot_path(report).symlink_to(other.name)
+
         with self.assertRaises(OSError):
+            self.store.open_screenshot(report.id)
+
+    def test_a_screenshot_directory_behind_a_link_is_corrupt(self) -> None:
+        report = self.add()
+        screenshots = self.data / "screenshots"
+        screenshots.rename(self.data / "elsewhere")
+        screenshots.symlink_to(self.data / "elsewhere")
+
+        with self.assertRaises(CorruptStore):
             self.store.open_screenshot(report.id)
 
     def test_a_file_of_the_wrong_size_is_corrupt(self) -> None:

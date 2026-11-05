@@ -128,6 +128,11 @@ _REPORT_COLUMNS = (
 _PURGEABLE = "status IN ('done', 'rejected') AND purged_at IS NULL AND resolved_at < :cutoff"
 
 
+def utc_now() -> datetime:
+    """The store's production clock."""
+    return datetime.now(UTC)
+
+
 class Actor(StrEnum):
     """Who changed a report, as recorded in its history."""
 
@@ -386,16 +391,19 @@ class Store:
     def open_screenshot(self, report_id: str) -> tuple[BinaryIO, int] | None:
         """The screenshot file and its size, or None when the report has none (any more).
 
-        The caller closes the file. The file is opened without following a
-        symbolic link and must be a regular file of the recorded size.
+        The caller closes the file. Its path must resolve inside screenshots/ (so
+        that directory cannot have been replaced by a link elsewhere), the file is
+        opened without following a symbolic link, and it must be a regular file of
+        the recorded size.
         """
         row = self.get(report_id)
         if row is None or not row.has_screenshot:
             return None
+        path = self._screenshot_path(report_id)
+        if Path(os.path.realpath(path)).parent != self._screenshots:
+            raise CorruptStore("screenshot path resolves outside screenshots/")
         try:
-            fd = os.open(
-                self._screenshot_path(report_id), os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
-            )
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
         except FileNotFoundError:
             return None  # Purged or deleted since the row was read.
         try:
