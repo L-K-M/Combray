@@ -2781,7 +2781,7 @@ then reads the next request on it and closes the connection without answering.
 
 ## 46. Pages wider than the screen (5 November 2026)
 
-Candidate source: `3cc07fdc0672836a05967153f3e6ff362c912cf6`, the head of downstream
+Candidate source: `53179536a4f2b357eb836e57416f925c5bbf7a69`, the head of downstream
 [PR #32](https://github.com/L-K-M/servo/pull/32) (`fix/zoom-out-to-content-width`) on §45's pin
 `0bf44ec270a0`.
 
@@ -2820,7 +2820,9 @@ viewport at device pixel ratio 2.
   zooms, Paint keeps the chosen page scale through later viewport changes where the limits allow.
   When script moves the root scroller to an edge of its range, as Combray's scroll-to-top and
   scroll-to-bottom buttons do, the pinch zoom viewport moves to that edge too. Content and initial
-  containing block are compared in app units, so content that fits gives exactly 1.
+  containing block are compared in app units, so content that fits gives exactly 1, and a viewport
+  without width (or a pinch zoom viewport without size) stays unzoomed instead of turning the
+  transform into NaN.
   `<meta viewport>` descriptions now belong to their document and pinch zoom resets when another
   document becomes the root (both carried over to the next page before; desktop servoshell keeps
   its pinch zoom), pinch steps that arrive in one frame multiply instead of only the last counting,
@@ -2856,7 +2858,10 @@ viewport at device pixel ratio 2.
   added after the user zoomed out to 0.5 left 0.8, `overflow-y: hidden` and right-to-left pages
   zoomed out to 0.4, desktop lost its pinch zoom on navigation, fitting content at a 384.6 CSS px
   width moved a pinch zoom viewport by 0.0013 px instead of scrolling, and a script scroll to the top
-  left the visual viewport 750 px down; the `overflow-x: hidden` guard passes either way. The `webview` (42), `accessibility` (32) and
+  left the visual viewport 750 px down; the `overflow-x: hidden` guard passes either way. Unit tests
+  of layout's expansion (`servo-layout`, `stacking_context::tests`) and of `PinchZoom` (`servo-paint`,
+  `pinch_zoom::tests`) cover infinite and NaN ratios and an empty viewport; the two guard tests
+  failed without the guards. The `webview` (42), `accessibility` (32) and
   `input_events` (2) suites, each test in its own process, pass except `test_svg_document_styles_paint`,
   which fails the same way on `0bf44ec270`; `test_accessibility_click_link` caught an extra
   accessibility update after navigations, fixed before review. `servo-paint-api` compositor tests
@@ -2865,7 +2870,9 @@ viewport at device pixel ratio 2.
   DeepSeek V4.1 Flash) with each finding checked by a second model. Real findings, fixed: a viewport
   zoom of zero, the user's scale lost to a later `<meta viewport>`, hidden vertical overflow revealed
   when zoomed out, right-to-left overflow counted, and desktop's pinch zoom reset on navigation.
-  Refuted: a missing green background in the pixel test (the shared helper paints it) and
+  A second helper review of the exact-fit and edge-following commits found that the exact fit had
+  dropped the guard for a viewport without width (an infinite ratio, then a NaN transform), fixed in
+  `37af7a980a`; the edge-following lens found nothing. Refuted: a missing green background in the pixel test (the shared helper paints it) and
   `background-attachment: fixed` against the larger layout viewport (that is the layout viewport,
   as in Chrome).
 - Desktop servoshell with the change, the synthetic page: opens at 0.379 with a 1088x2271 visual
