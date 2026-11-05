@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from site_reports import validation
+from site_reports.store import Limits, Store
 
 GOLDEN_PATH = Path(__file__).resolve().parent / "data" / "report-v1.json"
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
@@ -177,3 +178,15 @@ def temporary_directory(test: unittest.TestCase) -> Path:
     directory = tempfile.TemporaryDirectory()
     test.addCleanup(directory.cleanup)
     return Path(directory.name)
+
+
+def open_store(
+    test: unittest.TestCase,
+    data_dir: Path,
+    clock: Callable[[], datetime],
+    limits: Limits | None = None,
+) -> Store:
+    """A Store over ``data_dir``, closed when the test ends."""
+    store = Store(data_dir, clock, limits or Limits())
+    test.addCleanup(store.close)
+    return store
