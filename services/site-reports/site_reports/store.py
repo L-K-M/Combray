@@ -36,6 +36,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import sqlite3
 import stat
 import threading
@@ -541,9 +542,18 @@ class Store:
         ``target`` must not exist; it gets the data directory's layout, so a restore
         is a copy of its contents. Holding the writer lock keeps rows and files
         consistent. A screenshot that is missing or no longer matches its digest is
-        left out and its row's screenshot columns are cleared in the copy.
+        left out and its row's screenshot columns are cleared in the copy. A failed
+        backup removes the directory: a partial copy holds the same private data
+        and, after a full disk, keeps the volume full.
         """
         target.mkdir(mode=_DIR_MODE)
+        try:
+            return self._write_backup(target)
+        except BaseException:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+
+    def _write_backup(self, target: Path) -> BackupResult:
         screenshots = target / SCREENSHOTS_DIR
         screenshots.mkdir(mode=_DIR_MODE)
         database = target / DATABASE_NAME

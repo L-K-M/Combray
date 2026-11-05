@@ -212,7 +212,7 @@ docker compose cp site-reports:/data/backup-2026-11-05 ./backup-2026-11-05
 docker compose exec site-reports rm -r /data/backup-2026-11-05
 ```
 
-`backup` copies the database with SQLite's backup API and checks each screenshot's digest while copying it into a new directory laid out like `/data`; it refuses a directory that exists. To restore, stop the service and replace the volume's `reports.sqlite3` and `screenshots/` with the backup's, owned by uid 10001, with no `reports.sqlite3-wal` or `reports.sqlite3-shm` left beside them.
+`backup` copies the database with SQLite's backup API and checks each screenshot's digest while copying it into a new directory laid out like `/data`; it refuses a directory that exists, and it removes its directory again when the copy fails. To restore, stop the service and replace the volume's `reports.sqlite3` and `screenshots/` with the backup's, owned by uid 10001, with no `reports.sqlite3-wal` or `reports.sqlite3-shm` left beside them.
 
 ## Rotate a token
 

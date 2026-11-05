@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import sqlite3
@@ -717,6 +718,29 @@ class BackupTest(StoreTestCase):
 
         with self.assertRaises(FileExistsError):
             self.store.backup(target)
+
+    def test_a_failed_backup_leaves_no_partial_copy(self) -> None:
+        self.add()
+        self.add()
+        target = self.root / "backup"
+        copy_screenshot = store_module.Store._copy_screenshot
+        calls = 0
+
+        def fill_disk_on_the_second_copy(store, *args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return copy_screenshot(store, *args)
+
+        with (
+            mock.patch.object(store_module.Store, "_copy_screenshot", fill_disk_on_the_second_copy),
+            self.assertRaises(OSError),
+        ):
+            self.store.backup(target)
+
+        self.assertFalse(target.exists())
+        self.assertEqual(self.store.backup(target).screenshots, 2)
 
     def test_a_missing_screenshot_is_cleared_in_the_copy(self) -> None:
         report = self.add()
