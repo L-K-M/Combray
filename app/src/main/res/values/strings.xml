@@ -303,6 +303,11 @@
     <string name="reports_url_hint">https://reports.example.org</string>
     <string name="reports_token">Reporter token</string>
     <string name="reports_token_saved">A reporter token is saved. Enter a new one to replace it.</string>
+    <string name="reports_token_missing">Enter a reporter token. A new service address needs its own token.</string>
+    <string name="reports_token_invalid">This reporter token contains characters a token cannot have, such as a line break. Paste it again on one line.</string>
+    <string name="check_reports_token_not_stored">No reporter token is stored on this device. Enter it again.</string>
+    <!-- Mid-sentence, as in "Remove the report service?". -->
+    <string name="reports_name">the report service</string>
     <string name="settings_root_invalid_reports">Enter the report service’s web address, like https://reports.example.org.</string>
     <string name="settings_root_cleartext_reports">This service is reached over plain HTTP: anyone on the same network can read the reporter token and your reports, screenshots included.</string>
     <string name="check_token_unauthorized_reports">The report service did not accept this token for sending reports. Use the reporter token.</string>

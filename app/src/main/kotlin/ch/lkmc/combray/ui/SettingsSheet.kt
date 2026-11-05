@@ -182,9 +182,9 @@ fun SettingsSheet(
                     urlHint = R.string.reports_url_hint,
                     secret = R.string.reports_token,
                     secretSaved = R.string.reports_token_saved,
-                    secretMissing = R.string.settings_token_missing,
-                    secretInvalid = R.string.settings_token_invalid,
-                    secretNotStored = R.string.check_token_not_stored,
+                    secretMissing = R.string.reports_token_missing,
+                    secretInvalid = R.string.reports_token_invalid,
+                    secretNotStored = R.string.check_reports_token_not_stored,
                     rootInvalid = R.string.settings_root_invalid_reports,
                     cleartextWarning = R.string.settings_root_cleartext_reports,
                     unauthorized = R.string.check_token_unauthorized_reports,
@@ -196,6 +196,7 @@ fun SettingsSheet(
                     parked = R.plurals.queue_parked_reports,
                     discardParked = R.string.action_discard_parked_reports,
                     discardParkedTitle = R.string.discard_parked_reports_title,
+                    name = R.string.reports_name,
                 ),
                 kind = ServiceKind.SITE_REPORTS,
                 secret = SecretName.SITE_REPORTS_TOKEN,
@@ -306,6 +307,8 @@ private data class ServiceLabels(
     val parked: Int,
     val discardParked: Int,
     val discardParkedTitle: Int,
+    /** The service as a sentence names it; a product name is its [title]. */
+    val name: Int = title,
 )
 
 /**
@@ -404,7 +407,7 @@ private fun ServiceSettings(
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.title))) },
+            title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.name))) },
             text = { Text(pluralStringResource(labels.removeBody, jobs.size + parked.size, jobs.size + parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
