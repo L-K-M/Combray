@@ -318,7 +318,7 @@ class AccessibilityTest {
         showReport(reportDraft(REPORT_SNAPSHOT, shot))
 
         assertScrollingTargetsAreAccessible()
-        for (label in listOf("Include screenshot", "Remove query and fragment", "Address", "Page title", "What went wrong? (optional)", "Cancel", "Send")) {
+        for (label in listOf("Include screenshot", "Keep only the site and path", "Address", "Page title", "What went wrong? (optional)", "Cancel", "Send")) {
             compose.onNode(hasClickAction() and hasText(label)).performScrollTo().assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("Screenshot of the page").performScrollTo().assertIsDisplayed()

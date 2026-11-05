@@ -88,15 +88,15 @@ class ReportSheetTest {
     }
 
     @Test
-    fun theTrimButtonRemovesQueryAndFragmentAndRestoreBringsThemBack() {
+    fun theTrimButtonKeepsSiteAndPathAndRestoreBringsTheRestBack() {
         show()
-        compose.onNodeWithText("Remove query and fragment").performScrollTo().performClick()
+        compose.onNodeWithText("Keep only the site and path").performScrollTo().performClick()
         address().assert(hasText("https://example.org/article"))
-        compose.onNodeWithText("Remove query and fragment").assertDoesNotExist()
+        compose.onNodeWithText("Keep only the site and path").assertDoesNotExist()
         compose.onNodeWithText("Restore the full address").performScrollTo().performClick()
         address().assert(hasText(PAGE_URL))
 
-        compose.onNodeWithText("Remove query and fragment").performScrollTo().performClick()
+        compose.onNodeWithText("Keep only the site and path").performScrollTo().performClick()
         send()
         assertEquals("https://example.org/article", sent.single().url)
         assertTrue(sent.single().urlEdited)
@@ -118,6 +118,15 @@ class ReportSheetTest {
         send()
         assertEquals(sensitive, sent.single().url)
         assertFalse(sent.single().urlEdited)
+    }
+
+    /** A servlet session in the path is a code too: the address starts without it. */
+    @Test
+    fun aSessionInThePathIsLeftOutAtTheStart() {
+        show(draft(snapshot = SNAPSHOT.copy(url = "https://example.org/cart;jsessionid=8F3A?item=2")))
+        address().assert(hasText("https://example.org/cart"))
+        compose.onNodeWithText(TRIMMED_NOTE).assertExists()
+        compose.onNodeWithText(SENSITIVE_WARNING).assertDoesNotExist()
     }
 
     @Test
@@ -259,7 +268,7 @@ class ReportSheetTest {
 
     private companion object {
         const val PAGE_URL = "https://example.org/article?x=1#part"
-        const val TRIMMED_NOTE = "The part from ? or # on was removed because the address seems to contain a sign-in or session code."
+        const val TRIMMED_NOTE = "Only the site and path were kept because the address seems to contain a sign-in or session code."
         const val SENSITIVE_WARNING = "This address seems to contain a sign-in or session code."
         val SNAPSHOT = ReportSnapshot(
             url = PAGE_URL,

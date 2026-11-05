@@ -335,9 +335,9 @@
     <string name="report_no_screenshot_copy_failed">No screenshot: the page could not be copied.</string>
     <string name="report_no_screenshot_too_large">No screenshot: it is too large to send, even scaled down.</string>
     <string name="report_address">Address</string>
-    <string name="report_address_trim">Remove query and fragment</string>
+    <string name="report_address_trim">Keep only the site and path</string>
     <string name="report_address_restore">Restore the full address</string>
-    <string name="report_address_trimmed">The part from ? or # on was removed because the address seems to contain a sign-in or session code.</string>
+    <string name="report_address_trimmed">Only the site and path were kept because the address seems to contain a sign-in or session code.</string>
     <string name="report_address_sensitive">This address seems to contain a sign-in or session code.</string>
     <string name="report_address_blank">Enter the page’s address.</string>
     <string name="report_address_too_long">This address is too long to send.</string>

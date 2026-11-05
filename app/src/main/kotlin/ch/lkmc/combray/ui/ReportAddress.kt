@@ -11,22 +11,34 @@ internal object ReportAddress {
     /** What the report service refuses in an address: C0, DEL and C1 controls, line breaks included. */
     private val CONTROL = Regex("[\\u0000-\\u001f\\u007f-\\u009f]")
 
+    private const val AUTHORITY_START = "://"
+
     /**
-     * [url] without its query and fragment: everything from the first `?` or `#` on. A
-     * serialized URL percent-encodes both characters before its query, so scheme, user
-     * information, host, port and path are never cut. Text without either is returned as is.
+     * [url] with only its scheme, host, port and path: user information, path parameters
+     * (`/cart;jsessionid=…`), query and fragment go, as any of them can carry a sign-in or
+     * session code. A serialized URL percent-encodes `?` and `#` before its query and `@` in its
+     * user information, so no cut splits a host or a path segment's name. Text without `://`
+     * has no authority or path to read: only its query and fragment go.
      */
-    fun trimQueryAndFragment(url: String): String {
+    fun siteAndPath(url: String): String {
         val cut = url.indexOfFirst { it == '?' || it == '#' }
-        return if (cut < 0) url else url.substring(0, cut)
+        val address = if (cut < 0) url else url.substring(0, cut)
+        val separator = address.indexOf(AUTHORITY_START)
+        if (separator < 0) return address
+
+        val authorityStart = separator + AUTHORITY_START.length
+        val pathStart = address.indexOf('/', authorityStart).takeIf { it >= 0 } ?: address.length
+        val hostAndPort = address.substring(authorityStart, pathStart).substringAfterLast('@')
+        val path = address.substring(pathStart).split('/').joinToString("/") { it.substringBefore(';') }
+        return address.substring(0, authorityStart) + hostAndPort + path
     }
 
     /**
      * The address a new report starts with. Proposed default (open question 1, not an owner
      * decision): the full address, unless it looks like it carries a sign-in or session code;
-     * then without query and fragment, and one tap restores it.
+     * then only its [siteAndPath], and one tap restores it.
      */
-    fun starting(url: String): String = if (SensitiveUrls.looksSensitive(url)) trimQueryAndFragment(url) else url
+    fun starting(url: String): String = if (SensitiveUrls.looksSensitive(url)) siteAndPath(url) else url
 
     /** Null when the service would accept [text] as the report's address. */
     fun problem(text: String): ReportAddressProblem? = when {

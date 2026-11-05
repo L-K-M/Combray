@@ -119,7 +119,7 @@ internal fun ReportSheetContent(
     var includeScreenshot by rememberSaveable(draft.id) { mutableStateOf(true) }
     val addressProblem = ReportAddress.problem(address)
     val sensitive = remember(address) { SensitiveUrls.looksSensitive(address) }
-    val trimmed = ReportAddress.trimQueryAndFragment(address)
+    val trimmed = ReportAddress.siteAndPath(address)
     val encoding = includeScreenshot && shot is ReportShot.Pending
     val send: () -> Unit = { draft.toDraft(ReportForm(address, title, comment, includeScreenshot), shot)?.let(onSend) }
 
