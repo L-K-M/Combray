@@ -655,7 +655,7 @@ class PngStructureTest(unittest.TestCase):
             self.build(bad_idat, support.chunk(b"IEND")), 3, 2, "chunk CRC mismatch"
         )
         bad_ihdr = bytearray(PNG)
-        bad_ihdr[20] ^= 0x01  # A width byte; the IHDR CRC no longer matches.
+        bad_ihdr[20] ^= 0x01  # A height byte; the IHDR CRC no longer matches.
         self.assert_png_rejected(bytes(bad_ihdr), 3, 2, "chunk CRC mismatch")
 
     def test_chunk_types_are_four_ascii_letters(self) -> None:
