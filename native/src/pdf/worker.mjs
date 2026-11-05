@@ -213,8 +213,11 @@ export class PdfDocument {
         };
         const [x0, y0] = corner(module.getValue(rect, "float"), module.getValue(rect + 4, "float"));
         const [x1, y1] = corner(module.getValue(rect + 8, "float"), module.getValue(rect + 12, "float"));
-        const box = [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
-        found.push({ rect: box.map((value) => Math.min(1, Math.max(0, value))), ...target });
+        const box = [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]
+          .map((value) => Math.min(1, Math.max(0, value)));
+        // A link off the page (outside its crop box) has no area left: nobody could see or tap it.
+        if (box[2] <= box[0] || box[3] <= box[1]) continue;
+        found.push({ rect: box, ...target });
       }
     } finally {
       module._free(scratch);

@@ -74,7 +74,7 @@ Pages
                                pages.pdf        300 pages: sand, then navy; PDF-PAGES-TITLE
                                page-link.pdf    teal, linked to page 3 (sand), then navy
                                web-link.pdf     teal, linked to /solid/2e6b4f.html; javascript:, file: and
-                                                intent: links below the band
+                                                intent: links below the band, an https: one off the page
                                cookie.pdf       plum, PDF-COOKIE-TITLE with the /cookie-set cookie, else 403
                                attachment.pdf   plum, PDF-ATTACHMENT-TITLE, Content-Disposition: attachment
                                corrupt.pdf      %PDF- and then nothing PDFium reads
@@ -354,11 +354,13 @@ PDF_ATTACHMENT = pdf_file([(PDF_PLUM, "PDF-ATTACHMENT-TEXT", [])], title="PDF-AT
 
 
 def pdf_web_link(target):
-    """A one-page PDF whose band links to `target`; links PDFs may not follow sit under the band."""
+    """A one-page PDF whose band links to `target`; links PDFs may not follow sit under the band,
+    and one lies off the page."""
     ignored = [
         ((0.05, 0.62, 0.3, 0.7), ("uri", "javascript:document.title='PDF-SCRIPT-RAN'")),
         ((0.35, 0.62, 0.6, 0.7), ("uri", "file:///system/etc/hosts")),
         ((0.65, 0.62, 0.95, 0.7), ("uri", "intent://fixture#Intent;scheme=http;end")),
+        ((1.1, 0.1, 1.3, 0.2), ("uri", "https://example.test/off-the-page")),
     ]
     return pdf_file([(PDF_TEAL, "PDF-LINK-WEB", [(PDF_LINK_RECT, ("uri", target))] + ignored)],
                     title="PDF-WEB-LINK-TITLE")
