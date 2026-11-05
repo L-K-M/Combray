@@ -35,6 +35,8 @@ class OutboxDispatcher(
     private val scheduler: WakeupScheduler,
     private val leaseMs: Long = LEASE_MS,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Runs after each prune, at the start and end of every drain (removes unused report files). */
+    private val housekeeping: suspend () -> Unit = {},
 ) {
     private val running = Mutex()
 
@@ -51,6 +53,7 @@ class OutboxDispatcher(
             // Claiming expires captures past their age limit first (Outbox.claim), so a prune
             // failure only delays housekeeping: it must not stall every job kind.
             step { outbox.prune() }
+            step { housekeeping() }
             while (processed < maxJobs) {
                 claimFailed = true
                 val claim = step { outbox.claim(owner, leaseMs).also { claimFailed = false } } ?: break
@@ -69,6 +72,7 @@ class OutboxDispatcher(
                 if (finished == true) sent++
             }
             step { outbox.prune() }
+            step { housekeeping() }
         } finally {
             // Booked even when this coroutine is cancelled or storage is down: a broken step
             // or a cancelled drain must not strand the jobs behind it until the next kick.

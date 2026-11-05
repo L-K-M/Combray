@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-enum class ServiceKind { KARAKEEP, HISTER }
+enum class ServiceKind { KARAKEEP, HISTER, SITE_REPORTS }
 
 /**
  * A configured service. The secret (API key, token) is not here: it lives in the protected
@@ -31,7 +31,17 @@ data class ServiceEntity(
     val roots get() = listOfNotNull(baseUrl, alternateUrl)
 }
 
-enum class JobKind { KARAKEEP_SAVE, HISTER_ADD }
+enum class JobKind {
+    KARAKEEP_SAVE,
+    HISTER_ADD,
+
+    /**
+     * A report the user sent with More › Report this site. Deliberate like a save, so it is
+     * parked on a destination change; its payload references a screenshot file that is kept
+     * until the job is finished.
+     */
+    SITE_REPORT,
+}
 
 enum class JobState {
     PENDING,
@@ -55,8 +65,9 @@ enum class JobState {
     EXPIRED,
 
     /**
-     * Parked: a save queued for a main address that is no longer configured. It keeps its old
-     * fingerprint, so nothing sends it until the user sends it to the current address or discards it.
+     * Parked: a save or report queued for a main address that is no longer configured. It keeps
+     * its old fingerprint, so nothing sends it until the user sends it to the current address or
+     * discards it.
      */
     DESTINATION_CHANGED,
     ;

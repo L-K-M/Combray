@@ -135,6 +135,8 @@ class Integrations(
     fun jobUrl(job: OutboxJobEntity): String? = when (job.kind) {
         JobKind.KARAKEEP_SAVE -> runCatching { json.decodeFromString(SavePayload.serializer(), job.payload).url }.getOrNull()
         JobKind.HISTER_ADD -> runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
+        // Site reports are not sent yet: nothing queues one before their integration exists.
+        JobKind.SITE_REPORT -> null
     }
 
     /**
