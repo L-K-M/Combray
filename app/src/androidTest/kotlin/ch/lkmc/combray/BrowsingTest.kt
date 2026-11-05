@@ -342,6 +342,18 @@ class BrowsingTest {
     }
 
     @Test
+    fun closingATransferredMessagePortKeepsThePageRunning() {
+        device.browser.openUrl(Fixtures.PORT_CLOSE, Placement.CURRENT_TAB)
+        val state = device.awaitState {
+            val tab = it.activeTab
+            val title = tab?.title.orEmpty()
+            tab != null && (tab.crashed || title.startsWith(PORT_CLOSE_PREFIX) && title != PORT_CLOSE_WAITING)
+        }
+        assertFalse("the page crashed", state.activeTab?.crashed == true)
+        assertEquals(PORT_CLOSE_OK, state.activeTab?.title)
+    }
+
+    @Test
     fun pagesSeeAScreenAtLeastAsWideAsTheirWindow() {
         device.browser.openUrl(Fixtures.SCREEN, Placement.CURRENT_TAB)
         val state = device.awaitState { it.activeTab?.title?.startsWith(SCREEN_PREFIX) == true }
@@ -558,6 +570,9 @@ class BrowsingTest {
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val PORT_CLOSE_PREFIX = "PC:"
+        const val PORT_CLOSE_WAITING = "PC:waiting"
+        const val PORT_CLOSE_OK = "PC:ok"
         const val APIS_PREFIX = "XP:"
         const val APIS_WAITING = "XP:waiting"
         const val APIS_OK = "XP:ok"

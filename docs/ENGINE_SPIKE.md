@@ -2376,3 +2376,88 @@ had room. The candidate backports upstream's fix (`f80ad0305e2`).
 
 Limitations: engine evidence is from desktop servoshell and the API 30
 emulator. The phone result is pending.
+
+## 42. Frozen pages after a script thread panic (4 November 2026)
+
+Validated source: `7c7e2069db9eb6c90e34333cc43928acb5390c2b` on `combray/0.7`,
+which merges downstream [PR #28](https://github.com/L-K-M/servo/pull/28) onto
+the §41 source `825ef1f0356`. The "before" evidence below comes from the pin
+before §41, `6fbfc3d70ad`; neither has the port fixes.
+
+### Report and reproduction
+
+The owner reported an article page (not named here) that did not scroll and
+sometimes crashed Combray. With the CI arm64 APK of `6fbfc3d70ad` on an arm64
+API 36 emulator:
+
+- 2 to 6 seconds after the page loads, a script thread panics:
+  `close_message_port called on an unknown port` (`globalscope.rs:854`).
+  The page's bot-detection script transfers a `MessagePort` and then calls
+  `close()` on the object it keeps.
+- The page stays on screen, but swipes move only the bottom bar; later frames
+  lose the page's text. "This page stopped working" never appears.
+- Served through a local proxy that leaves out that one script, the same
+  build loads the page and scrolls it to the footer. The frozen page is the
+  panic's consequence, not a layout or input problem.
+
+Synthetic case: `const {port1} = new MessageChannel(); window.postMessage("x",
+"*", [port1]); port1.close();`, or the same with `MessagePort.postMessage` or
+`Worker.postMessage`. Desktop servoshell at `6fbfc3d70ad` crashes on all
+three.
+
+### Mechanism
+
+- v0.7.0 panics when `close()` reaches a port its global no longer manages.
+  Upstream fixed this on 4 November 2026 (`20b7ad33607`).
+- Even without the panic, closing the object a transfer leaves behind
+  disentangled the channel: the remote port got a `close` event and stopped
+  delivering to the transferred port.
+- Servo learns that a script thread died only from a panic report sent by its
+  own logger (`Servo::setup_logging`). Combray installs Android's logger, so
+  the report never reached the constellation: no crash page, no
+  `notify_crashed`, and the dead page kept its last frame.
+
+### Changes
+
+- Downstream: the upstream fix, cherry-picked; `close()` on a detached port
+  does nothing, as in Chromium and Gecko; `Servo::panic_reporter` returns a
+  `PanicReporter` whose `report_panic` sends the panic report from an
+  embedder's own panic hook.
+- Here: the panic hook reports panics on Servo's threads through that
+  reporter while Servo runs (`PanicAction::ReportAndUnwind` in
+  `native/src/panic_policy.rs`). Panics Servo recovers from stay unreported;
+  an engine thread panic outside a recoverable operation still aborts. Servo
+  then crashes the thread's pages, and the app shows its existing "This page
+  stopped working" notice with Reload. Servo's default options exit the
+  process once a reported panic reaches the constellation (`hard_fail`, meant
+  for test runners); Combray turns that off, as servoshell does by default.
+
+### Checks
+
+- Downstream, desktop servoshell (`--profile medium`): the new WPT test
+  `messageport-close-after-transfer.html` crashes at `6fbfc3d70ad`; with
+  only the backport its channel subtest times out; with both changes it
+  passes. `webmessaging/`, the upstream crash test and the port-origin test:
+  165 as expected. `streams/transferable/`, the worker event-properties test
+  and `structured-clone/`: 18 as expected. The validated source, rebuilt after
+  merging the flex change: the same port tests with `streams/transferable/`,
+  162 as expected. The new `panic_reporter`
+  integration test passes, and fails after its 30-second bound when the hook
+  does not call `report_panic`; the existing `crash` test passes. No new
+  `./mach test-tidy` findings.
+- Site check against Chromium: the reported page is `crash` at `6fbfc3d70ad`
+  and `ok` with the change.
+- Here: `cargo test --lib` (149 passed) and `cargo fmt --check` on the host.
+- Android, arm64 API 36 emulator, CI-built APKs of a temporary probe (the
+  `PanicReporter` commit without the port fixes, with this hook): the page's
+  panic now reaches `handle_panic` (`hard_fail=false`, one WebView, two
+  pipelines), the delegate gets `notify_crashed`, and the app shows "This page
+  stopped working" with Reload instead of the frozen page. Reload replaces
+  the renderer; that engine panics again and the notice returns, with the
+  process alive throughout. The probe's x86_64 fixture checks all passed.
+- New device check: `BrowsingTest#closingATransferredMessagePortKeepsThePageRunning`
+  opens the fixture `/port-close.html`, which transfers a port, closes the
+  object left behind and expects a message through the channel (`PC:ok`).
+  Desktop servoshell at `6fbfc3d70ad` panics on it; at this pin it reaches
+  `PC:ok`. On the emulator it runs in this PR's Engine workflow with the other
+  fixture checks.
