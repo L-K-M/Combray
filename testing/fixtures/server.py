@@ -72,10 +72,19 @@ service's own host is never captured for Hister)
   key "fixture-key"
 Fake Hister (root http://10.0.2.2:8766/hister on the emulator)
   POST /hister/api/add (needs Origin: hister://), GET /hister/search?q=&format=json; token "fixture-token"
+Fake report service (root http://10.0.2.2:8766/reports on the emulator; reporter token
+"fixture-reporter-token")
+  GET /reports/v1/whoami, POST /reports/v1/reports. A report is checked by the real service's
+  rules (services/site-reports/site_reports/validation.py), so a passing device check proves the
+  phone's request passes them. A repeated id with the same content answers 200, with other
+  content 409 id_conflict. Bodies over 12 MiB answer 413 unread; the shared 2 MiB cap does not
+  apply. /_admin/state "reports" holds each report's validated metadata, never its PNG.
 Admin (for the checks)
-  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, request log, media
+  GET  /_admin/state                    JSON: bookmarks, lists, hister documents, reports, request log, media
+  GET  /_admin/report-screenshot?id=<report id>
+                                        the PNG a report carried (404 when it had none)
   POST /_admin/reset                    forget everything
-  POST /_admin/fault?service=karakeep|hister&kind=<fault>&count=<n>
+  POST /_admin/fault?service=karakeep|hister|reports&kind=<fault>&count=<n>
        faults: none, store_then_hang, too_many_requests, server_error, unauthorized
 """
 
@@ -94,10 +103,24 @@ import threading
 import time
 import urllib.parse
 
+# The report service's own validation, so the fake accepts exactly what the service accepts.
+# Appended, not prepended: the standard library keeps precedence over that directory.
+SITE_REPORTS_DIR = pathlib.Path(__file__).resolve().parents[2] / "services" / "site-reports"
+if str(SITE_REPORTS_DIR) not in sys.path:
+    sys.path.append(str(SITE_REPORTS_DIR))
+from site_reports import API_VERSION as REPORTS_API_VERSION  # noqa: E402
+from site_reports import SERVICE_NAME as REPORTS_SERVICE_NAME  # noqa: E402
+from site_reports import validation as report_validation  # noqa: E402
+
 DEFAULT_PORT = 8766
 KARAKEEP_KEY = "fixture-key"
 SIGN_IN = ("ada", "lovelace")
 HISTER_TOKEN = "fixture-token"
+REPORTER_TOKEN = "fixture-reporter-token"
+# The report service's defaults (REPORTS_MAX_REQUEST_MB, REPORTS_MAX_SCREENSHOT_MB).
+MAX_REPORT_BODY_BYTES = 12 * 1024 * 1024
+MAX_REPORT_SCREENSHOT_BYTES = 8 * 1024 * 1024
+REPORTS_PREFIX = "/reports/v1"
 HANG_SECONDS = 20
 # Long enough for a check to see the tab loading before the page commits.
 SLOW_PAGE_SECONDS = 8
@@ -161,8 +184,11 @@ def fresh_media():
     return {"requests": 0, "completed": 0, "clip": fresh_served(), "tone": fresh_served(), "redirects": 0}
 
 
-state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "log": [], "media": fresh_media(), "stop_loads": {}}
-faults = {"karakeep": ["none", 0], "hister": ["none", 0]}
+state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "reports": {}, "log": [], "media": fresh_media(),
+         "stop_loads": {}}
+faults = {"karakeep": ["none", 0], "hister": ["none", 0], "reports": ["none", 0]}
+# Report id -> the PNG it carried; kept out of the JSON state, which holds metadata only.
+report_screenshots = {}
 once_served = set()  # /once.html keys already answered (a set, so not part of the JSON state)
 scroll_load_finished = threading.Event()
 stop_load_gates = {}
@@ -905,15 +931,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # Like the pinned server: always present, empty when there is no next page.
                 "page_key": "",
             })
+        if path == f"{REPORTS_PREFIX}/whoami":
+            if not self.reports_authorized():
+                return self.send_json(401, {"error": "unauthorized"})
+            self.record({"service": "reports", "method": "GET", "path": "whoami"})
+            return self.send_json(200, {"service": REPORTS_SERVICE_NAME, "api": REPORTS_API_VERSION, "role": "reporter"})
         if path == "/_admin/state":
             with lock:
                 return self.send_json(200, state)
+        if path == "/_admin/report-screenshot":
+            with lock:
+                png = report_screenshots.get(query.get("id", [""])[0])
+            if png is None:
+                return self.send_json(404, {"error": "no_screenshot"})
+            return self.send(200, png, "image/png")
         return self.send(404, page("not found", ""))
 
     def do_POST(self):
         url = urllib.parse.urlsplit(self.path)
         query = urllib.parse.parse_qs(url.query)
         path = url.path
+        # Before body(), which stops at MAX_BODY_BYTES: a report with a screenshot is larger.
+        if path == f"{REPORTS_PREFIX}/reports":
+            return self.reports_create()
         raw = self.body()
 
         if path == "/_admin/reset":
@@ -928,6 +968,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state["lists"].clear()
                 state["lists"].update(fresh_lists())
                 state["hister"].clear()
+                state["reports"].clear()
+                report_screenshots.clear()
                 state["log"].clear()
                 once_served.clear()
                 state["media"] = fresh_media()
@@ -1006,6 +1048,54 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if fault == "store_then_hang":
             time.sleep(HANG_SECONDS)
         return self.send_json(status, existing)
+
+    def reports_authorized(self):
+        return self.headers.get("Authorization") == f"Bearer {REPORTER_TOKEN}"
+
+    def reports_create(self):
+        """POST /reports/v1/reports, as the report service answers it (services/site-reports/README.md)."""
+        declared = self.headers.get("Content-Length", "")
+        if "Transfer-Encoding" in self.headers or not declared.isdigit():
+            self.close_connection = True
+            return self.send_json(411, {"error": "length_required"})
+        length = int(declared)
+        if length > MAX_REPORT_BODY_BYTES:
+            # Unread: the rest of the connection is body bytes, not a next request.
+            self.close_connection = True
+            return self.send_json(413, {"error": "too_large"})
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            self.close_connection = True
+            return self.send_json(400, {"error": "bad_request"})
+
+        fault = take_fault("reports")
+        if fault == "unauthorized" or not self.reports_authorized():
+            return self.send_json(401, {"error": "unauthorized"})
+        try:
+            report = report_validation.parse_report(raw, max_screenshot_bytes=MAX_REPORT_SCREENSHOT_BYTES)
+        except report_validation.ValidationError as error:
+            self.record({"service": "reports", "method": "POST", "id": None, "error": error.code})
+            return self.send_json(error.status, {"error": error.code, "field": error.field})
+        self.record({"service": "reports", "method": "POST", "id": report.id})
+        if fault == "too_many_requests":
+            return self.send_json(429, {"error": "rate_limited"}, headers=[("Retry-After", "1")])
+        if fault == "server_error":
+            return self.send_json(503, {"error": "busy"})
+
+        with lock:
+            stored = state["reports"].get(report.id)
+            created = stored is None
+            conflict = not created and report_validation.content_digest(stored) != report.content_sha256
+            if created:
+                state["reports"][report.id] = report.metadata
+                if report.screenshot is not None:
+                    report_screenshots[report.id] = report.screenshot
+        if conflict:
+            return self.send_json(409, {"error": "id_conflict"})
+        if fault == "store_then_hang":
+            time.sleep(HANG_SECONDS)
+        received = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        return self.send_json(201 if created else 200, {"id": report.id, "status": "open", "received_at": received})
 
     def send_media(self, name, data, content_type):
         """`data` with byte ranges (one range per request: 206, or 416 past the end), recording the request."""
