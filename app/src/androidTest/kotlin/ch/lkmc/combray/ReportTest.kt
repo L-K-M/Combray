@@ -185,7 +185,7 @@ class ReportTest {
         const val SHOWN = 0x7a2e3b
         const val TRIMMED = 0x2e7a3b
         const val NOT_SET_UP = 0x3b2e7a
-        const val LOST_ANSWER = 0x7a3b2e
+        const val LOST_ANSWER = 0x7a7a2e
 
         /** A hang past the timeout, a backoff and the retry, on a software-emulated device. */
         const val LOST_ANSWER_TIMEOUT_MS = 300_000L
