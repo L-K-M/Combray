@@ -293,9 +293,9 @@ class MediaPlayerTest {
     @Test
     fun aTypedSourceOffersItsVideo() {
         open(Fixtures.typedSource(key))
-        // The cancelled <source> errors, then the exhausted selection errors the <video>:
-        // two failures. A type-skipped source fires only the second, staying at errors:1.
-        device.awaitState { it.activeTab?.title == "TYPED:errors:2" }
+        // Selection fired the <source>'s error; a type-skipped source errors the same way, so
+        // the Play offer is what proves the claim matched and the fetch was cancelled.
+        device.awaitState { it.activeTab?.title == "TYPED:errors:1" }
         assertEquals("clip requests before Play", 0, clip().getInt("requests"))
         tapPlay()
 
