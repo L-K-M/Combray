@@ -618,3 +618,27 @@ test("a page that failed to draw at the old width is drawn again at the new one"
     assert.deepEqual(widths, [360 - 2 * PAGE_MARGIN, 720 - 2 * PAGE_MARGIN]);
   });
 });
+
+test("after the PDF fails to open again, no blank page or note comes back under the problem", async () => {
+  await onFakePage(async (page) => {
+    const sizes = Array.from({ length: MAX_PAGES }, () => LETTER);
+    const viewer = await openViewer(page, sizes);
+    page.dispatch("pagehide");
+    page.dispatch("pageshow", { persisted: true });
+    // A frame requested before the failure runs after it.
+    page.dispatch("scroll");
+    page.worker.fail(page.worker.requests("open")[0], { kind: "memory", message: "no memory for the PDF" });
+    await tick();
+    page.frame();
+
+    page.root.clientWidth = 720;
+    page.dispatch("resize");
+    page.dispatch("scroll");
+    page.frame();
+    assert.equal(viewer.problem, "memory");
+    assert.deepEqual(viewer.pages.children, []);
+    assert.equal(viewer.pages.style.height, "");
+    assert.equal(viewer.main.querySelector(".more"), null);
+    assert.equal(viewer.status.hidden, false);
+  });
+});

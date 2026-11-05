@@ -384,7 +384,7 @@ export class Viewer {
   }
 
   relayout() {
-    if (!this.sizes) return;
+    if (this.problem || !this.sizes) return;
     const width = document.documentElement.clientWidth || innerWidth;
     // Only the height changed (a keyboard, a bar): the same layout, other pages on screen.
     if (this.layout && width === this.layoutWidth) {
@@ -443,7 +443,7 @@ export class Viewer {
 
   /** Adds the elements of pages near the screen, removes the others, and draws what is missing. */
   update() {
-    if (this.stopped || !this.layout) return;
+    if (this.stopped || this.problem || !this.layout) return;
     const top = scrollY;
     const height = innerHeight;
     const near = pagesBetween(this.layout.pages, top - NEAR_SCREENS * height, top + (1 + NEAR_SCREENS) * height);
@@ -629,6 +629,8 @@ export class Viewer {
     this.problem = kind;
     const [heading, detail] = PROBLEM[kind](...values);
     this.pages.replaceChildren();
+    this.pages.style.height = "";
+    this.main.querySelector(".more")?.remove();
     this.views.clear();
     this.main.setAttribute("aria-busy", "false");
     this.status.replaceChildren();
