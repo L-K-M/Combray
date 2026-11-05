@@ -123,6 +123,48 @@ class StopFixtureTest(unittest.TestCase):
         self.assertEqual(1, counts["finished"])
 
 
+class ReusedCloseFixtureTest(unittest.TestCase):
+    """/reused-close.html answers a connection's first request and drops a later one unanswered."""
+
+    TIMEOUT_SECONDS = 5
+
+    def setUp(self):
+        self.fixture = load_server()
+        self.fixture.log_request_line = lambda method, target, now=None: None
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.fixture.Handler)
+        self.worker = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.worker.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.worker.join()
+
+    def connection(self):
+        return http.client.HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=self.TIMEOUT_SECONDS)
+
+    def test_a_reused_connection_is_closed_unanswered_and_a_new_one_answered(self):
+        kept = self.connection()
+        kept.request("GET", "/solid/2e6b4f.html")
+        first = kept.getresponse()
+        first.read()
+        self.assertEqual(200, first.status)
+
+        kept.request("GET", "/reused-close.html?k=check")
+        with self.assertRaises(http.client.RemoteDisconnected):
+            kept.getresponse()
+        kept.close()
+
+        fresh = self.connection()
+        fresh.request("GET", "/reused-close.html?k=check")
+        answer = fresh.getresponse()
+        self.assertEqual(200, answer.status)
+        self.assertIn("<title>FRESH</title>", answer.read().decode())
+        fresh.close()
+
+        self.assertEqual({"answered": 1, "dropped": 1}, self.fixture.state["reused_close"]["check"])
+
+
 class ReportServiceTest(unittest.TestCase):
     """The fake report service the device checks send to (design: real validation, own limits)."""
 

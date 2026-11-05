@@ -2494,7 +2494,7 @@ The engine change is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on
 `combray/0.7`, the merge commit of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
 (`engine/pdf-viewer-document`), merged on 4 November 2026; upstream base
-still v0.7.0. Combray pins `7c7e2069db9e` (section 42), which adds only
+still v0.7.0. Section 42's pin `7c7e2069db9e` (section 45 moves past it) adds only
 the flex sizing fix of
 [L-K-M/servo#27](https://github.com/L-K-M/servo/pull/27) (section 41) and
 the port close and panic report fixes of
@@ -2696,3 +2696,85 @@ Combray's address bar does, does not abort it (Servo keeps the old
 document in session history), so that download continues in the
 background up to the cap; and the network layer notices a cancelled
 fetch only when the next chunk arrives.
+
+## 45. Requests on a dropped pooled connection (5 November 2026)
+
+Validated source: `0bf44ec270a049eed4a7af96050b97603567680b` on `combray/0.7`, which merges downstream
+[PR #31](https://github.com/L-K-M/servo/pull/31) onto `b212be3ebc`. That base adds
+[PR #29](https://github.com/L-K-M/servo/pull/29) (inline box content size floored at zero) and
+[PR #30](https://github.com/L-K-M/servo/pull/30) (`overflow: hidden` on inline SVG roots) to the
+§42 pin; this pin is the first to carry them.
+
+### Report
+
+The owner reported a video page (not named here) that showed "Could not load the requested
+page: client error (SendRequest)" with the address bar's warning sign. On an arm64 API 36
+emulator, twice each:
+
+- The CI arm64 APK of `6fbfc3d70ad` (main's pin until #185 landed on 5 November 2026 at
+  01:53 UTC) shows exactly that screen. The error page keeps the address the navigation
+  started from, which is why the bar shows the first host and not the redirect's target.
+- The APK of main at `532d88a` (pin `7c7e2069db9`) loads the page.
+
+The page redirects to a host whose HTTP/2 response carries a 19,920-byte header list (measured
+with curl and the app's user agent), over hyper's 16 KiB default: the §43 limit, which main has
+carried since #185. A phone build from before #185 needs updating; that page needs no further
+change.
+
+### Second cause of the same message
+
+`client error (SendRequest)` is hyper-util's error for a request that reached a connection and
+then failed before a response. hyper-util sends a request again only when it never reached a
+connection. A request written to an idle pooled connection that the server or the network had
+already closed therefore fails, although nothing answered it: a server's idle timeout can race
+the request, and the socket of an idle connection can die unnoticed while a phone sleeps or
+switches between Wi-Fi and mobile data. Servo shows its network error page; Chromium sends the
+request again on a new connection. Servo did that too with synchronous hyper (`6079dd4de7`,
+2017).
+
+Synthetic reproduction: an HTTP/1.1 server answers the first request on a keep-alive connection,
+then reads the next request on it and closes the connection without answering.
+
+- Desktop servoshell at `b212be3ebc`: `Error(SendRequest, hyper::Error(IncompleteMessage))` and
+  the error page. Chromium (Playwright's headless shell) sends the request again on a second
+  connection and loads the page.
+- Android, main's APK at `532d88a`, the fixture `/reused-close.html` after a solid page: the same
+  error page, and the fixture counts the request as dropped with no second attempt.
+
+### Changes
+
+- Downstream (PR #31): a request without a body goes out once more, on a client that opens a new
+  connection, when its pooled connection failed before any response, and either its method is
+  idempotent and the connection closed or was reset, an HTTP/2 `GOAWAY` without error included
+  (RFC 9110, section 9.2.2), or the server guarantees it did not process the request: hyper never
+  wrote it, or an HTTP/2 `REFUSED_STREAM` (RFC 9113, section 8.7). A `GOAWAY` is no such
+  guarantee, because h2 also hands it to a stream it had just opened below the GOAWAY's last
+  stream id (found in review). Requests with a body (Servo streams them from their source once),
+  failures to connect and other errors, such as an HTTP/2 stream reset for another reason, fail
+  as before. `h2` becomes a direct dependency of `servo-net`.
+- Here: `native/Cargo.lock` gains that dependency edge (no new crate), the notices are
+  regenerated, the fixture serves `/reused-close.html` (answered as a connection's first request,
+  dropped unanswered on a reused one, counted in `/_admin/state` "reused_close"), and
+  `BrowsingTest#aRequestOnAConnectionTheServerDroppedIsSentAgain` opens it after a solid page and
+  expects the page, one dropped request and one answered one.
+
+### Checks
+
+- Downstream, desktop servoshell (`--profile medium`): the new `servo-net` tests
+  `connection_reuse` (seven cases) pass; with the second attempt switched off in the same binary,
+  every case that expects one failed with `client error (SendRequest)`, and the cases that must
+  not send again passed. Full `servo-net` integration tests 399 of 400 (the remaining
+  `test_filemanager` failure passes alone, as in §43); fetch WPT `api/basic`, `api/headers` and
+  `api/redirect` 213 as expected; no new `./mach test-tidy` findings. The synthetic servoshell run
+  above sends the dropped request again on a second connection.
+- Reviews: GLM 5.3 workflow review on the downstream PR in three rounds (two claims refuted with
+  hyper-util's source, the last two rounds without important findings) and independent helper
+  reviews (Devin SWE-2 max, GLM 5.3, DeepSeek V4.1 Flash). Devin found that h2 also reports a
+  `GOAWAY` without error to a stream just opened below its last stream id; that `GOAWAY` now lets
+  only idempotent requests go out again.
+- Here: `cargo metadata --locked` in `native/` passes with the new pin and the added edge, and fails
+  without it; the regenerated notices differ only in the hashes of `native/Cargo.lock` and the
+  pin. `scripts/tests/test_fixture_server.py` covers `/reused-close.html` over a kept-alive
+  connection. The new device check and the rest of the fixture suite run on the x86_64 emulator in
+  this PR's Engine workflow; that run is the evidence for this pin. Resource timing and devtools
+  still show one attempt for a request sent again (follow-up).

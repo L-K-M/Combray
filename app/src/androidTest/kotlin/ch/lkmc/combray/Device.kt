@@ -69,6 +69,14 @@ object Fixtures {
 
     const val ONCE_TITLE = "ONCE"
 
+    /**
+     * Answered (title [FRESH_TITLE]) as a connection's first request; on a connection that already
+     * carried one, the fixture closes it unanswered. [state] "reused_close" counts both per [key].
+     */
+    fun reusedClose(key: String) = "$BASE/reused-close.html?k=$key"
+
+    const val FRESH_TITLE = "FRESH"
+
     /** Titled `SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth>` as the page reads them. */
     const val SCREEN = "$BASE/screen.html"
 

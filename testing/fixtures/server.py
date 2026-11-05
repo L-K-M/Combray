@@ -15,6 +15,11 @@ Pages
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /once.html?k=<alnum>       title ONCE on the first request per key; later ones close unanswered
                              (a reload that fails like a lost connection)
+  /reused-close.html?k=<alnum>
+                             title FRESH when it is a connection's first request; on a connection that
+                             already carried a request it closes the connection unanswered, as a server
+                             whose idle timeout races the request. /_admin/state "reused_close" counts,
+                             per key, the requests "answered" and "dropped"
   /private.html              page for exclusion checks
   /slow.html                 answers after SLOW_PAGE_SECONDS; title SLOW
   /stop-loading.html?k=<key>  committed article, heartbeat title and held parser-blocking script
@@ -206,7 +211,7 @@ def fresh_media():
 
 
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "reports": {}, "log": [], "media": fresh_media(),
-         "pdf": {}, "stop_loads": {}}
+         "pdf": {}, "stop_loads": {}, "reused_close": {}}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0], "reports": ["none", 0]}
 # Report id -> the PNG it carried; kept out of the JSON state, which holds metadata only.
 report_screenshots = {}
@@ -834,6 +839,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not super().parse_request():
             return False
         log_request_line(self.command, self.path)
+        # One handler serves one connection: /reused-close.html tells a reused connection apart.
+        self.requests_on_connection = getattr(self, "requests_on_connection", 0) + 1
         return True
 
     def send(self, status, body=b"", content_type="text/html; charset=utf-8", headers=()):
@@ -1073,6 +1080,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # No response at all: the engine sees a network failure and commits its error page.
             self.close_connection = True
             return None
+        if path == "/reused-close.html":
+            key = "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:40]
+            if not key:
+                return self.send(400, page("REUSED-CLOSE-NEEDS-K", "<p>missing or empty k</p>"))
+            reused = self.requests_on_connection > 1
+            with lock:
+                counts = state["reused_close"].setdefault(key, {"answered": 0, "dropped": 0})
+                counts["dropped" if reused else "answered"] += 1
+            if not reused:
+                return self.send(200, page("FRESH", "<p>FRESH</p>"))
+            # Read and dropped: the client cannot tell whether the request was processed.
+            self.close_connection = True
+            return None
         if path == "/auth.html":
             expected = "Basic " + base64.b64encode(":".join(SIGN_IN).encode()).decode()
             if self.headers.get("Authorization") == expected:
@@ -1145,6 +1165,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     gate.set()
                 stop_load_gates.clear()
                 state["stop_loads"].clear()
+                state["reused_close"].clear()
             with lock:
                 state["bookmarks"].clear()
                 state["lists"].clear()
