@@ -304,6 +304,28 @@ APIS_PAGE = page(
     "} catch (e) { fail(e.message); }</script>",
 )
 
+# Reports in its title whether the page survives closing a message port it has just transferred,
+# and whether the transferred port keeps its channel. Servo 0.7.0 panicked the page's script
+# thread on that close() and left the page frozen.
+PORT_CLOSE_PAGE = page(
+    "PC:waiting",
+    "<p>ports</p><script>"
+    "function fail(why) { document.title = 'PC:fail:' + why; }"
+    "try {"
+    " var channel = new MessageChannel();"
+    " window.addEventListener('message', function (event) {"
+    "  var moved = event.ports[0];"
+    "  if (!moved) return fail('no port');"
+    "  moved.onmessage = function (m) {"
+    "   document.title = m.data === 'ping' ? 'PC:ok' : 'PC:fail:data ' + m.data;"
+    "  };"
+    "  channel.port2.postMessage('ping');"
+    " });"
+    " window.postMessage('port', '*', [channel.port1]);"
+    " channel.port1.close();"
+    "} catch (e) { fail(e.message); }</script>",
+)
+
 # Reports in its title whether element animations work: docs.mistral.ai runs an endless marquee
 # through Element.animate() and shows an error page without it.
 ANIMATE_PAGE = page(
@@ -682,6 +704,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, INTERSECTION_PAGE)
         if path == "/animate.html":
             return self.send(200, ANIMATE_PAGE)
+        if path == "/port-close.html":
+            return self.send(200, PORT_CLOSE_PAGE)
         if path == "/apis.html":
             return self.send(200, APIS_PAGE)
         if path in {"/stop-loading.html", "/stop-loading.js", "/stop-loading-pending.html"}:
