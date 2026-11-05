@@ -141,6 +141,12 @@ object Fixtures {
     /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
     const val ZOOM = "$BASE/zoom.html"
 
+    /**
+     * A row of an icon and a long sentence in an auto grid column, titled
+     * `FIT:<scrollWidth>:<innerWidth>` on load and on every resize.
+     */
+    const val FIT_WIDTH = "$BASE/fit-width.html"
+
     /** A transparent fixed drawer over the page, optionally held loading by an image. */
     const val FIXED_SCROLL = "$BASE/fixed-scroll.html"
 
