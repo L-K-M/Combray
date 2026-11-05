@@ -1,5 +1,5 @@
 # Exact tag and index digest, resolved 4 November 2026; Dependabot (docker, /services/site-reports) bumps both.
-FROM python:3.13.18-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1
+FROM python:3.15.0-slim-trixie@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58
 
 # Inside the container the service listens on every interface; Compose
 # publishes the port on the host address it names (loopback by default).
