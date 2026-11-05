@@ -296,6 +296,30 @@
     <string name="hister_exclusion_invalid">Enter a site name, like example.org.</string>
     <string name="hister_queue_title">Unfinished captures</string>
 
+    <!-- Site reports -->
+    <string name="reports_title">Site reports</string>
+    <string name="reports_explanation">More › Report this site sends what its preview shows to your own report service. Nothing is sent until you tap Send.</string>
+    <string name="reports_url_hint">https://reports.example.org</string>
+    <string name="reports_token">Reporter token</string>
+    <string name="reports_token_saved">A reporter token is saved. Enter a new one to replace it.</string>
+    <string name="settings_root_invalid_reports">Enter the report service’s web address, like https://reports.example.org.</string>
+    <string name="settings_root_cleartext_reports">This service is reached over plain HTTP: anyone on the same network can read the reporter token and your reports, screenshots included.</string>
+    <string name="check_token_unauthorized_reports">The report service did not accept this token for sending reports. Use the reporter token.</string>
+    <string name="check_wrong_address_reports">The server answered, but not like the report service (HTTP %1$d). Check the address.</string>
+    <plurals name="reports_remove_body">
+        <item quantity="one">The service address and reporter token are forgotten. %1$d unsent report is cancelled and its screenshot deleted.</item>
+        <item quantity="other">The service address and reporter token are forgotten. %1$d unsent reports are cancelled and their screenshots deleted.</item>
+    </plurals>
+    <string name="reports_queue_title">Unsent reports</string>
+    <string name="queue_paused_reports">Paused: the token was rejected or changed (%1$s)</string>
+    <string name="action_resume_reports">Send paused reports with the current token</string>
+    <plurals name="queue_parked_reports">
+        <item quantity="one">%1$d report was queued for the previous address.</item>
+        <item quantity="other">%1$d reports were queued for the previous address.</item>
+    </plurals>
+    <string name="action_discard_parked_reports">Discard the reports queued for the previous address</string>
+    <string name="discard_parked_reports_title">Discard these reports?</string>
+
     <!-- Search all history -->
     <string name="search_all_hint">Words you remember, searched in Hister…</string>
     <string name="search_all_not_configured">Connect Hister in Settings to search all history.</string>
