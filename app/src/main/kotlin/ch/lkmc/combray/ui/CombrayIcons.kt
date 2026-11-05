@@ -46,6 +46,12 @@ internal val ScheduleIcon: ImageVector = materialIcon(
         "M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z",
 )
 
+/** Material's "outlined_flag": Report this site. */
+internal val OutlinedFlagIcon: ImageVector = materialIcon(
+    "OutlinedFlag",
+    "M14 6l-1-2H5v17h2v-7h5l1 2h7V6h-6zm4 8h-4l-1-2H7V6h5l1 2h5v6z",
+)
+
 /** A 24dp icon of one filled path; [Icon][androidx.compose.material3.Icon] tints it. */
 private fun materialIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
     .addPath(addPathNodes(pathData), fill = SolidColor(Color.Black))

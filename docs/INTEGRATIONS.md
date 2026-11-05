@@ -55,6 +55,14 @@ The official [default search configuration](https://help.kagi.com/kagi/getting-s
 
 The same page advertises autosuggest, which is intentionally deferred so typing stays local. Kagi documents [private browser sessions](https://help.kagi.com/kagi/privacy/private-browser-sessions.html); a login link is sensitive and is not an ordinary history item. Do not implement a guessed token parameter. Native integration keys must not be inserted into web URLs.
 
+## Site reports
+
+Combray's own service, not a third-party one: the contract is owned in this repository, in [`services/site-reports/`](../services/site-reports/README.md#api-reference), so there is no external source to inspect. It is versioned under `/v1`, and [`tests/data/report-v1.json`](../services/site-reports/tests/data/report-v1.json) is the golden phone request that both sides test against.
+
+- The phone uses two routes with a reporter token: `POST /v1/reports`, idempotent on the report id the phone generates (a repeat with the same content is 200 with the current status, different content 409 `id_conflict`), and `GET /v1/whoami` for Settings' Check connection.
+- Paseo uses the agent routes with an agent token: list, read, download the screenshot, change status with an optional `expect` (compare-and-set), and delete. Neither token can do the other role's work.
+- Evidence so far: the service's unit tests and a container smoke test that posts the golden request (`.github/workflows/site-reports.yml`); the app's client test, whose request body equals the golden request; and the fixture server's fake report service, which checks every report from the device checks with the service's own validation. Those device checks passed on the x86_64 emulator in the Engine workflow, and no deployment on the owner's server or behind `tailscale serve` has been tried.
+
 ## Compatibility work still required
 
 1. Record actual deployed versions, path prefixes, auth identity, TLS/network reachability and server limits.

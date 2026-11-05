@@ -47,8 +47,8 @@ data class Claim(val job: OutboxJobEntity, val owner: String)
  *    │                └──Rejected/too many attempts─> FAILED ─retry─┤
  *    └──────────────────────────────────────────────────────────────┘
  * newer capture of the same key: unsent older jobs -> SUPERSEDED
- * destination changed: unfinished saves -> DESTINATION_CHANGED (sent only after the user
- *   rebinds them), unfinished captures -> CANCELLED; never sent elsewhere silently
+ * destination changed: unfinished saves and reports -> DESTINATION_CHANGED (sent only after
+ *   the user rebinds them), unfinished captures -> CANCELLED; never sent elsewhere silently
  * refused on purpose by the service (Declined): -> CANCELLED, captured text dropped
  * Retry that could not connect: RETRY_WAIT, not counted toward the attempt limit
  * ```
@@ -130,7 +130,7 @@ class Outbox(
             updatedAt = now,
         )
         dao.insertJob(job)
-        dao.dropFinishedCapturePayloads()
+        dao.dropFinishedTransientPayloads()
         Enqueued.Queued(job)
     }
 
@@ -188,7 +188,7 @@ class Outbox(
             else -> transition(released, current, result, now)
         }
         dao.updateJob(next)
-        dao.dropFinishedCapturePayloads()
+        dao.dropFinishedTransientPayloads()
         if (result is DispatchResult.Done) onDone(next, result)
         true
     }
@@ -237,14 +237,14 @@ class Outbox(
         val job = dao.job(jobId) ?: return@withTransaction
         if (job.state !in DISCARDABLE) return@withTransaction
         dao.updateJob(job.copy(state = JobState.CANCELLED, error = "discarded", updatedAt = clock.now()))
-        dao.dropFinishedCapturePayloads()
+        dao.dropFinishedTransientPayloads()
     }
 
     /**
      * Destination or credential changed (inside the configuration transaction). A different
-     * destination parks unfinished saves (see [PARKED_ON_DESTINATION_CHANGE]) and cancels other
-     * jobs; a removal cancels all. Nothing is sent with new settings unless the user says so. Same
-     * destination, new credential: jobs pause until the user resumes them explicitly.
+     * destination parks unfinished saves and reports (see [PARKED_ON_DESTINATION_CHANGE]) and
+     * cancels other jobs; a removal cancels all. Nothing is sent with new settings unless the user
+     * says so. Same destination, new credential: jobs pause until the user resumes them explicitly.
      */
     suspend fun onServiceChanged(previous: ServiceEntity?, current: ServiceEntity?) {
         // Added after a removal: only jobs queued around the removal can exist, for no destination.
@@ -265,7 +265,7 @@ class Outbox(
             }
             dao.updateJob(update.copy(updatedAt = now, leaseOwner = null, leaseUntil = null))
         }
-        dao.dropFinishedCapturePayloads()
+        dao.dropFinishedTransientPayloads()
     }
 
     /** User action after fixing a credential: paused jobs for this destination go out again. */
@@ -305,24 +305,27 @@ class Outbox(
             }
             dao.updateJob(update.copy(updatedAt = now))
         }
+        dao.dropFinishedTransientPayloads()
     }
 
     /** User action: give up on every job parked by a main address change. */
     suspend fun discardParked(kind: ServiceKind) = database.withTransaction {
         val now = clock.now()
         dao.parkedJobs(kind).forEach { dao.updateJob(it.copy(state = JobState.CANCELLED, error = "discarded", updatedAt = now)) }
+        // A discarded report's contents leave at once, as for any other finished report.
+        dao.dropFinishedTransientPayloads()
     }
 
     suspend fun nextWakeup(): Long? = dao.nextWakeup(clock.now())
 
     /**
-     * A user action starts a save's week of waiting for its server over: measured from the
-     * original [OutboxJobEntity.createdAt], a re-saved eight-day-old failure would fail again
-     * after one offline attempt. A capture keeps its createdAt, which also bounds how long its
-     * page text may be kept and which forget requests cover it.
+     * A user action starts a save's or report's week of waiting for its server over: measured
+     * from the original [OutboxJobEntity.createdAt], a re-saved eight-day-old failure would fail
+     * again after one offline attempt. A capture keeps its createdAt, which also bounds how long
+     * its page text may be kept and which forget requests cover it.
      */
     private fun OutboxJobEntity.restarted(now: Long): OutboxJobEntity =
-        if (kind == JobKind.KARAKEEP_SAVE) copy(createdAt = now) else this
+        if (kind in RESTARTS_ON_USER_ACTION) copy(createdAt = now) else this
 
     /** Unsent captures expire after a week; finished rows are kept a week for status, then removed. */
     suspend fun prune() {
@@ -333,7 +336,7 @@ class Outbox(
 
     private suspend fun expireCaptures(now: Long) {
         dao.expireCapturesBefore(now - CAPTURE_MAX_AGE_MS, now)
-        dao.dropFinishedCapturePayloads()
+        dao.dropFinishedTransientPayloads()
     }
 
     /**
@@ -345,7 +348,7 @@ class Outbox(
         dao.openJobs(serviceOf(kind)).filter { it.kind == kind && matches(it) }.forEach {
             dao.updateJob(it.copy(state = JobState.CANCELLED, error = reason, updatedAt = now, leaseOwner = null, leaseUntil = null))
         }
-        dao.dropFinishedCapturePayloads()
+        dao.dropFinishedTransientPayloads()
     }
 
     /** The next generation for a (re)configured service: never one an existing job carries. */
@@ -369,6 +372,7 @@ class Outbox(
         fun serviceOf(kind: JobKind) = when (kind) {
             JobKind.KARAKEEP_SAVE -> ServiceKind.KARAKEEP
             JobKind.HISTER_ADD -> ServiceKind.HISTER
+            JobKind.SITE_REPORT -> ServiceKind.SITE_REPORTS
         }
 
         /** Whether [job] waits for its server to be reachable: its last attempt sent nothing. */
@@ -379,10 +383,13 @@ class Outbox(
         private val DISCARDABLE = setOf(JobState.PENDING, JobState.RETRY_WAIT, JobState.AUTH_REQUIRED, JobState.FAILED)
 
         /**
-         * Saves are deliberate and usually stuck because of the address being corrected, so they
-         * wait for the user. Captures are automatic and made under the old server's policy: not
-         * worth sending to another one, so they are cancelled.
+         * Saves and reports are deliberate and usually stuck because of the address being
+         * corrected, so they wait for the user. Captures are automatic and made under the old
+         * server's policy: not worth sending to another one, so they are cancelled.
          */
-        private val PARKED_ON_DESTINATION_CHANGE = setOf(JobKind.KARAKEEP_SAVE)
+        private val PARKED_ON_DESTINATION_CHANGE = setOf(JobKind.KARAKEEP_SAVE, JobKind.SITE_REPORT)
+
+        /** Deliberate jobs whose unreachable limit a user action (Retry, Resume, Send) starts over. */
+        private val RESTARTS_ON_USER_ACTION = setOf(JobKind.KARAKEEP_SAVE, JobKind.SITE_REPORT)
     }
 }

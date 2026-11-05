@@ -1,5 +1,6 @@
 package ch.lkmc.combray
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
@@ -26,6 +28,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -49,7 +52,11 @@ import ch.lkmc.combray.core.browser.MediaPageRef
 import ch.lkmc.combray.core.browser.PlayableMedia
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.ThemeMode
+import ch.lkmc.combray.core.integration.EncodedScreenshot
+import ch.lkmc.combray.core.integration.ReportDisplay
+import ch.lkmc.combray.core.integration.ReportEnvironment
 import ch.lkmc.combray.core.integration.SaveStatus
+import ch.lkmc.combray.core.integration.ScreenshotOmission
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
@@ -67,9 +74,16 @@ import ch.lkmc.combray.ui.ToolbarMenuState
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
 import ch.lkmc.combray.ui.QuickLinks
+import ch.lkmc.combray.ui.ReportDraftState
+import ch.lkmc.combray.ui.ReportProblem
+import ch.lkmc.combray.ui.ReportProgress
+import ch.lkmc.combray.ui.ReportSheetContent
+import ch.lkmc.combray.ui.ReportShot
+import ch.lkmc.combray.ui.ReportSnapshot
 import ch.lkmc.combray.ui.TextSizeDialog
 import ch.lkmc.combray.ui.ScrollEdgeButton
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -272,7 +286,7 @@ class AccessibilityTest {
 
         assertTargetsAreAccessible()
         // The rows scroll when they outgrow the window: bring each into view before checking it.
-        for (label in listOf("Share", "Play audio or video", "Settings")) {
+        for (label in listOf("Share", "Play audio or video", "Report this site", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
         // New tab and Close tab belong to the bar, not the menu.
@@ -294,6 +308,35 @@ class AccessibilityTest {
         compose.onNodeWithContentDescription("Play video clip.mp4 from example.org").performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription("Play audio tone.wav from cdn.example.org").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Audio and video on this page").assertIsDisplayed()
+    }
+
+    /** The report preview with a screenshot, at the narrow width and the largest font. */
+    @Test
+    fun theReportSheetIsAccessible() {
+        val preview = Bitmap.createBitmap(PREVIEW_WIDTH, PREVIEW_HEIGHT, Bitmap.Config.ARGB_8888).asImageBitmap()
+        val shot = ReportShot.Ready(preview, EncodedScreenshot(ByteArray(8), PREVIEW_WIDTH, PREVIEW_HEIGHT, scaled = false))
+        showReport(reportDraft(REPORT_SNAPSHOT, shot))
+
+        assertScrollingTargetsAreAccessible()
+        for (label in listOf("Include screenshot", "Keep only the site and path", "Address", "Page title", "What went wrong? (optional)", "Cancel", "Send")) {
+            compose.onNode(hasClickAction() and hasText(label)).performScrollTo().assertIsDisplayed()
+        }
+        compose.onNodeWithContentDescription("Screenshot of the page").performScrollTo().assertIsDisplayed()
+    }
+
+    /** Without a screenshot (reader view) and with a problem that offers Settings. */
+    @Test
+    fun theReportSheetWithoutAScreenshotIsAccessible() {
+        val draft = reportDraft(REPORT_SNAPSHOT.copy(display = ReportDisplay.READER), ReportShot.Omitted(ScreenshotOmission.READER_VIEW))
+        draft.progress.value = ReportProgress(problem = ReportProblem.TOO_MANY)
+        showReport(draft)
+
+        assertScrollingTargetsAreAccessible()
+        compose.onNodeWithText("Include screenshot").assertDoesNotExist()
+        compose.onNodeWithText("No screenshot: reader view covers the page. Leave reader view to include one.").performScrollTo().assertIsDisplayed()
+        for (label in listOf("Settings", "Cancel", "Send")) {
+            compose.onNode(hasClickAction() and hasText(label)).performScrollTo().assertIsDisplayed()
+        }
     }
 
     @Test
@@ -484,6 +527,17 @@ class AccessibilityTest {
         assertTargetsAreAccessible()
     }
 
+    private fun reportDraft(snapshot: ReportSnapshot, shot: ReportShot) =
+        ReportDraftState(REPORT_ID, createdAt = 0, snapshot, "reports.example.org", MutableStateFlow(shot), preparation = null)
+
+    private fun showReport(draft: ReportDraftState) {
+        show(LARGE_FONT) {
+            Column(Modifier.width(NARROW_WIDTH)) {
+                ReportSheetContent(draft, REPORT_ENVIRONMENT, onSend = {}, onCancel = {}, onOpenSettings = {})
+            }
+        }
+    }
+
     private fun show(fontScale: Float, content: @Composable () -> Unit) {
         compose.setContent {
             val density = LocalDensity.current
@@ -496,13 +550,28 @@ class AccessibilityTest {
     private fun assertTargetsAreAccessible() {
         val targets = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
         if (targets.isEmpty()) throw AssertionError("nothing to tap")
-        val crowded = targets.flatMapIndexed { index, target ->
-            targets.drop(index + 1)
-                .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
-                .map { "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
-        }
-        val problems = targets.mapNotNull(::problem) + crowded
+        val problems = targets.mapNotNull(::problem) + crowded(targets)
         if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
+    }
+
+    /**
+     * As [assertTargetsAreAccessible], for content taller than the screen: a target scrolled out
+     * of view has no touch area to measure, so each is scrolled into view before it is measured.
+     */
+    private fun assertScrollingTargetsAreAccessible() {
+        val count = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().size
+        if (count == 0) throw AssertionError("nothing to tap")
+        val problems = (0 until count).mapNotNull { index ->
+            problem(compose.onAllNodes(hasClickAction())[index].performScrollTo().fetchSemanticsNode())
+        } + crowded(compose.onAllNodes(hasClickAction()).fetchSemanticsNodes())
+        if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
+    }
+
+    /** Targets whose touch areas overlap, so neither gets its 48dp to itself. */
+    private fun crowded(targets: List<SemanticsNode>): List<String> = targets.flatMapIndexed { index, target ->
+        targets.drop(index + 1)
+            .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
+            .map { "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
     }
 
     /**
@@ -595,6 +664,20 @@ class AccessibilityTest {
             PlayableMedia(1, MediaKind.AUDIO, "tone.wav", "cdn.example.org"),
         )
         val MEDIA_PAGE = MediaPageRef("tab", 1)
+
+        const val REPORT_ID = "6f1c2b9e-1d2a-4a5b-9c3d-2e1f0a9b8c7d"
+        const val PREVIEW_WIDTH = 108
+        const val PREVIEW_HEIGHT = 208
+        val REPORT_SNAPSHOT = ReportSnapshot(
+            url = "https://example.org/article?x=1#part",
+            title = "Article",
+            display = ReportDisplay.PAGE,
+            loadFailed = false,
+            crashed = false,
+            zoomPercent = 100,
+            density = 2.625f,
+        )
+        val REPORT_ENVIRONMENT = ReportEnvironment("0.1.0", 1, "debug", "0.7.0", "6fbfc3d70ad83df5443445d3ff4c43871aae41dd", "15", 35)
 
         val SMALL_TARGET = 40.dp
 

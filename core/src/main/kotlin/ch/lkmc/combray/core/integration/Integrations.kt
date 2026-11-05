@@ -26,6 +26,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.File
 
 /** The Save button's state for one address. */
 sealed interface SaveStatus {
@@ -90,6 +91,8 @@ internal data class SavePayload(val url: String, val title: String? = null)
 /**
  * Integration settings, credentials and actions for the UI. Saves snapshot the page's address
  * and title when the user taps, and stay bound to the destination configured at that moment.
+ * Site reports keep their screenshots in [reportDirectory] (no-backup storage, kept across
+ * restarts while a report is unsent) and name the versions in [reportEnvironment].
  */
 class Integrations(
     private val database: CombrayDatabase,
@@ -99,6 +102,8 @@ class Integrations(
     private val newId: () -> String,
     private val scope: CoroutineScope,
     scheduler: WakeupScheduler,
+    reportDirectory: File,
+    reportEnvironment: ReportEnvironment,
 ) {
     private val dao = database.integrations()
     private val routes = ServiceRoutes(transport)
@@ -109,6 +114,9 @@ class Integrations(
 
     /** Hister settings, capture (the browser's [ch.lkmc.combray.core.browser.CaptureSink]) and search. */
     val hister = HisterIntegration(database, secrets, transport, clock, outbox, ::kick)
+
+    /** More › Report this site: settings, durable reports and their delivery. */
+    val reports = SiteReports(database, secrets, transport, clock, outbox, ReportFiles(reportDirectory), reportEnvironment, ::kick)
     private val credentials = ServiceCredentials(secrets)
 
     val dispatcher = OutboxDispatcher(
@@ -116,9 +124,12 @@ class Integrations(
         handlers = mapOf(
             JobKind.KARAKEEP_SAVE to JobHandler { dispatchSave(it) },
             JobKind.HISTER_ADD to JobHandler { hister.dispatch(it) },
+            JobKind.SITE_REPORT to JobHandler { reports.dispatch(it) },
         ),
         onDone = ::recordDone,
         scheduler = scheduler,
+        // Finished, cancelled and discarded reports' screenshots leave the device.
+        housekeeping = { reports.sweep() },
     )
 
     val karakeepService: Flow<ServiceEntity?> = dao.observeService(ServiceKind.KARAKEEP)
@@ -135,6 +146,7 @@ class Integrations(
     fun jobUrl(job: OutboxJobEntity): String? = when (job.kind) {
         JobKind.KARAKEEP_SAVE -> runCatching { json.decodeFromString(SavePayload.serializer(), job.payload).url }.getOrNull()
         JobKind.HISTER_ADD -> runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
+        JobKind.SITE_REPORT -> runCatching { json.decodeFromString(ReportPayload.serializer(), job.payload).url }.getOrNull()
     }
 
     /**
@@ -297,7 +309,10 @@ class Integrations(
         dispatcher.drain()
     }
 
-    fun discard(jobId: String) = launchGuarded("discarding a job") { outbox.discard(jobId) }
+    fun discard(jobId: String) = launchGuarded("discarding a job") {
+        outbox.discard(jobId)
+        reports.sweep()
+    }
 
     /** After the user fixed a credential: paused jobs for the configured destination go out. */
     fun resume(kind: ServiceKind) = launchGuarded("resuming jobs") {
@@ -311,7 +326,10 @@ class Integrations(
         dispatcher.drain()
     }
 
-    fun discardParked(kind: ServiceKind) = launchGuarded("discarding parked jobs") { outbox.discardParked(kind) }
+    fun discardParked(kind: ServiceKind) = launchGuarded("discarding parked jobs") {
+        outbox.discardParked(kind)
+        reports.sweep()
+    }
 
     /** User actions run on the app scope: a failure is logged (class only), never a crash. */
     private fun launchGuarded(action: String, block: suspend () -> Unit) = scope.launch {

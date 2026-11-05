@@ -22,6 +22,7 @@
     <string name="reader_loading">Preparing reader view…</string>
     <string name="reader_unavailable">Reader view found no article on this page.</string>
     <string name="reader_truncated">The article continues on the page: reader view shows only its first part.</string>
+    <string name="action_report_site">Report this site</string>
     <string name="action_text_size">Text size</string>
     <string name="text_size_smaller">Smaller text</string>
     <string name="text_size_larger">Larger text</string>
@@ -295,6 +296,78 @@
     <string name="hister_exclusion_remove">Remove exclusion for %1$s</string>
     <string name="hister_exclusion_invalid">Enter a site name, like example.org.</string>
     <string name="hister_queue_title">Unfinished captures</string>
+
+    <!-- Site reports -->
+    <string name="reports_title">Site reports</string>
+    <string name="reports_explanation">More › Report this site sends what its preview shows to your own report service. Nothing is sent until you tap Send.</string>
+    <string name="reports_url_hint">https://reports.example.org</string>
+    <string name="reports_token">Reporter token</string>
+    <string name="reports_token_saved">A reporter token is saved. Enter a new one to replace it.</string>
+    <string name="reports_token_missing">Enter a reporter token. A new service address needs its own token.</string>
+    <string name="reports_token_invalid">This reporter token contains characters a token cannot have, such as a line break. Paste it again on one line.</string>
+    <string name="check_reports_token_not_stored">No reporter token is stored on this device. Enter it again.</string>
+    <!-- Mid-sentence, as in "Remove the report service?". -->
+    <string name="reports_name">the report service</string>
+    <string name="settings_root_invalid_reports">Enter the report service’s web address, like https://reports.example.org.</string>
+    <string name="settings_root_cleartext_reports">This service is reached over plain HTTP: anyone on the same network can read the reporter token and your reports, screenshots included.</string>
+    <string name="check_token_unauthorized_reports">The report service did not accept this token for sending reports. Use the reporter token.</string>
+    <string name="check_wrong_address_reports">The server answered, but not like the report service (HTTP %1$d). Check the address.</string>
+    <plurals name="reports_remove_body">
+        <item quantity="one">The service address and reporter token are forgotten. %1$d unsent report is cancelled and its screenshot deleted.</item>
+        <item quantity="other">The service address and reporter token are forgotten. %1$d unsent reports are cancelled and their screenshots deleted.</item>
+    </plurals>
+    <string name="reports_queue_title">Unsent reports</string>
+    <string name="queue_paused_reports">Paused: the token was rejected or changed (%1$s)</string>
+    <string name="action_resume_reports">Send paused reports with the current token</string>
+    <plurals name="queue_parked_reports">
+        <item quantity="one">%1$d report was queued for the previous address.</item>
+        <item quantity="other">%1$d reports were queued for the previous address.</item>
+    </plurals>
+    <string name="action_discard_parked_reports">Discard the reports queued for the previous address</string>
+    <string name="discard_parked_reports_title">Discard these reports?</string>
+
+    <!-- Report this site -->
+    <string name="report_title">Report this site</string>
+    <!-- %1$s is the report service's host, from Settings. -->
+    <string name="report_recipient">Sends what you see here to your report service, %1$s. Your report service and the agents that read it get everything shown here.</string>
+    <string name="report_include_screenshot">Include screenshot</string>
+    <string name="report_screenshot_description">Screenshot of the page</string>
+    <string name="report_screenshot_preparing">Preparing the screenshot…</string>
+    <string name="report_no_screenshot_user">No screenshot: you left it out.</string>
+    <string name="report_no_screenshot_reader">No screenshot: reader view covers the page. Leave reader view to include one.</string>
+    <string name="report_no_screenshot_not_shown">No screenshot: the page was not on screen.</string>
+    <string name="report_no_screenshot_page_changed">No screenshot: another page was on screen by the time it was taken. Report again to include one.</string>
+    <string name="report_no_screenshot_copy_failed">No screenshot: the page could not be copied.</string>
+    <string name="report_no_screenshot_too_large">No screenshot: it is too large to send, even scaled down.</string>
+    <string name="report_address">Address</string>
+    <string name="report_address_trim">Keep only the site and path</string>
+    <string name="report_address_restore">Restore the full address</string>
+    <string name="report_address_trimmed">Only the site and path were kept because the address seems to contain a sign-in or session code.</string>
+    <string name="report_address_sensitive">This address seems to contain a sign-in or session code.</string>
+    <string name="report_address_blank">Enter the page’s address.</string>
+    <string name="report_address_too_long">This address is too long to send.</string>
+    <string name="report_address_control">Remove line breaks, tabs and other invisible characters from the address.</string>
+    <string name="report_page_title">Page title</string>
+    <string name="report_comment">What went wrong? (optional)</string>
+    <string name="report_details_title">Details</string>
+    <!-- App version, build type, engine version, short engine commit, Android release, API level. -->
+    <string name="report_details_versions">Combray %1$s (%2$s) · Servo %3$s at %4$s · Android %5$s (API %6$d)</string>
+    <string name="report_details_display">Text size %1$d%% · Display density %2$s</string>
+    <string name="report_details_load_failed">The page did not load.</string>
+    <string name="report_details_crashed">The tab had crashed.</string>
+    <string name="action_send">Send</string>
+    <string name="report_queued">Report queued.</string>
+    <string name="report_not_set_up">Reporting needs your report service. Set it up in Settings.</string>
+    <string name="report_too_many">Too many reports are waiting to be sent. See Settings.</string>
+    <string name="report_not_stored">The report could not be stored. Try again.</string>
+    <string name="report_invalid_address">This address cannot be sent. Check it and try again.</string>
+    <string name="report_comment_too_long">The comment is too long.</string>
+    <string name="report_screenshot_invalid">The screenshot cannot be sent. Untick it and try again.</string>
+    <string name="report_invalid">This report cannot be sent. Report the page again.</string>
+    <!-- Once the sheet is closed, its draft is gone: these cannot ask to try again. -->
+    <string name="report_lost">The report was not stored. Report the page again.</string>
+    <string name="report_lost_not_set_up">The report was not stored because your report service is not set up.</string>
+    <string name="report_lost_too_many">The report was not stored because too many reports are waiting to be sent.</string>
 
     <!-- Search all history -->
     <string name="search_all_hint">Words you remember, searched in Hister…</string>

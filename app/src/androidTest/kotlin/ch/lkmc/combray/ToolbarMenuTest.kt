@@ -59,6 +59,8 @@ class ToolbarMenuTest {
         device.awaitState { it.activeTab?.isHome == true }
         compose.onNodeWithText(MENU).assertIsDisplayed().performClick()
         compose.onNodeWithText(SETTINGS).assertIsDisplayed()
+        // Home is no site: there is nothing to report.
+        compose.onNodeWithText(REPORT).assertDoesNotExist()
         compose.onNodeWithContentDescription(CLOSE_MENU).performClick()
         compose.onNodeWithText(MENU).assertIsDisplayed()
     }
@@ -69,6 +71,7 @@ class ToolbarMenuTest {
         compose.onNodeWithContentDescription(MENU).assertIsDisplayed().performClick()
         compose.onNodeWithText(SHARE).assertIsDisplayed()
         compose.onNodeWithText(RELOAD).assertIsDisplayed()
+        compose.onNodeWithText(REPORT).assertIsDisplayed()
         compose.onNodeWithContentDescription(CLOSE_MENU).performClick()
         compose.onNodeWithText(SHARE).assertDoesNotExist()
         assertEquals(url, device.browser.browserState.value.activeTab?.url)
@@ -112,6 +115,7 @@ class ToolbarMenuTest {
         const val DONE = "Done"
         const val SHARE = "Share"
         const val RELOAD = "Reload"
+        const val REPORT = "Report this site"
         const val SETTINGS = "Settings"
         val OPEN_DRAG = 40.dp
     }

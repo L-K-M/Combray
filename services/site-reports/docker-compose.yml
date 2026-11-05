@@ -1,0 +1,23 @@
+name: combray-site-reports
+services:
+  site-reports:
+    build: .
+    image: combray-site-reports:local
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Loopback by default: put tailscale serve or a TLS reverse proxy in front (README).
+      - "${REPORTS_BIND_ADDRESS:-127.0.0.1}:${REPORTS_PORT:-8787}:8787"
+    volumes:
+      - site-reports-data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 64
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+volumes:
+  site-reports-data:

@@ -132,6 +132,9 @@ fun SettingsSheet(
                     queue = R.string.queue_title,
                     queuePaused = R.string.queue_paused,
                     resume = R.string.action_resume_all,
+                    parked = R.plurals.queue_parked,
+                    discardParked = R.string.action_discard_parked,
+                    discardParkedTitle = R.string.discard_parked_title,
                 ),
                 kind = ServiceKind.KARAKEEP,
                 secret = SecretName.KARAKEEP_API_KEY,
@@ -159,6 +162,10 @@ fun SettingsSheet(
                     queue = R.string.hister_queue_title,
                     queuePaused = R.string.queue_paused_hister,
                     resume = R.string.action_resume_captures,
+                    // Never shown: captures are cancelled, not parked, by a main address change.
+                    parked = R.plurals.queue_parked,
+                    discardParked = R.string.action_discard_parked,
+                    discardParkedTitle = R.string.discard_parked_title,
                 ),
                 kind = ServiceKind.HISTER,
                 secret = SecretName.HISTER_TOKEN,
@@ -167,6 +174,37 @@ fun SettingsSheet(
                 check = integrations.hister::check,
                 remove = integrations.hister::remove,
             ) { service -> HisterCaptureSettings(integrations, service) }
+            ServiceSettings(
+                integrations = integrations,
+                labels = ServiceLabels(
+                    title = R.string.reports_title,
+                    explanation = R.string.reports_explanation,
+                    urlHint = R.string.reports_url_hint,
+                    secret = R.string.reports_token,
+                    secretSaved = R.string.reports_token_saved,
+                    secretMissing = R.string.reports_token_missing,
+                    secretInvalid = R.string.reports_token_invalid,
+                    secretNotStored = R.string.check_reports_token_not_stored,
+                    rootInvalid = R.string.settings_root_invalid_reports,
+                    cleartextWarning = R.string.settings_root_cleartext_reports,
+                    unauthorized = R.string.check_token_unauthorized_reports,
+                    wrongAddress = R.string.check_wrong_address_reports,
+                    removeBody = R.plurals.reports_remove_body,
+                    queue = R.string.reports_queue_title,
+                    queuePaused = R.string.queue_paused_reports,
+                    resume = R.string.action_resume_reports,
+                    parked = R.plurals.queue_parked_reports,
+                    discardParked = R.string.action_discard_parked_reports,
+                    discardParkedTitle = R.string.discard_parked_reports_title,
+                    name = R.string.reports_name,
+                ),
+                kind = ServiceKind.SITE_REPORTS,
+                secret = SecretName.SITE_REPORTS_TOKEN,
+                service = integrations.reports.service,
+                configure = integrations.reports::configure,
+                check = integrations.reports::check,
+                remove = integrations.reports::remove,
+            )
             SectionTitle(R.string.settings_history_title)
             val days = retention.closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
@@ -247,7 +285,7 @@ private fun themeModeLabel(mode: ThemeMode): String = stringResource(
     },
 )
 
-/** Each service's own wording: an API key for Karakeep, an access token for Hister. */
+/** Each service's own wording: an API key for Karakeep, an access token for Hister, a reporter token for site reports. */
 private data class ServiceLabels(
     val title: Int,
     val explanation: Int,
@@ -265,6 +303,12 @@ private data class ServiceLabels(
     val queue: Int,
     val queuePaused: Int,
     val resume: Int,
+    /** Plurals: how many items wait for the previous main address. */
+    val parked: Int,
+    val discardParked: Int,
+    val discardParkedTitle: Int,
+    /** The service as a sentence names it; a product name is its [title]. */
+    val name: Int = title,
 )
 
 /**
@@ -363,7 +407,7 @@ private fun ServiceSettings(
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.title))) },
+            title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.name))) },
             text = { Text(pluralStringResource(labels.removeBody, jobs.size + parked.size, jobs.size + parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
@@ -390,11 +434,11 @@ private fun ServiceSettings(
             Text(stringResource(labels.resume))
         }
     }
-    // Only saves are parked by a main address change (captures are cancelled), hence the wording.
-    // They are never sent to the new address without this explicit choice.
+    // Saves and reports are parked by a main address change (captures are cancelled), each in its
+    // own wording. They are never sent to the new address without this explicit choice.
     if (parked.isNotEmpty()) {
-        val discardLabel = stringResource(R.string.action_discard_parked)
-        Text(pluralStringResource(R.plurals.queue_parked, parked.size, parked.size), modifier = Modifier.padding(top = 8.dp))
+        val discardLabel = stringResource(labels.discardParked)
+        Text(pluralStringResource(labels.parked, parked.size, parked.size), modifier = Modifier.padding(top = 8.dp))
         OutlinedButton(onClick = { integrations.sendParkedToCurrent(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.action_send_to_current_address))
         }
@@ -403,12 +447,12 @@ private fun ServiceSettings(
             modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = discardLabel },
         ) { Text(stringResource(R.string.action_discard)) }
     }
-    // Discarding cannot be undone, and the saves were the user's own: confirm first.
+    // Discarding cannot be undone, and the saves or reports were the user's own: confirm first.
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
-            title = { Text(stringResource(R.string.discard_parked_title)) },
-            text = { Text(pluralStringResource(R.plurals.queue_parked, parked.size, parked.size)) },
+            title = { Text(stringResource(labels.discardParkedTitle)) },
+            text = { Text(pluralStringResource(labels.parked, parked.size, parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDiscard = false

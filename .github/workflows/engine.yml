@@ -41,6 +41,8 @@ on:
       - testing/**
       # The desktop site-check harness never reaches the Android build or devices.
       - "!testing/sitecheck/**"
+      # The fixture server's fake report service validates with the service's own rules.
+      - services/site-reports/site_reports/**
       - app/src/androidTest/**
       - app/build.gradle.kts
       # The media player and its network rules: only the device job plays media.

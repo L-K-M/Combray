@@ -43,6 +43,10 @@ object Fixtures {
     const val HISTER_ROOT = "$SERVICES/hister"
     const val HISTER_TOKEN = "fixture-token"
 
+    /** The fake report service, which checks each report with the real service's rules. */
+    const val REPORTS_ROOT = "$SERVICES/reports"
+    const val REPORTS_TOKEN = "fixture-reporter-token"
+
     fun solid(color: Int) = "$BASE/solid/%06x.html".format(color and 0xFFFFFF)
 
     /** A news-style page with navigation, an aside and a footer around its article. */
@@ -185,16 +189,41 @@ object Fixtures {
 
     fun fault(service: String, kind: String, count: Int) = request("POST", "/_admin/fault?service=$service&kind=$kind&count=$count")
 
-    private const val HTTP_POST = "POST"
+    /** Report id -> the validated metadata the fake report service stored (no screenshot bytes). */
+    fun reports(): JSONObject = state().getJSONObject("reports")
 
-    private fun request(method: String, path: String): String {
+    /** The PNG report [id] carried, as the service received it. */
+    fun reportScreenshot(id: String): ByteArray = bytes("GET", "/_admin/report-screenshot?id=$id")
+
+    /** Waits until the fake report service holds a report that [matches]; returns its metadata. */
+    fun awaitReport(timeoutMs: Long = Device.LOAD_TIMEOUT_MS, matches: (JSONObject) -> Boolean): JSONObject {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            val reports = reports()
+            reports.keys().asSequence().map(reports::getJSONObject).firstOrNull(matches)?.let { return it }
+            if (System.currentTimeMillis() > deadline) throw AssertionError("no matching report among ${reports.length()} received")
+            Thread.sleep(REPORT_POLL_MS)
+        }
+    }
+
+    /** The fake report service's POSTs, in order, as the request log has them. */
+    fun reportPosts(): List<JSONObject> = state().getJSONArray("log").let { log ->
+        (0 until log.length()).map(log::getJSONObject).filter { it.getString("service") == "reports" && it.getString("method") == HTTP_POST }
+    }
+
+    private const val HTTP_POST = "POST"
+    private const val REPORT_POLL_MS = 1_000L
+
+    private fun request(method: String, path: String): String = bytes(method, path).toString(Charsets.UTF_8)
+
+    private fun bytes(method: String, path: String): ByteArray {
         val connection = URL(BASE + path).openConnection() as HttpURLConnection
         connection.requestMethod = method
         if (method == "POST") {
             connection.doOutput = true
             connection.outputStream.close()
         }
-        return connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }.also { connection.disconnect() }
+        return connection.inputStream.use { it.readBytes() }.also { connection.disconnect() }
     }
 }
 

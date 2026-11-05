@@ -56,6 +56,11 @@ jobs:
       - name: Site-check harness
         run: python3 -I -m unittest discover -s testing/sitecheck/tests -t testing/sitecheck
 
+      # Standard library only. site-reports.yml also builds the service's image
+      # and smoke-tests it, but only when the service changes.
+      - name: Site-report service
+        run: python3 -I -m unittest discover -s services/site-reports/tests -t services/site-reports
+
       # Formatting needs no Servo tree. The host unit tests (cargo test --lib)
       # do: Cargo reads the Android-only path dependencies into servo-checkout/,
       # so the Engine workflow runs them after fetching. The explicit toolchain skips the
