@@ -67,7 +67,8 @@ class OutboxDispatcher(
                 // instead, and the attempt limit hands it to the user. finish applies the
                 // state and the recorded result in one transaction, so a rollback retries
                 // the delivery; the service APIs dedupe (Karakeep answers 200 with the
-                // existing bookmark, Hister updates the document).
+                // existing bookmark, Hister updates the document, the report service answers
+                // 200 for a report id it has).
                 if (finished == null) step { outbox.finish(claim, DispatchResult.Retry("cycle_failed")) }
                 if (finished == true) sent++
             }
@@ -135,7 +136,8 @@ class OutboxDispatcher(
          * cancelled drain blocks its key. Connect and read timeouts are per operation, not a
          * deadline, so finish()'s fence, not this value, protects job state; a reclaimed
          * request may arrive twice, which the services absorb (Karakeep answers 200 for an
-         * existing link, Hister updates the document).
+         * existing link, Hister updates the document, the report service answers 200 for a
+         * known report id).
          */
         const val LEASE_MS = 60_000L
         const val MAX_JOBS_PER_DRAIN = 50

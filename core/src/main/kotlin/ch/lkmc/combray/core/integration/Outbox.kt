@@ -305,12 +305,15 @@ class Outbox(
             }
             dao.updateJob(update.copy(updatedAt = now))
         }
+        dao.dropFinishedTransientPayloads()
     }
 
     /** User action: give up on every job parked by a main address change. */
     suspend fun discardParked(kind: ServiceKind) = database.withTransaction {
         val now = clock.now()
         dao.parkedJobs(kind).forEach { dao.updateJob(it.copy(state = JobState.CANCELLED, error = "discarded", updatedAt = now)) }
+        // A discarded report's contents leave at once, as for any other finished report.
+        dao.dropFinishedTransientPayloads()
     }
 
     suspend fun nextWakeup(): Long? = dao.nextWakeup(clock.now())

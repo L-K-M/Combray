@@ -281,9 +281,10 @@ class HisterIntegration(
     private suspend fun eligible(url: String, service: ServiceEntity): Boolean {
         if (!HostNames.isWeb(url) || SensitiveUrls.looksSensitive(url)) return false
         val host = HostNames.of(url) ?: return false
-        // The services' own pages (accounts, settings, search results) are never captured. Kagi
-        // result pages hold the user's queries: not captured by default (an open owner question).
-        val serviceRoots = service.roots + dao.service(ServiceKind.KARAKEEP)?.roots.orEmpty()
+        // The services' own pages (accounts, settings, search results, reports) are never captured.
+        // Kagi result pages hold the user's queries: not captured by default (an open owner question).
+        val serviceRoots = service.roots + dao.service(ServiceKind.KARAKEEP)?.roots.orEmpty() +
+            dao.service(ServiceKind.SITE_REPORTS)?.roots.orEmpty()
         val serviceHosts = serviceRoots.mapNotNull(HostNames::of) + KAGI_HOST
         if (serviceHosts.any { HostNames.matches(host, it, includeSubdomains = true) }) return false
         return dao.exclusions().none { HostNames.matches(host, it.host, it.includeSubdomains) }

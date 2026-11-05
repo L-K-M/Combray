@@ -2,6 +2,7 @@ package ch.lkmc.combray
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import androidx.annotation.OptIn
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -21,6 +22,7 @@ import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.KeystoreSecretStore
 import ch.lkmc.combray.core.integration.OutboxDispatcher
 import ch.lkmc.combray.core.integration.OutboxHost
+import ch.lkmc.combray.core.integration.ReportEnvironment
 import ch.lkmc.combray.core.integration.UrlConnectionTransport
 import ch.lkmc.combray.core.integration.WorkManagerScheduler
 import ch.lkmc.combray.core.media.MediaNetwork
@@ -128,6 +130,17 @@ class AppGraph(application: Application) {
         newId = { UUID.randomUUID().toString() },
         scope = scope,
         scheduler = WorkManagerScheduler(application),
+        // Not cleared at start like uploads: unsent reports' screenshots must outlive the process.
+        reportDirectory = File(application.noBackupFilesDir, "reports"),
+        reportEnvironment = ReportEnvironment(
+            appVersion = BuildConfig.VERSION_NAME,
+            appBuild = BuildConfig.VERSION_CODE,
+            buildType = BuildConfig.BUILD_TYPE,
+            engineVersion = BuildConfig.SERVO_VERSION,
+            engineRevision = BuildConfig.SERVO_REVISION,
+            androidRelease = Build.VERSION.RELEASE,
+            androidSdk = Build.VERSION.SDK_INT,
+        ),
     )
     val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
     val home = HomeLinks(database)

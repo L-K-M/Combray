@@ -315,6 +315,30 @@ class OutboxTest {
     }
 
     @Test
+    fun discardedOrReplacedParkedReportsDropTheirContentAtOnce() {
+        val previous = reportsService()
+        val replaced = enqueueReport("report-replaced", previous)
+        val current = reportsService("fp-new")
+        runBlocking {
+            database.withTransaction { outbox.onServiceChanged(previous, current) }
+            // The same report was queued for the new address meanwhile: the parked copy is replaced.
+            database.integrations().insertJob(job(replaced.job.id).copy(id = "again", fingerprint = "fp-new", state = JobState.PENDING))
+            outbox.sendParkedToCurrent(ServiceKind.SITE_REPORTS)
+        }
+        assertEquals(JobState.SUPERSEDED, job(replaced.job.id).state)
+        assertEquals("", job(replaced.job.id).payload)
+
+        val discarded = enqueueReport("report-discarded", current)
+        val next = reportsService("fp-next")
+        runBlocking {
+            database.withTransaction { outbox.onServiceChanged(current, next) }
+            outbox.discardParked(ServiceKind.SITE_REPORTS)
+        }
+        assertEquals(JobState.CANCELLED, job(discarded.job.id).state)
+        assertEquals("", job(discarded.job.id).payload)
+    }
+
+    @Test
     fun unfinishedReportsHoldTheirFilesAndCountTowardTheCap() {
         val dao = database.integrations()
         val service = reportsService()

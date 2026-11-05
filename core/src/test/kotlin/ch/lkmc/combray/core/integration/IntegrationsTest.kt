@@ -23,7 +23,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -33,6 +35,8 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class IntegrationsTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    @get:Rule val reportFolder = TemporaryFolder()
     private lateinit var database: CombrayDatabase
     private lateinit var scope: CoroutineScope
     private lateinit var integrations: Integrations
@@ -71,6 +75,8 @@ class IntegrationsTest {
             newId = { "job${ids++}" },
             scope = scope,
             scheduler = { scheduled = it },
+            reportDirectory = reportFolder.root,
+            reportEnvironment = FakeReports.ENVIRONMENT,
         )
     }
 
