@@ -13,7 +13,9 @@ error:
 4. the route's handler, which maps validation and store errors to wire codes.
 
 A response sent without reading a declared body closes the connection, so the
-unread bytes are never parsed as the next request.
+unread bytes are never parsed as the next request. A header line that is not a
+field line is 400 before routing, since the parser would hide the lines after
+it, a Content-Length among them.
 
 Logging writes one line per request: method, route template, status, body bytes
 in and out, milliseconds, role and report id. Never a header value, a query, a
@@ -88,6 +90,10 @@ _LIST_MAX_LIMIT = 100
 _LIST_STATUS_ALL = "all"
 _ID_SEGMENT = "{id}"
 _CONTENT_LENGTH = re.compile(r"[0-9]{1,15}")
+# An RFC 9110 field name (a token), a colon and a value without CR or LF. A line
+# with leading whitespace (obs-fold) is refused, as RFC 9112 allows.
+_FIELD_LINE = re.compile(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[^\r\n]*\r?\n")
+_HEADER_BLOCK_ENDS = frozenset({b"\r\n", b"\n", b""})
 _NO_VALUE = "-"
 _HTTP_0_9 = "HTTP/0.9"
 # Methods named in log lines; any other is logged as OTHER, since the method is
@@ -137,11 +143,17 @@ class _HeaderBlockReader:
     request slot or token check, enough for 32 connections to exhaust the
     container's memory. Past the budget this raises LineTooLong, which
     BaseHTTPRequestHandler answers with 431 and a closed connection.
+
+    ``malformed`` is set by any line other than a field line or the blank line
+    that ends the block. The email parser behind parse_headers ends the headers
+    at such a line, so a Content-Length or Transfer-Encoding after it would go
+    unseen and its body be read as the next request.
     """
 
     def __init__(self, rfile: BinaryIO, budget: int) -> None:
         self._rfile = rfile
         self._remaining = budget
+        self.malformed = False
 
     def readline(self, limit: int = -1) -> bytes:
         allowed = self._remaining + 1 if limit < 0 else min(limit, self._remaining + 1)
@@ -149,6 +161,8 @@ class _HeaderBlockReader:
         self._remaining -= len(line)
         if self._remaining < 0:
             raise http.client.LineTooLong("header block")
+        if line not in _HEADER_BLOCK_ENDS and _FIELD_LINE.fullmatch(line) is None:
+            self.malformed = True
         return line
 
 
@@ -262,8 +276,8 @@ class Handler(BaseHTTPRequestHandler):
     def parse_request(self) -> bool:
         self._started = time.monotonic()
         rfile = self.rfile
-        budget = self.server.limits.max_header_bytes
-        self.rfile = _HeaderBlockReader(rfile, budget)  # type: ignore[assignment]
+        reader = _HeaderBlockReader(rfile, self.server.limits.max_header_bytes)
+        self.rfile = reader  # type: ignore[assignment]
         try:
             parsed = super().parse_request()
         finally:
@@ -273,6 +287,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.request_version == _HTTP_0_9:
             # No headers, so no token, and responses without a status line.
             self.send_error(HTTPStatus.HTTP_VERSION_NOT_SUPPORTED)
+            return False
+        if reader.malformed:
+            self.send_error(HTTPStatus.BAD_REQUEST)
             return False
         # self.path has had leading slashes collapsed; routing uses the raw target.
         self._target = self.requestline.split()[1]
@@ -582,9 +599,14 @@ class Handler(BaseHTTPRequestHandler):
         if self._body_read:
             return False
         headers = getattr(self, "headers", None)
-        if headers is None:
+        if not isinstance(headers, http.client.HTTPMessage):
+            # No header block was parsed (HTTP/0.9 leaves a plain dict).
             return True
-        return "Transfer-Encoding" in headers or headers.get("Content-Length", "0").strip() != "0"
+        if "Transfer-Encoding" in headers:
+            return True
+        # Every value counts: a first "0" must not hide a second Content-Length.
+        lengths = [value.strip() for value in headers.get_all("Content-Length") or []]
+        return lengths not in ([], ["0"])
 
     def _begin(self) -> None:
         self._started = time.monotonic()

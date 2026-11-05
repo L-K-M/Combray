@@ -416,9 +416,11 @@ class BodyFramingTest(ApiTestCase):
                 )
 
     def test_two_content_length_headers_are_400(self) -> None:
-        request = self.post_head(Content_Length="2")[:-2] + b"Content-Length: 2\r\n\r\n"
+        for first in ("2", "0"):
+            with self.subTest(first=first):
+                request = self.post_head(Content_Length=first)[:-2] + b"Content-Length: 2\r\n\r\n"
 
-        self.assert_answered_before_the_body(request, 400, "bad_request")
+                self.assert_answered_before_the_body(request, 400, "bad_request")
 
     def test_refusing_a_request_with_a_body_closes_the_connection(self) -> None:
         sock = self.client.connect(self)
@@ -456,21 +458,48 @@ class BodyFramingTest(ApiTestCase):
         self.assertTrue(receive_head(refused).startswith(b"HTTP/1.1 401 Unauthorized\r\n"))
 
     def test_a_body_on_a_route_without_one_closes_the_connection(self) -> None:
-        sock = self.client.connect(self)
-        sock.sendall(
-            head(
-                "GET",
-                "/v1/whoami",
-                {"Authorization": f"Bearer {AGENT}", "Content-Length": "5"},
-            )
-            + b"GET /"
+        declared = head(
+            "GET", "/v1/whoami", {"Authorization": f"Bearer {AGENT}", "Content-Length": "5"}
         )
+        # A first Content-Length of 0 must not hide the second.
+        behind_zero = (
+            declared[:-2].replace(b"Length: 5", b"Length: 0") + b"Content-Length: 5\r\n\r\n"
+        )
+        for request in (declared, behind_zero):
+            with self.subTest(request=request):
+                sock = self.client.connect(self)
+                sock.sendall(request + b"GET /")
 
-        response = support.read_response(sock)
+                response = support.read_response(sock)
 
-        self.assertEqual(response.status, 200)
-        self.assertEqual(response.headers["Connection"], "close")
-        self.assertTrue(support.is_closed(sock))
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers["Connection"], "close")
+                self.assertTrue(support.is_closed(sock))
+
+    def test_a_malformed_header_line_is_400_and_closes_the_connection(self) -> None:
+        # The header parser stops at such a line, so a Content-Length or
+        # Transfer-Encoding after it goes unseen and its body would be read as
+        # the next request.
+        smuggled = head("GET", "/v1/whoami", {"Authorization": f"Bearer {AGENT}"})
+        for request in (
+            b"GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nX Bad: y\r\n"
+            + f"Content-Length: {len(smuggled)}\r\n\r\n".encode()
+            + smuggled,
+            (
+                b"GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nNo-colon\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n5\r\nGET /\r\n0\r\n\r\n"
+            ),
+            b"GET /healthz HTTP/1.1\r\n Folded: y\r\nHost: 127.0.0.1\r\n\r\n",
+        ):
+            with self.subTest(request=request):
+                sock = self.client.connect(self)
+                sock.sendall(request)
+
+                response = support.read_response(sock)
+
+                self.assert_error(response, 400, "bad_request")
+                self.assertEqual(response.headers["Connection"], "close")
+                self.assertTrue(support.is_closed(sock))
 
 
 class HeaderLimitTest(ApiTestCase):
