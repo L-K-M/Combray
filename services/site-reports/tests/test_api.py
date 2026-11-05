@@ -473,6 +473,30 @@ class BodyFramingTest(ApiTestCase):
         self.assertTrue(support.is_closed(sock))
 
 
+class HeaderLimitTest(ApiTestCase):
+    # 1000-byte header lines: FITTING of them and the blank line fit the limit.
+    LINE = b"X-Filler: " + b"a" * 988 + b"\r\n"
+    FITTING = ServerLimits().max_header_bytes // len(LINE) - 1
+
+    def test_a_header_block_within_the_limit_is_served(self) -> None:
+        sock = self.client.connect(self)
+        sock.sendall(b"GET /healthz HTTP/1.1\r\n" + self.LINE * self.FITTING + b"\r\n")
+
+        self.assertEqual(support.read_response(sock).status, 200)
+
+    def test_a_header_block_past_the_limit_is_431_before_it_ends(self) -> None:
+        # Without the blank line that ends the block: the server must stop
+        # reading at the limit instead of buffering up to 100 lines of 64 KiB.
+        sock = self.client.connect(self)
+        sock.sendall(b"GET /healthz HTTP/1.1\r\n" + self.LINE * (self.FITTING + 3))
+
+        response = support.read_response(sock)
+
+        self.assert_error(response, 431, "request_header_fields_too_large")
+        self.assertEqual(response.headers["Connection"], "close")
+        self.assertTrue(support.is_closed(sock))
+
+
 class CreateTest(ApiTestCase):
     def test_a_new_report_is_201_and_a_repeat_is_200_with_the_current_status(self) -> None:
         value = support.request()

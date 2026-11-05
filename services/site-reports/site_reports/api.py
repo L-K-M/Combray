@@ -2,7 +2,9 @@
 
 ``http.server`` is not hardened for hostile networks, so the service is for a
 loopback or tailnet bind behind TLS, and this module adds the missing limits.
-Each request goes through the same steps, any of which can end it with a JSON
+A header block is read only up to ``ServerLimits.max_header_bytes`` (431 past
+it), so the headers of every open connection fit in memory together. Each
+request then goes through the same steps, any of which can end it with a JSON
 error:
 
 1. route: the raw request target, segment by segment (404, then 405 with Allow);
@@ -21,6 +23,7 @@ browsing data and requests carry tokens.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import math
@@ -120,10 +123,33 @@ class ServerLimits:
     max_connections: int = 32
     max_requests: int = 8
     max_uploads: int = 2
+    max_header_bytes: int = 32 * 1024
     status_body_bytes: int = 16 * 1024
     socket_timeout: float = 30.0
     upload_deadline: float = 300.0
     sweep_interval: float = 3600.0
+
+
+class _HeaderBlockReader:
+    """A connection's rfile while one header block is read, with a byte budget.
+
+    http.client.parse_headers buffers up to 100 lines of 64 KiB each before any
+    request slot or token check, enough for 32 connections to exhaust the
+    container's memory. Past the budget this raises LineTooLong, which
+    BaseHTTPRequestHandler answers with 431 and a closed connection.
+    """
+
+    def __init__(self, rfile: BinaryIO, budget: int) -> None:
+        self._rfile = rfile
+        self._remaining = budget
+
+    def readline(self, limit: int = -1) -> bytes:
+        allowed = self._remaining + 1 if limit < 0 else min(limit, self._remaining + 1)
+        line = self._rfile.readline(allowed)
+        self._remaining -= len(line)
+        if self._remaining < 0:
+            raise http.client.LineTooLong("header block")
+        return line
 
 
 class _Refusal(Exception):
@@ -235,7 +261,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def parse_request(self) -> bool:
         self._started = time.monotonic()
-        if not super().parse_request():
+        rfile = self.rfile
+        budget = self.server.limits.max_header_bytes
+        self.rfile = _HeaderBlockReader(rfile, budget)  # type: ignore[assignment]
+        try:
+            parsed = super().parse_request()
+        finally:
+            self.rfile = rfile
+        if not parsed:
             return False
         if self.request_version == _HTTP_0_9:
             # No headers, so no token, and responses without a status line.

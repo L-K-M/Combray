@@ -181,6 +181,7 @@ Deletes the screenshot, the contents and every note now, and keeps the id and co
 | `POST /v1/reports` body | 12 MiB (413 `too_large`) | `REPORTS_MAX_REQUEST_MB` |
 | Decoded screenshot | 8 MiB (413 `screenshot_too_large`) | `REPORTS_MAX_SCREENSHOT_MB` |
 | Status change body | 16 KiB | fixed |
+| Request headers | 32 KiB after the request line (431) | fixed |
 | Screenshots stored | 1024 MiB (507) | `REPORTS_MAX_STORAGE_MB` |
 | New reports per reporter token | 60 per clock hour (429); repeats and refused reports do not count | `REPORTS_MAX_REPORTS_PER_HOUR` |
 | Requests in progress | 8, of which 2 uploads (503 `busy`) | fixed |
