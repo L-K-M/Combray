@@ -464,17 +464,17 @@ mod tests {
 
     #[test]
     fn the_viewer_loads_only_allowlisted_files() {
-        // Every scheme path the module and the worker name, relative to them, is served. A
-        // renamed file would otherwise only fail on a device.
-        let module = ViewerFile::Module.path();
-        for (source, relative) in [
-            (VIEWER_MODULE, "worker.mjs"),
-            (VIEWER_MODULE, "viewer.css"),
-            (VIEWER_WORKER, "./pdfium/index.browser.js"),
-            (VIEWER_WORKER, "pdfium/pdfium.wasm"),
+        // Every scheme path the module and the worker name, each relative to its own file, is
+        // served. A renamed or moved file would otherwise only fail on a device.
+        for (file, relative) in [
+            (ViewerFile::Module, "worker.mjs"),
+            (ViewerFile::Module, "viewer.css"),
+            (ViewerFile::Worker, "./pdfium/index.browser.js"),
+            (ViewerFile::Worker, "pdfium/pdfium.wasm"),
         ] {
+            let source = String::from_utf8(file.contents().unwrap()).unwrap();
             assert!(source.contains(&format!("\"{relative}\"")), "{relative}");
-            let url = Url::parse(&format!("combray-pdf://{HOST}{module}"))
+            let url = Url::parse(&format!("combray-pdf://{HOST}{}", file.path()))
                 .unwrap()
                 .join(relative)
                 .unwrap();
