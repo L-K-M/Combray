@@ -2781,7 +2781,7 @@ then reads the next request on it and closes the connection without answering.
 
 ## 46. Pages wider than the screen (5 November 2026)
 
-Candidate source: `47f51554ad76924ff6a22c52feb42487d8818ffd`, the head of downstream
+Candidate source: `3cc07fdc0672836a05967153f3e6ff362c912cf6`, the head of downstream
 [PR #32](https://github.com/L-K-M/servo/pull/32) (`fix/zoom-out-to-content-width`) on §45's pin
 `0bf44ec270a0`.
 
@@ -2818,6 +2818,9 @@ viewport at device pixel ratio 2.
   without a viewport meta tag) opens zoomed out to its width, like Chrome's "auto" initial scale, and
   follows its content as it loads until the user zooms; a page with one opens at it. Once the user
   zooms, Paint keeps the chosen page scale through later viewport changes where the limits allow.
+  When script moves the root scroller to an edge of its range, as Combray's scroll-to-top and
+  scroll-to-bottom buttons do, the pinch zoom viewport moves to that edge too. Content and initial
+  containing block are compared in app units, so content that fits gives exactly 1.
   `<meta viewport>` descriptions now belong to their document and pinch zoom resets when another
   document becomes the root (both carried over to the next page before; desktop servoshell keeps
   its pinch zoom), pinch steps that arrive in one frame multiply instead of only the last counting,
@@ -2836,23 +2839,24 @@ viewport at device pixel ratio 2.
 - Fixed-position boxes stay in the initial containing block, the top left of the larger layout
   viewport, so a fixed bar stays on screen at a page's `initial-scale`; zoomed out, it no longer
   spans the screen.
-- The scroll-to-top and scroll-to-bottom buttons move the root scroller and the field tap check
-  converts by scale only: neither follows the pinch zoom viewport's offset (§13). A page that opens
-  at its `initial-scale` inside a wider layout viewport behaves there like a pinch-zoomed page, so
-  after the user has scrolled, the buttons can stop short of the page's top or bottom and a tap on a
-  field the page focused can miss it (follow-up).
+- The field tap check converts by scale only and ignores the pinch zoom viewport's offset (§13). A
+  page that opens at its `initial-scale` inside a wider layout viewport behaves there like a
+  pinch-zoomed page, so after the user has scrolled, a tap on a field the page focused can miss it
+  (follow-up). The scroll buttons reach the page's edges: Servo moves the pinch zoom viewport along
+  when script scrolls the root to an edge.
 - WebDriver touch actions use CSS pixels, which Servo converts at the current zoom, so a WebDriver
   pinch gains speed as it zooms; Android forwards touches in device pixels.
 
 ### Checks
 
-- Downstream, `--profile medium`: ten new embedder tests in `components/servo/tests/webview.rs`
+- Downstream, `--profile medium`: twelve new embedder tests in `components/servo/tests/webview.rs`
   (`test_viewport_*` and `test_desktop_pinch_zoom_survives_navigation`, each in its own process) and
   two `viewport_description` unit tests pass. Each failed before its change: on the tests-only commit
   `2b3b6de206` the four that zoom out stayed at 1, the 25% default opened at 10%, a `<meta viewport>`
   added after the user zoomed out to 0.5 left 0.8, `overflow-y: hidden` and right-to-left pages
-  zoomed out to 0.4, and desktop lost its pinch zoom on navigation; the `overflow-x: hidden` guard
-  passes either way. The `webview` (42), `accessibility` (32) and
+  zoomed out to 0.4, desktop lost its pinch zoom on navigation, fitting content at a 384.6 CSS px
+  width moved a pinch zoom viewport by 0.0013 px instead of scrolling, and a script scroll to the top
+  left the visual viewport 750 px down; the `overflow-x: hidden` guard passes either way. The `webview` (42), `accessibility` (32) and
   `input_events` (2) suites, each test in its own process, pass except `test_svg_document_styles_paint`,
   which fails the same way on `0bf44ec270`; `test_accessibility_click_link` caught an extra
   accessibility update after navigations, fixed before review. `servo-paint-api` compositor tests
@@ -2867,6 +2871,19 @@ viewport at device pixel ratio 2.
 - Desktop servoshell with the change, the synthetic page: opens at 0.379 with a 1088x2271 visual
   viewport, as Chromium does; with `initial-scale=1` it opens at 1.0 and a WebDriver touch pinch zooms
   it out to 0.379.
+- Engine workflow on the candidate `47f51554ad`: both native ABIs and the full x86_64 emulator suite,
+  `ZoomOutTest` included, passed.
+- arm64 runtime (the CI arm64 APK of `47f51554ad` and the test APK, both re-signed with one debug key,
+  on an arm64 API 36 emulator on the Mac, 1080x1894 at density 2.625): `ZoomOutTest` passed (2), and
+  failed with main's arm64 APK (pin `0bf44ec`), red where green belongs. `FixedLayerScrollTest`,
+  `TextSizeTest`, `FitWidthTest`, `KeyboardTest` and `PdfTest` passed; `ScrollTest`'s
+  `aPullRevealsHiddenControlsAndStillReloads` failed three times of three (main's APK passed it):
+  the viewport there is 411.43 CSS px wide, the scroll fixture came out a hair wider than it in app
+  units, the page opened at a pinch zoom of 1.00001, the test's swipe moved that pinch zoom viewport
+  and the scroll-to-top button left it there, so the pull did not arm. The x86_64 CI emulator's
+  integer width hid this. Both causes are fixed in `349266dd3a` (exact fit; script scrolls to an edge
+  bring the pinch zoom viewport along) with regression tests above; this pin's Engine run and a
+  repeat of the arm64 run check them.
 - Here: `cargo metadata --locked` in `native/` passes (no lockfile change); the regenerated notices
   differ only in the pin's hash; `scripts/tests/test_fixture_server.py` covers `/wide.html`. The
   device checks run in this PR's Engine workflow.
