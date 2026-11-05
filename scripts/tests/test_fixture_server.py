@@ -33,6 +33,17 @@ def load_server():
     return module
 
 
+class WidePageTest(unittest.TestCase):
+    """The wide page sets an initial scale only when asked: without one, it opens zoomed out."""
+
+    def test_only_the_initial_scale_variant_has_a_viewport_meta_tag(self):
+        server = load_server()
+        self.assertNotIn("name='viewport'", server.wide_page(False))
+        self.assertIn("initial-scale=1", server.wide_page(True))
+        for initial_scale in (False, True):
+            self.assertIn("width:1080px", server.wide_page(initial_scale))
+
+
 class RequestLogTest(unittest.TestCase):
     def setUp(self):
         self.server = load_server()
