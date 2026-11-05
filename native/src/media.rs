@@ -11,12 +11,13 @@
 //! its fallback. Script fetches (`fetch()`, `XMLHttpRequest`) have the empty destination and are
 //! not affected.
 //!
-//! `canPlayType` and `<source type>` ask Servo's media backend what plays. The dummy answers
-//! nothing, which hides media from the player too: a site that asks first attaches no source,
-//! and a `<source>` with a `type` is skipped before its fetch, so nothing is cancelled and
-//! nothing is reported. `media_backend` answers instead with the types the player can fetch
-//! and decode ([`claimed_support`]); every other type keeps the `No` it had, so a page never
-//! picks a format the player cannot play.
+//! `canPlayType` and `<source type>` ask Servo's media backend what plays; they are the only
+//! callers (this engine has no MSE `isTypeSupported` for a page to reach the same answer
+//! through). The dummy answers nothing, which hides media from the player too: a site that
+//! asks first attaches no source, and a `<source>` with a `type` is skipped before its fetch,
+//! so nothing is cancelled and nothing is reported. `media_backend` answers instead with the
+//! types the player can fetch and decode ([`claimed_support`]); every other type keeps the
+//! `No` it had, so a page never picks a format the player cannot play.
 //!
 //! The application may offer a cancelled `audio` or `video` load to a player outside Servo, so
 //! the engine reports its URL when the URL is one the player could fetch as the page asked

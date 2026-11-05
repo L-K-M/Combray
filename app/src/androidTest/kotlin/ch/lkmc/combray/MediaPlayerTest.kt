@@ -293,6 +293,8 @@ class MediaPlayerTest {
     @Test
     fun aTypedSourceOffersItsVideo() {
         open(Fixtures.typedSource(key))
+        // The <source> was chosen only because the claim matched; its cancel fired the error.
+        device.awaitState { it.activeTab?.title?.startsWith("TYPED:errors:") == true }
         assertEquals("clip requests before Play", 0, clip().getInt("requests"))
         tapPlay()
 
