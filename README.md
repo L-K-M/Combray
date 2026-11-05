@@ -9,7 +9,7 @@ A personal Android browser powered by **Servo**, with controls at the bottom and
 
 <img src="media-sources/icon.png" alt="Combray: an ivory folded C on a square pine-green background" width="160" height="160">
 
-Combray connects to **Karakeep** for quick saves, **Hister** for long-term history and full-text search, and **Kagi** for web search. The initial audience is its owner, for personal use.
+Combray connects to **Karakeep** for quick saves, **Hister** for long-term history and full-text search, **Kagi** for web search, and its own self-hosted report service, from which Paseo hands site reports to coding agents (the app's Report this site action is still to come). The initial audience is its owner, for personal use.
 
 ## Status
 
@@ -57,6 +57,7 @@ scripts/release.sh X.Y.Z --push  # bump, tag vX.Y.Z, push; the tag publishes the
 | `docs/ENGINE_SPIKE.md`, `docs/BUILDING.md` | M0 results, decisions and reproducible build |
 | `app/`, `core/`, `engine/` | The Android app: Compose UI; logical tabs, history, outbox and service clients; Kotlin engine port |
 | `native/` | Combray's Rust bridge to the downstream Servo commit in `scripts/m0/servo-pin.sh` |
+| `services/site-reports/` | Self-hosted report service that receives Report this site and serves reports to Paseo (Docker Compose; the app's side is still to come) |
 | `testing/fixtures/` | Synthetic pages and fake Karakeep/Hister servers for the device checks (`scripts/check-app.sh`) |
 | `spike/` | M0 engine harness app and fixture site (test tooling) |
 | `scripts/m0/` | Fetch, build, emulator and check scripts for M0 |
