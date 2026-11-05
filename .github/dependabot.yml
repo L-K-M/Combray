@@ -24,3 +24,11 @@ updates:
     ignore:
       - dependency-name: "com.squareup.okhttp3:*"
         update-types: ["version-update:semver-major"]
+  # The site-report service's base image (services/site-reports/Dockerfile), pinned by tag and
+  # digest; an update moves both. The Site reports workflow builds each update, runs the
+  # service's unit tests on its Python and SQLite, and smoke-tests the container.
+  - package-ecosystem: docker
+    directory: /services/site-reports
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

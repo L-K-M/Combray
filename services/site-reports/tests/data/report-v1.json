@@ -1,0 +1,36 @@
+{
+  "id": "6f1c2b9e-1d2a-4a5b-9c3d-2e1f0a9b8c7d",
+  "created_at": "2026-11-04T09:12:44.123Z",
+  "page": {
+    "url": "https://example.org/article?x=1#part",
+    "url_edited": false,
+    "title": "Example article",
+    "display": "page",
+    "load_failed": false,
+    "crashed": false
+  },
+  "comment": "The menu covers the first paragraph.",
+  "client": {
+    "app": "combray",
+    "app_version": "0.1.0",
+    "app_build": 1,
+    "build_type": "debug",
+    "engine": "servo",
+    "engine_version": "0.7.0",
+    "engine_revision": "6fbfc3d70ad83df5443445d3ff4c43871aae41dd",
+    "android_release": "15",
+    "android_sdk": 35,
+    "page_zoom_percent": 100,
+    "density": 2.625
+  },
+  "screenshot": {
+    "media_type": "image/png",
+    "width": 3,
+    "height": 2,
+    "bytes": 84,
+    "sha256": "9e48f631b565170c2adc990778959fa149fce6ed9358e9899446e87f95d78966",
+    "scaled": false,
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAG0lEQVR4nGNgYDjxXwOIA4CYgSEKyAHiACAGAJHnDKnaH5CwAAAAAElFTkSuQmCC"
+  },
+  "screenshot_omitted": null
+}

@@ -42,6 +42,10 @@ All notable changes to this project are documented here. The format follows
   and ranks what breaks in Servo. A nightly task uses it to fix the
   engine, follow upstream Servo releases and move the engine pin. Its
   data stays on the machine that runs it. See docs/SITECHECK.md.
+- A self-hosted report service (`services/site-reports/`) for Report this
+  site. It runs with Docker Compose, stores the reports your phone will
+  send, and lets Paseo list, read, claim and resolve them. The app's
+  side is still to come.
 - Settings › Display › Show tab count: an optional counter on the tabs
   button, off by default. The choice persists across restarts.
 - Long-press Recent to switch to the tab you used before this one (a tap

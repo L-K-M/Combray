@@ -1,0 +1,5 @@
+# The image needs the package only: no tests, data, .env or backups.
+*
+!site_reports/
+**/__pycache__
+**/*.py[cod]
