@@ -256,7 +256,7 @@ The app (M1–M3) uses the same bridge, thread model and capture path. Changes s
 | Patch 0004: `CoreResourceMsg::PersistState` and `SiteDataManager::persist_to_disk` write the cookie jar, HSTS list and HTTP auth cache on request; profile files are written to a temporary file and renamed, and a failed write is logged instead of panicking | Servo wrote cookies only at a clean exit, which Android rarely allows, so logins were lost (section 10). A kill during an in-place write could truncate a profile file | `native/servo/patches/0004-*` (4 files, 64 insertions, 20 deletions) |
 | Servo preference `dom_intersection_observer_enabled` on | Off by default in Servo 0.6.0 (servoshell enables it only with its experimental features). Next.js sites call it on start-up; without it anthropic.com's script failed with `IntersectionObserver is not defined` and the site replaced the page with its error screen. Servo's implementation has open TODOs for clipping and visibility | `native/src/engine.rs`; `BrowsingTest#pagesCanObserveWhatIsOnScreen` |
 | Servo preferences `dom_fontface_enabled`, `dom_indexeddb_enabled` and `dom_adoptedstylesheet_enabled` on | Experimental and off by default in Servo 0.7 (servoshell enables them only with its experimental features). Pages that construct `FontFace`, call `document.fonts.add` or `load`, assign `adoptedStyleSheets` or open IndexedDB unconditionally stopped with a `TypeError`. IndexedDB data is stored in the profile directory. `dom_web_animations_enabled` stays off: Servo 0.7's `Animation` still lacks `play`, `cancel` and `finished`, and with it on `animations.js` would step aside for that stub | `native/src/engine.rs`; `BrowsingTest#pagesCanUseTheEnabledExperimentalApis` |
-| Every view runs `animations.js` before a document's own scripts (Servo `UserContentManager`). It adds stubs for `Element.prototype.animate`, `Element.prototype.getAnimations` and `document.getAnimations`, whose first use installs web-animations-js 2.3.2 (vendored next-lite build, with `finished` promises and `effect`) and adds the `effect.getComputedTiming()` it lacks | Servo 0.6.0 has no `Element.animate()`; its Web Animations interfaces behind `dom_web_animations_enabled` are stubs without `play`, `pause`, `cancel` or `finished`. docs.mistral.ai's marquee calls it unconditionally, so the site showed its error screen. The polyfill wraps `requestAnimationFrame`, `getComputedStyle` and animated elements' `style`, hence the lazy install; it steps aside for a complete native implementation. The constructors (`Animation`, `KeyframeEffect`) and `document.timeline` still appear only after that first use. Known polyfill bug: `pause()` then `play()` within one frame leaves a later `cancel()` without effect | `native/src/animations.js`, `native/src/animations.rs`, `native/src/engine.rs`; `BrowsingTest#pagesCanAnimateElements` |
+| Every view runs `animations.js` before a document's own scripts (Servo `UserContentManager`). It adds stubs for `Element.prototype.animate`, `Element.prototype.getAnimations` and `document.getAnimations`, whose first use installs web-animations-js 2.3.2 (vendored next-lite build, with `finished` promises and `effect`) and adds the `effect.getComputedTiming()` it lacks | Servo 0.6.0 has no `Element.animate()`; its Web Animations interfaces behind `dom_web_animations_enabled` are stubs without `play`, `pause`, `cancel` or `finished`. docs.mistral.ai's marquee calls it unconditionally, so the site showed its error screen. The polyfill wraps `requestAnimationFrame`, `getComputedStyle` and animated elements' `style`, hence the lazy install; it steps aside for a complete native implementation. The constructors (`Animation`, `KeyframeEffect`) and `document.timeline` still appear only after that first use. Property-indexed keyframes (`{opacity: [0, 1], offset: [0, 0.4]}`) are converted to a keyframe sequence first, as the spec processes them: 2.3.2 gives every keyframe the whole `offset`, `easing` and `composite` list and throws. Known polyfill bug: `pause()` then `play()` within one frame leaves a later `cancel()` without effect | `native/src/animations.js`, `native/src/animations.rs`, `native/src/engine.rs`; `BrowsingTest#pagesCanAnimateElements` |
 | `persistProfile` command and `profile_persisted {ok}` event | The app persists when it leaves the foreground and every five minutes while in use; each write briefly holds the engine thread | `native/src/engine.rs`, `CombrayApplication.kt` |
 | `captureArticle(tab, document, id, maxBytes, timeoutMs)` | Reader view: the capture path with `reader.js` and Readability.js instead of the text script; the result's text is the article as JSON. A separate entry point keeps `capture`'s JNI signature, which the M0 harness also binds | `native/src/reader.js`, `native/src/capture.rs`, `native/src/jni_api.rs` |
 | `selectNone` command | The app's home screen shows no page: no view is painted under it | `native/src/engine.rs` |
@@ -2310,7 +2310,74 @@ network and headless WebDriver environment fail the checkbox for every
 browser tried. The phone result is pending, with the arm64 APK from the app
 integration PR's Engine workflow.
 
-## 41. HTTP/2 response header list limit (4 November 2026)
+## 41. Flex rows wider than the screen (4 November 2026)
+
+Validated source: `825ef1f0356fd4adb6184207ffdb84f572241ef0` on
+`combray/0.7`, which merges downstream
+[PR #27](https://github.com/L-K-M/servo/pull/27) onto `6b44b9b2a43`. That
+base also brings the HTTP/2 header list limit and the inert PDF viewer
+document. The merge differs from the tested PR commit `dbf53b7e4e1` only in
+a comment of the new test. An article the owner opened on the phone
+scrolled sideways instead of fitting the screen.
+
+### Reproduction
+
+Desktop servoshell at 745 CSS px laid the article out 1183 px wide;
+Chromium 156 fits it to 745 px. The page's main column is a grid with one
+`auto` track. A figure caption in it is a flex row: a label that cannot
+shrink (an icon and a few words) and a long sentence. A synthetic page with
+that structure, the `fit-width.html` fixture, lays out 1268 px wide in a
+412 px viewport; Chromium keeps it at 412 px.
+
+### Mechanism
+
+Servo computed a single-line flex container's min-content size with the
+flex-fraction ideal algorithm of CSS Flexbox §9.9.1.1. The specification
+says that algorithm is not Web-compatible and allows the Web-compatible
+one of §9.9.1.2. Under the ideal algorithm, an item whose desired flex
+fraction is zero, such as a single word, an icon or the label above, makes
+the line's chosen fraction zero. Every other item then contributes its
+flex base size, its max-content width. The caption's min-content width
+became the whole sentence on one line, and the grid track grew to it.
+
+The engine change sums the items' min-content contributions instead, each
+clamped by the item's flex base size and min/max main size as §9.9.3 says.
+Multi-line containers and the max-content size are unchanged.
+
+With the page fitting, its byline showed a second defect. In a wrapped flex
+row with column gaps, v0.7.0 counted the gaps twice when deciding whether a
+line's items shrink, so each label broke onto two lines although the line
+had room. The candidate backports upstream's fix (`f80ad0305e2`).
+
+### Checks
+
+- A seven-case downstream WPT test fails five cases on the previous engine,
+  with the widths the ideal algorithm predicts, and passes all seven with
+  the fix. The upstream `gap-006` tests and `flexbox-column-row-gap-001`
+  pass with the backport.
+- WPT `css-flexbox`, `css-grid`, `css-sizing`, `css-tables` and `css-align`
+  (5192 tests) with the previous and the candidate engine. Twelve results
+  newly pass: the new cases, the gap tests and two compat cases, among them
+  Chromium's case for this bug in `row-compat-001.html`. Ten flex-fraction
+  subtests of `row-005.html` and `row-008.html` newly fail; Chromium 156
+  fails all ten too. Nothing else changed beyond load flakes in the
+  baseline run.
+- The article and the synthetic pages match Chromium's widths, byline
+  included. `FitWidthTest` loads the fixture on the device and requires a
+  page no wider than its viewport.
+- The fixture's sentence is over 2500 CSS px wide on one line, so the
+  check also holds at tablet widths: at 1280 px the previous engine lays
+  the page out 3159 px wide, the candidate and Chromium 1280 px.
+- Reviews: Devin SWE-2 and two GLM rounds on the downstream PR; their
+  findings and the responses are recorded there.
+- Builds: `./mach build --profile medium --media-stack dummy` on macOS
+  arm64. The Engine workflow builds both Android ABIs and runs the emulator
+  fixtures on the app PR.
+
+Limitations: engine evidence is from desktop servoshell and the API 30
+emulator. The phone result is pending.
+
+## 42. HTTP/2 response header list limit (4 November 2026)
 
 Validated source: `3423e2b538029a6c5585b7244ecce281dbdceaea` on `combray/0.7`, which merges downstream
 [PR #26](https://github.com/L-K-M/servo/pull/26) on top of the §40 source.
@@ -2330,20 +2397,27 @@ The same response over HTTP/1.1 loads. Servo now sets the limit to 256 KiB, Chro
   after it; `servo-net` integration tests 392 of 393 (the remaining `test_filemanager` failure
   is the same on the previous pin and passes alone); fetch WPT `api/basic` and `api/headers`
   167 as expected; no new `./mach test-tidy` findings; independent review without findings.
-- Here: Combray takes this fix with `6b44b9b2a`, the PDF viewer merge of §42, whose first parent
-  is `3423e2b53`; `native/Cargo.lock` and the notices' content are unchanged (§42). Host tests,
-  both native ABI builds and the x86_64 emulator checks run in the Engine workflow of the PR that
-  sets that pin; no local device or phone result is claimed.
+- Here: Combray takes this fix with `6b44b9b2a`, the PDF viewer merge of §43, whose first parent
+  is `3423e2b53`, and with the §41 pin built on it; `native/Cargo.lock` and the notices' content
+  are unchanged (§43). Host tests, both native ABI builds and the x86_64 emulator checks run in
+  the Engine workflow of the PRs that set those pins; no local device or phone result is claimed.
 
-## 42. PDF viewer document (30 October 2026)
+## 43. PDF viewer document (30 October 2026)
 
-The pin is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on `combray/0.7`,
-the merge commit of
+The engine change is `6b44b9b2a43137c527f8fa79fdb306813b8c9e20` on
+`combray/0.7`, the merge commit of
 [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18)
 (`engine/pdf-viewer-document`), merged on 4 November 2026; upstream base
-still v0.7.0. Its parents are `3423e2b53`, `combray/0.7` with the
-HTTP/2 header-list fix of
-[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) (section 41)
+still v0.7.0. Combray pins `825ef1f0356f` (section 41), which adds only
+the flex sizing fix of
+[L-K-M/servo#27](https://github.com/L-K-M/servo/pull/27) on top of it:
+`git diff 6b44b9b2a 825ef1f03` touches `components/layout/flexbox`,
+WPT metadata and tests and `DOWNSTREAM.md`, no PDF, parser or document
+file and no `Cargo.lock`, `Cargo.toml` or toolchain file. Main set that pin
+with the viewer's preferences still unset, so the viewer turns on with
+this section's app change. The parents of `6b44b9b2a` are `3423e2b53`,
+`combray/0.7` with the HTTP/2 header-list fix of
+[L-K-M/servo#26](https://github.com/L-K-M/servo/pull/26) (section 42)
 over `6fbfc3d70` (the engine fixes of sections 32, 33, 35, 38, 39 and
 40), and `71b94369b`, #18's head and this section's previous pin.
 `git diff 3423e2b53 6b44b9b2a` is exactly the 12 files of the PDF
@@ -2505,8 +2579,17 @@ On `ee5d4c625`, Engine run
 (head `76bc681`) passed all 185 checks, with no report-only failures.
 Engine run
 [41881346624](https://github.com/L-K-M/Combray/actions/runs/41881346624)
-on `71b94369b` (head `2a5a42f`) had not finished when #18 merged. The
-Engine workflow has not run on `6b44b9b2a` yet.
+on `71b94369b` (head `2a5a42f`) was cancelled by the next push before its
+emulator job ran. On `6b44b9b2a`, Engine run
+[41903858889](https://github.com/L-K-M/Combray/actions/runs/41903858889)
+(head `d650c1b`) built both ABIs and passed host tests; on the emulator,
+every check through `TabCounterTest` passed, `PdfTest` (10) and
+`StopLoadingTest` (3) included. A second after `TabCounterTest`'s app
+process ended normally, logcat stops and adb then reported the emulator
+offline, with no crash in either log; the remaining suites (`TabSwipeTest`, `TextSizeTest`,
+`ToolbarMenuTest` and the process-death checks) did not run. The Engine
+run on the merge of main that moves the pin to `825ef1f0356f` is the
+evidence for that pin.
 
 Open follow-ups for L-K-M/servo: a `charset` on the PDF's
 `Content-Type` still sets the viewer document's encoding, and with it
