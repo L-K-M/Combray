@@ -33,7 +33,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -43,6 +45,8 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class HisterIntegrationTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    @get:Rule val reportFolder = TemporaryFolder()
     private lateinit var database: CombrayDatabase
     private lateinit var scope: CoroutineScope
     private lateinit var integrations: Integrations
@@ -70,6 +74,8 @@ class HisterIntegrationTest {
         newId = { "job${ids++}" },
         scope = scope,
         scheduler = {},
+        reportDirectory = reportFolder.root,
+        reportEnvironment = FakeReports.ENVIRONMENT,
     )
 
     @After
@@ -446,6 +452,16 @@ class HisterIntegrationTest {
         runBlocking { assertEquals(Configured.Saved, hister.configure(server.root, FakeHister.TOKEN, "https://hister.tailnet.ts.net")) }
         enable()
         assertNull(wants("https://hister.tailnet.ts.net/settings"))
+        assertNotNull(wants("https://a.example/"))
+    }
+
+    @Test
+    fun theReportServicesPagesAreNeverCaptured() {
+        val reports = "https://reports.tailnet.ts.net:8443"
+        runBlocking { assertEquals(Configured.Saved, integrations.reports.configure(reports, FakeReports.TOKEN, "http://100.64.0.7:8787")) }
+        enable()
+        assertNull(wants("$reports/v1/whoami"))
+        assertNull(wants("http://100.64.0.7:8787/healthz"))
         assertNotNull(wants("https://a.example/"))
     }
 

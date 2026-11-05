@@ -23,6 +23,13 @@ android {
         // The desktop JDK's HttpURLConnection drops "Origin" (Hister's native-client header)
         // unless allowed; Android's sends it. scripts/check-app.sh proves the device path.
         unitTests.all { it.systemProperty("sun.net.http.allowRestrictedHeaders", "true") }
+        // SiteReportsClientTest compares the phone's request body with the report service's
+        // golden request, so a change on either side fails the unit tests.
+        val reportGolden = rootProject.file("services/site-reports/tests/data/report-v1.json")
+        unitTests.all {
+            it.inputs.file(reportGolden).withPathSensitivity(PathSensitivity.RELATIVE)
+            it.systemProperty("combray.siteReports.golden", reportGolden.absolutePath)
+        }
     }
 
     // Migration tests open the committed schemas.

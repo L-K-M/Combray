@@ -42,7 +42,7 @@ The service is then at `https://<machine>.<tailnet>.ts.net:8443`. Pick a free HT
 
 Alternatives: a reverse proxy with TLS in front of `127.0.0.1:8787`, or `REPORTS_BIND_ADDRESS` set to the machine's tailnet IPv4 address over plain HTTP. WireGuard encrypts that hop, but Combray's settings warn about any plain HTTP address. Never bind to a public address.
 
-On the phone, Combray › Settings › Site reports takes the address (the root above, without `/v1`) and the reporter token, and Check connection asks the service who the token belongs to. The app side is coming in a follow-up change: this version of Combray has no Site reports settings yet.
+On the phone, Combray › Settings › Site reports takes the address (the root above, without `/v1`) and the reporter token, and Check connection asks the service who the token belongs to. Then use More › Report this site on a page: the preview shows everything the report sends, and nothing leaves the phone until you tap Send.
 
 ## Use it from Paseo
 

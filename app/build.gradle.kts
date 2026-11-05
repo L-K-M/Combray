@@ -54,6 +54,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SERVO_VERSION", "\"$servoVersion\"")
         buildConfigField("String", "SERVO_SOURCE_URL", "\"$servoSourceUrl\"")
+        // The exact engine commit, sent with every site report.
+        buildConfigField("String", "SERVO_REVISION", "\"${servoPinValue("COMBRAY_SERVO_GIT_REVISION")}\"")
     }
 
     signingConfigs {

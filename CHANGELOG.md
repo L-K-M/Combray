@@ -42,10 +42,15 @@ All notable changes to this project are documented here. The format follows
   and ranks what breaks in Servo. A nightly task uses it to fix the
   engine, follow upstream Servo releases and move the engine pin. Its
   data stays on the machine that runs it. See docs/SITECHECK.md.
+- More › Report this site sends a screenshot of the page, its address and
+  title, your comment and the app, engine and Android versions to your
+  own report service, queued until the service can be reached. A preview
+  shows all of it and lets you leave out the screenshot, trim or edit the
+  address and edit the title; nothing is sent until you tap Send. Set the
+  service up in Settings › Site reports.
 - A self-hosted report service (`services/site-reports/`) for Report this
-  site. It runs with Docker Compose, stores the reports your phone will
-  send, and lets Paseo list, read, claim and resolve them. The app's
-  side is still to come.
+  site. It runs with Docker Compose, stores the reports your phone sends,
+  and lets Paseo list, read, claim and resolve them.
 - Settings › Display › Show tab count: an optional counter on the tabs
   button, off by default. The choice persists across restarts.
 - Long-press Recent to switch to the tab you used before this one (a tap

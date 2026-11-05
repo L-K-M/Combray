@@ -2,6 +2,7 @@ package ch.lkmc.combray
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import androidx.annotation.OptIn
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -21,11 +22,13 @@ import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.KeystoreSecretStore
 import ch.lkmc.combray.core.integration.OutboxDispatcher
 import ch.lkmc.combray.core.integration.OutboxHost
+import ch.lkmc.combray.core.integration.ReportEnvironment
 import ch.lkmc.combray.core.integration.UrlConnectionTransport
 import ch.lkmc.combray.core.integration.WorkManagerScheduler
 import ch.lkmc.combray.core.media.MediaNetwork
 import ch.lkmc.combray.engine.NativeEngineHost
 import ch.lkmc.combray.player.PlaybackRequests
+import ch.lkmc.combray.ui.ReportDrafts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -120,6 +123,16 @@ class AppGraph(application: Application) {
         profileDir = File(application.filesDir, "servo-profile"),
         density = application.resources.displayMetrics.density,
     )
+    /** The versions every site report names, also shown in its preview. */
+    val reportEnvironment = ReportEnvironment(
+        appVersion = BuildConfig.VERSION_NAME,
+        appBuild = BuildConfig.VERSION_CODE,
+        buildType = BuildConfig.BUILD_TYPE,
+        engineVersion = BuildConfig.SERVO_VERSION,
+        engineRevision = BuildConfig.SERVO_REVISION,
+        androidRelease = Build.VERSION.RELEASE,
+        androidSdk = Build.VERSION.SDK_INT,
+    )
     val integrations = Integrations(
         database = database,
         secrets = KeystoreSecretStore(application),
@@ -128,6 +141,9 @@ class AppGraph(application: Application) {
         newId = { UUID.randomUUID().toString() },
         scope = scope,
         scheduler = WorkManagerScheduler(application),
+        // Not cleared at start like uploads: unsent reports' screenshots must outlive the process.
+        reportDirectory = File(application.noBackupFilesDir, "reports"),
+        reportEnvironment = reportEnvironment,
     )
     val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
     val home = HomeLinks(database)
@@ -147,6 +163,9 @@ class AppGraph(application: Application) {
 
     /** Requests on their way to the media player: an Intent carries only an id. */
     val playback = PlaybackRequests()
+
+    /** The site report being previewed; it outlives rotation, not the process. */
+    internal val reportDrafts = ReportDrafts(scope, integrations.reports::submit)
 
     /** The media player's HTTP client, built at the first playback. */
     val media by lazy { MediaNetwork() }

@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Integration credentials. Never shown again after saving, never in logs or page scripts. */
-enum class SecretName { KARAKEEP_API_KEY, HISTER_TOKEN }
+enum class SecretName { KARAKEEP_API_KEY, HISTER_TOKEN, SITE_REPORTS_TOKEN }
 
 interface SecretStore {
     /** The secret, or null when unset or unreadable (for example after a Keystore key loss). */
