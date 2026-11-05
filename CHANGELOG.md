@@ -264,6 +264,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages no longer fail with "client error (SendRequest)" when Combray sends
+  a request on a connection that the site or the network has already
+  closed, as after the phone sleeps or switches between Wi-Fi and mobile
+  data: Servo sends the request again on a new connection, as other
+  browsers do. A form submission is not sent twice.
+- Inline SVG icons without a `viewBox` no longer widen pages: Servo clips
+  inline SVG roots, as other browsers do.
+- Text with a large negative `letter-spacing` no longer reports a negative
+  width to page scripts.
 - Pages served over HTTP/2 with large response headers (long security
   policies, for example) load instead of showing a network error. Servo
   now accepts header lists up to 256 KiB, as Chromium does, instead of
