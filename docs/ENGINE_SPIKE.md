@@ -289,7 +289,7 @@ Limitations found while building the app:
 - **No audio or video.** Without a media backend nothing plays; the engine cancels media element and text-track loads instead of downloading them (table above), and the app says so on the page. A load names no document, and Servo delivers loads, document starts and commits on three channels taken in no fixed order, so a new document's first loads can arrive before its start and its commit. The engine holds a load that arrives after the app asked for a page (a new tab, an address, a reload) or after a new document reported its start, and before a commit, and gives it to the document that commits (`media::PendingMedia`; a request that commits nothing within 30 s, or a start within 5 s, gives its loads back to the committed page). The app also holds, while a page it asked for is pending, every report with a referrer, gives those from the new page's origin to that page when it commits, and gives them back to the page on screen when the wait ends without a commit. What stays wrong: a load that overtakes both the start and the commit of a page the page itself opened (a link), or a `pushState`, counts for the page before it, and a late one from the replaced document or the previous route counts for the new page. A page that sends more reports than the budget allows loses the rest, and a `pushState` route's report can be lost to an earlier route's flood. Media a page downloads by script is not cancelled and does not play either. A real backend (servo-media on Android's MediaCodec) would be new engine work.
 - **Leave-page questions cover page navigations only.** Servo 0.6.0 runs `beforeunload` for navigations the page starts (links, forms, `location`), for reloads and for `window.close()`. The constellation loads embedder URLs (`LoadUrl`) and traverses history without it, so a typed address, a link from another app, Back/Forward and closing a tab still discard unsaved form text without asking. Covering them needs a Servo change.
 - **A refused or handed-off link still stops the page's loading.** Servo's `navigate()` queues `abort_a_document_and_its_descendants` on the script thread before it asks the embedder (`components/script/navigation.rs`, step 24.4, lines 546-565 of the patched tree), and `NavigationRequest::deny()` does not undo it. The page stays on screen, but its in-flight fetches, EventSources and parser are aborted. If the link was tapped before the load event, the page never reports load complete: the address bar can keep showing it loading, and capture skips it. The fix needs a Servo patch: skip the abort for schemes the embedder will not load, as Chromium does for external protocols, or queue it only once the embedder allows the navigation.
-- **The tap check ignores pinch-zoom panning.** Servo 0.6.0 exposes the pinch-zoom factor but not the zoomed area's offset, so on a pinch-zoomed page a tap on a field focused before the user touched the page can miss it (no keyboard; tapping elsewhere and then the field works) or count a nearby tap.
+- **The tap check ignores pinch-zoom panning.** Servo 0.6.0 exposes the pinch-zoom factor but not the zoomed area's offset, so on a pinch-zoomed page a tap on a field focused before the user touched the page can miss it (no keyboard; tapping elsewhere and then the field works) or count a nearby tap. Since §46 the same holds on a page that opens at its `initial-scale` inside a wider layout viewport, once the user has scrolled.
 - **Profile writes block the engine thread** for the duration of three small file writes; the five-minute interval keeps that rare.
 - **An HTTP sign-in lasts only on its page.** Servo 0.6.0 keeps a 401 answer in the document URL, which the app never sees, not in its auth cache. Links on the signed-in page inherit it; anything else asks again: the same address typed, opened from Recent, restored after a kill or opened from the link menu in a new tab. A script request that does not inherit the URL (`fetch(location.origin + …)`) gets the 401 without a prompt, because Servo asks only for navigations. The fix is a Servo patch that stores the answer as an auth-cache entry for its origin; it must ship together with the next item's patch change, or it would write 401 passwords to disk.
 - **Proxy sign-ins reach the disk.** Servo stores the answer to a 407, which any server can send (Servo does not check that a proxy is configured), in its auth cache with the password in plain text, and sends it again to that origin as `Authorization` without asking. Patch 0004 writes the cache to `auth_cache.json` with the cookies (upstream wrote it only at a clean exit). The engine deletes the file before Servo starts, so a later run does not read the sign-in back, but the file stays on disk from the next profile write until then. Planned patch change: leave `auth_cache.json` out of `persist_state` in patch 0004, which also covers the exit write, so the auth cache lives only in memory. Not done here because it means preparing the Servo tree again.
@@ -2778,3 +2778,81 @@ then reads the next request on it and closes the connection without answering.
   connection. The new device check and the rest of the fixture suite run on the x86_64 emulator in
   this PR's Engine workflow; that run is the evidence for this pin. Resource timing and devtools
   still show one attempt for a request sent again (follow-up).
+
+## 46. Pages wider than the screen (5 November 2026)
+
+Candidate source: `089646422e1d0e1bc2e7b20998353ab0f3e93396`, the head of downstream
+[PR #32](https://github.com/L-K-M/servo/pull/32) (`fix/zoom-out-to-content-width`) on §45's pin
+`0bf44ec270a0`.
+
+### Report
+
+The owner reported a page (not named here) that was too wide for the screen and could not be
+zoomed out. It has no viewport meta tag and a fixed-width table about 1080 CSS px wide. Combray lays
+such a page out at the screen's width (412 CSS px on the reporting phone), the table overflows, and
+Servo's pinch zoom, a magnifier that stopped at 100%, showed only the page's left part; the rest was
+reachable only by scrolling sideways at 100%.
+
+Synthetic reproduction: a page without a viewport meta tag holding a 1080 px table, in a 412x860
+viewport at device pixel ratio 2.
+
+- Desktop servoshell at `0bf44ec270` with `viewport_meta_enabled`: the page lays out 412 px wide, its
+  content is 1088 px wide, only the left 412 px show, and pinching out does nothing.
+- Chromium's mobile emulation (Playwright's headless shell, `isMobile`): the page opens at a page
+  scale of 0.379 (412/1088) with a 1088x2271 CSS px visual viewport; `innerWidth` is 1088 and
+  `documentElement.clientWidth` 980, its legacy layout width. With `width=device-width,
+  initial-scale=1` it opens at 1.0 and zooms out to 0.379; a `position: fixed; bottom: 0` bar then
+  sits at the bottom of the larger 1088x2272 layout viewport, off screen at 1.0.
+
+### Changes
+
+- Downstream (PR #32): layout grows the root scrollport (the layout viewport) to the width of the
+  page's content, keeping its aspect ratio, by at most `initial-scale` over `minimum-scale` (over
+  0.25, Chrome's default, without one). The initial containing block, media queries, `vw` and
+  `innerWidth` keep their size, so the page does not lay out again; a root with `overflow-x: hidden`
+  or `clip` does not grow; the page background covers the larger viewport. Paint shows the whole
+  layout viewport at a pinch zoom of 1.0, so pinch zoom reaches the content's full width, with the
+  page's `<meta viewport>` limits applied to the page scale. A page without `initial-scale` (or
+  without a viewport meta tag) opens zoomed out to its width, like Chrome's "auto" initial scale, and
+  follows its content as it loads until the user zooms; a page with one opens at it. `<meta
+  viewport>` descriptions now belong to their document and pinch zoom resets when another document
+  becomes the root (both carried over to the next page before), and pinch steps that arrive in one
+  frame multiply instead of only the last counting.
+- Here: the pin, the fixture `/wide.html` (a 1080 CSS px row, red on its left half and green on its
+  right; `?initial-scale=1` adds `width=device-width, initial-scale=1`), and `ZoomOutTest`: the page
+  without an initial scale shows green at the screen's right edge, and the `initial-scale=1` page
+  shows red there until a two-finger pinch zooms it out to green.
+
+### Differences from Chrome and limits
+
+- Combray still lays out a page without a viewport meta tag at the screen's width; Chrome and
+  Firefox use a 980 px layout width. Without text autosizing (Servo has none), 980 px would make the
+  text of simple pages too small to read, while pages wider than the screen now open zoomed out
+  anyway.
+- Fixed-position boxes stay in the initial containing block, the top left of the larger layout
+  viewport, so a fixed bar stays on screen at a page's `initial-scale`; zoomed out, it no longer
+  spans the screen.
+- The scroll-to-top and scroll-to-bottom buttons move the root scroller and the field tap check
+  converts by scale only: neither follows the pinch zoom viewport's offset (§13). A page that opens
+  at its `initial-scale` inside a wider layout viewport behaves there like a pinch-zoomed page, so
+  after the user has scrolled, the buttons can stop short of the page's top or bottom and a tap on a
+  field the page focused can miss it (follow-up).
+- WebDriver touch actions use CSS pixels, which Servo converts at the current zoom, so a WebDriver
+  pinch gains speed as it zooms; Android forwards touches in device pixels.
+
+### Checks
+
+- Downstream, `--profile medium`: six new embedder tests in `components/servo/tests/webview.rs`
+  (`test_viewport_*`, each in its own process) pass; on the tests-only commit `2b3b6de206` the four
+  that zoom out failed (pinch zoom stayed at 1), the 25% default opened at 10% before its commit, and
+  the `overflow-x: hidden` guard passes either way. The `webview` (42), `accessibility` (32) and
+  `input_events` (2) suites, each test in its own process, pass except `test_svg_document_styles_paint`,
+  which fails the same way on `0bf44ec270`; `test_accessibility_click_link` caught an extra
+  accessibility update after navigations, fixed before review. `servo-paint-api` compositor tests
+  pass (11); `./mach test-tidy` has no new findings.
+- Desktop servoshell with the change, the synthetic page: opens at 0.379 with a 1088x2271 visual
+  viewport, as Chromium does; with `initial-scale=1` it opens at 1.0 and a WebDriver touch pinch zooms
+  it out to 0.379.
+- Here: `cargo metadata --locked` in `native/` passes (no lockfile change); the regenerated notices
+  differ only in the pin's hash; `scripts/tests/test_fixture_server.py` covers `/wide.html`. The
+  device checks run in this PR's Engine workflow.
