@@ -264,6 +264,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
+  generators' link prefetching does, no longer stop with a script error:
+  Servo now has the interface, and `className` on SVG elements reflects
+  `class` through it, as in other browsers.
+- The engine's zlib binding (libz-sys) is updated to 1.1.31, which clears
+  a dependency advisory against its build script.
 - Pages wider than the screen can be seen whole: a pinch zooms out until the
   page's full width fits, and a page that sets no initial zoom, such as an
   older page with a fixed-width table, opens zoomed out that way, as in other

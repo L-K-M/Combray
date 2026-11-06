@@ -2897,3 +2897,26 @@ viewport at device pixel ratio 2.
 - Here: `cargo metadata --locked` in `native/` passes (no lockfile change); the regenerated notices
   differ only in the pin's hash; `scripts/tests/test_fixture_server.py` covers `/wide.html`. The
   device checks run in this PR's Engine workflow.
+
+## 47. SVGAnimatedString and libz-sys (6 November 2026)
+
+Validated source: `4778c513e962e63cfdd1f59b36093263f1ccf886` on `combray/0.7`, which merges
+downstream [PR #34](https://github.com/L-K-M/servo/pull/34) onto the merge of
+[PR #33](https://github.com/L-K-M/servo/pull/33), on §46's pin `e05945443307`. Upstream base
+still v0.7.0.
+
+- [PR #33](https://github.com/L-K-M/servo/pull/33) adds SVG 2's `SVGAnimatedString` interface and
+  `SVGElement.className`, which reflects `class` through it. Scripts that tell an SVG `<a>`'s `href`
+  from an HTML one with `instanceof SVGAnimatedString` threw a `ReferenceError` and stopped. Checks:
+  a new WPT test (4 of 5 subtests failed before), 46 more passing subtests in `svg/idlharness` and
+  `svg/types/scripted/SVGAnimatedString.html` with no other change in `svg/` and `dom/nodes/`, and
+  a 20-page site-check sweep with no change. Reviews: gpt-6.1-sol (one minor finding, fixed) and
+  GLM 5.3 (one minor test suggestion, not taken).
+- [PR #34](https://github.com/L-K-M/servo/pull/34) backports upstream `4ad464ffb5d` and
+  `ed6a9248aae`: libz-sys 1.1.29 to 1.1.31 in the lockfile, which clears cargo-deny's advisory
+  against its build script (environment variables leaked into the build directory). libz-sys
+  is linked through fontsan and mozjs. Checks: `css/WOFF2` WPT (298 tests) unchanged,
+  `fetch/content-encoding` passes, and a 20-page sweep with no change.
+- Here: `native/Cargo.lock` takes the same libz-sys version and checksum, and `cargo metadata
+  --locked` passes; the regenerated notices differ only in their input hashes; the native host
+  tests pass. The device checks run in this PR's Engine workflow.
