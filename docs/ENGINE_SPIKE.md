@@ -3065,4 +3065,11 @@ Checks:
   `scripts/tests/test_fixture_server.py` cover the rule and the header's escaping into the page's
   script. `UserAgentTest` loads it on the device. With main's engine (the arm64 APK of the Engine
   run for `bf8e052`, on the arm64 API 36 emulator) it fails: the page is refused and its tab has
-  no title.
+  no title. With this change (a local `COMBRAY_ABI=arm64 scripts/build-native.sh` build of
+  `0575f0e`, same emulator) it passes, and the reported page opens with its article and cookie
+  notice.
+- The full device suite (`scripts/check-app.sh`) on that build and emulator: 196 passed, 3
+  failed. The three (`AccessibilityTest.theBottomBarOnANewTabIsAccessible`,
+  `ReaderScrollTest.readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles` and
+  `MediaPlayerTest.aPageVideoPlaysAfterATapWithoutServosCookie`, a video pixel colour) fail the
+  same way with main's engine on this emulator, so they predate the change.
