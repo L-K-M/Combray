@@ -3006,9 +3006,12 @@ The video was playable; Play was out of reach. The owner chose all three remedie
 ### Changes
 
 - `native/src/media_tap.js`, filled by `media::tap_hits_media_script`: whether a tap's point,
-  in CSS pixels, lies in the box of a `<video>` or `<audio>` with `readyState` 0, in the
-  document or in the open shadow roots under the point, with the topmost element there being
-  that element, containing it, or within its parent. Boxes, not the hit stack: Servo's
+  in CSS pixels, lies in the box of a `<video>` or `<audio>` with `readyState` 0 that was given
+  a source (`networkState` not empty), in the document or in the open shadow roots under the
+  point. The topmost element there must be that element or a container of it across shadow
+  roots, or controls drawn on it: inside its parent and inside its box (1 px slack). A banner
+  sharing the video's parent once counted; the review of this PR caught it. Boxes, not the
+  hit stack: Servo's
   `ShadowRoot.elementsFromPoint` leaves out a video with `pointer-events: none`, as custom
   players set it under their controls. Bounded to 16 roots, 64 hits and 64 media elements
   per root.

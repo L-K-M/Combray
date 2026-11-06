@@ -8,9 +8,11 @@
 // players lay their controls over the video and often take it out of hit testing
 // (pointer-events: none). The hit stack serves two things. It reaches the open shadow roots under
 // the point, where such players keep their <video>. And it tells the player from something drawn
-// over it: the topmost element at the point must be the media element, contain it, or lie within
-// the media element's parent, so a tap on a banner over the video does not count. Closed shadow
-// roots and frames are not searched.
+// over it: the topmost element at the point must be the media element or a container of it,
+// across shadow roots (hit because the video itself is not), or controls drawn on the video,
+// inside the media element's parent and inside its box. So a tap on a banner or a sheet over the
+// video does not count. A media element never given a source does not count either. Closed
+// shadow roots and frames are not searched.
 //
 // The page's realm runs this, so a page can make it answer either way; a yes only offers again
 // what the page itself loaded.
@@ -21,6 +23,9 @@
   var MAX_HITS = 64;
   var MAX_MEDIA = 64;
   var HAVE_NOTHING = 0;
+  var NETWORK_EMPTY = 0;
+  // CSS pixels an overlay may reach past the video's box, for rounding.
+  var SLACK = 1;
 
   var roots = [document];
   for (var r = 0; r < roots.length; r++) {
@@ -40,13 +45,27 @@
   return false;
 
   function tapped(root, element) {
-    if (element.readyState !== HAVE_NOTHING) return false;
+    if (element.readyState !== HAVE_NOTHING || element.networkState === NETWORK_EMPTY) return false;
     var box = element.getBoundingClientRect();
     if (!(box.width > 0 && box.height > 0)) return false;
     if (!(x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) return false;
     var top = root.elementFromPoint(x, y);
     if (!top) return false;
+    if (holds(top, element)) return true;
     var parent = element.parentNode;
-    return top === element || top.contains(element) || (!!parent && parent.contains(top));
+    return !!parent && parent.contains(top) && within(top.getBoundingClientRect(), box);
+  }
+
+  // Whether node is element or contains it, across shadow roots.
+  function holds(node, element) {
+    for (var at = element; at; at = at.parentNode || at.host) {
+      if (at === node) return true;
+    }
+    return false;
+  }
+
+  function within(inner, outer) {
+    return inner.left >= outer.left - SLACK && inner.right <= outer.right + SLACK &&
+      inner.top >= outer.top - SLACK && inner.bottom <= outer.bottom + SLACK;
   }
 })(__X__, __Y__)

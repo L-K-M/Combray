@@ -18,6 +18,8 @@ import vm from "node:vm";
 const TEMPLATE = readFileSync(new URL("../media_tap.js", import.meta.url), "utf8");
 const HAVE_NOTHING = 0;
 const HAVE_ENOUGH_DATA = 4;
+const NETWORK_EMPTY = 0;
+const NETWORK_NO_SOURCE = 3;
 
 class Tree {
   constructor(host = null) {
@@ -72,12 +74,13 @@ class Tree {
 }
 
 class Element {
-  constructor(tag, [left, top, width, height], { parent = null, hittable = true, readyState = HAVE_NOTHING } = {}) {
+  constructor(tag, [left, top, width, height], { parent = null, hittable = true, readyState = HAVE_NOTHING, networkState = NETWORK_NO_SOURCE } = {}) {
     this.tag = tag;
     this.box = { left, top, width, height, right: left + width, bottom: top + height };
     this.parentNode = parent;
     this.hittable = hittable;
     this.readyState = readyState;
+    this.networkState = networkState;
     this.shadowRoot = null;
     this.tree = null;
   }
@@ -108,7 +111,7 @@ class Element {
 
 /** A shadow root's top-level nodes have the root as their parent, which contains them all. */
 function inRoot(tree) {
-  return { parentNode: null, tree, contains: (node) => tree.contains(node) };
+  return { parentNode: null, host: tree.host, tree, contains: (node) => tree.contains(node) };
 }
 
 function tapped(document, x, y) {
@@ -158,6 +161,40 @@ test("a banner drawn over the video takes the tap", () => {
 
   assert.equal(tapped(document, 200, 350), false, "on the banner, over the video");
   assert.equal(tapped(document, 200, 250), true, "on the player, above the banner");
+});
+
+test("a banner beside the video in the same parent does not count over it", () => {
+  const { document, body } = page();
+  document.add(new Element("video", [0, 0, 400, 225], { parent: body }));
+  document.add(new Element("div", [0, 150, 400, 300], { parent: body }));
+
+  assert.equal(tapped(document, 200, 200), false, "on the banner, over the video");
+  assert.equal(tapped(document, 200, 100), true, "on the video, above the banner");
+});
+
+test("an overlay that reaches past the video does not count", () => {
+  const { document, body } = page();
+  const box = document.add(new Element("div", [0, 0, 400, 400], { parent: body }));
+  document.add(new Element("video", [0, 0, 400, 225], { parent: box }));
+  document.add(new Element("div", [0, 0, 400, 400], { parent: box }));
+
+  assert.equal(tapped(document, 200, 100), false);
+});
+
+test("a tap on the player's own host counts when nothing in it takes hits", () => {
+  const { document, body } = page();
+  const host = document.add(new Element("media-player", [0, 100, 400, 300], { parent: body }));
+  const root = host.attachShadow();
+  root.add(new Element("video", [0, 100, 400, 300], { parent: inRoot(root), hittable: false }));
+
+  assert.equal(tapped(document, 200, 250), true);
+});
+
+test("a video that was never given a source does not count", () => {
+  const { document, body } = page();
+  document.add(new Element("video", [0, 0, 400, 225], { parent: body, networkState: NETWORK_EMPTY }));
+
+  assert.equal(tapped(document, 200, 100), false);
 });
 
 test("a video that has data does not count", () => {
