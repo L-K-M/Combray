@@ -212,6 +212,13 @@ sealed interface EngineEvent {
         override fun toString() = "MediaBlocked(view=$view, document=$document, kind=$kind, hasUrl=${url != null})"
     }
 
+    /**
+     * The user tapped a media element of [document] that has no data (the engine cancelled its load),
+     * or controls the page laid over one, after the page reported a media address. The page's
+     * media can be offered again.
+     */
+    data class MediaTapped(val view: ViewRef, val document: Long) : EngineEvent
+
     /** A page control waits for [EnginePort.respondToControl] with [control]. */
     data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
 
@@ -312,6 +319,7 @@ sealed interface EngineEvent {
                     event.optionalString("url"),
                     event.optionalString("referrer"),
                 )
+                "media_tapped" -> MediaTapped(event.view(), event.long("document"))
                 "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
                 "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))

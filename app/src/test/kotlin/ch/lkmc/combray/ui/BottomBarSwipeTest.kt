@@ -142,6 +142,39 @@ class BottomBarSwipeTest {
     }
 
     @Test
+    fun theAddressHasNoPlayWithoutMedia() {
+        showBar()
+        compose.onNodeWithContentDescription(PLAY_MEDIA).assertDoesNotExist()
+    }
+
+    @Test
+    fun playInTheAddressPlaysThePagesMedia() {
+        showBar(media = true)
+        compose.onNodeWithContentDescription(PLAY_MEDIA).performTouchInput { click() }
+        compose.runOnIdle { assertEquals(listOf("play"), clicks) }
+    }
+
+    /** At the narrowest single row, Play and Reader leave the address the room Reader alone left it. */
+    @Test
+    fun playAndReaderLeaveTheSingleRowAddressItsRoom() {
+        showBar(516.dp, media = true)
+        val address = address().fetchSemanticsNode().boundsInRoot
+        val back = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
+
+        assertTrue("address=$address, back=$back", address.top < back.bottom && address.bottom > back.top)
+        assertTrue("address=$address", address.width >= with(compose.density) { 116.dp.toPx() } - 1f)
+    }
+
+    @Test
+    fun belowItTheAddressTakesItsOwnRow() {
+        showBar(515.dp, media = true)
+        val address = address().fetchSemanticsNode().boundsInRoot
+        val back = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
+
+        assertTrue("address=$address, back=$back", address.bottom <= back.top)
+    }
+
+    @Test
     fun swipesStartOnTheAddressAndEveryButtonInTheSingleRowBar() {
         showBar(600.dp)
         swipeEveryControl()
@@ -283,6 +316,7 @@ class BottomBarSwipeTest {
         tab: ActiveTab = PAGE,
         mode: AddressEditorMode = AddressEditorMode.IDLE,
         direction: LayoutDirection = LayoutDirection.Ltr,
+        media: Boolean = false,
     ) {
         shownTab = tab
         compose.setContent {
@@ -303,6 +337,7 @@ class BottomBarSwipeTest {
                             readerDisplay = ReaderDisplay.PAGE,
                             onStop = { clicks += "stop" },
                             onReader = { clicks += "reader" },
+                            onPlayMedia = if (media) ({ clicks += "play" }) else null,
                             onHister = { clicks += "hister" },
                             onKarakeep = { clicks += "karakeep" },
                             onNewTab = { clicks += "new" },
@@ -326,6 +361,7 @@ class BottomBarSwipeTest {
     }
 
     private companion object {
+        const val PLAY_MEDIA = "Play audio or video"
         val PAGE = ActiveTab("tab", "https://example.org/", "Example", false, true, false, false, true)
     }
 }

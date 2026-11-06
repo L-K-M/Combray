@@ -2,8 +2,9 @@
 #
 #   scripts — bash -n + shellcheck over scripts/*.sh, the scripts' regression
 #             tests, rustfmt over native/, a syntax check of the engine's
-#             page scripts, and the PDF viewer's modules and host tests
-#             (always meaningful; none needs the Servo tree).
+#             page scripts and host tests of those with logic of their own,
+#             and the PDF viewer's modules and host tests (always
+#             meaningful; none needs the Servo tree).
 #   android — JVM tests, Android lint, debug + release APKs, the device
 #             checks' test APK (compiled, not run), a check that Room's
 #             exported schemas are committed, the third-party notices in
@@ -85,6 +86,10 @@ jobs:
           for f in native/src/*.js native/src/vendor/*.js; do
             node -e 'const file = process.argv[1]; new (require("vm").Script)(require("fs").readFileSync(file, "utf8"), { filename: file })' "$f"
           done
+
+      # Page scripts with logic of their own, run on fake pages.
+      - name: Engine page-script tests
+        run: node --test native/src/test/*.test.mjs
 
       # The PDF viewer's module and worker (served by native/src/pdf.rs) are ES
       # modules, which vm.Script would reject: `node --check` parses them as

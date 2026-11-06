@@ -26,6 +26,10 @@
 //! budget per tab and document ([`MediaBudget`]) bounds the reports of a page that keeps changing
 //! its media URL or its address. A load names no document, so the engine credits it to the
 //! committed one, except while a new document is awaited ([`PendingMedia`]).
+//!
+//! Once a page has reported a URL, a tap on one of its media elements, or on controls the page
+//! laid over one, has the application offer the page's media again ([`tap_hits_media_script`]):
+//! sites draw their own player with their own error message, and that is where you tap.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
@@ -199,6 +203,23 @@ pub(crate) fn page_key(url: &str) -> &str {
     url.split_once('#').map_or(url, |(page, _)| page)
 }
 
+/// Says whether a tap landed on a media element with no data (`media_tap.js`).
+const TAP_TEMPLATE: &str = include_str!("media_tap.js");
+
+/// The script for the current document that says whether a tap at (`x`, `y`), in CSS pixels of
+/// the viewport, landed on a media element whose load was cancelled, or on controls the page laid
+/// over it (`media_tap.js`). None for a point that is not finite.
+pub(crate) fn tap_hits_media_script(x: f32, y: f32) -> Option<String> {
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    Some(
+        TAP_TEMPLATE
+            .replace("__X__", &x.to_string())
+            .replace("__Y__", &y.to_string()),
+    )
+}
+
 /// What to tell the application about one cancelled load.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum MediaReport {
@@ -287,6 +308,12 @@ impl PageMedia {
         self.recent.push_front(key.to_owned());
         self.recent.truncate(MAX_MEDIA_RECENT);
         MediaReport::Playable(url.to_owned())
+    }
+
+    /// Whether the page reported a media URL: only then can a tap on a media element have the
+    /// application offer it again ([`tap_hits_media_script`]).
+    pub(crate) fn reported_a_url(&self) -> bool {
+        !self.recent.is_empty()
     }
 
     fn spend(&mut self, budget: &mut MediaBudget, now_ms: u64) -> bool {
@@ -720,6 +747,46 @@ mod tests {
             PageMedia::default().note(None, &mut budget, 0),
             MediaReport::Unplayable
         );
+    }
+
+    #[test]
+    fn only_a_page_that_reported_a_url_can_offer_it_again() {
+        let mut page = PageMedia::default();
+        let mut budget = MediaBudget::default();
+        assert!(!page.reported_a_url());
+
+        assert_eq!(page.note(None, &mut budget, 0), MediaReport::Unplayable);
+        assert!(!page.reported_a_url());
+        assert!(matches!(
+            page.note(Some("https://example.org/a.mp4"), &mut budget, 0),
+            MediaReport::Playable(_)
+        ));
+        assert!(page.reported_a_url());
+    }
+
+    #[test]
+    fn a_url_the_budget_dropped_was_not_reported() {
+        let mut page = PageMedia::default();
+        let mut spent = MediaBudget::default();
+        for n in 0..MEDIA_REPORT_BURST {
+            PageMedia::default().note(Some(&format!("https://example.org/{n}.mp4")), &mut spent, 0);
+        }
+
+        assert_eq!(
+            page.note(Some("https://example.org/a.mp4"), &mut spent, 0),
+            MediaReport::Nothing
+        );
+        assert!(!page.reported_a_url());
+    }
+
+    #[test]
+    fn the_media_tap_script_gets_the_point_in_css_pixels() {
+        let script = tap_hits_media_script(12.5, 40.0).unwrap();
+        assert!(script.trim_end().ends_with("})(12.5, 40)"), "{script}");
+        assert!(!script.contains("__X__") && !script.contains("__Y__"));
+        assert!(script.contains("elementsFromPoint(x, y)"));
+        assert_eq!(tap_hits_media_script(f32::NAN, 1.0), None);
+        assert_eq!(tap_hits_media_script(1.0, f32::INFINITY), None);
     }
 
     #[test]

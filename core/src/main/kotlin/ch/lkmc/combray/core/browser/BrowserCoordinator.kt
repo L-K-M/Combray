@@ -726,6 +726,9 @@ class BrowserCoordinator(
     /** Clears [notice] (or an equal duplicate); a different one posted while the UI showed it is kept. */
     fun noticeShown(notice: Notice) = state.update { if (it.notice == notice) it.copy(notice = null) else it }
 
+    /** The user played or closed [offer]; a later offer of the same page shows again. */
+    fun dismissMediaOffer(offer: MediaPageRef) = state.update { if (it.mediaOffer == offer) it.copy(mediaOffer = null) else it }
+
     /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
@@ -820,6 +823,7 @@ class BrowserCoordinator(
                 it.dialogsBlocked = false
             }
             is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
+            is EngineEvent.MediaTapped -> view(event.view)?.let { onMediaTapped(it, event) }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live ->
                 val hidden = live.controls.filter { it.id == event.control }
@@ -879,10 +883,12 @@ class BrowserCoordinator(
      * name the wrong page. An address the player may not fetch from this page ([MediaPolicy])
      * counts as media without one.
      *
-     * Only the tab on screen gets notices, at most two per page: the plain one, then the playable
-     * one if an address arrives later. The first address gives the playable notice at once. Media
-     * without an address gives the plain notice only once the page has loaded and still has none,
-     * so a `<track>` cancelled just before its video does not give a notice of its own.
+     * Only the tab on screen gets notices, at most two per page: the plain one, then the offer
+     * ([BrowserState.mediaOffer]) if an address arrives later. The first address gives the offer
+     * at once; later ones join it without a second one (a tap on the page's media offers it again,
+     * [onMediaTapped]). Media without an address gives the plain notice only once the page has
+     * loaded and still has none, so a `<track>` cancelled just before its video does not give a
+     * notice of its own.
      */
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
@@ -936,8 +942,13 @@ class BrowserCoordinator(
             if (!shown || page.playableShown) return
             page.playableShown = true
             page.plainPending = false
-            // Overwrites any notice the UI has not taken yet, as every notice does; that includes this page's plain one.
-            state.update { it.copy(notice = Notice.MediaPlayable(MediaPageRef(view.tabId, page.id))) }
+            // One page, one message: the offer replaces this page's plain notice if the UI has not taken it yet.
+            state.update {
+                it.copy(
+                    mediaOffer = MediaPageRef(view.tabId, page.id),
+                    notice = it.notice.takeUnless { notice -> notice == Notice.MediaUnplayable },
+                )
+            }
             return
         }
         if (!shown || page.entries.isNotEmpty() || page.plainShown || page.playableShown) return
@@ -946,6 +957,17 @@ class BrowserCoordinator(
             return
         }
         showPlainMediaNotice(page)
+    }
+
+    /**
+     * The user tapped a media element of the page shown, which cannot play in the page: offer the
+     * page's media again, also after the user closed the offer. Only while the tap's document is
+     * still shown and its page has media the player may fetch.
+     */
+    private fun onMediaTapped(view: LiveView, event: EngineEvent.MediaTapped) {
+        if (view.nativeTab != selectedNative || view.crashed || view.currentDocument != event.document) return
+        val page = view.shownPageMedia()?.takeIf { it.entries.isNotEmpty() } ?: return
+        state.update { it.copy(mediaOffer = MediaPageRef(view.tabId, page.id)) }
     }
 
     /** The plain media notice a page deferred until it loaded, if it is still on screen and found no address. */
@@ -1615,6 +1637,7 @@ class BrowserCoordinator(
             ?: tab?.currentVisitId?.let { dao.visit(it)?.failed }
             ?: false
         val shownMedia = view?.takeIf { !it.crashed }?.shownPageMedia()?.takeIf { it.entries.isNotEmpty() }
+        val mediaPage = tab?.let { active -> shownMedia?.let { MediaPageRef(active.id, it.id) } }
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -1635,9 +1658,11 @@ class BrowserCoordinator(
                             live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
                         },
                         media = shownMedia?.entries?.map { it.playable() }.orEmpty(),
-                        mediaPage = shownMedia?.let { MediaPageRef(active.id, it.id) },
+                        mediaPage = mediaPage,
                     )
                 },
+                // The offer lasts while its page is shown: another page, tab or document, Home or a crash ends it.
+                mediaOffer = it.mediaOffer?.takeIf { offer -> offer == mediaPage },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->
                     PageControl(shown.id, tab.url?.let(HostNames::of)?.let(HostNames::forDisplay), shown.content, shown.offerBlocking)
                 },
