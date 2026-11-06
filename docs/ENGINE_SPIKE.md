@@ -2978,3 +2978,77 @@ still v0.7.0.
 - Here: `native/Cargo.lock` takes the same libz-sys version and checksum, and `cargo metadata
   --locked` passes; the regenerated notices differ only in their input hashes; the native host
   tests pass. The device checks run in this PR's Engine workflow.
+
+## 50. Keeping Play reachable (6 November 2026)
+
+### Report
+
+The owner reported a page whose own video player shows its error and never plays (the site is
+not named here). Reproduced on an arm64 API 36 emulator with the Engine workflow's APK of
+PR 196's head, and read from the site's player code:
+
+- The player sits in an open shadow root. Without `MediaSource` it sets `video.src` to a
+  progressive H.264/AAC MP4 listed in the page's own data, whatever `canPlayType` answers
+  (headless Chromium with MSE removed, once with every answer empty and once with Combray's
+  claim table). Combray cancels the load, the element fails with `MEDIA_ERR_SRC_NOT_SUPPORTED`,
+  and the player draws its own error over the video. The MP4 needs no cookie and has its `moov`
+  first.
+- The load was reported and offered: the playable notice came about 7 s after the load
+  started, over the site's cookie sheet on a first visit, and was gone 10 s later
+  (`SnackbarDuration.Long`). More › "Play audio or video" opened the player, which showed the
+  video.
+- A tap on the site's player brought nothing back: the failed element's `play()` is refused
+  without a new load, and the engine reports each address once per page.
+
+The video was playable; Play was out of reach. The owner chose all three remedies offered
+([VIDEO.md](VIDEO.md#owner-decisions)).
+
+### Changes
+
+- `native/src/media_tap.js`, filled by `media::tap_hits_media_script`: whether a tap's point,
+  in CSS pixels, lies in the box of a `<video>` or `<audio>` with `readyState` 0, in the
+  document or in the open shadow roots under the point, with the topmost element there being
+  that element, containing it, or within its parent. Boxes, not the hit stack: Servo's
+  `ShadowRoot.elementsFromPoint` leaves out a video with `pointer-events: none`, as custom
+  players set it under their controls. Bounded to 16 roots, 64 hits and 64 media elements
+  per root.
+- `engine.rs`: every tap the field tracker recognizes also runs `check_tap_on_media`, only when
+  the page's `PageMedia::reported_a_url`; the answer is drained on the engine thread like the
+  field check and becomes `media_tapped` (`events.rs`) while that document is still current in
+  the active tab.
+- `core`: `BrowserState.mediaOffer` replaces `Notice.MediaPlayable`. It is set by the page's
+  first offered address and by `media_tapped`, cleared by `dismissMediaOffer` and, in
+  `publish()`, as soon as it no longer names the shown page's media.
+- `app`: the offer shows from its own `SnackbarHostState` (`Indefinite`, with a close button),
+  stepping aside while a notice shows; the address chip shows Play while the page has media;
+  the single-row bar stacks below 516dp instead of 468dp.
+- `testing/fixtures/server.py`: `/media-player.html`, a site-style player (shadow root, video
+  out of hit testing, overlay with a play button) that counts its errors, its button's clicks
+  and clicks below it in its title.
+
+### Checks
+
+- Desktop servoshell (`servo-sitecheck`, `--profile medium`, fresh profile) over WebDriver: on
+  `/media-player.html` the script says yes on the play button and on the overlay's corner, no
+  just below the player and no on a fixed banner laid over it. On the reported page, also with
+  a fresh profile: yes at the player's centre and on its controls row, no above and below it.
+  Headless Chromium gives the fixture answers too.
+- `cargo test --lib` in `native/` (167), `node --test native/src/test/*.test.mjs` (9),
+  `cargo fmt --check`, `cargo check --target aarch64-linux-android --locked`, the fixture
+  server's host tests (17), and `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest` pass.
+- Device, on an arm64 API 36 emulator (Pixel 7 profile) with this branch's local arm64 build:
+  `MediaPlayerTest` passes all 13 checks, check 15 and `leavingThePageTakesItsOfferAway`
+  included. Check 1's colour sample failed once, on the first player launch after a fresh
+  install, where API 36 dims the screen behind its "Viewing full screen" hint; it passes once
+  the hint has been acknowledged. `AccessibilityTest` (with `playInTheAddressIsAccessible`) and
+  `BrowsingTest.mediaIsCancelledBeforeDownloadingAndThePageIsTold` pass except
+  `theBottomBarOnANewTabIsAccessible`, which fails the same way on main's build on that
+  emulator ("New tab" and "Recent" share a touch area on Home at 200% font): not this change.
+- The reported page on the same emulator: the offer stays past ten seconds, with Play in the
+  address field; closed, it stays closed while untouched and after a tap beside the video,
+  and comes back after a tap on the player's error text, its play button or its mute button
+  (which the site also handles). Once, a tap on the site's cookie sheet where it covered the
+  video brought the offer back as well; the sheet did not show again on a cleared profile, so
+  whether that tap reached the player in Servo's hit test is open.
+- The x86_64 emulator suite runs in this PR's Engine workflow.

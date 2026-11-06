@@ -244,7 +244,8 @@ class MediaPlayerTest {
 
         compose.onNodeWithContentDescription(DISMISS).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithText(PLAYABLE_NOTICE).fetchSemanticsNodes().isEmpty() }
-        assertNull(device.browser.browserState.value.mediaOffer)
+        // The snackbar goes first; the effect that saw it go then closes the offer.
+        device.awaitState { it.mediaOffer == null }
         compose.onNodeWithContentDescription(PLAY_MEDIA).assertExists()
 
         // A tap below the player reaches the page, and its media is not offered.
