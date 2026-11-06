@@ -2709,6 +2709,40 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aCrashedPagesLateMediaIsNeitherOfferedNorTold() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+
+        // Loads the engine held for the page come after its crash.
+        media(1, 10, "https://a.test/a.mp4")
+        media(1, 10, null)
+        assertNull(state().mediaOffer)
+        assertNull(state().notice)
+        assertNull(state().activeTab!!.mediaPage)
+    }
+
+    @Test
+    fun aTapAfterARouteReturnOffersThatRoutesMedia() {
+        ready()
+        browser.openUrl("https://app.test/feed", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://app.test/feed")
+        media(1, 10, "https://cdn.test/1.mp4")
+        val feed = offer()
+        browser.dismissMediaOffer(feed)
+
+        // Away and back within the document: the feed's player loads nothing again.
+        commit(1, 10, "https://app.test/post/2", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
+        tapped(1, 10)
+        assertNull("a route without media offers nothing", state().mediaOffer)
+        commit(1, 10, "https://app.test/feed", HistoryKind.SAME_DOCUMENT, index = 0, length = 2)
+        tapped(1, 10)
+        assertEquals(feed, offer())
+    }
+
+    @Test
     fun theOfferEndsWhenItsPageLeavesTheScreen() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()

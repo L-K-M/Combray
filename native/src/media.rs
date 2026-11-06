@@ -27,9 +27,10 @@
 //! its media URL or its address. A load names no document, so the engine credits it to the
 //! committed one, except while a new document is awaited ([`PendingMedia`]).
 //!
-//! Once a page has reported a URL, a tap on one of its media elements, or on controls the page
-//! laid over one, has the application offer the page's media again ([`tap_hits_media_script`]):
-//! sites draw their own player with their own error message, and that is where you tap.
+//! Once a document has reported a URL, a tap on one of its media elements, or on controls the
+//! page laid over one, has the application offer the page's media again
+//! ([`tap_hits_media_script`]): sites draw their own player with their own error message, and
+//! that is where you tap.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
@@ -308,12 +309,6 @@ impl PageMedia {
         self.recent.push_front(key.to_owned());
         self.recent.truncate(MAX_MEDIA_RECENT);
         MediaReport::Playable(url.to_owned())
-    }
-
-    /// Whether the page reported a media URL: only then can a tap on a media element have the
-    /// application offer it again ([`tap_hits_media_script`]).
-    pub(crate) fn reported_a_url(&self) -> bool {
-        !self.recent.is_empty()
     }
 
     fn spend(&mut self, budget: &mut MediaBudget, now_ms: u64) -> bool {
@@ -747,36 +742,6 @@ mod tests {
             PageMedia::default().note(None, &mut budget, 0),
             MediaReport::Unplayable
         );
-    }
-
-    #[test]
-    fn only_a_page_that_reported_a_url_can_offer_it_again() {
-        let mut page = PageMedia::default();
-        let mut budget = MediaBudget::default();
-        assert!(!page.reported_a_url());
-
-        assert_eq!(page.note(None, &mut budget, 0), MediaReport::Unplayable);
-        assert!(!page.reported_a_url());
-        assert!(matches!(
-            page.note(Some("https://example.org/a.mp4"), &mut budget, 0),
-            MediaReport::Playable(_)
-        ));
-        assert!(page.reported_a_url());
-    }
-
-    #[test]
-    fn a_url_the_budget_dropped_was_not_reported() {
-        let mut page = PageMedia::default();
-        let mut spent = MediaBudget::default();
-        for n in 0..MEDIA_REPORT_BURST {
-            PageMedia::default().note(Some(&format!("https://example.org/{n}.mp4")), &mut spent, 0);
-        }
-
-        assert_eq!(
-            page.note(Some("https://example.org/a.mp4"), &mut spent, 0),
-            MediaReport::Nothing
-        );
-        assert!(!page.reported_a_url());
     }
 
     #[test]

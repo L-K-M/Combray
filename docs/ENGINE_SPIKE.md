@@ -3010,15 +3010,15 @@ The video was playable; Play was out of reach. The owner chose all three remedie
   a source (`networkState` not empty), in the document or in the open shadow roots under the
   point. The topmost element there must be that element or a container of it across shadow
   roots, or controls drawn on it: inside its parent and inside its box (1 px slack). A banner
-  sharing the video's parent once counted; the review of this PR caught it. Boxes, not the
-  hit stack: Servo's
-  `ShadowRoot.elementsFromPoint` leaves out a video with `pointer-events: none`, as custom
-  players set it under their controls. Bounded to 16 roots, 64 hits and 64 media elements
-  per root.
+  sharing the video's parent once counted; the review of this PR caught it. Boxes, not the hit
+  stack: Servo's `ShadowRoot.elementsFromPoint` leaves out a video with `pointer-events: none`,
+  as custom players set it under their controls. Bounded to 16 roots, 64 hits and 64 media
+  elements per root.
 - `engine.rs`: every tap the field tracker recognizes also runs `check_tap_on_media`, only when
-  the page's `PageMedia::reported_a_url`; the answer is drained on the engine thread like the
-  field check and becomes `media_tapped` (`events.rs`) while that document is still current in
-  the active tab.
+  the document reported a media URL on any of its pages (`Tab::media_documents`, so a route
+  change or a return to a cached document that loads nothing again keeps it). The answer is
+  drained on the engine thread like the field check and becomes `media_tapped` (`events.rs`)
+  while that document is still current in the active tab.
 - `core`: `BrowserState.mediaOffer` replaces `Notice.MediaPlayable`. It is set by the page's
   first offered address and by `media_tapped`, cleared by `dismissMediaOffer` and, in
   `publish()`, as soon as it no longer names the shown page's media.
@@ -3036,7 +3036,7 @@ The video was playable; Play was out of reach. The owner chose all three remedie
   just below the player and no on a fixed banner laid over it. On the reported page, also with
   a fresh profile: yes at the player's centre and on its controls row, no above and below it.
   Headless Chromium gives the fixture answers too.
-- `cargo test --lib` in `native/` (167), `node --test native/src/test/*.test.mjs` (9),
+- `cargo test --lib` in `native/` (165), `node --test native/src/test/*.test.mjs` (13),
   `cargo fmt --check`, `cargo check --target aarch64-linux-android --locked`, the fixture
   server's host tests (17), and `./gradlew testDebugUnitTest lintDebug assembleDebug
   assembleDebugAndroidTest` pass.

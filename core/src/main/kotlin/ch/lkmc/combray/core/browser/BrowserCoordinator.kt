@@ -891,6 +891,8 @@ class BrowserCoordinator(
      * notice of its own.
      */
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
+        // A crashed page shows the crash: a load the engine held for it is neither offered nor told.
+        if (view.crashed) return
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
         // A load names no document, so the engine credits it to the committed one. While a page the app asked
         // for is pending, a load can be the pending page's, overtaking its commit (a data: page leaving for a
