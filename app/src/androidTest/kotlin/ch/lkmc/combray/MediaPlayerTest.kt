@@ -357,7 +357,15 @@ class MediaPlayerTest {
         assertTrue("video tracks", playing.hasVideo)
         back(player)
 
-        assertTrue("HLS requests", hls().getInt("requests") > 0)
+        // The doomed progressive fetch already counts once; the hops below prove the retry.
+        val served = hls()
+        assertTrue("HLS requests", served.getInt("requests") >= 4)
+        val paths = (0 until served.getJSONArray("seen").length()).map {
+            served.getJSONArray("seen").getJSONObject(it).getString("path")
+        }
+        for (hop in listOf("/media/hls-manifest", "/media/hls-video.m3u8", "/media/hls-audio.m3u8", "/media/hls-init.mp4")) {
+            assertTrue("fetched $hop", paths.any { it.startsWith(hop) })
+        }
         assertLogHasNoAddress()
     }
 
