@@ -305,6 +305,38 @@ class MediaPlayerTest {
         assertTrue("clip requests", clip().getInt("requests") > 0)
     }
 
+    /**
+     * Check 13: an HLS playlist claimed by `canPlayType` is offered and plays after a tap
+     * (docs/VIDEO.md, phase C2): the variant playlist in X's shape, fMP4 video segments and a
+     * separate AAC audio playlist, every hop through the player's network rules.
+     */
+    @Test
+    fun anHlsPlaylistPlaysAfterATap() {
+        open(Fixtures.hls(key))
+        // The playlist was attached only because the claim matched; its cancel fired the error.
+        device.awaitState { it.activeTab?.title == "HLS:errors:1" }
+        assertEquals("HLS requests before Play", 0, hls().getInt("requests"))
+        tapPlay()
+
+        val player = awaitPlayer()
+        val playing = awaitSnapshot(player, "ready and the first frame") { it.firstFrameRendered && it.phase in PLAYED }
+        assertTrue("video tracks", playing.hasVideo)
+        back(player)
+
+        // The master playlist, both media playlists, the init segment and the segments all
+        // reached the fixture through the player's client.
+        val served = hls()
+        assertTrue("HLS requests", served.getInt("requests") > 0)
+        val seen = served.getJSONArray("seen")
+        for (index in 0 until seen.length()) {
+            val request = seen.getJSONObject(index)
+            assertEquals("Cookie", "", request.getString("cookie"))
+            assertEquals("Referer", "${Fixtures.BASE}/", request.getString("referer"))
+            assertTrue("User-Agent names Servo", request.getBoolean("servo_agent"))
+        }
+        assertLogHasNoAddress()
+    }
+
     /** Check 10 (report): a data: page's media is judged as a public page's, through the engine. */
     @Test
     fun aDataPageOffersNothing() = report("data page") {
@@ -407,6 +439,8 @@ class MediaPlayerTest {
     private fun media(): JSONObject = Fixtures.state().getJSONObject("media")
 
     private fun clip(): JSONObject = media().getJSONObject("clip")
+
+    private fun hls(): JSONObject = media().getJSONObject("hls")
 
     private fun tapPageCenter() {
         device.dismissSystemDialogs()

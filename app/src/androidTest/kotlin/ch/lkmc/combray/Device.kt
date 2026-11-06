@@ -165,6 +165,13 @@ object Fixtures {
     /** A `<video>` whose only `<source>` is [clip] with [key] typed `video/mp4`; titled `TYPED:errors:<n>`. */
     fun typedSource(key: String) = "$BASE/media-source.html?k=$key"
 
+    /**
+     * A `<video>` that attaches its playlist with [key] only when `canPlayType` claims the HLS
+     * codecs; titled `HLS:errors:<n>`, or `HLS:unsupported` when the claim is empty. The
+     * playlist and its segments are counted under "media" › "hls" in [state].
+     */
+    fun hls(key: String) = "$BASE/hls.html?k=$key"
+
     /** The 6 s fixture clip, [Device.GREEN] then [Device.BLUE]; "media" › "clip" in [state] records its requests. */
     fun clip(key: String) = "$BASE/media/clip.mp4?k=$key"
 

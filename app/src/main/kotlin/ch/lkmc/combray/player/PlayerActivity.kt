@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.util.TypedValue
@@ -29,10 +30,12 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
@@ -361,15 +364,21 @@ class PlayerActivity : ComponentActivity() {
 }
 
 /**
- * The media source for [request]. C1 plays progressive files only: a playlist fails as a format
- * error instead of reaching Media3's automatic source selection. C2 adds an HLS branch here
- * (with `media3-exoplayer-hls`).
+ * The media source for [request]: an HLS source when the address names a playlist (C2), a
+ * progressive one otherwise. Both fetch through the same [factory], so playlist and segment
+ * hops pass the same network rules. A source kind other than these never arrives: the engine's
+ * claim table claims no other type, and Media3's automatic selection is not used.
  */
 @OptIn(UnstableApi::class)
-internal fun mediaSource(request: PlaybackRequest, factory: DataSource.Factory): MediaSource =
-    ProgressiveMediaSource.Factory(factory)
-        .setLoadErrorHandlingPolicy(RefusalsAreFinal)
-        .createMediaSource(MediaItem.fromUri(request.url.toString()))
+internal fun mediaSource(request: PlaybackRequest, factory: DataSource.Factory): MediaSource {
+    val item = MediaItem.fromUri(request.url.toString())
+    val sourceFactory = if (Util.inferContentType(Uri.parse(request.url.toString())) == C.CONTENT_TYPE_HLS) {
+        HlsMediaSource.Factory(factory)
+    } else {
+        ProgressiveMediaSource.Factory(factory)
+    }
+    return sourceFactory.setLoadErrorHandlingPolicy(RefusalsAreFinal).createMediaSource(item)
+}
 
 /** Media3 retries failed loads; a refused address is refused again, so it fails at once. */
 @OptIn(UnstableApi::class)

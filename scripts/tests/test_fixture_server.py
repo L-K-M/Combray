@@ -378,5 +378,57 @@ class ReportServiceTest(unittest.TestCase):
         self.assertEqual(201, self.post(self.golden)[0])
 
 
+class HlsFixtureTest(unittest.TestCase):
+    """The HLS fixture (docs/VIDEO.md, phase C2): a claim-gated page, a variant playlist in
+    X's shape, and fMP4 segments remuxed from clip.mp4's own samples."""
+
+    def setUp(self):
+        self.fixture = load_server()
+
+    def test_the_page_attaches_the_playlist_only_when_hls_is_claimed(self):
+        document = self.fixture.hls_page("k9")
+        self.assertIn("canPlayType('application/vnd.apple.mpegurl", document)
+        self.assertIn("v.src = '/media/hls.m3u8?k=k9'", document)
+        self.assertIn("HLS:unsupported", document)
+
+    def test_the_master_playlist_names_a_video_variant_and_a_separate_audio_playlist(self):
+        playlist = self.fixture.hls_master_playlist("k9")
+        self.assertIn("#EXT-X-VERSION:6", playlist)
+        self.assertIn('TYPE=AUDIO,GROUP-ID="a"', playlist)
+        self.assertIn('URI="/media/hls-audio.m3u8?k=k9"', playlist)
+        self.assertIn('AUDIO="a"', playlist)
+        self.assertIn("/media/hls-video.m3u8?k=k9", playlist)
+
+    def test_the_video_playlist_maps_its_init_segment_and_names_root_relative_segments(self):
+        playlist = self.fixture.hls_media_playlist(
+            [(3.0, "/media/hls-video-0.m4s?k=k9"), (3.0, "/media/hls-video-1.m4s?k=k9")],
+            "/media/hls-init.mp4?k=k9")
+        self.assertIn('#EXT-X-MAP:URI="/media/hls-init.mp4?k=k9"', playlist)
+        self.assertIn("/media/hls-video-0.m4s?k=k9", playlist)
+        self.assertIn("#EXT-X-ENDLIST", playlist)
+
+    def test_the_remux_keeps_the_clips_samples_and_boxes_parse(self):
+        clip = self.fixture.CLIP_PATH.read_bytes()
+        init, segments = self.fixture.remux_fmp4(clip)
+        self.assertEqual(700, len(init))
+        self.assertEqual(
+            [("ftyp", 32), ("moov", 668)],
+            [(typ, size) for typ, _, size, _ in self.fixture.mp4_boxes(init)])
+        for index, segment in enumerate(segments):
+            with self.subTest(segment=index):
+                self.assertEqual(
+                    ["styp", "moof", "mdat"],
+                    [typ for typ, _, _, _ in self.fixture.mp4_boxes(segment)])
+                pos, size = self.fixture.mp4_find(segment, "moof.traf.trun")
+                flags, count, offset = struct.unpack(">IIi", segment[pos + 8:pos + 20])
+                self.assertEqual((0x000701, 90), (flags, count))
+                self.assertGreater(offset, 0)
+                pos, _ = self.fixture.mp4_find(segment, "moof.traf.tfdt")
+                self.assertEqual(index * 46080, struct.unpack(">Q", segment[pos + 12:pos + 20])[0])
+                pos, mdat_size = self.fixture.mp4_find(segment, "mdat")
+                # The segment's samples are the clip's own half, byte for byte.
+                self.assertIn(segment[pos + 8:pos + mdat_size], clip)
+
+
 if __name__ == "__main__":
     unittest.main()
