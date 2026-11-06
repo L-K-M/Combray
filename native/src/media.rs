@@ -11,6 +11,14 @@
 //! its fallback. Script fetches (`fetch()`, `XMLHttpRequest`) have the empty destination and are
 //! not affected.
 //!
+//! `canPlayType` and `<source type>` ask Servo's media backend what plays; they are the only
+//! callers (this engine has no MSE `isTypeSupported` for a page to reach the same answer
+//! through). The dummy answers nothing, which hides media from the player too: a site that
+//! asks first attaches no source, and a `<source>` with a `type` is skipped before its fetch,
+//! so nothing is cancelled and nothing is reported. `media_backend` answers instead with the
+//! types the player can fetch and decode ([`claimed_support`]); every other type keeps the
+//! `No` it had, so a page never picks a format the player cannot play.
+//!
 //! The application may offer a cancelled `audio` or `video` load to a player outside Servo, so
 //! the engine reports its URL when the URL is one the player could fetch as the page asked
 //! ([`reportable_url`]). Reports are per page ([`PageMedia`]): a URL already reported for the
@@ -73,6 +81,94 @@ pub(crate) fn cancelled_kind(destination: &str) -> Option<MediaKind> {
         "track" => Some(MediaKind::Track),
         _ => None,
     }
+}
+
+/// What `canPlayType` reports, as `SupportsMediaType` spells it, so the table and its tests
+/// build without Servo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaSupport {
+    No,
+    Maybe,
+    Probably,
+}
+
+/// What `canPlayType` answers for `media_type` (as `video/mp4; codecs="avc1.42E01E, mp4a.40.2"`):
+/// `Maybe` for a MIME type the player outside the engine reads, `Probably` when its `codecs`
+/// names only codecs a device decoder plays, and `No` for anything else.
+///
+/// The claim is what Media3's progressive source reads through the decoders Android requires:
+/// H.264 video and AAC/MP3 audio in MP4, and AAC, MP3, WAV, FLAC and Vorbis/Opus/FLAC audio on
+/// their own. Nothing else is claimed: a codec a device may lack (HEVC, VP9, AV1) or a source
+/// the player does not read (HLS until it gains one, DASH, WebM, MSE) must stay `No`, or a
+/// site chooses it and fails.
+pub(crate) fn claimed_support(media_type: &str) -> MediaSupport {
+    let media_type = media_type.to_ascii_lowercase();
+    let mut parts = media_type.split(';');
+    let mime = parts.next().unwrap_or_default().trim();
+    let codecs = parts.find_map(|part| {
+        let (name, value) = part.split_once('=')?;
+        (name.trim() == "codecs").then(|| value.trim().trim_matches('"').trim())
+    });
+    match mime {
+        "video/mp4" | "audio/mp4" | "audio/x-m4a" => support(codecs, mp4_codec),
+        // ADTS carries AAC only, so a named codec must be one (`mp4a.40.*` or a bare `mp4a`).
+        "audio/aac" | "audio/x-aac" => support(codecs, |codec| {
+            codec == "mp4a" || codec.starts_with("mp4a.40")
+        }),
+        "audio/mpeg" | "audio/mp3" | "audio/x-mp3" | "audio/mpeg3" | "audio/x-mpeg3" => {
+            support(codecs, mp3_codec)
+        },
+        "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/vnd.wave" => support(codecs, wav_codec),
+        "audio/flac" | "audio/x-flac" => support(codecs, |codec| codec == "flac"),
+        "audio/ogg" | "application/ogg" => support(codecs, ogg_codec),
+        _ => MediaSupport::No,
+    }
+}
+
+/// `Probably` when `codecs` names codecs and every one is `supported`, `Maybe` for a bare
+/// type (or an empty `codecs=""`, which says nothing), `No` when a named codec is not.
+fn support(codecs: Option<&str>, supported: impl Fn(&str) -> bool) -> MediaSupport {
+    let Some(codecs) = codecs else {
+        return MediaSupport::Maybe;
+    };
+    let codecs: Vec<&str> = codecs
+        .split(',')
+        .map(str::trim)
+        .filter(|codec| !codec.is_empty())
+        .collect();
+    if codecs.is_empty() {
+        MediaSupport::Maybe
+    } else if codecs.iter().all(|codec| supported(codec)) {
+        MediaSupport::Probably
+    } else {
+        MediaSupport::No
+    }
+}
+
+/// The MP4 codecs a device decoder plays: H.264 (`avc1`, `avc3`), AAC (`mp4a.40.*`), MP3 in
+/// MP4 (`mp4a.69`, `mp4a.6b`) and a bare `mp4a` that names none. Not AC-3/E-AC-3 (`mp4a.a5`,
+/// `mp4a.a6`) and no video codec a device may lack.
+fn mp4_codec(codec: &str) -> bool {
+    codec.starts_with("avc1")
+        || codec.starts_with("avc3")
+        || codec == "mp4a"
+        || codec.starts_with("mp4a.40")
+        || codec.starts_with("mp4a.69")
+        || codec.starts_with("mp4a.6b")
+}
+
+fn mp3_codec(codec: &str) -> bool {
+    codec == "mp3" || codec.starts_with("mp4a.69") || codec.starts_with("mp4a.6b")
+}
+
+/// The WAV encodings Media3 reads: PCM, float PCM, A-law and mu-law.
+fn wav_codec(codec: &str) -> bool {
+    matches!(codec, "1" | "3" | "6" | "7")
+}
+
+/// The Ogg audio a device decoder plays: Vorbis, Opus and FLAC.
+fn ogg_codec(codec: &str) -> bool {
+    matches!(codec, "vorbis" | "opus" | "flac")
 }
 
 /// The URL of a cancelled load, if the engine reports it: http(s) only, without sign-in
@@ -707,5 +803,82 @@ mod tests {
             page.note(Some(&url(300)), &mut budget, start + 60_000),
             MediaReport::Nothing
         );
+    }
+
+    #[test]
+    fn mp4_claims_cover_h264_and_aac() {
+        use MediaSupport::*;
+        assert_eq!(Maybe, claimed_support("video/mp4"));
+        assert_eq!(Maybe, claimed_support("audio/mp4"));
+        assert_eq!(
+            Probably,
+            claimed_support("video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"")
+        );
+        assert_eq!(Probably, claimed_support("video/mp4;codecs=avc1.4d401f"));
+        assert_eq!(
+            Probably,
+            claimed_support("video/mp4; codecs=\"avc3.640028\"")
+        );
+        assert_eq!(Probably, claimed_support("audio/mp4; codecs=\"mp4a.40.2\""));
+        assert_eq!(Probably, claimed_support("audio/mp4; codecs=\"mp4a.69\""));
+        assert_eq!(Maybe, claimed_support("audio/x-m4a"));
+        assert_eq!(Maybe, claimed_support("audio/aac"));
+        assert_eq!(Maybe, claimed_support("audio/x-aac"));
+        assert_eq!(Probably, claimed_support("audio/aac; codecs=\"mp4a.40.5\""));
+        assert_eq!(No, claimed_support("audio/aac; codecs=\"avc1.42E01E\""));
+        // Case and spacing are the page's, not the table's.
+        assert_eq!(
+            Probably,
+            claimed_support("VIDEO/MP4;  CODECS = \"AVC1.42E01E\"")
+        );
+    }
+
+    #[test]
+    fn mp4_claims_reject_codecs_a_device_may_lack() {
+        use MediaSupport::*;
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"hvc1.1.6.L93\""));
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"hev1.1.6.L93\""));
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"av01.0.04M\""));
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"vp09.00.10.08\""));
+        assert_eq!(No, claimed_support("audio/mp4; codecs=\"mp4a.a5\""));
+        // One unknown codec sinks the whole list.
+        assert_eq!(
+            No,
+            claimed_support("video/mp4; codecs=\"avc1.42E01E, ac-3\"")
+        );
+    }
+
+    #[test]
+    fn audio_claims_cover_what_the_player_reads() {
+        use MediaSupport::*;
+        assert_eq!(Maybe, claimed_support("audio/mpeg"));
+        assert_eq!(Probably, claimed_support("audio/mpeg; codecs=\"mp3\""));
+        assert_eq!(Maybe, claimed_support("audio/wav"));
+        assert_eq!(Probably, claimed_support("audio/wav; codecs=\"1\""));
+        assert_eq!(No, claimed_support("audio/wav; codecs=\"85\""));
+        assert_eq!(Maybe, claimed_support("audio/flac"));
+        assert_eq!(Probably, claimed_support("audio/ogg; codecs=\"vorbis\""));
+        assert_eq!(Probably, claimed_support("audio/ogg; codecs=\"opus\""));
+        assert_eq!(No, claimed_support("audio/ogg; codecs=\"theora\""));
+    }
+
+    #[test]
+    fn unbacked_types_stay_unclaimed() {
+        use MediaSupport::*;
+        // HLS until the player gains an HLS source; DASH and MSE never had one.
+        for media_type in [
+            "application/vnd.apple.mpegurl",
+            "application/x-mpegurl",
+            "audio/mpegurl",
+            "audio/x-mpegurl",
+            "application/dash+xml",
+            "video/webm",
+            "audio/webm",
+            "video/webm; codecs=\"vp8, vorbis\"",
+            "application/octet-stream",
+            "",
+        ] {
+            assert_eq!(No, claimed_support(media_type), "{media_type:?}");
+        }
     }
 }
