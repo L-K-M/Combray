@@ -96,11 +96,11 @@ pub(crate) enum MediaSupport {
 /// `Maybe` for a MIME type the player outside the engine reads, `Probably` when its `codecs`
 /// names only codecs a device decoder plays, and `No` for anything else.
 ///
-/// The claim is what Media3's progressive source reads through the decoders Android requires:
-/// H.264 video and AAC/MP3 audio in MP4, and AAC, MP3, WAV, FLAC and Vorbis/Opus/FLAC audio on
-/// their own. Nothing else is claimed: a codec a device may lack (HEVC, VP9, AV1) or a source
-/// the player does not read (HLS until it gains one, DASH, WebM, MSE) must stay `No`, or a
-/// site chooses it and fails.
+/// The claim is what Media3's progressive and HLS sources read through the decoders Android
+/// requires: H.264 video and AAC/MP3 audio in MP4, AAC, MP3, WAV, FLAC and Vorbis/Opus/FLAC
+/// audio on their own, and HLS playlists carrying the same codecs in TS or fMP4. Nothing else
+/// is claimed: a codec a device may lack (HEVC, VP9, AV1) or a source the player does not read
+/// (DASH, WebM, MSE) must stay `No`, or a site chooses it and fails.
 pub(crate) fn claimed_support(media_type: &str) -> MediaSupport {
     let media_type = media_type.to_ascii_lowercase();
     let mut parts = media_type.split(';');
@@ -121,6 +121,13 @@ pub(crate) fn claimed_support(media_type: &str) -> MediaSupport {
         "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/vnd.wave" => support(codecs, wav_codec),
         "audio/flac" | "audio/x-flac" => support(codecs, |codec| codec == "flac"),
         "audio/ogg" | "application/ogg" => support(codecs, ogg_codec),
+        // HLS playlists: the `codecs` parameter names the segments' codecs, which the same
+        // MP4-family decoders play (`application/vnd.apple.mpegurl` is the registered type;
+        // `audio/mpegurl` is common for audio-only playlists).
+        "application/vnd.apple.mpegurl"
+        | "application/x-mpegurl"
+        | "audio/mpegurl"
+        | "audio/x-mpegurl" => support(codecs, mp4_codec),
         _ => MediaSupport::No,
     }
 }
@@ -863,14 +870,33 @@ mod tests {
     }
 
     #[test]
-    fn unbacked_types_stay_unclaimed() {
+    fn hls_claims_follow_the_playlists_codecs() {
         use MediaSupport::*;
-        // HLS until the player gains an HLS source; DASH and MSE never had one.
-        for media_type in [
+        for mime in [
             "application/vnd.apple.mpegurl",
             "application/x-mpegurl",
             "audio/mpegurl",
             "audio/x-mpegurl",
+        ] {
+            assert_eq!(Maybe, claimed_support(mime), "{mime:?}");
+            assert_eq!(
+                Probably,
+                claimed_support(&format!("{mime}; codecs=\"avc1.42E01E, mp4a.40.2\"")),
+                "{mime:?} with supported codecs"
+            );
+            assert_eq!(
+                No,
+                claimed_support(&format!("{mime}; codecs=\"hvc1.1.6.L93\"")),
+                "{mime:?} with an unbacked codec"
+            );
+        }
+    }
+
+    #[test]
+    fn unbacked_types_stay_unclaimed() {
+        use MediaSupport::*;
+        // DASH and MSE never had a player.
+        for media_type in [
             "application/dash+xml",
             "video/webm",
             "audio/webm",

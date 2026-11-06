@@ -56,6 +56,11 @@ Pages
   /media-source.html?k=<alnum>
                              <video> whose only <source> is clip.mp4 typed video/mp4 with
                              codecs; skipped when the engine claims no MP4; title TYPED:errors:<n>
+  /hls.html?k=<alnum>        <video> that attaches /media/hls.m3u8?k=... only when canPlayType
+                             claims the HLS codecs; title HLS:errors:<n>, or HLS:unsupported
+                             when the claim is No
+  /hls-noext.html?k=<alnum>  the same, but the playlist is /media/hls-manifest: no .m3u8 for
+                             the player to infer from
   /media-redirect.html?to=clip|file[&k=<alnum>]
                              <video> from /media/redirect; title REDIRECT:errors:<n>
   /media-local.html          a data: and a file: <video>, neither of them a web address; title LOCAL:errors:<n>
@@ -64,6 +69,16 @@ Pages
   /media/clip.mp4            testing/fixtures/media/clip.mp4 (6 s, green then blue; see its README),
                              with byte ranges (206, 416)
   /media/tone.wav            3 s of a 440 Hz tone, with byte ranges
+  /media/hls.m3u8            variant playlist in X's shape (version 6, a separate audio
+                             playlist, root-relative URIs): hls-video.m3u8 + hls-audio.m3u8;
+                             also served extensionless at /media/hls-manifest
+  /media/hls-video.m3u8      video playlist: EXT-X-MAP hls-init.mp4 + two fMP4 segments,
+                             remuxed from clip.mp4 at start-up (green half, then blue)
+  /media/hls-audio.m3u8      audio playlist: two committed AAC segments (media/README.md)
+  /media/hls-init.mp4        fMP4 init segment for the video playlist
+  /media/hls-video-{0,1}.m4s fMP4 media segments (video/iso.segment)
+  /media/hls-audio-{0,1}.aac ADTS AAC media segments
+                             /_admin/state "media" counts all of them under "hls"
   /media/redirect?to=clip|file[&k=<alnum>]
                              302 to /media/clip.mp4?k=..., or to file:///system/etc/hosts
                              /_admin/state "media" also has, for "clip" and "tone": requests, bytes sent
@@ -219,7 +234,7 @@ def fresh_served():
 
 def fresh_media():
     """Requests for /media/slow.bin that arrived and responses sent to the end; the player's files and redirects."""
-    return {"requests": 0, "completed": 0, "clip": fresh_served(), "tone": fresh_served(), "redirects": 0}
+    return {"requests": 0, "completed": 0, "clip": fresh_served(), "tone": fresh_served(), "hls": fresh_served(), "redirects": 0}
 
 
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "reports": {}, "log": [], "media": fresh_media(),
@@ -437,6 +452,188 @@ def tone_wav():
 TONE_WAV = tone_wav()
 
 
+# --- fMP4 HLS video, remuxed from the clip -------------------------------------------
+#
+# clip.mp4 holds 180 samples of one H.264 track, each 512/15360 s long, 90 green and 90
+# blue (testing/fixtures/media/README.md). The pages' HLS fixture needs those same
+# samples as fragmented MP4: an init segment with an empty sample table, and one media
+# segment per half, split at the keyframe on the boundary. Only the boxes around the
+# samples are rebuilt; the samples move unchanged, so no encoder is needed. The shapes
+# match how sites stream HLS (EXT-X-MAP init segment, styp+moof+mdat segments).
+
+def mp4_boxes(data, start=0, end=None):
+    """(type, offset, size, header size) for each box in [start, end)."""
+    end = len(data) if end is None else end
+    pos = start
+    while pos + 8 <= end:
+        size, typ = struct.unpack(">I4s", data[pos:pos + 8])
+        header = 8
+        if size == 1:
+            size = struct.unpack(">Q", data[pos + 8:pos + 16])[0]
+            header = 16
+        if size == 0:
+            size = end - pos
+        yield typ.decode(), pos, size, header
+        pos += size
+
+
+def mp4_find(data, path):
+    """The whole-box span (offset, size) of the box `path` names, e.g. "moov.trak.mdia.mdhd"."""
+    start, end = 0, len(data)
+    names = path.split(".")
+    for name in names:
+        for typ, pos, size, header in mp4_boxes(data, start, end):
+            if typ == name:
+                if name == names[-1]:
+                    return pos, size
+                start, end = pos + header, pos + size
+                break
+        else:
+            raise ValueError(f"{path}: no {name}")
+
+
+def mp4_whole(data, path):
+    pos, size = mp4_find(data, path)
+    return data[pos:pos + size]
+
+
+def mp4_content(data, path):
+    pos, size = mp4_find(data, path)
+    return data[pos + 8:pos + size]
+
+
+def mp4_table(data, path, fields, offset=8):
+    """The records of `fields` unsigned ints in a versioned full box's table."""
+    body = mp4_content(data, path)
+    count = struct.unpack(">I", body[4:8])[0]
+    return [struct.unpack(">" + "I" * fields, body[offset + i * 4 * fields:offset + (i + 1) * 4 * fields])
+            for i in range(count)]
+
+
+def mp4_box(typ, payload):
+    return struct.pack(">I4s", 8 + len(payload), typ) + payload
+
+
+def remux_fmp4(clip):
+    """clip's video track as (init segment, [media segments]) with the samples unchanged."""
+    mvhd = mp4_whole(clip, "moov.mvhd")
+    tkhd = mp4_whole(clip, "moov.trak.tkhd")
+    mdhd = mp4_whole(clip, "moov.trak.mdia.mdhd")
+    hdlr = mp4_whole(clip, "moov.trak.mdia.hdlr")
+    vmhd = mp4_whole(clip, "moov.trak.mdia.minf.vmhd")
+    dinf = mp4_whole(clip, "moov.trak.mdia.minf.dinf")
+    stsd = mp4_whole(clip, "moov.trak.mdia.minf.stbl.stsd")
+
+    durations = [d for count, d in mp4_table(clip, "moov.trak.mdia.minf.stbl.stts", 2)
+                 for _ in range(count)]
+    stss = mp4_content(clip, "moov.trak.mdia.minf.stbl.stss")
+    sync = {struct.unpack(">I", stss[8 + i * 4:12 + i * 4])[0] - 1
+            for i in range(struct.unpack(">I", stss[4:8])[0])}
+    stsz = mp4_content(clip, "moov.trak.mdia.minf.stbl.stsz")
+    assert struct.unpack(">I", stsz[4:8])[0] == 0, "per-sample sizes expected"
+    sizes = [struct.unpack(">I", stsz[12 + i * 4:16 + i * 4])[0]
+             for i in range(struct.unpack(">I", stsz[8:12])[0])]
+    stco = mp4_content(clip, "moov.trak.mdia.minf.stbl.stco")
+    chunks = [struct.unpack(">I", stco[8 + i * 4:12 + i * 4])[0]
+              for i in range(struct.unpack(">I", stco[4:8])[0])]
+
+    # Sample offsets from the chunk layout (stsc + stco).
+    offsets = []
+    sample = 0
+    stsc = mp4_table(clip, "moov.trak.mdia.minf.stbl.stsc", 3)
+    for i, (first_chunk, per_chunk, _desc) in enumerate(stsc):
+        last = stsc[i + 1][0] - 1 if i + 1 < len(stsc) else len(chunks)
+        for chunk in chunks[first_chunk - 1:last]:
+            pos = chunk
+            for _ in range(per_chunk):
+                offsets.append(pos)
+                pos += sizes[sample]
+                sample += 1
+    assert sample == len(sizes) == len(durations), "sample tables disagree"
+
+    def empty_table(t):
+        return mp4_box(t, b"\x00\x00\x00\x00" + struct.pack(">I", 0))
+
+    # The init segment's stbl is empty: the samples live in the segments, not the moov.
+    stbl = mp4_box(b"stbl", stsd + empty_table(b"stts") + empty_table(b"stsc")
+                   + mp4_box(b"stsz", b"\x00\x00\x00\x00" + struct.pack(">II", 0, 0))
+                   + empty_table(b"stco"))
+    mdia = mp4_box(b"mdia", mdhd + hdlr + mp4_box(b"minf", vmhd + dinf + stbl))
+    trex = mp4_box(b"trex", b"\x00\x00\x00\x00" + struct.pack(">IIIII", 1, 1, 0, 0, 0))
+    init = mp4_whole(clip, "ftyp") + mp4_box(
+        b"moov", mvhd + mp4_box(b"trak", tkhd + mdia) + mp4_box(b"mvex", trex))
+
+    def segment(seq, first, count):
+        mfhd = mp4_box(b"mfhd", b"\x00\x00\x00\x00" + struct.pack(">I", seq))
+        # default-base-is-moof: trun's data_offset counts from this moof's start.
+        tfhd = mp4_box(b"tfhd", struct.pack(">II", 0x020000, 1))
+        tfdt = mp4_box(b"tfdt", struct.pack(">I", 0x01000000)
+                       + struct.pack(">Q", sum(durations[:first])))
+        # trun flags 0x701: data-offset + per-sample duration, size and flags.
+        trun_rows = b"".join(
+            struct.pack(">III", durations[first + i], sizes[first + i],
+                        0x02000000 if first + i in sync else 0x01010000)
+            for i in range(count))
+
+        def trun(data_offset):
+            return mp4_box(b"trun", struct.pack(">IIi", 0x000701, count, data_offset) + trun_rows)
+
+        moof = mp4_box(b"moof", mfhd + mp4_box(b"traf", tfhd + tfdt + trun(0)))
+        moof = mp4_box(b"moof", mfhd + mp4_box(b"traf", tfhd + tfdt + trun(len(moof) + 8)))
+        mdat = mp4_box(b"mdat", b"".join(
+            clip[offsets[first + i]:offsets[first + i] + sizes[first + i]] for i in range(count)))
+        return mp4_box(b"styp", b"iso6" + struct.pack(">I", 0) + b"iso6mp41dash") + moof + mdat
+
+    half = len(sizes) // 2
+    assert half in sync, "the second segment must start on a keyframe"
+    return init, [segment(1, 0, half), segment(2, half, len(sizes) - half)]
+
+
+HLS_INIT, HLS_VIDEO_SEGMENTS = remux_fmp4(CLIP_PATH.read_bytes())
+HLS_AUDIO_SEGMENTS = [
+    (CLIP_PATH.parent / "seg-a0.aac").read_bytes(),
+    (CLIP_PATH.parent / "seg-a1.aac").read_bytes(),
+]
+
+
+def hls_master_playlist(key):
+    """A variant playlist in X's shape (docs/VIDEO.md): version 6, a video rendition and
+    its separate audio playlist, both addressed root-relative."""
+    audio = f"/media/hls-audio.m3u8?k={key}"
+    return (
+        "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-INDEPENDENT-SEGMENTS\n"
+        f"#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"audio\",DEFAULT=YES,AUTOSELECT=YES,URI=\"{audio}\"\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=800000,CODECS=\"avc1.42E01E,mp4a.40.2\",RESOLUTION=320x180,AUDIO=\"a\"\n"
+        f"/media/hls-video.m3u8?k={key}\n"
+    )
+
+
+def hls_media_playlist(entries, init_uri=None):
+    """A VOD media playlist for (duration, URI) segment `entries`; `init_uri` is the
+    fMP4 init segment (EXT-X-MAP) the segments continue."""
+    target = math.ceil(max(duration for duration, _ in entries))
+    lines = (f"#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:{target}\n"
+             "#EXT-X-PLAYLIST-TYPE:VOD\n")
+    if init_uri is not None:
+        lines += f"#EXT-X-MAP:URI=\"{init_uri}\"\n"
+    lines += "".join(f"#EXTINF:{duration:.3f},\n{uri}\n" for duration, uri in entries)
+    return lines + "#EXT-X-ENDLIST\n"
+
+
+def hls_page(key, src=None):
+    """A <video> that asks canPlayType about HLS before attaching its playlist."""
+    src = src or f"/media/hls.m3u8?k={key}"
+    return page(
+        "HLS",
+        "<video controls onerror='failed()'></video>"
+        "<script>var v = document.querySelector('video');"
+        f" if (v.canPlayType('{HLS_CODECS}') === '') {{"
+        " document.title = 'HLS:unsupported'; }"
+        f" else {{ v.src = '{src}'; }}</script>",
+        "<script>var errors = 0; function failed() { errors++; document.title = 'HLS:errors:' + errors; }</script>",
+    )
+
+
 def media_key(query):
     """The `k` parameter, letters and digits only."""
     return "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:64]
@@ -453,6 +650,7 @@ def media_page(title, element, src):
 
 # The codecs the claim table calls supported; what capability-driven pages ask about (docs/VIDEO.md).
 MP4_CODECS = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'
+HLS_CODECS = 'application/vnd.apple.mpegurl; codecs="avc1.42E01E, mp4a.40.2"'
 
 
 def canplay_page(key):
@@ -1058,6 +1256,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, canplay_page(media_key(query)))
         if path == "/media-source.html":
             return self.send(200, typed_source_page(media_key(query)))
+        if path == "/hls.html":
+            return self.send(200, hls_page(media_key(query)))
+        if path == "/hls-noext.html":
+            # A claimed playlist on an extensionless address: the player must still pick HLS.
+            key = media_key(query)
+            return self.send(200, hls_page(key, f"/media/hls-manifest?k={key}"))
         if path == "/media-redirect.html":
             to = query.get("to", ["clip"])[0]
             return self.send(200, media_page("REDIRECT", "video", f"/media/redirect?to={urllib.parse.quote(to)}&k={media_key(query)}"))
@@ -1079,6 +1283,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_media("clip", CLIP_PATH.read_bytes(), "video/mp4")
         if path == "/media/tone.wav":
             return self.send_media("tone", TONE_WAV, "audio/wav")
+        if path == "/media/hls.m3u8" or path == "/media/hls-manifest":
+            return self.send_media("hls", hls_master_playlist(media_key(query)).encode(),
+                                   "application/vnd.apple.mpegurl")
+        if path == "/media/hls-video.m3u8":
+            key = media_key(query)
+            entries = [(3.0, f"/media/hls-video-{i}.m4s?k={key}") for i in range(len(HLS_VIDEO_SEGMENTS))]
+            return self.send_media("hls", hls_media_playlist(entries, f"/media/hls-init.mp4?k={key}").encode(),
+                                   "application/vnd.apple.mpegurl")
+        if path == "/media/hls-audio.m3u8":
+            key = media_key(query)
+            entries = [(3.0, f"/media/hls-audio-{i}.aac?k={key}") for i in range(len(HLS_AUDIO_SEGMENTS))]
+            return self.send_media("hls", hls_media_playlist(entries).encode(),
+                                   "application/vnd.apple.mpegurl")
+        if path == "/media/hls-init.mp4":
+            return self.send_media("hls", HLS_INIT, "video/mp4")
+        for name, data, mime in (
+            (f"/media/hls-video-{i}.m4s", segment, "video/mp4")
+            for i, segment in enumerate(HLS_VIDEO_SEGMENTS)
+        ):
+            if path == name:
+                return self.send_media("hls", data, mime)
+        for name, data in (
+            (f"/media/hls-audio-{i}.aac", segment)
+            for i, segment in enumerate(HLS_AUDIO_SEGMENTS)
+        ):
+            if path == name:
+                return self.send_media("hls", data, "audio/aac")
         if path == "/media/redirect":
             to = query.get("to", ["clip"])[0]
             with lock:
@@ -1478,6 +1709,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             served["requests"] += 1
             served["bytes"] += sent
             served["seen"].append({
+                "path": self.path,
                 "cookie": self.headers.get("Cookie", ""),
                 "referer": self.headers.get("Referer", ""),
                 "servo_agent": "Servo/" in self.headers.get("User-Agent", ""),

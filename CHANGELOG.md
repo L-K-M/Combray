@@ -43,6 +43,9 @@ All notable changes to this project are documented here. The format follows
 - Pages that ask `canPlayType`, or list a `<source>` with a type, now get
   the formats the player reads — H.264/AAC MP4 and common audio — so their
   media is offered for Play instead of never loading.
+- HLS playlists are claimed and played the same way: pages that pick HLS
+  through `canPlayType`, X posts included, now reach the player, and the
+  playlist and its segments fetch under the same network rules.
 - Settings › About links the engine's exact source: the `L-K-M/servo`
   commit in `scripts/m0/servo-pin.sh`.
 - Third-party notices for the Rust standard library (also shipped as
