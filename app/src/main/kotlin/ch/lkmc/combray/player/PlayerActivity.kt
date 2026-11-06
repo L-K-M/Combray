@@ -38,6 +38,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.UnrecognizedInputFormatException
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
@@ -94,6 +95,7 @@ class PlayerActivity : ComponentActivity() {
     private var positionMs = 0L
     private var playWhenReady = true
     private var failure: MediaFailure? = null
+    private var hlsTried = false
     private var ticker: Job? = null
 
     private val state = MutableStateFlow(PlaybackSnapshot())
@@ -120,6 +122,19 @@ class PlayerActivity : ComponentActivity() {
         override fun onRenderedFirstFrame() = state.update { it.copy(firstFrameRendered = true) }
 
         override fun onPlayerError(error: PlaybackException) {
+            // A claimed HLS playlist whose address lacks .m3u8 infers as OTHER and dies in the
+            // progressive extractors; retry it once as HLS before calling it a failure.
+            if (!hlsTried && unrecognizedMedia(error)) {
+                hlsTried = true
+                player?.let {
+                    it.setMediaSource(
+                        mediaSource(request, factory(), hls = true),
+                        it.currentPosition.coerceAtLeast(0),
+                    )
+                    it.prepare()
+                    return
+                }
+            }
             val failed = error.failure()
             // The code and the refusal's name only: an exception's message or causes can name the address.
             val refusal = refusalIn(error)?.let { " ($it)" }.orEmpty()
@@ -201,13 +216,16 @@ class PlayerActivity : ComponentActivity() {
             .build()
         exo.addListener(listener)
         // The client sets User-Agent and Referer on every hop itself.
-        exo.setMediaSource(mediaSource(request, OkHttpDataSource.Factory(graph.media.callFactory(request))), positionMs)
+        hlsTried = Util.inferContentType(Uri.parse(request.url.toString())) == C.CONTENT_TYPE_HLS
+        exo.setMediaSource(mediaSource(request, factory(), hlsTried), positionMs)
         exo.playWhenReady = playWhenReady
         exo.prepare()
         playerView.player = exo
         player = exo
         publish()
     }
+
+    private fun factory() = OkHttpDataSource.Factory(graph.media.callFactory(request))
 
     private fun releasePlayer() {
         val exo = player ?: return
@@ -364,21 +382,23 @@ class PlayerActivity : ComponentActivity() {
 }
 
 /**
- * The media source for [request]: an HLS source when the address names a playlist (C2), a
- * progressive one otherwise. Both fetch through the same [factory], so playlist and segment
- * hops pass the same network rules. A source kind other than these never arrives: the engine's
- * claim table claims no other type, and Media3's automatic selection is not used.
+ * The media source for [request]: an HLS source when [hls] holds — the caller infers it from
+ * the address naming a playlist (C2) — a progressive one otherwise. Both fetch through the same
+ * [factory], so playlist and segment hops pass the same network rules. A source kind other than
+ * these never arrives: the engine's claim table claims no other type, and Media3's automatic
+ * selection is not used.
  */
 @OptIn(UnstableApi::class)
-internal fun mediaSource(request: PlaybackRequest, factory: DataSource.Factory): MediaSource {
+internal fun mediaSource(request: PlaybackRequest, factory: DataSource.Factory, hls: Boolean): MediaSource {
     val item = MediaItem.fromUri(request.url.toString())
-    val sourceFactory = if (Util.inferContentType(Uri.parse(request.url.toString())) == C.CONTENT_TYPE_HLS) {
-        HlsMediaSource.Factory(factory)
-    } else {
-        ProgressiveMediaSource.Factory(factory)
-    }
+    val sourceFactory = if (hls) HlsMediaSource.Factory(factory) else ProgressiveMediaSource.Factory(factory)
     return sourceFactory.setLoadErrorHandlingPolicy(RefusalsAreFinal).createMediaSource(item)
 }
+
+/** [error] means no bundled extractor recognized the input — the signature of an HLS playlist fed to a progressive source. */
+@OptIn(UnstableApi::class)
+private fun unrecognizedMedia(error: PlaybackException): Boolean =
+    generateSequence(error.cause) { it.cause }.any { it is UnrecognizedInputFormatException }
 
 /** Media3 retries failed loads; a refused address is refused again, so it fails at once. */
 @OptIn(UnstableApi::class)

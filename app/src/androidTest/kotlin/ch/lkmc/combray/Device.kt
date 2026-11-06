@@ -172,6 +172,9 @@ object Fixtures {
      */
     fun hls(key: String) = "$BASE/hls.html?k=$key"
 
+    /** [hls], but the playlist address carries no `.m3u8` for the player to infer from. */
+    fun hlsNoExt(key: String) = "$BASE/hls-noext.html?k=$key"
+
     /** The 6 s fixture clip, [Device.GREEN] then [Device.BLUE]; "media" › "clip" in [state] records its requests. */
     fun clip(key: String) = "$BASE/media/clip.mp4?k=$key"
 

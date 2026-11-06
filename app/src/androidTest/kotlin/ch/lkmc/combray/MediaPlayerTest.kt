@@ -326,14 +326,38 @@ class MediaPlayerTest {
         // The master playlist, both media playlists, the init segment and the segments all
         // reached the fixture through the player's client.
         val served = hls()
-        assertTrue("HLS requests", served.getInt("requests") > 0)
+        assertTrue("HLS requests", served.getInt("requests") >= 4)
         val seen = served.getJSONArray("seen")
+        val paths = (0 until seen.length()).map { seen.getJSONObject(it).getString("path") }
+        for (hop in listOf("/media/hls.m3u8", "/media/hls-video.m3u8", "/media/hls-audio.m3u8", "/media/hls-init.mp4")) {
+            assertTrue("fetched $hop", paths.any { it.startsWith(hop) })
+        }
         for (index in 0 until seen.length()) {
             val request = seen.getJSONObject(index)
             assertEquals("Cookie", "", request.getString("cookie"))
             assertEquals("Referer", "${Fixtures.BASE}/", request.getString("referer"))
             assertTrue("User-Agent names Servo", request.getBoolean("servo_agent"))
         }
+        assertLogHasNoAddress()
+    }
+
+    /**
+     * Check 14: a claimed playlist on an extensionless address still picks the HLS source —
+     * Media3 cannot infer `.m3u8`, so the progressive failure retries as HLS.
+     */
+    @Test
+    fun anHlsPlaylistWithoutItsExtensionStillPlays() {
+        open(Fixtures.hlsNoExt(key))
+        device.awaitState { it.activeTab?.title == "HLS:errors:1" }
+        assertEquals("HLS requests before Play", 0, hls().getInt("requests"))
+        tapPlay()
+
+        val player = awaitPlayer()
+        val playing = awaitSnapshot(player, "ready and the first frame") { it.firstFrameRendered && it.phase in PLAYED }
+        assertTrue("video tracks", playing.hasVideo)
+        back(player)
+
+        assertTrue("HLS requests", hls().getInt("requests") > 0)
         assertLogHasNoAddress()
     }
 

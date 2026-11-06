@@ -2990,8 +2990,11 @@ Phase C2's remainder (docs/VIDEO.md): the player reads HLS, so the claim table m
 - `gradle/libs.versions.toml` pins `androidx.media3:media3-exoplayer-hls` at Media3 1.11.1,
   and `mediaSource(request, factory)` in `PlayerActivity.kt` picks `HlsMediaSource` for a
   `.m3u8` address, progressive otherwise — the source is chosen by the address's extension,
-  not Media3's automatic selection. Playlist and segment requests share the same OkHttp
-  call factory, so `HopPolicy` applies to every hop unchanged.
+  not Media3's automatic selection. The claim is by MIME type while inference is by
+  extension, so a progressive source that finds no extractor for its input
+  (UnrecognizedInputFormatException) is retried once as HLS: a claimed playlist does not
+  always carry `.m3u8`. Playlist and segment requests share the same OkHttp call factory,
+  so `HopPolicy` applies to every hop unchanged.
 - Fixture: `/hls.html` gates `video.src = /media/hls.m3u8` on `canPlayType`, and the server
   serves a variant playlist in X's shape (version 6, `EXT-X-MAP`, root-relative URIs, a
   separate audio playlist). The video segments are remuxed from `clip.mp4`'s own samples at
@@ -3001,6 +3004,9 @@ Phase C2's remainder (docs/VIDEO.md): the player reads HLS, so the claim table m
 - `MediaPlayerTest`'s `anHlsPlaylistPlaysAfterATap` waits for `HLS:errors:1` (the cancelled
   playlist load), asserts zero fixture requests, taps Play, and requires READY with video
   tracks; every recorded request then carries no cookie, the page's origin as `Referer` and
-  Servo's user agent. Fixture-side unit tests cover the remux's box layout and the playlists.
+  Servo's user agent, and the recorded paths name the master, both media playlists and the
+  init segment. `anHlsPlaylistWithoutItsExtensionStillPlays` plays `/hls-noext.html`, whose
+  playlist is served at `/media/hls-manifest`, exercising the retry. Fixture-side unit
+  tests cover the remux's box layout and the playlists.
 - Not run here: an X post on a phone; the emulator run in this PR's Engine workflow is the
   device evidence for the claim and the HLS source.

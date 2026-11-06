@@ -390,6 +390,8 @@ class HlsFixtureTest(unittest.TestCase):
         self.assertIn("canPlayType('application/vnd.apple.mpegurl", document)
         self.assertIn("v.src = '/media/hls.m3u8?k=k9'", document)
         self.assertIn("HLS:unsupported", document)
+        extensionless = self.fixture.hls_page("k9", "/media/hls-manifest?k=k9")
+        self.assertIn("v.src = '/media/hls-manifest?k=k9'", extensionless)
 
     def test_the_master_playlist_names_a_video_variant_and_a_separate_audio_playlist(self):
         playlist = self.fixture.hls_master_playlist("k9")

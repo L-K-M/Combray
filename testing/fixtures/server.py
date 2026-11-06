@@ -59,6 +59,8 @@ Pages
   /hls.html?k=<alnum>        <video> that attaches /media/hls.m3u8?k=... only when canPlayType
                              claims the HLS codecs; title HLS:errors:<n>, or HLS:unsupported
                              when the claim is No
+  /hls-noext.html?k=<alnum>  the same, but the playlist is /media/hls-manifest: no .m3u8 for
+                             the player to infer from
   /media-redirect.html?to=clip|file[&k=<alnum>]
                              <video> from /media/redirect; title REDIRECT:errors:<n>
   /media-local.html          a data: and a file: <video>, neither of them a web address; title LOCAL:errors:<n>
@@ -68,7 +70,8 @@ Pages
                              with byte ranges (206, 416)
   /media/tone.wav            3 s of a 440 Hz tone, with byte ranges
   /media/hls.m3u8            variant playlist in X's shape (version 6, a separate audio
-                             playlist, root-relative URIs): hls-video.m3u8 + hls-audio.m3u8
+                             playlist, root-relative URIs): hls-video.m3u8 + hls-audio.m3u8;
+                             also served extensionless at /media/hls-manifest
   /media/hls-video.m3u8      video playlist: EXT-X-MAP hls-init.mp4 + two fMP4 segments,
                              remuxed from clip.mp4 at start-up (green half, then blue)
   /media/hls-audio.m3u8      audio playlist: two committed AAC segments (media/README.md)
@@ -579,6 +582,7 @@ def remux_fmp4(clip):
         return mp4_box(b"styp", b"iso6" + struct.pack(">I", 0) + b"iso6mp41dash") + moof + mdat
 
     half = len(sizes) // 2
+    assert half in sync, "the second segment must start on a keyframe"
     return init, [segment(1, 0, half), segment(2, half, len(sizes) - half)]
 
 
@@ -613,15 +617,16 @@ def hls_media_playlist(entries, init_uri=None):
     return lines + "#EXT-X-ENDLIST\n"
 
 
-def hls_page(key):
+def hls_page(key, src=None):
     """A <video> that asks canPlayType about HLS before attaching its playlist."""
+    src = src or f"/media/hls.m3u8?k={key}"
     return page(
         "HLS",
         "<video controls onerror='failed()'></video>"
         "<script>var v = document.querySelector('video');"
         f" if (v.canPlayType('{HLS_CODECS}') === '') {{"
         " document.title = 'HLS:unsupported'; }"
-        f" else {{ v.src = '/media/hls.m3u8?k={key}'; }}</script>",
+        f" else {{ v.src = '{src}'; }}</script>",
         "<script>var errors = 0; function failed() { errors++; document.title = 'HLS:errors:' + errors; }</script>",
     )
 
@@ -1233,6 +1238,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, typed_source_page(media_key(query)))
         if path == "/hls.html":
             return self.send(200, hls_page(media_key(query)))
+        if path == "/hls-noext.html":
+            # A claimed playlist on an extensionless address: the player must still pick HLS.
+            key = media_key(query)
+            return self.send(200, hls_page(key, f"/media/hls-manifest?k={key}"))
         if path == "/media-redirect.html":
             to = query.get("to", ["clip"])[0]
             return self.send(200, media_page("REDIRECT", "video", f"/media/redirect?to={urllib.parse.quote(to)}&k={media_key(query)}"))
@@ -1254,7 +1263,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_media("clip", CLIP_PATH.read_bytes(), "video/mp4")
         if path == "/media/tone.wav":
             return self.send_media("tone", TONE_WAV, "audio/wav")
-        if path == "/media/hls.m3u8":
+        if path == "/media/hls.m3u8" or path == "/media/hls-manifest":
             return self.send_media("hls", hls_master_playlist(media_key(query)).encode(),
                                    "application/vnd.apple.mpegurl")
         if path == "/media/hls-video.m3u8":
@@ -1270,7 +1279,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/media/hls-init.mp4":
             return self.send_media("hls", HLS_INIT, "video/mp4")
         for name, data, mime in (
-            (f"/media/hls-video-{i}.m4s", segment, "video/iso.segment")
+            (f"/media/hls-video-{i}.m4s", segment, "video/mp4")
             for i, segment in enumerate(HLS_VIDEO_SEGMENTS)
         ):
             if path == name:
@@ -1675,6 +1684,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             served["requests"] += 1
             served["bytes"] += sent
             served["seen"].append({
+                "path": self.path,
                 "cookie": self.headers.get("Cookie", ""),
                 "referer": self.headers.get("Referer", ""),
                 "servo_agent": "Servo/" in self.headers.get("User-Agent", ""),
