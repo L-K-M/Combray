@@ -55,13 +55,41 @@ fn is_version(text: &str) -> bool {
 mod tests {
     use super::with_gecko_token;
 
-    /// `UserAgentPlatform::Android` in the pinned Servo's components/config/prefs.rs.
+    /// `UserAgentPlatform::Android` in the pinned Servo's components/config/prefs.rs, for Servo
+    /// 0.7.0 (`the_pinned_servo_sends_servo_android` keeps it current).
     const SERVO_ANDROID: &str =
         "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0";
+    const SERVO_VERSION_TOKEN: &str = "Servo/0.7.0";
     /// What Combray sends for `SERVO_ANDROID`. The site-check harness sends the same agent, and
     /// testing/sitecheck/tests/test_config.py fails when its template differs from this one.
     const COMBRAY_ANDROID: &str =
         "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0";
+
+    /// The pinned Servo's preferences source: cargo resolves the Android-only `servo` dependency
+    /// from this checkout even on the host, so it is there whenever these tests build.
+    const SERVO_PREFERENCES: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../servo-checkout/servo/components/config/prefs.rs"
+    ));
+
+    /// A pin whose Android agent changes (a new Firefox revision, say) fails here, so the
+    /// constants above, and with them the harness's template, follow it.
+    #[test]
+    fn the_pinned_servo_sends_servo_android() {
+        let (_, branch) = SERVO_PREFERENCES
+            .split_once("UserAgentPlatform::Android =>")
+            .expect("prefs.rs has no Android branch in to_user_agent_string");
+        let template = branch
+            .split('"')
+            .nth(1)
+            .expect("no string literal in the Android branch");
+        assert_eq!(
+            template,
+            SERVO_ANDROID.replace(SERVO_VERSION_TOKEN, "Servo/{SERVO_VERSION}"),
+            "update SERVO_ANDROID and COMBRAY_ANDROID, and the site-check harness's \
+             USER_AGENT_TEMPLATE, to the pinned Servo's Android agent"
+        );
+    }
 
     #[test]
     fn servos_android_agent_gains_firefox_for_androids_gecko_token() {

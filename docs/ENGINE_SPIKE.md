@@ -3012,8 +3012,10 @@ already saw Firefox in `Firefox/153.0`. A site that picks a Gecko-only code path
 call something Servo lacks; no such page is known.
 
 The site-check harness sends the same agent to servoshell and Chromium
-(`USER_AGENT_TEMPLATE`; `tests/test_config.py` fails when it differs from `COMBRAY_ANDROID` in
-`user_agent.rs`'s tests). Chromium results cached under the old agent are fetched again, since
+(`USER_AGENT_TEMPLATE`). Two tests keep it in step with a pin: a Rust host test reads the pinned
+Servo's Android agent from its `prefs.rs` and fails when it differs from `SERVO_ANDROID` in
+`user_agent.rs`'s tests, and `tests/test_config.py` fails when the harness's template differs
+from `COMBRAY_ANDROID` there. Chromium results cached under the old agent are fetched again, since
 the agent is part of the cache fingerprint. The harness cannot find refusals like this one:
 Chromium is refused the same way, so the page counts as `reference-failed` and never enters the
 triage queue.
@@ -3023,8 +3025,12 @@ Checks:
 - Desktop servoshell (the site-check build, headless, 412×915, `--user-agent`): with Servo's
   Android agent the reported page shows "Access denied"; with Combray's it renders the article.
 - Rust host tests for the transformation (Servo's Android agent, another revision, an agent that
-  has the token, seven agents of other shapes) and `cargo fmt --check` pass; the harness's 544
-  tests pass, and its new test fails when the template lacks the token.
+  has the token, seven agents of other shapes) and for the pinned agent pass, as does `cargo fmt
+  --check`. The pin test fails when `SERVO_ANDROID` names another Firefox revision. The harness's
+  544 tests pass, and its new test fails when the template lacks the token.
 - The fixture server's `/agent.html` applies the firewall's rule and, when it lets the page
-  through, checks that `navigator.userAgent` equals the header. `UserAgentTest` loads it on the
-  device.
+  through, checks that `navigator.userAgent` equals the header; host tests in
+  `scripts/tests/test_fixture_server.py` cover the rule and the header's escaping into the page's
+  script. `UserAgentTest` loads it on the device. With main's engine (the arm64 APK of the Engine
+  run for `bf8e052`, on the arm64 API 36 emulator) it fails: the page is refused and its tab has
+  no title.
