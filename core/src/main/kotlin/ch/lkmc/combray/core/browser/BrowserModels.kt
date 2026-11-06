@@ -89,7 +89,7 @@ sealed interface Notice {
 
     data object StopFailed : Notice
 
-    /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
+    /** A link or image opened in a tab that did not take focus. */
     data class OpenedInBackground(val tabId: String) : Notice
 
     /** The shown page has audio or video that nothing can play; its media was not downloaded. */

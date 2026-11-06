@@ -2989,7 +2989,9 @@ menu action cannot restore an opener chain after focus has moved outside it.
 Images use the same action. The separate Open in background row is removed;
 ordinary link taps, page-opened windows and the + button are unchanged.
 
-Evidence on macOS arm64, JDK 21, Android SDK under `~/Library/Android/sdk`:
+Evidence on macOS arm64, JDK 21, Rust 1.97.1, Android SDK under
+`~/Library/Android/sdk` (the Rust toolchain's `bin` directory was added to `PATH`
+because this host has no Cargo proxy):
 
 - The coordinator regression failed before the fix at the active-tab identity
   assertion. After it, all 168 `BrowserCoordinatorTest` checks pass, including
@@ -2999,11 +3001,18 @@ Evidence on macOS arm64, JDK 21, Android SDK under `~/Library/Android/sdk`:
   `PasteMenuBackTest` passes after the callback removal.
 - `cd native && cargo test --lib --locked`: 163 checks pass. No native or
   downstream Servo source changed; the pin remains `4778c513e962e63cfdd1f59b36093263f1ccf886`.
-- `PageControlsTest.aLongPressOpensALinkInANewTabWithoutLeavingTheCurrentPage`
-  checks both logical focus and painted content, explicitly selects the new tab,
-  then returns to the opener. Device evidence is collected by the Engine PR
-  checks; JVM tests alone do not prove rendering. Image rendering and physical
-  phone behavior are not verified by this slice.
+- Full `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+  assembleRelease` passed: 740 JVM checks, no failures or skips. The 110 Python
+  script checks, documentation check and `git diff --check` pass too.
+- `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh` passed in 9m11s;
+  the rebuilt debug APK passed `verify-apk.py --expected-arch arm64`.
+- All eight `PageControlsTest` checks pass on a dedicated Android 16/API-36
+  arm64 emulator (`emulator-5592`, 360×720dp, SwiftShader). In particular,
+  `aLongPressOpensALinkInANewTabWithoutLeavingTheCurrentPage` verifies logical
+  focus and painted content, explicitly selects the new tab, then returns to
+  the opener. Local evidence: `/tmp/combray-background-tab-logs/device/`.
+  The full x86_64 fixture suite remains for the Engine PR checks. Image
+  rendering and physical-phone behavior are not verified by this slice.
 
 Reproduction and checks:
 

@@ -1150,8 +1150,8 @@ class BrowserCoordinator(
     }
 
     /**
-     * A page opened a window. It becomes a new logical tab, focused, like a link opened in a new
-     * tab; its address arrives with its first commit. Windows from closed tabs are refused.
+     * A page opened a window. It becomes a focused logical tab; its address arrives with its
+     * first commit. Windows from closed tabs are refused.
      */
     private suspend fun onTabOpened(event: EngineEvent.TabOpened) {
         // Only the page the user sees may open a tab (the engine enforces this too).
