@@ -998,6 +998,9 @@ dependencies = [
  "serde_json",
  "servo",
  "servo-allocator",
+ "servo-base",
+ "servo-media",
+ "servo-media-dummy",
  "sha2 0.10.9",
  "url",
 ]

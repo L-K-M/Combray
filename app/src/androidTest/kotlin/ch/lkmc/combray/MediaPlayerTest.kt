@@ -274,6 +274,37 @@ class MediaPlayerTest {
         back(player)
     }
 
+    /** Check 11: a page that asks canPlayType first reaches Play (docs/VIDEO.md). */
+    @Test
+    fun aPageThatAsksCanPlayTypeOffersItsVideo() {
+        open(Fixtures.canPlay(key))
+        // The source attached only because the claim matched; its cancel fired the error.
+        device.awaitState { it.activeTab?.title == "CANPLAY:errors:1" }
+        assertEquals("clip requests before Play", 0, clip().getInt("requests"))
+        tapPlay()
+
+        val player = awaitPlayer()
+        awaitSnapshot(player, "ready") { it.phase in PLAYED }
+        back(player)
+        assertTrue("clip requests", clip().getInt("requests") > 0)
+    }
+
+    /** Check 12: a typed `<source>` is fetched, cancelled and offered once its type is claimed. */
+    @Test
+    fun aTypedSourceOffersItsVideo() {
+        open(Fixtures.typedSource(key))
+        // Selection fired the <source>'s error; a type-skipped source errors the same way, so
+        // the Play offer is what proves the claim matched and the fetch was cancelled.
+        device.awaitState { it.activeTab?.title == "TYPED:errors:1" }
+        assertEquals("clip requests before Play", 0, clip().getInt("requests"))
+        tapPlay()
+
+        val player = awaitPlayer()
+        awaitSnapshot(player, "ready") { it.phase in PLAYED }
+        back(player)
+        assertTrue("clip requests", clip().getInt("requests") > 0)
+    }
+
     /** Check 10 (report): a data: page's media is judged as a public page's, through the engine. */
     @Test
     fun aDataPageOffersNothing() = report("data page") {

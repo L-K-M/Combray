@@ -57,3 +57,14 @@ features = [
 [target.'cfg(target_os = "android")'.dependencies.servo-allocator]
 path = "../servo-checkout/servo/components/allocator"
 features = ["use-jemalloc"]
+
+# The backend that answers canPlayType/<source type> from what the player reads
+# (native/src/media_backend.rs).
+[target.'cfg(target_os = "android")'.dependencies.servo-base]
+path = "../servo-checkout/servo/components/shared/base"
+
+[target.'cfg(target_os = "android")'.dependencies.servo-media]
+path = "../servo-checkout/servo/components/media/servo-media"
+
+[target.'cfg(target_os = "android")'.dependencies.servo-media-dummy]
+path = "../servo-checkout/servo/components/media/backends/dummy"

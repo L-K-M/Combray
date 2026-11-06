@@ -40,6 +40,9 @@ All notable changes to this project are documented here. The format follows
 - Play a page's audio or video in a fullscreen player after a tap. Media
   on your home network or tailnet plays from any page; this phone and
   link-local hosts stay closed to pages that are not on them.
+- Pages that ask `canPlayType`, or list a `<source>` with a type, now get
+  the formats the player reads — H.264/AAC MP4 and common audio — so their
+  media is offered for Play instead of never loading.
 - Settings › About links the engine's exact source: the `L-K-M/servo`
   commit in `scripts/m0/servo-pin.sh`.
 - Third-party notices for the Rust standard library (also shipped as

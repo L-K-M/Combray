@@ -58,6 +58,7 @@ use crate::keyboard::{self, TapTracker};
 use crate::media::{
     self, MediaBudget, MediaKind, MediaReport, PageMedia, PendingMedia, UnattributedMedia,
 };
+use crate::media_backend;
 use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
@@ -830,6 +831,10 @@ impl Engine {
         set_pdf_viewer_preferences(&mut preferences);
         // The application's own fetches (the media player) send what Servo sends.
         let user_agent = preferences.user_agent.clone();
+
+        // The player answers canPlayType and <source type>, not Servo's dummy backend, or
+        // capability-driven pages attach nothing the delegate can report (media_backend).
+        media_backend::install();
 
         let servo = ServoBuilder::default()
             .opts(opts)
