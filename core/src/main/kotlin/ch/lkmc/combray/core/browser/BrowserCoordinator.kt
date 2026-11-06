@@ -323,11 +323,19 @@ class BrowserCoordinator(
     }
 
     /**
-     * Opens a link from the page in [openerTabId] (its link menu) in a new tab. Like a window the
-     * page opened, Back on the new tab's first page returns to the opener ([returnToOpener]).
+     * Opens a link from the page in [openerTabId] (its link menu) without moving focus. The new
+     * tab loads when selected; Back on its first page returns to the opener ([returnToOpener]).
      */
     fun openUrlFromTab(url: String, openerTabId: String) = submit {
-        createTab(url, openerTabId)
+        val active = activeTab()
+        if (active == null) {
+            createTab(url, openerTabId)
+        } else {
+            val tabId = createBackgroundTab(url, active)
+            openerTabId.takeIf { dao.tab(it)?.state == TabState.OPEN }?.let { openers[tabId] = it }
+            // A delayed menu action must not revive a chain the user already left.
+            keepOpenersFor(active.id)
+        }
         reconcile()
         publish()
     }
@@ -1335,7 +1343,7 @@ class BrowserCoordinator(
      * and a later one before it. No renderer is created here ([reconcile] serves the focused tab
      * only): the page loads when the user switches to the tab.
      */
-    private suspend fun createBackgroundTab(url: String, active: TabEntity) {
+    private suspend fun createBackgroundTab(url: String, active: TabEntity): String {
         val now = clock.now()
         val tab = newOpenTab(url, createdAt = now, lastFocusedAt = now - 1)
         database.withTransaction {
@@ -1343,6 +1351,7 @@ class BrowserCoordinator(
             dao.insertTab(tab)
         }
         state.update { it.copy(notice = Notice.OpenedInBackground(tab.id)) }
+        return tab.id
     }
 
     private fun newOpenTab(url: String?, createdAt: Long, lastFocusedAt: Long) = TabEntity(

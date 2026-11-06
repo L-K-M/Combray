@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.Placement
+import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.PageControlContent
 import org.junit.Assert.assertEquals
@@ -115,10 +116,10 @@ class PageControlsTest {
     }
 
     @Test
-    fun aLongPressOnALinkOffersToOpenItInANewTab() {
+    fun aLongPressOpensALinkInANewTabWithoutLeavingTheCurrentPage() {
         val opener = "${Fixtures.BASE}/opener.html"
         device.browser.openUrl(opener, Placement.CURRENT_TAB)
-        device.awaitState { it.activeTab?.title == "OPENER" && it.activeTab?.loading == false }
+        val reading = device.awaitState { it.activeTab?.title == "OPENER" && it.activeTab?.loading == false }.activeTab!!
         val seen = device.awaitScreen(Device.VIOLET)
         assertTrue("opener not painted", device.matches(seen, Device.VIOLET))
 
@@ -130,8 +131,21 @@ class PageControlsTest {
 
         awaitText("Open in new tab")
         compose.onNodeWithText("Open in new tab").performClick()
+        val state = device.awaitState { it.openTabCount == 2 && it.pageControl == null }
+        assertEquals(reading.id, state.activeTab?.id)
+        assertEquals(opener, state.activeTab?.url)
+        assertTrue("opening a tab replaced the painted page", device.matches(device.awaitScreen(Device.VIOLET), Device.VIOLET))
+
+        val opened = device.recent().filterIsInstance<RecentItem.OpenTab>().single { it.tabId != reading.id }
+        assertEquals(Fixtures.solid(Device.BLUE), opened.url)
+        device.browser.selectTab(opened.tabId)
         device.awaitPage(Fixtures.solid(Device.BLUE))
-        assertEquals(2, device.browser.browserState.value.openTabCount)
+        assertTrue("the selected tab was not painted", device.matches(device.awaitScreen(Device.BLUE), Device.BLUE))
+        assertTrue(device.browser.browserState.value.activeTab!!.returnsToOpener)
+
+        device.browser.returnToOpener(opened.tabId)
+        device.awaitState { it.activeTab?.id == reading.id && it.openTabCount == 1 }
+        assertTrue("Back did not repaint the opener", device.matches(device.awaitScreen(Device.VIOLET), Device.VIOLET))
     }
 
     /**

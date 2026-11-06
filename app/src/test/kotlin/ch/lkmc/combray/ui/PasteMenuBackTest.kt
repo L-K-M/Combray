@@ -48,7 +48,6 @@ class PasteMenuBackTest {
                     onUploadFailed = {},
                     isWebAddress = { true },
                     onOpenInNewTab = {},
-                    onOpenInBackground = {},
                     onSaveLink = {},
                     onShare = {},
                     onNotify = {},

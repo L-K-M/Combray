@@ -462,7 +462,7 @@ class AccessibilityTest {
     @Test
     fun aLinkMenuIsAccessible() {
         assertControlIsAccessible(PageControlContent.LinkMenu("https://example.org/a", image = null))
-        for (label in listOf("Open in new tab", "Open in background", "Save link to Karakeep", "Copy link", "Share link")) {
+        for (label in listOf("Open in new tab", "Save link to Karakeep", "Copy link", "Share link")) {
             compose.onNodeWithText(label).assertIsDisplayed()
         }
     }
@@ -517,7 +517,6 @@ class AccessibilityTest {
                 {},
                 isWebAddress = { true },
                 onOpenInNewTab = {},
-                onOpenInBackground = {},
                 onSaveLink = {},
                 onShare = {},
                 onNotify = {},

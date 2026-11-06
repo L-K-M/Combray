@@ -1996,13 +1996,22 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aLinkOpenedInANewTabFromThePageReturnsToItsOpenerEvenAfterNavigating() {
+    fun aLinkOpenedFromThePageWaitsInTheBackgroundAndReturnsToItsOpener() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://a.test/")
         val opener = state().activeTab!!.id
 
         browser.openUrlFromTab("https://b.test/", opener); idle()
+        assertEquals(opener, state().activeTab?.id)
+        assertEquals(2, state().openTabCount)
+        assertEquals(listOf(1L to "https://a.test/"), engine.created)
+        assertEquals(1L, engine.selected.last())
+
+        val opened = (state().notice as Notice.OpenedInBackground).tabId
+        browser.selectTab(opened); idle()
+        assertEquals(opened, state().activeTab?.id)
+        assertEquals(2L to "https://b.test/", engine.created.last())
         commit(2, 20, "https://b.test/")
         assertTrue(state().activeTab!!.returnsToOpener)
         // Its own history goes first (the UI checks canGoBack); the way back to the opener stays.
@@ -2013,6 +2022,37 @@ class BrowserCoordinatorTest {
         browser.returnToOpener(state().activeTab!!.id); idle()
         assertEquals(opener, state().activeTab?.id)
         assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun aDelayedLinkMenuActionKeepsFocusWithoutRevivingAnEndedOpenerChain() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        val opener = state().activeTab!!.id
+        browser.openUrl("https://other.test/", Placement.NEW_TAB); idle()
+        val reading = state().activeTab!!.id
+
+        browser.openUrlFromTab("https://b.test/", opener); idle()
+        assertEquals(reading, state().activeTab?.id)
+        assertEquals(3, state().openTabCount)
+        assertEquals(2, engine.created.size)
+
+        browser.selectTab((state().notice as Notice.OpenedInBackground).tabId); idle()
+        assertFalse(state().activeTab!!.returnsToOpener)
+    }
+
+    @Test
+    fun aLinkMenuActionAfterTheLastTabClosedOpensAFocusedTab() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        val opener = state().activeTab!!.id
+        browser.closeTab(opener); idle()
+
+        browser.openUrlFromTab("https://b.test/", opener); idle()
+        assertEquals("https://b.test/", state().activeTab?.url)
+        assertEquals(1, state().openTabCount)
+        assertFalse(state().activeTab!!.returnsToOpener)
+        assertEquals(2L to "https://b.test/", engine.created.last())
     }
 
     @Test

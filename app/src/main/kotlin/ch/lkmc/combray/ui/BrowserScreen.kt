@@ -792,14 +792,13 @@ fun BrowserScreen(
             onAnswer = { response, blocking -> browser.answerPageControl(control.id, response, blocking) },
             onUploadFailed = { notify(resources.getString(R.string.upload_failed)) },
             isWebAddress = { url -> navigation(url) != null },
-            // The control belongs to the focused tab's page: Back on the new tab returns there.
+            // Keep reading here; after selecting the new tab, Back returns to its opener.
             onOpenInNewTab = { url ->
                 navigation(url)?.let { link ->
                     val opener = tab?.id
-                    if (opener != null) browser.openUrlFromTab(link.url, opener) else browser.openUrl(link.url, Placement.NEW_TAB)
+                    if (opener != null) browser.openUrlFromTab(link.url, opener) else browser.openUrl(link.url, Placement.BACKGROUND_TAB)
                 }
             },
-            onOpenInBackground = { url -> navigation(url)?.let { browser.openUrl(it.url, Placement.BACKGROUND_TAB) } },
             onSaveLink = { url ->
                 navigation(url)?.let { link ->
                     scope.launch {

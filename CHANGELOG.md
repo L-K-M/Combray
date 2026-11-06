@@ -183,6 +183,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Long-press › Open in new tab keeps you on the current page, for links
+  and images. Select the new tab when you want to read it; Back returns
+  to its opener. The separate Open in background row is removed.
 - The engine sleeps until a message or pending deadline instead of polling
   every 250 ms. Capture, dialog, reload-pull, media and paint retries stay timed.
 - The media notice offers Play.

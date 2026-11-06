@@ -2978,3 +2978,41 @@ still v0.7.0.
 - Here: `native/Cargo.lock` takes the same libz-sys version and checksum, and `cargo metadata
   --locked` passes; the regenerated notices differ only in their input hashes; the native host
   tests pass. The device checks run in this PR's Engine workflow.
+
+## 49. Long-press opens a background tab (6 November 2026)
+
+Owner request: long-press › Open in new tab must leave the current tab selected.
+The link menu called `openUrlFromTab`, which created and focused a tab immediately.
+It now uses the existing lazy background-tab path and retains its opener relation,
+so selecting the new tab later still permits Back to the original tab. A delayed
+menu action cannot restore an opener chain after focus has moved outside it.
+Images use the same action. The separate Open in background row is removed;
+ordinary link taps, page-opened windows and the + button are unchanged.
+
+Evidence on macOS arm64, JDK 21, Android SDK under `~/Library/Android/sdk`:
+
+- The coordinator regression failed before the fix at the active-tab identity
+  assertion. After it, all 168 `BrowserCoordinatorTest` checks pass, including
+  lazy loading, returning to the opener and delayed menu actions.
+- Three `LinkMenuTest` checks pass for links, images and linked images, including
+  dismissal before opening and removal of the duplicate background row.
+  `PasteMenuBackTest` passes after the callback removal.
+- `cd native && cargo test --lib --locked`: 163 checks pass. No native or
+  downstream Servo source changed; the pin remains `4778c513e962e63cfdd1f59b36093263f1ccf886`.
+- `PageControlsTest.aLongPressOpensALinkInANewTabWithoutLeavingTheCurrentPage`
+  checks both logical focus and painted content, explicitly selects the new tab,
+  then returns to the opener. Device evidence is collected by the Engine PR
+  checks; JVM tests alone do not prove rendering. Image rendering and physical
+  phone behavior are not verified by this slice.
+
+Reproduction and checks:
+
+```sh
+./gradlew :core:testDebugUnitTest --tests 'ch.lkmc.combray.core.browser.BrowserCoordinatorTest'
+./gradlew :app:testDebugUnitTest --tests 'ch.lkmc.combray.ui.LinkMenuTest' --tests 'ch.lkmc.combray.ui.PasteMenuBackTest'
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+COMBRAY_ABI=arm64 scripts/build-native.sh
+scripts/check-app.sh <serial> ch.lkmc.combray.PageControlsTest
+python3 scripts/check_docs.py
+git diff --check
+```

@@ -82,7 +82,6 @@ fun PageControlDialog(
     /** Whether the address policy would navigate to an address: only those open in a tab or go to Karakeep. */
     isWebAddress: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
-    onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
     onShare: (String) -> Unit,
     /** Shows a short message, such as a copy confirmation where Android shows none. */
@@ -92,7 +91,7 @@ fun PageControlDialog(
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
-        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
+        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onSaveLink, onShare, onNotify) {
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
@@ -136,7 +135,6 @@ private fun LinkMenu(
     content: PageControlContent.LinkMenu,
     isWebAddress: (String) -> Boolean,
     onOpenInNewTab: (String) -> Unit,
-    onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
     onShare: (String) -> Unit,
     onNotify: (String) -> Unit,
@@ -158,7 +156,6 @@ private fun LinkMenu(
             // Only web addresses open in a tab, and only those can be saved to Karakeep.
             if (isWebAddress(link)) {
                 add(R.string.link_open_new_tab to { onOpenInNewTab(link) })
-                add(R.string.link_open_background to { onOpenInBackground(link) })
                 add(R.string.link_save to { onSaveLink(link) })
             }
             add(R.string.link_copy to { copy(link, linkCopied) })
