@@ -3073,3 +3073,75 @@ Checks:
   `ReaderScrollTest.readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles` and
   `MediaPlayerTest.aPageVideoPlaysAfterATapWithoutServosCookie`, a video pixel colour) fail the
   same way with main's engine on this emulator, so they predate the change.
+
+## 51. Typing into rich text editors (7 November 2026)
+
+Validated source: `eac185da746e7bf27b5caa22f2dac5e4a350790f`, the head of downstream
+[PR #35](https://github.com/L-K-M/servo/pull/35) onto §48's pin `4778c513e962`.
+
+### Report
+
+The owner reported that commenting did not work on a site (not named here). The comment box shows
+only when signed in, which the site-check policy rules out, so its editor could not be inspected.
+Form fields take typing in Combray, which pointed to an editable element (a rich text editor) rather
+than a form field.
+
+Synthetic reproduction, in desktop servoshell at `4778c513e962` driven by WebDriver, with Chromium
+(Playwright's headless shell) as reference: a plain `contenteditable` div, a Lexical 0.53
+rich-text editor in light DOM and in an open shadow root, and a ProseMirror 1.42 editor, each
+clicked and typed `hello`, Backspace, `p`, Enter, `world`.
+
+- Without `dom_exec_command_enabled` (Combray's setting): keydown events reach the page and nothing
+  is inserted in any of them.
+- With it: ProseMirror works; the plain editor gives `hell<font size="7">pworld</font>` and no new
+  paragraph; Lexical inserts nothing, because execCommand's `beforeinput` has no `inputType` and
+  Lexical cancels it.
+- On Android the keyboard does not open at all: Servo asks the embedder for an input method only
+  for `<input>` and `<textarea>`, and Combray's committed text arrives as a composition end, which
+  only those insert.
+- Chromium: `hellp`/`world` in all four.
+
+### Changes
+
+- Downstream (PR #35), each with tests:
+  - the backport of upstream's `ImeEvent::Commit`;
+  - restoring the font size and link after `delete` (the `<font size="7">`);
+  - `Selection.modify()` by character and word through the DOM, which Lexical needs for Backspace
+    and Delete;
+  - Input Events `beforeinput`/`input` with `inputType` and `data` for user input in editing
+    hosts, input only into the focused editing host, and the left and right arrow keys;
+  - a multiline text input method requested by a focused editing host and released on blur,
+    removal or loss of `contenteditable`.
+- Here: the pin; `dom_exec_command_enabled`, which runs editing-host typing and gives pages
+  `document.execCommand` as other browsers do; `ime_commit` sends `ImeEvent::Commit` (as Servo's
+  own Android shell now does) instead of a composition end; the fixture `/contenteditable.html` and
+  `KeyboardTest.aRichTextEditorOpensTheKeyboardAndTakesTyping`.
+
+After the change, the synthetic run gives Chromium's text in all four editors (the plain editor
+keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left arrows, Delete gives
+`aX` in all of them, as in Chromium.
+
+### Differences from Chrome and limits
+
+- No caret is painted in editing hosts: Servo paints one only in text controls. A text-node caret
+  was tried and dropped, as it cannot show in an empty editor (`<p><br></p>`) and broke caret
+  reftests.
+- Combray still sends a word to the page when the keyboard commits it, with no composition
+  preview, as for form fields.
+- `Selection.modify()` moves through the DOM, not layout: moves by line, sentence, paragraph and to
+  a boundary do nothing, and "left"/"right" ignore right-to-left text. Shift with an arrow key does
+  nothing in an editing host (no `selectstart` yet).
+- `getTargetRanges()` stays empty for user input; Lexical and ProseMirror do without it.
+- The keyboard shows a single-line action key: Combray does not yet pass `multiline` to Android.
+  The key sends Enter, which inserts a paragraph.
+- The reported site's editor was not seen signed in, so its exact framework is unconfirmed.
+
+### Checks
+
+- Downstream, `--profile medium`: three embedder tests (`test_typing_in_editing_host`,
+  `test_ime_for_editing_host`, `test_commit_without_composition`, each in its own process) and the
+  existing input method tests pass; on the commit before each fix the two new ones fail. The new
+  mozilla WPT test failed 4 of 4 before. WPT `editing/`, `input-events/` and `selection/` (1086
+  tests) against the unchanged engine on the same Mac: 453 subtests newly pass, none regress.
+- Here: `scripts/tests/test_notices.py` (the notices' crate set is unchanged; only the pin script's
+  hash moves) and `scripts/check_docs.py` pass. The device checks run in this PR's Engine workflow.

@@ -124,6 +124,28 @@ class KeyboardTest {
     }
 
     @Test
+    fun aRichTextEditorOpensTheKeyboardAndTakesTyping() {
+        openFocusedField("contenteditable", "EDITOR:ready")
+        tapField()
+        awaitTitle("EDITOR:focused")
+        awaitKeyboard(visible = true)
+
+        // What the soft keyboard sends: committed text, Backspace, and Enter for a new line.
+        NativeEngine.imeCommit("été")
+        awaitTitle("EDITOR:input:été:insertText")
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL)
+        awaitTitle("EDITOR:input:ét:deleteContentBackward")
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
+        awaitTitle("EDITOR:input:ét:insertParagraph")
+        NativeEngine.imeCommit("b")
+        awaitTitle("EDITOR:input:étb:insertText")
+
+        shell("input keyevent KEYCODE_BACK")
+        awaitKeyboard(visible = false)
+        awaitTitle("EDITOR:blurred")
+    }
+
+    @Test
     fun aLongPressPastesClipboardTextIntoAClosedShadowPasswordField() = pasteIntoShadowField(KeyboardBeforePaste.CLOSED)
 
     @Test
