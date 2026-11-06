@@ -348,6 +348,70 @@ class MediaPlayerTest {
         assertTrue("clip requests", clip().getInt("requests") > 0)
     }
 
+    /**
+     * Check 13: an HLS playlist claimed by `canPlayType` is offered and plays after a tap
+     * (docs/VIDEO.md, phase C2): the variant playlist in X's shape, fMP4 video segments and a
+     * separate AAC audio playlist, every hop through the player's network rules.
+     */
+    @Test
+    fun anHlsPlaylistPlaysAfterATap() {
+        open(Fixtures.hls(key))
+        // The playlist was attached only because the claim matched; its cancel fired the error.
+        device.awaitState { it.activeTab?.title == "HLS:errors:1" }
+        assertEquals("HLS requests before Play", 0, hls().getInt("requests"))
+        tapPlay()
+
+        val player = awaitPlayer()
+        val playing = awaitSnapshot(player, "ready and the first frame") { it.firstFrameRendered && it.phase in PLAYED }
+        assertTrue("video tracks", playing.hasVideo)
+        back(player)
+
+        // The master playlist, both media playlists, the init segment and the segments all
+        // reached the fixture through the player's client.
+        val served = hls()
+        assertTrue("HLS requests", served.getInt("requests") >= 4)
+        val seen = served.getJSONArray("seen")
+        val paths = (0 until seen.length()).map { seen.getJSONObject(it).getString("path") }
+        for (hop in listOf("/media/hls.m3u8", "/media/hls-video.m3u8", "/media/hls-audio.m3u8", "/media/hls-init.mp4")) {
+            assertTrue("fetched $hop", paths.any { it.startsWith(hop) })
+        }
+        for (index in 0 until seen.length()) {
+            val request = seen.getJSONObject(index)
+            assertEquals("Cookie", "", request.getString("cookie"))
+            assertEquals("Referer", "${Fixtures.BASE}/", request.getString("referer"))
+            assertTrue("User-Agent names Servo", request.getBoolean("servo_agent"))
+        }
+        assertLogHasNoAddress()
+    }
+
+    /**
+     * Check 14: a claimed playlist on an extensionless address still picks the HLS source —
+     * Media3 cannot infer `.m3u8`, so the progressive failure retries as HLS.
+     */
+    @Test
+    fun anHlsPlaylistWithoutItsExtensionStillPlays() {
+        open(Fixtures.hlsNoExt(key))
+        device.awaitState { it.activeTab?.title == "HLS:errors:1" }
+        assertEquals("HLS requests before Play", 0, hls().getInt("requests"))
+        tapPlay()
+
+        val player = awaitPlayer()
+        val playing = awaitSnapshot(player, "ready and the first frame") { it.firstFrameRendered && it.phase in PLAYED }
+        assertTrue("video tracks", playing.hasVideo)
+        back(player)
+
+        // The doomed progressive fetch already counts once; the hops below prove the retry.
+        val served = hls()
+        assertTrue("HLS requests", served.getInt("requests") >= 4)
+        val paths = (0 until served.getJSONArray("seen").length()).map {
+            served.getJSONArray("seen").getJSONObject(it).getString("path")
+        }
+        for (hop in listOf("/media/hls-manifest", "/media/hls-video.m3u8", "/media/hls-audio.m3u8", "/media/hls-init.mp4")) {
+            assertTrue("fetched $hop", paths.any { it.startsWith(hop) })
+        }
+        assertLogHasNoAddress()
+    }
+
     /** Check 10 (report): a data: page's media is judged as a public page's, through the engine. */
     @Test
     fun aDataPageOffersNothing() = report("data page") {
@@ -450,6 +514,8 @@ class MediaPlayerTest {
     private fun media(): JSONObject = Fixtures.state().getJSONObject("media")
 
     private fun clip(): JSONObject = media().getJSONObject("clip")
+
+    private fun hls(): JSONObject = media().getJSONObject("hls")
 
     /** Taps halfway across the page at [fraction] of its height until [done] holds for its title. */
     private fun tapPageUntil(fraction: Float, done: (String?) -> Boolean) {
