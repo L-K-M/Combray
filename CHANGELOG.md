@@ -295,6 +295,12 @@ All notable changes to this project are documented here. The format follows
 - Reloading a page sends the referrer of the request that first loaded it,
   as Firefox does, instead of the page's own address. A bot check that
   compared the two requests turned the reload away.
+- Pages behind a bot check that measures SVG shapes no longer block
+  Combray as automated: Servo now answers SVG's `getBBox()`,
+  `isPointInFill()` and `createSVGPoint()` (with `createSVGMatrix()` and
+  `createSVGRect()`), as other browsers do, so the check can finish.
+  Chart libraries that lay out labels with `getBBox()` work on shapes too;
+  boxes of SVG text are not computed yet.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects
