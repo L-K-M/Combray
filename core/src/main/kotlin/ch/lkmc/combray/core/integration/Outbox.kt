@@ -7,6 +7,7 @@ import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.JobKind
 import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
+import ch.lkmc.combray.core.data.SavedItemEntity
 import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.data.ServiceKind
 
@@ -162,6 +163,22 @@ class Outbox(
         )
         dao.updateJob(claimed)
         Claim(claimed, owner)
+    }
+
+    /**
+     * Records the remote id a job's create step acknowledged while the job is still running, with
+     * the saved-item row that goes with it, in one transaction. Only the current claim owner may
+     * write it. Later retries then skip the create and repeat only the step that failed.
+     */
+    suspend fun markCreated(job: OutboxJobEntity, remoteId: String, saved: SavedItemEntity?) {
+        database.withTransaction {
+            val current = dao.job(job.id) ?: return@withTransaction
+            if (current.state != JobState.RUNNING || current.fence != job.fence || current.leaseOwner != job.leaseOwner) {
+                return@withTransaction
+            }
+            dao.updateJob(current.copy(remoteId = remoteId))
+            if (saved != null) dao.setSaved(saved)
+        }
     }
 
     /**
