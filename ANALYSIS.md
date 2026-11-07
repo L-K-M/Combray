@@ -48,6 +48,11 @@ remaining nice-to-have findings are folded into the sections below.
 The longcat-2 review's blocking and important findings are implemented in open
 PRs #219, #237, #243, #244, #250, #256 and #267 and are omitted; its remaining
 nice-to-have findings are folded into the sections below.
+The longcat-1 review's important findings are implemented in open PRs #233,
+#241, #260, #263 and #269 (concurrent PRs cover the same findings) and are
+omitted; its nice-to-have findings are implemented in open PRs #271, #272,
+#274 and #275 and are omitted, except for the remaining outbox transaction
+note below.
 
 ## Still open
 
@@ -406,19 +411,21 @@ Retain newest payloads where required and count ambiguous attempts
 conservatively: counting only returned failures can permit endless resends
 after repeated response loss. Effort: one to two days.
 
-### Enforce ServiceRoutes' one-request-per-attempt contract
+### Run outbox completion side effects after the commit
 
 general issues — nice-to-have
 
-`ServiceRoutes.kt` documents a one-request callback, but its attempt transport
-has no single-use guard. Current callers must be checked before claiming a
-production double-send; the concern is future misuse permitting extra sends
-before alternate-address failover.
+`Outbox.finish` runs its `onDone` callback inside the Room transaction, so a
+side effect that throws rolls back an already-applied job state and the
+dispatcher retries it. `Integrations.recordDone` now decodes its payload
+defensively in open PR #219, which closes the known throw path, but the
+transaction boundary remains: any future callback that writes to the database
+or throws will still couple its fate to the finish transaction.
 
-Suggested fix: add a single-use guard if the contract remains public to
-multiple internal callers, with tests that a second execution cannot send or
-trigger unsafe failover. Preserve the distinction between NotConnected and
-ambiguous delivery. Effort: a few hours.
+Suggested fix: run `onDone` after the transaction commits, or document that
+callbacks must be idempotent and non-throwing. Test a throwing callback and a
+callback that writes, verifying the job state survives. Effort: about half a
+day.
 
 ### Handle runtime refusals without request identity
 
