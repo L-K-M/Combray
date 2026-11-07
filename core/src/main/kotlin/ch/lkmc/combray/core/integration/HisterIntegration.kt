@@ -271,6 +271,9 @@ class HisterIntegration(
         val (service, token) = snapshot()
         if (service == null || service.fingerprint != job.fingerprint) return DispatchResult.Cancelled("destination_changed")
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
+        // The due-job query holds paused captures, but one already claimed when the user
+        // paused must not be sent either.
+        if (!service.captureEnabled) return DispatchResult.Cancelled("capture_disabled")
         val payload = json.decodeFromString(CapturePayload.serializer(), job.payload)
         // The policy may have changed since the capture: recheck right before sending.
         if (!eligible(payload.url, service) || wasForgotten(job, payload.url)) return DispatchResult.Cancelled("excluded")
