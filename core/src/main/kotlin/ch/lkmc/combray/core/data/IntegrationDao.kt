@@ -30,6 +30,15 @@ interface IntegrationDao {
     @Query("SELECT * FROM outbox WHERE id = :id")
     suspend fun job(id: String): OutboxJobEntity?
 
+    /** The newest job for one destination key, whatever its state: the capture dedupe checks its fate. */
+    @Query(
+        """
+        SELECT * FROM outbox WHERE kind = :kind AND fingerprint = :fingerprint AND dedupeKey = :dedupeKey
+        ORDER BY sequence DESC LIMIT 1
+        """,
+    )
+    suspend fun newestJob(kind: JobKind, fingerprint: String, dedupeKey: String): OutboxJobEntity?
+
     @Query("SELECT COALESCE(MAX(sequence), 0) FROM outbox")
     suspend fun lastSequence(): Long
 

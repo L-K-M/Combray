@@ -233,7 +233,12 @@ class HisterIntegration(
         if (!eligible(page.url, service) || page.text.isBlank()) return
 
         val key = documentKey(page.url)
-        if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
+        // Unchanged content is queued once, but only while its job is on its way to the server
+        // or was delivered: a job that failed carries nothing there, so the same text must be
+        // queued again instead of being skipped for the rest of the process's life. A discard
+        // or a purposeful refusal stays deduplicated (the user or Hister said no), and an
+        // expired capture is not revived (its text has aged out on purpose).
+        if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256 && !failedBefore(key, service)) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
         if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) {
@@ -248,6 +253,10 @@ class HisterIntegration(
         synchronized(lastQueuedHash) { if (policyGeneration.get() == page.policyGeneration) lastQueuedHash[key] = page.sha256 }
         kick()
     }
+
+    /** Whether the newest queued job for [key] failed before reaching the server. */
+    private suspend fun failedBefore(key: String, service: ServiceEntity): Boolean =
+        dao.newestJob(JobKind.HISTER_ADD, service.fingerprint, key)?.state == JobState.FAILED
 
     override suspend fun forgetHost(host: String, includeSubdomains: Boolean) {
         val now = clock.now()
