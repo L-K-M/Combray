@@ -94,6 +94,7 @@ class EngineSurfaceView(
         viewTreeObserver.removeOnGlobalLayoutListener(keyboardWatch)
         // The keyboard goes with the window (rotation recreates the Activity): the page must not
         // keep a field that thinks it has one, or a tap on that field could not reopen it.
+        pageFieldActive = false
         if (pageKeyboard.reset()) reportDismissal(Dismissal.WINDOW_GONE)
         super.onDetachedFromWindow()
     }
@@ -170,6 +171,13 @@ class EngineSurfaceView(
     /** Type of the focused page field ("password", "email", ...), from the engine's ime_shown. */
     private var fieldKind = TEXT
 
+    /**
+     * Whether a page field has focus, so [onCheckIsTextEditor] is true only for a real field.
+     * The engine asks for a keyboard (or prepares one) when a field takes focus, and the app
+     * hides it when the field loses it; TalkBack then does not announce the page as editable.
+     */
+    private var pageFieldActive = false
+
     /** Whether the keyboard is a page field's, so that its closing can be told apart. */
     private val pageKeyboard = PageKeyboardTracker()
 
@@ -194,7 +202,7 @@ class EngineSurfaceView(
         if (change == PageKeyboardTracker.KeyboardChange.DISMISSED) reportDismissal(Dismissal.CLOSED_BY_USER)
     }
 
-    override fun onCheckIsTextEditor(): Boolean = engineRunning()
+    override fun onCheckIsTextEditor(): Boolean = engineRunning() && pageFieldActive
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!engineRunning()) return null
@@ -218,6 +226,7 @@ class EngineSurfaceView(
     fun showKeyboard(kind: String = TEXT) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
+        pageFieldActive = true
         useFieldKind(kind, keyboard)
         pageKeyboard.showRequested()
         val shown = keyboard.showSoftInput(this, 0)
@@ -233,10 +242,12 @@ class EngineSurfaceView(
      * Focus is not taken: a sheet the user is typing in keeps it.
      */
     fun prepareKeyboard(kind: String) {
+        pageFieldActive = true
         useFieldKind(kind, context.getSystemService(InputMethodManager::class.java))
     }
 
     fun hideKeyboard() {
+        pageFieldActive = false
         pageKeyboard.hideRequested()
         context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
         Log.i(LOG_TAG, "keyboard hide, $pageKeyboard")
@@ -248,6 +259,7 @@ class EngineSurfaceView(
      * a tap on it then opens the keyboard again.
      */
     private fun reportDismissal(cause: Dismissal) {
+        pageFieldActive = false
         Log.i(LOG_TAG, "keyboard dismissal sent to the page: $cause")
         if (engineRunning()) NativeEngine.imeDismissed()
     }
@@ -271,6 +283,9 @@ class EngineSurfaceView(
         const val PASSWORD = "password"
     }
 }
+
+/** Longest deletion one request may turn into key events, in each direction. */
+private const val MAX_EDIT_CHARS = 1_000
 
 /**
  * Minimal IME bridge: committed text becomes a composition end in the focused element;
@@ -311,8 +326,12 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
     }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-        repeat(beforeLength) { tapKey(KeyEvent.KEYCODE_DEL) }
-        repeat(afterLength) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
+        // A page can ask for an unbounded deletion; cap it so one request cannot flood the
+        // engine's command queue with two JNI calls per character.
+        val before = beforeLength.coerceIn(0, MAX_EDIT_CHARS)
+        val after = afterLength.coerceIn(0, MAX_EDIT_CHARS)
+        repeat(before) { tapKey(KeyEvent.KEYCODE_DEL) }
+        repeat(after) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
         return true
     }
 
