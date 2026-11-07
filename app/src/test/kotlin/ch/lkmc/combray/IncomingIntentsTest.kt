@@ -102,6 +102,31 @@ class IncomingIntentsTest {
     }
 
     @Test
+    fun oneLineCollapsesWhitespaceTrimsAndSaysWhenItCut() {
+        assertEquals(IncomingIntents.OneLine("Proust madeleine", cut = false), IncomingIntents.oneLine("  Proust\n\tmadeleine  "))
+        assertNull(IncomingIntents.oneLine("   "))
+        assertEquals(IncomingIntents.OneLine("c".repeat(2_000), cut = false), IncomingIntents.oneLine("c".repeat(2_000)))
+        val cut = IncomingIntents.oneLine("c".repeat(3_000))
+        assertEquals(2_000, cut?.text?.length)
+        assertEquals(true, cut?.cut)
+    }
+
+    @Test
+    fun aHugeShareIsExaminedOnlyAsFarAsTheLineLimit() {
+        val huge = CountingText("word ".repeat(300_000))
+        val line = IncomingIntents.oneLine(huge)
+        assertEquals(2_000, line?.text?.length)
+        assertEquals(true, line?.cut)
+        // Before the scan was bounded, trim-and-replace copied and read the whole share here.
+        assertTrue("examined ${huge.reads} characters", huge.reads < 10_000)
+    }
+
+    @Test(timeout = 1_000)
+    fun aLongWhitespaceRunBeforeTheTextIsSkipped() {
+        assertEquals(LaunchRequest.EditNewTab("madeleine"), send(" ".repeat(300_000) + "madeleine"))
+    }
+
+    @Test
     fun otherSchemesAreNeverOpenedFromSharedText() {
         // The editor refuses it and says why; nothing is loaded.
         assertEquals(LaunchRequest.EditNewTab("javascript:alert(1)"), send("javascript:alert(1)"))
@@ -192,4 +217,15 @@ class IncomingIntentsTest {
         assertNull(IncomingIntents.interpret(Intent.ACTION_MAIN, null) { "https://example.org/" })
         assertNull(IncomingIntents.interpret(null, "https://example.org/") { null })
     }
+}
+
+/** Counts how many characters a scan reads, so a test can prove the scan stops early. */
+private class CountingText(private val body: String) : CharSequence {
+    var reads = 0
+
+    override val length get() = body.length
+
+    override fun get(index: Int): Char = body[index].also { reads++ }
+
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = body.subSequence(startIndex, endIndex)
 }

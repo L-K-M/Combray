@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A share or "Search with Kagi" selection of any size is handled without
+  copying and scanning all of it on the main thread, which could jank or
+  freeze the app for a multi-megabyte share.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

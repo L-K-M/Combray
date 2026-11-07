@@ -52,7 +52,6 @@ object IncomingIntents {
     private const val MAX_LINK_LENGTH = 32_768
 
     private val WEB_ADDRESS = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
-    private val WHITESPACE = Regex("\\s+")
 
     // After a link in prose these end the sentence or close a quote: not taken as part of it.
     private const val TRAILING_PUNCTUATION = ".,;:!?'\"”’>"
@@ -119,6 +118,9 @@ object IncomingIntents {
         return end
     }
 
+    /** One line of shared text, and whether the line limit dropped the rest of it. */
+    internal data class OneLine(val text: String, val cut: Boolean)
+
     private fun open(address: String): Incoming.Open? =
         (AddressPolicy.interpret(address).primary as? AddressDecision.Navigate)?.let { Incoming.Open(it.url) }
 
@@ -142,20 +144,20 @@ object IncomingIntents {
 
     /** The user chose "Search with Kagi" for this text: search, or open it if it is an address. */
     private fun searchNow(text: String): Incoming? {
-        val query = oneLine(text) ?: return null
-        return when (val decision = AddressPolicy.interpret(query).primary) {
+        val line = oneLine(text) ?: return null
+        return when (val decision = AddressPolicy.interpret(line.text).primary) {
             // An address the line limit cut never opens in half: the whole link opens, as from a
             // share, or the editor shows what was kept.
-            is AddressDecision.Navigate -> if (isCut(text, query)) {
-                firstWebAddress(text)?.takeIf { it.startsWith(query) }?.let(::open) ?: LaunchRequest.EditNewTab(query)
+            is AddressDecision.Navigate -> if (line.cut) {
+                firstWebAddress(text)?.takeIf { it.startsWith(line.text) }?.let(::open) ?: LaunchRequest.EditNewTab(line.text)
             } else {
                 Incoming.Open(decision.url)
             }
             // A link with a password or token among other words goes to the editor alone, as from
             // a share: searched with them, it would reach Kagi unseen.
-            is AddressDecision.Search -> secretLink(query)?.let { LaunchRequest.EditNewTab(it) } ?: Incoming.Open(decision.url)
+            is AddressDecision.Search -> secretLink(line.text)?.let { LaunchRequest.EditNewTab(it) } ?: Incoming.Open(decision.url)
             // mailto:, tel: and refused addresses: the editor says what they are.
-            is AddressDecision.External, is AddressDecision.Rejected -> LaunchRequest.EditNewTab(query)
+            is AddressDecision.External, is AddressDecision.Rejected -> LaunchRequest.EditNewTab(line.text)
         }
     }
 
@@ -168,19 +170,45 @@ object IncomingIntents {
         .filter { it.substringAfter("://").isNotEmpty() }
         .firstOrNull { open(it) == null || SensitiveUrls.looksSensitive(it) }
 
-    private fun editNewTab(text: String): LaunchRequest.EditNewTab? = oneLine(text)?.let { LaunchRequest.EditNewTab(it) }
+    private fun editNewTab(text: String): LaunchRequest.EditNewTab? = oneLine(text)?.let { LaunchRequest.EditNewTab(it.text) }
 
-    // Whether oneLine dropped the end of [text] to make [line].
-    private fun isCut(text: String, line: String) = normalized(text).length > line.length
+    /** Whether [char] is one of Java regex's `\s`: a space or an ASCII whitespace control. */
+    private fun isLineSpace(char: Char) = char == ' ' || char == '\t' || char == '\n' || char == '\u000B' || char == '\u000C' || char == '\r'
 
-    private fun normalized(text: String) = text.trim().replace(WHITESPACE, " ")
-
-    /** [text] as one bounded line, or null when it is blank. */
-    private fun oneLine(text: String): String? {
-        val line = normalized(text)
+    /**
+     * [text] as one line of at most [MAX_TEXT_LENGTH] characters, or null when it is blank, and
+     * whether the limit dropped the rest of it. Whitespace runs collapse to one space and the
+     * ends are trimmed, but in one bounded pass: any app can share without a tap, this runs on
+     * the main thread, and a multi-megabyte share must not be copied or scanned whole.
+     */
+    internal fun oneLine(text: CharSequence): OneLine? {
+        val line = StringBuilder()
+        var pendingSpace = false
+        for (index in 0 until text.length) {
+            val char = text[index]
+            if (isLineSpace(char)) {
+                // Leading whitespace never starts a line; the rest waits as one space.
+                if (line.isNotEmpty()) pendingSpace = true
+                continue
+            }
+            // trim() drops other control characters at the ends; interior ones stay.
+            if (line.isEmpty() && char <= ' ') continue
+            if (pendingSpace) {
+                line.append(' ')
+                pendingSpace = false
+            }
+            line.append(char)
+            // The line is full: whatever follows is dropped, and says so.
+            if (line.length > MAX_TEXT_LENGTH) return OneLine(cutAt(line), cut = true)
+        }
+        // The end trim: trailing whitespace never made it in, but trailing controls did.
+        while (line.isNotEmpty() && line[line.length - 1] <= ' ') line.setLength(line.length - 1)
         if (line.isEmpty()) return null
-        if (line.length <= MAX_TEXT_LENGTH) return line
-        // Not between the two halves of a surrogate pair.
+        return OneLine(line.toString(), cut = false)
+    }
+
+    /** The first [MAX_TEXT_LENGTH] of [line], never between the two halves of a surrogate pair. */
+    private fun cutAt(line: StringBuilder): String {
         val end = if (line[MAX_TEXT_LENGTH - 1].isHighSurrogate()) MAX_TEXT_LENGTH - 1 else MAX_TEXT_LENGTH
         return line.substring(0, end)
     }
