@@ -62,7 +62,7 @@ const TEXT = Object.freeze({
   loadingSize: (size) => `Loading PDF (${size})…`,
   page: (number, count) => `Page ${number} of ${count}`,
   pageImage: (number) => `Page ${number}`,
-  pageFailed: (number) => `Page ${number} could not be drawn.`,
+  pageFailedRetry: (number) => `Page ${number} could not be drawn. Tap to try again.`,
   goToPage: (number) => `Go to page ${number}`,
   more: (shown, count) => `Showing the first ${shown.toLocaleString("en")} of ${count.toLocaleString("en")} pages.`,
 });
@@ -400,7 +400,11 @@ export class Viewer {
     // A wider screen makes pages taller, so fewer may fit under MAX_DOCUMENT_HEIGHT.
     for (const [index, view] of this.views) {
       if (index >= this.layout.shown) this.remove(index, view);
-      else this.place(index, view.element);
+      else {
+        this.place(index, view.element);
+        // A failure belongs to the layout that produced it: the new width draws the page again.
+        this.clearFailure(view);
+      }
     }
     this.showMore();
     if (anchor) {
@@ -589,13 +593,32 @@ export class Viewer {
     }
   }
 
+  /** A failure belongs to the layout that produced it: a new width draws the page again. */
+  clearFailure(view) {
+    if (!view.failed) return;
+    view.failed = false;
+    view.element.querySelector(".page-error")?.remove();
+  }
+
+  /** Asks for a page that failed again. */
+  retry(index) {
+    const view = this.views.get(index);
+    if (!view) return;
+    view.failed = false;
+    view.element.querySelector(".page-error")?.remove();
+    this.requestUpdate();
+  }
+
   pageFailed(index, view, error) {
     console.error(`PDF page ${index + 1}: ${error.message}`);
     view.failed = true;
     this.release(view);
-    const note = document.createElement("p");
+    const note = document.createElement("button");
     note.className = "page-error";
-    note.textContent = TEXT.pageFailed(index + 1);
+    note.type = "button";
+    note.textContent = TEXT.pageFailedRetry(index + 1);
+    note.setAttribute("aria-label", TEXT.pageFailedRetry(index + 1));
+    note.addEventListener("click", () => this.retry(index));
     view.element.append(note);
   }
 
@@ -628,6 +651,9 @@ export class Viewer {
   showProblem(kind, ...values) {
     this.problem = kind;
     const [heading, detail] = PROBLEM[kind](...values);
+    // Release the bitmaps before the elements leave the DOM: a canvas Servo can paint is freed at
+    // once, while a detached one waits for garbage collection.
+    for (const [, view] of this.views) this.release(view);
     this.pages.replaceChildren();
     this.pages.style.height = "";
     this.main.querySelector(".more")?.remove();
