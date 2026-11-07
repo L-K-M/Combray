@@ -1,9 +1,9 @@
 # Combray: outstanding analysis and future work
 
 Consolidated on 7 November 2026 from the existing backlog and the sol-1,
-mistral-2 and sol-2 source reviews. Completed work and findings implemented
-in open PRs are omitted. Open PRs are not claims about behavior on main.
-Remaining inherited candidates are
+mistral-2, sol-2 and devin-2 source reviews. Completed work and findings
+implemented in open PRs are omitted. Open PRs are not claims about behavior on
+main. Remaining inherited candidates are
 identified as such where their current impact still needs reproduction. The
 7 November 2026 mistral-2 review's blocking/important findings are open PRs
 (#204, #207, #213, #220, #225, #226, #231) and are omitted per the rule above;
@@ -37,6 +37,9 @@ engine for arm64 and passed targeted capture/search, save and real-Keystore
 checks on a fresh API-36 arm64 emulator. Exact commands and limitations are in
 its feature PRs. These are not a full browser-suite run, physical-phone results
 or deployed-service acceptance; pending CI/reviews remain on the open PRs.
+The devin-2 review re-verified the backlog at `3224345`; its blocking and
+important findings are open PRs and are omitted, and its remaining nice-to-have
+findings are folded into the sections below.
 
 ## Still open
 
@@ -509,13 +512,29 @@ adding cached snapshots or dirty flags. Preserve navigation/title delivery
 and transactional counts; isolate remaining broad state reads only where
 measurements justify it. Effort: about one day.
 
+### Publish the player snapshot only when it changes
+
+performance problems, stuttering, and jank — nice-to-have
+
+`PlayerActivity.startTicker` publishes a new `PlaybackSnapshot` every 250 ms
+while playing. The on-screen position is Media3's own controller; the snapshot's
+position is read only by the media device checks, so the StateFlow is updated
+four times a second for the whole playback while nothing collects it.
+
+Suggested fix: publish on phase/track changes plus a slower position update
+(for example one second), or let the device checks poll a cached position.
+Verify the media device checks still observe the position within their timeout.
+Effort: about one hour.
+
 ### Profile Recent ranking and database query plans
 
 performance problems, stuttering, and jank — nice-to-have
 
 Recent can re-sort after flow emissions; search now correctly covers retained
-history and caps after filtering. Address suggestions rank parsed hosts, and
-several DAO paths have possible index/N+1 costs: history filtering/order,
+history and caps after filtering. Home's top-sites flow likewise parses,
+sensitivity-checks and groups every retained visit on each emission and each
+cutoff tick, then caps the tiles at six. Address suggestions rank parsed hosts,
+and several DAO paths have possible index/N+1 costs: history filtering/order,
 open tabs by state/time, open jobs by service, host/subdomain deletion,
 Hister eligibility/exclusion reads. `releaseViewsBeyond`'s per-view primary-key
 reads are bounded by the live-view cap, about seven reads per reconcile, not
@@ -809,6 +828,22 @@ destination through switching/response loss. Localize coordinator problems
 through typed notices mapped to app resources, not resource IDs in core.
 Effort: about one day. Creation-receipt persistence is implemented in open
 PR #230; this is the remaining presentation and recovery task.
+
+### Let audio play with the screen off, or say it stops
+
+usability: fast, convenient, clear — nice-to-have
+
+`PlayerActivity` keeps the screen on only while video plays
+(`onIsPlayingChanged` sets `keepScreenOn = isPlaying && hasVideo`), and
+`onStop` releases the player. A long audio track therefore stops when the
+screen times out, which is a pocket-listening interruption. The app's stated
+rule is that nothing plays in the background, but the user is not told that
+this is why audio ends.
+
+Suggested fix: decide the policy. If background audio is wanted, keep the
+screen on for audio too or add a foreground media session (an owner decision;
+do not add one silently). If it is not, say so in `docs/VIDEO.md`. Effort:
+30 minutes for the flag or a line of docs.
 
 ### Give address and state changes clear accessibility context
 
