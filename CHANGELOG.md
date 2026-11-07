@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A device clock set far ahead (a manual change, bad time from the network)
+  no longer wipes local history and closes every unused tab in one
+  maintenance pass: when the clock runs more than 30 days past everything
+  recorded, history is aged from the newest record instead.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

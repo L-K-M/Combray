@@ -39,6 +39,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -1366,6 +1367,21 @@ class BrowserCoordinatorTest {
 
         assertEquals(shown, state().activeTab?.id)
         assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun aClockJumpedFarAheadDoesNotWipeHistory() {
+        ready()
+        browser.openUrl("https://kept.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://kept.test/")
+        browser.closeTab(state().activeTab!!.id); idle()
+        val visit = recent().filterIsInstance<RecentItem.Visit>().single { it.url == "https://kept.test/" }
+
+        // A device clock set a year ahead (manual change, bad NTP) must not wipe history.
+        now += 365 * DAY
+        browser.runMaintenance(); idle()
+
+        assertNotNull(runBlocking { database.browser().visit(visit.visitId) })
     }
 
     @Test

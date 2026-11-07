@@ -55,6 +55,10 @@ interface BrowserDao {
     @Query("SELECT * FROM visits WHERE id = :id")
     suspend fun visit(id: String): VisitEntity?
 
+    /** The newest recorded history time: the anchor for retention when the wall clock jumps. */
+    @Query("SELECT MAX(lastSeenAt) FROM visits")
+    suspend fun newestVisitSeenAt(): Long?
+
     /**
      * Visits shown as history: not failed, seen since [since], and not the page an open tab is
      * currently showing (that one is represented by its tab row).

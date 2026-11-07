@@ -1586,7 +1586,19 @@ class BrowserCoordinator(
     }
 
     private suspend fun maintain() {
-        val cutoff = clock.now() - retention.closedHistoryMillis
+        // Retention ages history from the wall clock, which can jump far ahead on its own (a
+        // manual change, bad NTP). When the clock runs more than CLOCK_JUMP_SUSPECT_MS past
+        // everything recorded, it is not trusted: the window is aged from the newest record
+        // instead, so a jump cannot wipe history or close every unused tab in one pass.
+        // Tradeoff: an install idle for longer reclaims its old rows at its next visit rather
+        // than at its next launch, and once new activity is recorded under a wrong clock,
+        // retention follows that clock.
+        val newest = dao.newestVisitSeenAt()
+        val cutoff = if (newest != null && clock.now() - newest > CLOCK_JUMP_SUSPECT_MS) {
+            newest - retention.closedHistoryMillis
+        } else {
+            clock.now() - retention.closedHistoryMillis
+        }
         if (unusedTabs() == UnusedTabs.CLOSE) {
             val active = dao.session()?.activeTabId
             dao.openTabs().filter { it.id != active && it.lastFocusedAt < cutoff }.forEach { closeLogically(it) }
@@ -1805,6 +1817,13 @@ class BrowserCoordinator(
 
         /** Proposed default until measured on the owner's phone (M4). */
         const val MAX_LIVE_VIEWS = 6
+
+        /**
+         * How far past the newest record the wall clock may run before a maintenance pass stops
+         * trusting it (30 days). Long enough that an idle install ages its rows normally, short
+         * enough that a jumped clock cannot wipe more than the window before the jump.
+         */
+        const val CLOCK_JUMP_SUSPECT_MS = 30L * 24 * 60 * 60 * 1000
 
         /** Quick-link tiles on the new-tab page: two rows of three. */
         const val TOP_SITES_LIMIT = 6
