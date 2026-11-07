@@ -44,6 +44,7 @@ object ServiceUrls {
         }
         val host = uri.host?.lowercase() ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         if (uri.scheme?.lowercase() !in WEB_SCHEMES) return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
+        if (!isValidPort(uri.port)) return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) {
             return ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY)
         }
@@ -79,6 +80,9 @@ object ServiceUrls {
 
     /** Plain HTTP: the credential and what Combray sends can be read on the network. */
     fun isCleartext(root: String): Boolean = root.startsWith("http:", ignoreCase = true)
+
+    /** -1 means the scheme's default; an explicit port must be a usable TCP destination. */
+    internal fun isValidPort(port: Int): Boolean = port == -1 || port in 1..65535
 
     private val WEB_SCHEMES = setOf("http", "https")
 }
