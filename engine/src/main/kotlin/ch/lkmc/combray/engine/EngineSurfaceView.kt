@@ -194,7 +194,7 @@ class EngineSurfaceView(
         if (change == PageKeyboardTracker.KeyboardChange.DISMISSED) reportDismissal(Dismissal.CLOSED_BY_USER)
     }
 
-    override fun onCheckIsTextEditor(): Boolean = engineRunning()
+    override fun onCheckIsTextEditor(): Boolean = engineRunning() && pageKeyboard.hasPageField
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!engineRunning()) return null
@@ -234,6 +234,8 @@ class EngineSurfaceView(
      */
     fun prepareKeyboard(kind: String) {
         useFieldKind(kind, context.getSystemService(InputMethodManager::class.java))
+        // A field has focus, so the view is a text editor even though the keyboard stays closed.
+        pageKeyboard.prepareRequested()
     }
 
     fun hideKeyboard() {

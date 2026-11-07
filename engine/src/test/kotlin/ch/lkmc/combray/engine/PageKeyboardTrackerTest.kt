@@ -72,6 +72,25 @@ class PageKeyboardTrackerTest {
     }
 
     @Test
+    fun aPreparedFieldIsATextEditorUntilTheKeyboardGoes() {
+        assertFalse(tracker.hasPageField)
+        tracker.prepareRequested()
+        assertTrue(tracker.hasPageField)
+        tracker.hideRequested()
+        assertFalse(tracker.hasPageField)
+    }
+
+    @Test
+    fun aShownFieldIsATextEditorUntilTheUserClosesIt() {
+        tracker.showRequested()
+        assertTrue(tracker.hasPageField)
+        tracker.observed(onScreen = true)
+        assertTrue(tracker.hasPageField)
+        tracker.observed(onScreen = false)
+        assertFalse(tracker.hasPageField)
+    }
+
+    @Test
     fun aKeyboardNoPageFieldAskedForIsNoDismissal() {
         tracker.observed(onScreen = true)
 

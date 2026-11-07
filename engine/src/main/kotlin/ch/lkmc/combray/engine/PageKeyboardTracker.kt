@@ -31,6 +31,14 @@ internal class PageKeyboardTracker {
         page = if (onScreen && !appHiding) PageKeyboard.OPEN else PageKeyboard.REQUESTED
     }
 
+    /** A page field has focus but the keyboard stays closed until the user taps it. */
+    fun prepareRequested() {
+        if (page == PageKeyboard.NONE) page = PageKeyboard.REQUESTED
+    }
+
+    /** Whether a page field currently owns the keyboard (asked for or open). */
+    val hasPageField: Boolean get() = page != PageKeyboard.NONE
+
     fun hideRequested() {
         page = PageKeyboard.NONE
         appHiding = onScreen
