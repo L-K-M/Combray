@@ -236,7 +236,10 @@ class HisterIntegration(
         if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
-        if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) {
+        // A capture of a page already queued supersedes that job's body; charge only the room the
+        // replacement actually takes, or a re-capture near the cap is refused for space it frees.
+        val queued = dao.queuedCaptureBytes() - outbox.replacementBytes(JobKind.HISTER_ADD, service.fingerprint, key)
+        if (queued + bytes > MAX_QUEUED_CAPTURE_BYTES) {
             // One that could never fit, even in an empty queue, must not hold the warning on.
             if (bytes <= MAX_QUEUED_CAPTURE_BYTES) largestRefused.update { maxOf(it, bytes) }
             return

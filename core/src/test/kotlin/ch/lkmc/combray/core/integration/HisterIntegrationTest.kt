@@ -390,6 +390,22 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun aReplacementCaptureIsNotChargedTheBodyItReplaces() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        // Fill the queue until a further full-size body would not fit.
+        repeat(79) { capture("https://a.example/$it", "$text$it") }
+        assertTrue(runBlocking { database.integrations().queuedCaptureBytes() } > HisterIntegration.MAX_QUEUED_CAPTURE_BYTES - 300_000)
+
+        // Re-capturing a page already queued replaces its body, so the room it frees counts.
+        val key = HisterIntegration.documentKey("https://a.example/0")
+        capture("https://a.example/0", text)
+        assertTrue(jobs().any { it.dedupeKey == key && it.state == JobState.SUPERSEDED })
+        assertTrue(jobs().any { it.dedupeKey == key && it.state == JobState.PENDING })
+        assertTrue(runBlocking { database.integrations().queuedCaptureBytes() } <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+    }
+
+    @Test
     fun aCaptureHisterRefusesOnPurposeIsCancelledAndItsTextDropped() {
         enable()
         for ((status, category) in listOf(406 to "skipped_by_server", 422 to "sensitive_content")) {

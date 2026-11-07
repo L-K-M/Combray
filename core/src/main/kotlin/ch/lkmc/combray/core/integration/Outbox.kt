@@ -134,6 +134,19 @@ class Outbox(
         Enqueued.Queued(job)
     }
 
+    /**
+     * Payload bytes a superseding enqueue of [key] would replace and drop: its active jobs except
+     * one being sent, and its failed jobs. The capture budget charges the replacement only for the
+     * room it actually takes, not for the body it replaces.
+     */
+    suspend fun replacementBytes(kind: JobKind, fingerprint: String, key: String): Long {
+        val active = dao.activeJobs(kind, fingerprint, key)
+            .filter { it.state != JobState.RUNNING }
+            .sumOf { it.payloadBytes.toLong() }
+        val failed = dao.failedJobs(kind, fingerprint, key).sumOf { it.payloadBytes.toLong() }
+        return active + failed
+    }
+
     /** Claims the next due job under a lease of [leaseMs], or returns null. */
     suspend fun claim(owner: String, leaseMs: Long): Claim? = database.withTransaction {
         val now = clock.now()
