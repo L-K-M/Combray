@@ -777,7 +777,9 @@ class IntegrationsTest {
         drain()
         assertEquals(JobState.FAILED, job().state)
         assertEquals("list_not_found", job().error)
-        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+        // The bookmark exists, so the Save icon says saved; the queue row keeps the failure.
+        assertEquals(SaveStatus.Saved, status())
+        assertEquals(1, server.requests.count { it.startsWith("POST") })
 
         server.lists["later"] = mutableSetOf()
         chooseList("later")
@@ -786,6 +788,8 @@ class IntegrationsTest {
         assertEquals(SaveStatus.Saved, status())
         assertEquals(setOf("bm1"), server.lists["later"])
         assertEquals(1, server.bookmarks.size)
+        // The retry only repeated the list step; it did not create the link again.
+        assertEquals(1, server.requests.count { it.startsWith("POST") })
     }
 
     /** The bookmark exists, so this attempt reached the server: it counts, and the save is not "waiting". */
