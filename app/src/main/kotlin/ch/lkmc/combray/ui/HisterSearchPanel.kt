@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -57,6 +58,8 @@ private sealed interface SearchUi {
 fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by hister.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // The seeded local Recent filter is not text typed here: the first search waits for the user.
+    var searchRequested by rememberSaveable { mutableStateOf(false) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
     var nextPage by remember { mutableStateOf<String?>(null) }
@@ -64,14 +67,14 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    LaunchedEffect(query, searchRequested, service) {
         val mine = ++generation
         // The last answer belongs to the last query: no stale count while the next one waits.
         ui = SearchUi.Idle
         hits = emptyList()
         nextPage = null
         loadingMore = false
-        if (service == null || query.isBlank()) {
+        if (service == null || !shouldRunSearch(query, searchRequested, blankShowsAll = false)) {
             ui = SearchUi.Idle
             return@LaunchedEffect
         }
@@ -89,11 +92,12 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; searchRequested = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.search_all_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { searchRequested = true }),
             modifier = Modifier.fillMaxWidth(),
         )
         if (ui == SearchUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
