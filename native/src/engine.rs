@@ -126,6 +126,7 @@ fn set_panic_reporter(reporter: Option<PanicReporter>) {
 pub fn run(
     config: EngineConfig,
     commands: Receiver<Command>,
+    urgent: Receiver<Command>,
     wake: Sender<Command>,
     sink: Box<dyn EventSink + Send>,
 ) {
@@ -143,14 +144,36 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         };
 
-        // Handle everything already queued before spinning Servo once.
+        // Lifecycle commands preempt whatever is queued: their JNI callers block on an
+        // acknowledgement, and input queued for a dying surface is moot anyway.
         let mut flow = Flow::Continue;
+        for command in std::iter::from_fn(|| urgent.try_recv().ok()) {
+            flow = engine.handle(command);
+            if flow == Flow::Stop {
+                break;
+            }
+        }
+        if flow == Flow::Stop {
+            break;
+        }
+
+        // Handle everything already queued before spinning Servo once.
         let queued = std::iter::from_fn(|| commands.try_recv().ok());
+        // Wake only asks Servo to spin, which pump() does once per iteration anyway:
+        // any number of them in one batch is one spin. Touches are never merged — their
+        // positions feed the tap and scroll trackers, not only the page.
+        let mut wake_pending = false;
         for command in command
             .into_iter()
             .chain(queued)
             .take(MAX_COMMANDS_PER_ITERATION)
         {
+            if matches!(command, Command::Wake) {
+                if wake_pending {
+                    continue;
+                }
+                wake_pending = true;
+            }
             flow = engine.handle(command);
             if flow == Flow::Stop {
                 break;

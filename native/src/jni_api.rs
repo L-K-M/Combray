@@ -45,6 +45,9 @@ const KEY_RELEASE: jint = 1;
 
 /// Servo keeps process-wide state, so one engine per process.
 static ENGINE: OnceLock<Sender<Command>> = OnceLock::new();
+/// Lifecycle commands whose callers block on an acknowledgement: they must not
+/// queue behind a backlog of input, so they travel on their own channel.
+static ENGINE_URGENT: OnceLock<Sender<Command>> = OnceLock::new();
 static ENGINE_THREAD: OnceLock<ThreadId> = OnceLock::new();
 /// Set once shutdown is requested: later commands are refused instead of queued forever.
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
@@ -65,6 +68,29 @@ fn send(command: Command) -> bool {
     true
 }
 
+/// Like [send], on the urgent channel. A `Wake` on the normal channel follows so the
+/// engine's blocking receive returns at once instead of polling for urgent work.
+fn send_urgent(command: Command) -> bool {
+    let Some(commands) = ENGINE_URGENT.get() else {
+        error!("engine not started");
+        return false;
+    };
+    if SHUTTING_DOWN.load(Ordering::SeqCst) && !matches!(command, Command::Shutdown { .. }) {
+        error!("engine is shutting down; command refused");
+        return false;
+    }
+    if commands.send(command).is_err() {
+        error!("engine thread has stopped");
+        return false;
+    }
+    if let Some(normal) = ENGINE.get() {
+        // Bypasses send()'s shutdown refusal on purpose: the wake must arrive even
+        // while shutting down, or the urgent Shutdown itself would never be seen.
+        let _ = normal.send(Command::Wake);
+    }
+    true
+}
+
 /// Send a command and wait until the engine thread acknowledges it.
 fn send_and_wait(make: impl FnOnce(mpsc::SyncSender<()>) -> Command, timeout: Duration) -> bool {
     if ENGINE_THREAD.get() == Some(&std::thread::current().id()) {
@@ -73,7 +99,7 @@ fn send_and_wait(make: impl FnOnce(mpsc::SyncSender<()>) -> Command, timeout: Du
         return false;
     }
     let (done, finished) = mpsc::sync_channel(1);
-    if !send(make(done)) {
+    if !send_urgent(make(done)) {
         return false;
     }
     let acknowledged = finished.recv_timeout(timeout).is_ok();
@@ -197,10 +223,11 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_start<'local>(
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (commands, receiver) = mpsc::channel();
+        let (urgent, urgent_receiver) = mpsc::channel();
         let waker = commands.clone();
         let spawned = std::thread::Builder::new()
             .name("combray-engine".into())
-            .spawn(move || engine::run(config, receiver, waker, Box::new(sink)));
+            .spawn(move || engine::run(config, receiver, urgent_receiver, waker, Box::new(sink)));
         let engine_thread = match spawned {
             Ok(handle) => handle.thread().id(),
             Err(failure) => {
@@ -210,7 +237,7 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_start<'local>(
         };
         // Publish only a running engine, so a failed start can be retried.
         let _ = ENGINE_THREAD.set(engine_thread);
-        if ENGINE.set(commands).is_err() {
+        if ENGINE.set(commands).is_err() || ENGINE_URGENT.set(urgent).is_err() {
             error!("engine already started in this process");
             return Ok(false);
         }
