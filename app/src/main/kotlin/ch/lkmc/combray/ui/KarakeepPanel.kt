@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.R
+import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.KarakeepBookmark
 import ch.lkmc.combray.core.integration.KarakeepPage
@@ -55,10 +56,23 @@ private sealed interface BookmarksUi {
 @Composable
 fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by integrations.karakeepService.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
+    KarakeepPanelContent(service, initialQuery, integrations::karakeepBookmarks, onOpen, onSettings)
+}
+
+/** The panel's state and UI, separated from service observation for deterministic delayed-read checks. */
+@Composable
+internal fun KarakeepPanelContent(
+    service: ServiceEntity?,
+    initialQuery: String,
+    readBookmarks: suspend (String, String?) -> KarakeepRead<KarakeepPage>?,
+    onOpen: (String) -> Unit,
+    onSettings: () -> Unit,
+) {
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
+    var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -72,12 +86,13 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
         ui = BookmarksUi.Idle
         bookmarks = emptyList()
         nextCursor = null
+        loadingMore = false
         if (service == null) return@LaunchedEffect
 
         // The newest bookmarks show at once; a search waits for a pause in typing.
         if (query.isNotBlank()) delay(SEARCH_DEBOUNCE_MS)
         ui = BookmarksUi.Loading
-        val answer = integrations.karakeepBookmarks(query)
+        val answer = readBookmarks(query, null)
         if (mine != generation) return@LaunchedEffect
         // Null: the service went away meanwhile; its removal restarts this effect.
         ui = answer?.let { BookmarksUi.Answer(it) } ?: BookmarksUi.Idle
@@ -130,20 +145,32 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
             )
         }
         nextCursor?.let { cursor ->
+            if (loadingMore) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) }
             item {
                 TextButton(
                     onClick = {
+                        // Queued taps can carry the same enabled action before recomposition.
+                        if (loadingMore) return@TextButton
                         val mine = generation
+                        val requestedQuery = query
+                        loadingMore = true
                         scope.launch {
-                            val more = integrations.karakeepBookmarks(query, cursor) ?: return@launch
-                            if (mine != generation) return@launch
-                            // A failed page keeps the rows shown and says why above them.
-                            ui = BookmarksUi.Answer(more)
-                            if (more !is KarakeepRead.Ok) return@launch
-                            bookmarks = (bookmarks + more.value.bookmarks).distinctBy { it.id }
-                            nextCursor = more.value.nextCursor
+                            try {
+                                if (mine != generation) return@launch
+                                val more = readBookmarks(requestedQuery, cursor) ?: return@launch
+                                if (mine != generation) return@launch
+                                // A failed page keeps the rows shown and says why above them.
+                                ui = BookmarksUi.Answer(more)
+                                if (more !is KarakeepRead.Ok) return@launch
+                                bookmarks = (bookmarks + more.value.bookmarks).distinctBy { it.id }
+                                nextCursor = more.value.nextCursor
+                            } finally {
+                                // An old page must not release a newer query/destination's gate.
+                                if (mine == generation) loadingMore = false
+                            }
                         }
                     },
+                    enabled = !loadingMore,
                     modifier = Modifier.padding(16.dp).heightIn(min = 48.dp),
                 ) { Text(stringResource(R.string.search_all_more)) }
             }
