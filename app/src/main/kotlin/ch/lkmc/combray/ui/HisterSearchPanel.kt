@@ -41,6 +41,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** The rows shown so far, with [page] added: one row per address, in arrival order. */
+internal fun mergeHits(hits: List<HisterHit>, page: List<HisterHit>): List<HisterHit> =
+    (hits + page).distinctBy { it.url }
+
 private sealed interface SearchUi {
     data object Idle : SearchUi
 
@@ -81,7 +85,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         if (mine != generation) return@LaunchedEffect
         ui = SearchUi.Answer(answer)
         if (answer is HisterSearch.Results) {
-            hits = answer.hits
+            hits = mergeHits(emptyList(), answer.hits)
             nextPage = answer.nextPage
         }
     }
@@ -167,7 +171,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
                             // A failed page keeps the rows shown and says why above them.
                             ui = SearchUi.Answer(more)
                             if (more !is HisterSearch.Results) return@launch
-                            hits = hits + more.hits.filter { hit -> hits.none { it.url == hit.url } }
+                            hits = mergeHits(hits, more.hits)
                             nextPage = more.nextPage
                         }
                     },
