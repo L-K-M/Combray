@@ -275,6 +275,16 @@ All notable changes to this project are documented here. The format follows
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
   none. Combray now sends Firefox for Android's token in front of Servo's:
   `Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0`.
+- Pages behind a bot check that measures SVG shapes no longer block
+  Combray as automated: Servo now answers SVG's `getBBox()`,
+  `isPointInFill()` and `createSVGPoint()` (with `createSVGMatrix()` and
+  `createSVGRect()`), as other browsers do, so the check can finish.
+  Chart libraries that lay out labels with `getBBox()` work on shapes too;
+  boxes of SVG text are not computed yet.
+- Reloading a page, with Reload or by the page's own script, no longer
+  sends the page's own address as the referrer: it sends what the page's
+  original request sent, as Firefox does. A bot check challenged the
+  reload that follows its verification again because of that header.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects
