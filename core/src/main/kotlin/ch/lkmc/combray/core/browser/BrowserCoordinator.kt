@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URLDecoder
 import java.util.UUID
@@ -90,11 +91,20 @@ class BrowserCoordinator(
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
     /** How long a request may wait for its page before the tab stops showing it as loading. */
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
+    /** Work-queue capacity; the overflow policy is backpressure in [submit], never a drop. */
+    private val workQueueCapacity: Int = DEFAULT_WORK_QUEUE_CAPACITY,
     /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
     private val textSize: () -> TextSize = { TextSize.DEFAULT },
 ) {
     private val dao = database.browser()
-    private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
+    /**
+     * Bounded, so a flood of engine events cannot grow the queue without limit. The overflow
+     * policy is backpressure, not a drop: [submit]'s fast path is a non-blocking trySend, and a
+     * full queue blocks the caller (UI or engine thread) until the consumer frees a slot, so no
+     * command or event is silently dropped and their order is preserved.
+     */
+    private val work = Channel<suspend () -> Unit>(workQueueCapacity)
     private val state = MutableStateFlow(BrowserState())
 
     // Runtime state, touched only by the consumer.
@@ -1295,7 +1305,13 @@ class BrowserCoordinator(
     // --- Helpers ----------------------------------------------------------------------------------
 
     private fun submit(block: suspend () -> Unit) {
-        work.trySend(block)
+        // Fast path without blocking. When the bounded queue is full (a flood of engine
+        // events), wait for the consumer instead of dropping the job: completeness and order
+        // are invariants of the single-consumer queue. The consumer never waits on its callers
+        // (engine commands are queued JNI calls, Room calls are suspending), so this cannot
+        // deadlock; a stuck consumer is reported by the queue's own error handling.
+        if (work.trySend(block).isSuccess) return
+        runBlocking { work.send(block) }
     }
 
     private fun withActiveView(action: (LiveView) -> Unit) = submit {
@@ -1796,6 +1812,7 @@ class BrowserCoordinator(
 
     private companion object {
         const val LOG_TAG = "CombrayBrowser"
+
         const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val PROCESS_KEY_LENGTH = 8
@@ -1888,6 +1905,9 @@ class BrowserCoordinator(
         }
     }
 }
+
+/** Work-queue slots before [BrowserCoordinator]'s callers wait (backpressure); nothing is dropped. */
+internal const val DEFAULT_WORK_QUEUE_CAPACITY = 1024
 
 /** Whether open tabs the user has not used for the retention period close by themselves. */
 enum class UnusedTabs { KEEP, CLOSE }
