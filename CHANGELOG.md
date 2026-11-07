@@ -273,6 +273,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Scrolling a long article in reader view does less work: each block's text
+  is built once, not again every time the screen around it recomposes.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
