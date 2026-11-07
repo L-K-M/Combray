@@ -338,7 +338,10 @@ private fun ServiceSettings(
     val alternate = editedAlternate ?: current?.alternateUrl.orEmpty()
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    // One slot per action: a slow connection check must not replace the save's result, or
+    // the other way round, when the two run at the same time.
+    var saveMessage by remember { mutableStateOf<String?>(null) }
+    var checkMessage by remember { mutableStateOf<String?>(null) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -381,7 +384,7 @@ private fun ServiceSettings(
             onClick = {
                 scope.launch {
                     val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
+                    saveMessage = describe(resources, labels, result)
                     if (result == Configured.Saved) {
                         editedAddress = null
                         editedAlternate = null
@@ -393,8 +396,8 @@ private fun ServiceSettings(
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
             onClick = {
-                message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
+                checkMessage = resources.getString(R.string.check_running)
+                scope.launch { checkMessage = check()?.let { describe(resources, labels, it) } }
             },
             enabled = current != null,
             modifier = Modifier.heightIn(min = 48.dp),
@@ -414,13 +417,20 @@ private fun ServiceSettings(
                     confirmRemove = false
                     editedAddress = null
                     editedAlternate = null
-                    scope.launch { remove(); message = null }
+                    scope.launch {
+                        remove()
+                        saveMessage = null
+                        checkMessage = null
+                    }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
-    message?.let { Text(it, modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
+    Column(Modifier.padding(top = 4.dp)) {
+        saveMessage?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+        checkMessage?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+    }
     if (current?.roots?.any(ServiceUrls::isCleartext) == true) {
         Text(stringResource(labels.cleartextWarning), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp))
     }
