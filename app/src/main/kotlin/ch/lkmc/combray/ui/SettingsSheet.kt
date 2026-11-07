@@ -338,7 +338,7 @@ private fun ServiceSettings(
     val alternate = editedAlternate ?: current?.alternateUrl.orEmpty()
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -349,7 +349,7 @@ private fun ServiceSettings(
     Text(stringResource(labels.explanation))
     OutlinedTextField(
         value = address,
-        onValueChange = { editedAddress = it },
+        onValueChange = { editedAddress = it; message = null },
         label = { Text(stringResource(R.string.karakeep_url)) },
         placeholder = { Text(stringResource(labels.urlHint)) },
         singleLine = true,
@@ -358,7 +358,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = alternate,
-        onValueChange = { editedAlternate = it },
+        onValueChange = { editedAlternate = it; message = null },
         label = { Text(stringResource(R.string.settings_alternate_url)) },
         placeholder = { Text(stringResource(R.string.settings_alternate_url_hint)) },
         supportingText = { Text(stringResource(R.string.settings_alternate_url_help)) },
