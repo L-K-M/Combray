@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -166,6 +168,10 @@ fun RecentSheet(
     // A new filter or scope shows its best matches first, once its rows are there.
     val listState = rememberLazyListState()
     LaunchedEffect(rows?.query, scope) { listState.scrollToItem(0) }
+    // The Undo snackbar for a tab closed here overlays the list's bottom; reserve its height so
+    // the last row can scroll clear of it instead of sitting under the action.
+    var snackbarHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         // The sheet is its own window: the Undo for a tab closed here must be shown inside it.
@@ -229,6 +235,7 @@ fun RecentSheet(
                             query = answered.query,
                             now = now,
                             listState = listState,
+                            listContentPadding = PaddingValues(bottom = snackbarHeight),
                             onShowAll = { scope = RecentScope.ALL },
                             onDismiss = onDismiss,
                             onForgetSite = { forgetting = it },
@@ -236,7 +243,11 @@ fun RecentSheet(
                     }
                 }
             }
-            NoticeHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+            NoticeHost(
+                snackbar,
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                    .onGloballyPositioned { info -> snackbarHeight = with(density) { info.size.height.toDp() } },
+            )
         }
     }
 
@@ -262,6 +273,7 @@ private fun LocalRecent(
     query: String,
     now: Long,
     listState: LazyListState,
+    listContentPadding: PaddingValues = PaddingValues(0.dp),
     onShowAll: () -> Unit,
     onDismiss: () -> Unit,
     onForgetSite: (String) -> Unit,
@@ -273,7 +285,7 @@ private fun LocalRecent(
 
     val days = remember(shown) { shown.map { calendarDay(it.time) } }
     val today = calendarDay(now)
-    LazyColumn(Modifier.fillMaxWidth(), state = listState) {
+    LazyColumn(Modifier.fillMaxWidth(), state = listState, contentPadding = listContentPadding) {
         var lastDay: Long? = null
         shown.forEachIndexed { index, item ->
             val day = days[index]
