@@ -111,7 +111,14 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     private fun file(name: SecretName) = File(directory, "${name.name}.bin")
 
-    private fun key(): SecretKey {
+    /**
+     * The process's one Keystore key. Creation is synchronized: two first-time configures (each
+     * service holds its own mutex) could otherwise race generateKey, and one could replace the
+     * key the other's ciphertext was sealed with.
+     */
+    private val keyLock = Any()
+
+    private fun key(): SecretKey = synchronized(keyLock) {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
@@ -122,7 +129,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
                 .setKeySize(KEY_BITS)
                 .build(),
         )
-        return generator.generateKey()
+        generator.generateKey()
     }
 
     private companion object {
