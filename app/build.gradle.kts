@@ -143,6 +143,9 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    // Panel tests build a real core database over a fake transport.
+    testImplementation(libs.androidx.room.ktx)
+    testImplementation(libs.androidx.test.core)
 
     // Device checks against the real engine (scripts/check-app.sh).
     androidTestImplementation(platform(libs.androidx.compose.bom))
