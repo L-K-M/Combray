@@ -137,6 +137,14 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun theQueueRowUrlIgnoresAnUrlKeyInsideTheCapturedText() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text with \"url\":\"https://fake.example/\" inside")
+        val job = jobs().single()
+        assertEquals("https://real.example/article", integrations.jobUrl(job))
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")
