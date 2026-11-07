@@ -29,6 +29,16 @@ class ServiceUrlsTest {
     }
 
     @Test
+    fun aUnicodeHostIsStoredUnderItsPunycodeName() {
+        // java.net.URI has no host for Unicode (IDN) authorities. Like typed addresses, a
+        // service on one is accepted and stored under its ASCII name.
+        assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example"), root("https://bücher.example"))
+        assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example:8443/k"), root("https://bücher.example:8443/k/api"))
+        // Credentials and query parts are refused before any host work.
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY), root("https://u:p@bücher.example"))
+    }
+
+    @Test
     fun anAlternateIsCheckedLikeTheMainAddressAndIsNoneWhenBlankOrTheSame() {
         assertEquals(
             ServiceAddresses.Valid("http://keep.lan", "https://keep.tailnet.ts.net"),

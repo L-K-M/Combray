@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.integration
 
+import ch.lkmc.combray.core.policy.HostNames
 import java.net.URI
 import java.net.URISyntaxException
 import java.security.MessageDigest
@@ -37,11 +38,19 @@ object ServiceUrls {
      * pasted API suffix (`/api/v1`, `/api`), so endpoints are never doubled.
      */
     fun normalizeRoot(input: String, apiSuffixes: List<String>): ServiceRoot {
-        val uri = try {
-            URI(input.trim())
+        val text = input.trim()
+        val parsed = try {
+            URI(text)
         } catch (malformed: URISyntaxException) {
-            return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
+            null
         }
+        // java.net.URI has no host for Unicode (IDN) authorities (and rejects some): retry with
+        // the host in punycode, as typed addresses store hosts.
+        val uri = if (parsed?.host != null) parsed else try {
+            asciiHosted(text)?.let(::URI)
+        } catch (malformed: URISyntaxException) {
+            null
+        } ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         val host = uri.host?.lowercase() ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         if (uri.scheme?.lowercase() !in WEB_SCHEMES) return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
         if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) {
@@ -53,6 +62,28 @@ object ServiceUrls {
         // java.net.URI already returns IPv6 literals in brackets.
         val hostPart = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
         return ServiceRoot.Valid("${uri.scheme.lowercase()}://$hostPart$port$path")
+    }
+
+    /**
+     * [text] with its host in ASCII (punycode), as typed addresses store hosts. Null when the
+     * authority has no plain host; userinfo and port are kept as they are.
+     */
+    private fun asciiHosted(text: String): String? {
+        val schemeEnd = text.indexOf("://")
+        if (schemeEnd < 0) return null
+        val authorityStart = schemeEnd + "://".length
+        val rest = text.substring(authorityStart)
+        val cut = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }
+        val authorityEnd = if (cut < 0) text.length else authorityStart + cut
+        val authority = text.substring(authorityStart, authorityEnd)
+        // Brackets already name an IPv6 literal in ASCII; only a plain host needs IDN.
+        val hostPort = authority.substringAfterLast('@')
+        if (hostPort.startsWith("[")) return text
+        val host = hostPort.substringBefore(':')
+        val ascii = HostNames.normalize(host) ?: return null
+        val userInfo = if ('@' in authority) authority.substringBeforeLast('@') + '@' else ""
+        val rebuilt = userInfo + ascii + hostPort.substring(host.length)
+        return text.substring(0, authorityStart) + rebuilt + text.substring(authorityEnd)
     }
 
     /** Checks both fields; a blank alternate, or one equal to the main address, is none. */
