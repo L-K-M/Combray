@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -71,6 +72,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -211,6 +213,8 @@ fun RecentSheet(
                             onValueChange = { query = it },
                             singleLine = true,
                             placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
+                            // Like the service scopes' fields: Search, not a plain Enter.
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         )
                     }
