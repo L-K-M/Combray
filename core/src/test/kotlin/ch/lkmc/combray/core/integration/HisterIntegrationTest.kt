@@ -172,6 +172,29 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun pausingCaptureHoldsAClaimedCaptureAndSendsNothingUntilItIsOnAgain() {
+        enable()
+        capture("https://a.example/", "private text")
+        val claim = runBlocking { integrations.outbox.claim("worker", 60_000) }!!
+        runBlocking { hister.setCaptureEnabled(false) }
+
+        // Rechecked right before sending: a capture claimed before the pause is not sent.
+        val result = runBlocking { hister.dispatch(claim.job) }
+        assertTrue(server.added.isEmpty())
+        runBlocking { integrations.outbox.finish(claim, result) }
+
+        // Held, not cancelled: the job waits for the switch, having spent no attempt.
+        val held = jobs().single()
+        assertEquals(JobState.RETRY_WAIT, held.state)
+        assertEquals(0, held.attempts)
+
+        // Turning capture on again sends exactly the held capture.
+        runBlocking { hister.setCaptureEnabled(true) }
+        drain()
+        assertTrue(server.added.single().contains("private text"))
+    }
+
+    @Test
     fun forgettingAVisitRollsBackBothHistoryAndCancellationWhenInvalidationFails() = runBlocking {
         enable()
         val url = "https://a.example/article"
