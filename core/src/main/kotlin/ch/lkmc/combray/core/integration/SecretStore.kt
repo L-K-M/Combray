@@ -70,6 +70,13 @@ internal class ServiceCredentials(private val secrets: SecretStore) {
 class KeystoreSecretStore(context: Context) : SecretStore {
     private val directory = File(context.noBackupFilesDir, "secrets").apply { mkdirs() }
 
+    /**
+     * Key creation is process-wide: two concurrent first-time configures (Karakeep and Hister
+     * hold different mutexes) would both find no key and both call `generateKey`, and the second
+     * could fail or replace the key the first had just stored.
+     */
+    private val keyLock = Any()
+
     override fun read(name: SecretName): String? {
         val file = file(name)
         if (!file.exists()) return null
@@ -111,7 +118,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     private fun file(name: SecretName) = File(directory, "${name.name}.bin")
 
-    private fun key(): SecretKey {
+    private fun key(): SecretKey = synchronized(keyLock) {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
@@ -122,7 +129,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
                 .setKeySize(KEY_BITS)
                 .build(),
         )
-        return generator.generateKey()
+        generator.generateKey()
     }
 
     private companion object {
