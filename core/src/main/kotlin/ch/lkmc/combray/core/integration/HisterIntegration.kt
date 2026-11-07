@@ -237,8 +237,7 @@ class HisterIntegration(
         // that ended without delivering (failed, cancelled, expired, parked) must not silence a
         // later capture of the same page forever.
         val alreadyHandled = synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256 &&
-            dao.latestCapture(service.fingerprint, key)
-                ?.let { it.state == JobState.SUCCEEDED || it.state.isActive } == true
+            dao.latestCapture(service.fingerprint, key)?.state?.deliveredOrInFlight() == true
         if (alreadyHandled) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
@@ -253,6 +252,15 @@ class HisterIntegration(
         // cleared the memory, and this hash must not survive that.
         synchronized(lastQueuedHash) { if (policyGeneration.get() == page.policyGeneration) lastQueuedHash[key] = page.sha256 }
         kick()
+    }
+
+    /**
+     * Whether this state still owes a delivery or has delivered. Exhaustive on purpose: a new
+     * [JobState] must be classified here before it compiles.
+     */
+    private fun JobState.deliveredOrInFlight(): Boolean = when (this) {
+        JobState.SUCCEEDED, JobState.PENDING, JobState.RUNNING, JobState.RETRY_WAIT, JobState.AUTH_REQUIRED -> true
+        JobState.FAILED, JobState.CANCELLED, JobState.SUPERSEDED, JobState.EXPIRED, JobState.DESTINATION_CHANGED -> false
     }
 
     override suspend fun forgetHost(host: String, includeSubdomains: Boolean) {

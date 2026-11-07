@@ -166,6 +166,20 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun anIdenticalCaptureIsNotQueuedAgainWhileItsJobIsStillInFlight() {
+        enable()
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        assertEquals(JobState.PENDING, jobs().single().state)
+
+        // Not delivered yet: the remembered hash must keep suppressing the duplicate.
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        drain()
+        assertEquals(1, server.added.size)
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")
