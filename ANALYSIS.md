@@ -3,7 +3,10 @@
 Consolidated on 7 November 2026 from the existing backlog and the sol-1 source
 review. Completed work and findings implemented in open PRs are omitted. Open
 PRs are not claims about behavior on main. Remaining inherited candidates are
-identified as such where their current impact still needs reproduction.
+identified as such where their current impact still needs reproduction. The
+7 November 2026 mistral-2 review's blocking/important findings are open PRs
+(#204, #207, #213, #220, #225, #226, #231) and are omitted per the rule above;
+its remaining nice-to-have findings are folded into the sections below.
 
 Read [AGENTS.md](AGENTS.md), the [implementation plan](docs/IMPLEMENTATION_PLAN.md)
 and [integration evidence](docs/INTEGRATIONS.md) before implementation. Servo is
@@ -1159,3 +1162,60 @@ or add a verified downstream signal before using these events for top-level
 chrome. Test iframe loads, same-document changes, redirects and real tapped
 links with generation/document guards. Effort: about one day plus native and
 device checks.
+
+### Key the Hister search effect on server identity, not the whole row
+
+bugs — nice-to-have
+
+`HisterSearchPanel.kt:67` keys its search effect on `LaunchedEffect(query,
+service)`, the whole `ServiceEntity` including `updatedAt`, so any settings
+save that rewrites the row (even one that only drops the alternate address)
+clears the results and re-searches. `KarakeepPanel.kt:70` was keyed on
+fingerprint and generation by #100; the Hister panel was not.
+
+Suggested fix: key the effect on `service?.fingerprint, service?.generation`
+like the Karakeep panel. Effort: trivial plus a test.
+
+### Keep a typed service credential across rotation
+
+usability: fast, convenient, clear — nice-to-have
+
+`SettingsSheet.kt:339` holds the credential field in plain `remember`, so a
+rotation loses a just-typed API key or token while the address fields survive
+(`rememberSaveable`). The field is never persisted either way.
+
+Suggested fix: `rememberSaveable` for the field. Effort: trivial.
+
+### Reject out-of-range ports in the address policy
+
+bugs — nice-to-have
+
+`AddressPolicy.kt:71` accepts any 1–5 digit port (`example.org:99999` classifies
+as Navigate), but the WHATWG parser then rejects the port, so the user only gets
+the generic "address not opened" snackbar instead of a local "malformed
+address" message.
+
+Suggested fix: treat ports above 65535 as `MALFORMED_ADDRESS` in
+`AddressPolicy`. Effort: small plus a unit test.
+
+### Fix the address policy's space-handling comment
+
+bugs — nice-to-have
+
+`AddressPolicy.kt:97-99` documents that a known-scheme address navigates "as
+typed", but `AddressPolicy.kt:108` encodes its spaces as `%20` first.
+
+Suggested fix: correct the doc comment to match the encoding (or stop encoding
+if the engine is meant to parse the raw text). Effort: trivial.
+
+### Offer copying the article's address from Reader view
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+Reader view's top bar (`ReaderView.kt` `ShowPageBar`) offers only "Show the
+page"; a passage's source cannot be copied or shared without leaving the
+article.
+
+Suggested fix: add a "Copy link" action next to "Show the page", reusing
+`copyAddressToClipboard` (sensitive-marked like the bar's long-press copy).
+Effort: small.
