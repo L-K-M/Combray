@@ -84,6 +84,7 @@ fun PageControlDialog(
     onOpenInNewTab: (String) -> Unit,
     onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
+    onDownloadImage: (String) -> Unit,
     onShare: (String) -> Unit,
     /** Shows a short message, such as a copy confirmation where Android shows none. */
     onNotify: (String) -> Unit,
@@ -92,7 +93,7 @@ fun PageControlDialog(
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
-        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
+        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onDownloadImage, onShare, onNotify) {
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
@@ -138,6 +139,7 @@ private fun LinkMenu(
     onOpenInNewTab: (String) -> Unit,
     onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
+    onDownloadImage: (String) -> Unit,
     onShare: (String) -> Unit,
     onNotify: (String) -> Unit,
     onDone: () -> Unit,
@@ -165,7 +167,10 @@ private fun LinkMenu(
             add(R.string.link_share to { onShare(link) })
         }
         content.image?.let { image ->
-            if (isWebAddress(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+            if (isWebAddress(image)) {
+                add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+                add(R.string.image_download to { onDownloadImage(image) })
+            }
             add(R.string.image_copy to { copy(image, imageCopied) })
         }
     }

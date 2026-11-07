@@ -50,6 +50,7 @@ class PasteMenuBackTest {
                     onOpenInNewTab = {},
                     onOpenInBackground = {},
                     onSaveLink = {},
+                    onDownloadImage = {},
                     onShare = {},
                     onNotify = {},
                 )

@@ -12,6 +12,13 @@ Pages
   /cookie-set?v=<alnum>      sets cookie combray=<v> (one year)
   /cookie-echo               title COOKIE:<Cookie header>
   /opener.html               link with target=_blank to /solid/3b4f8a.html
+  /image-download.html?k=<key>[&linked=1][&redirect=1][&fail=1]
+                             page-filling green image, optionally linked to a blue page;
+                             sets the browser cookie; title IMAGE-DOWNLOAD
+  /download-image.png?k=<key>[&fail=1]
+                             original 1x1 green PNG; fail=1 refuses the separate downloader
+  /download-image-redirect.png?k=<key>
+                             redirects to the original PNG
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /once.html?k=<alnum>       title ONCE on the first request per key; later ones close unanswered
                              (a reload that fails like a lost connection)
@@ -166,6 +173,10 @@ from site_reports import SERVICE_NAME as REPORTS_SERVICE_NAME  # noqa: E402
 from site_reports import validation as report_validation  # noqa: E402
 
 DEFAULT_PORT = 8766
+# One RGB pixel (#2e6b4f). Tests verify the downloaded bytes, not a screenshot or re-encoding.
+DOWNLOAD_IMAGE = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPQy/YHAAGzAOkONZUWAAAAAElFTkSuQmCC"
+)
 KARAKEEP_KEY = "fixture-key"
 SIGN_IN = ("ada", "lovelace")
 HISTER_TOKEN = "fixture-token"
@@ -1169,6 +1180,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page(f"COOKIE-SET:{value}", "<p>set</p>"), headers=[("Set-Cookie", cookie)])
         if path == "/cookie-echo":
             return self.send(200, page(f"COOKIE:{self.headers.get('Cookie', '')}", "<p>echo</p>"))
+        if path == "/image-download.html":
+            key = re.sub(r"[^a-zA-Z0-9]", "", query.get("k", ["image"])[0])[:32]
+            image_path = "/download-image-redirect.png" if query.get("redirect") == ["1"] else "/download-image.png"
+            image_url = image_path + "?" + urllib.parse.urlencode({"k": key, "fail": query.get("fail", ["0"])[0]})
+            image = f"<img src='{html.escape(image_url, quote=True)}' style='display:block;width:100vw;height:100vh'>"
+            if query.get("linked") == ["1"]:
+                image = f"<a href='/solid/3b4f8a.html'>{image}</a>"
+            return self.send(200, page("IMAGE-DOWNLOAD", image, "<style>html,body{margin:0;background:#5b2a86}</style>"),
+                             headers=[("Set-Cookie", f"{COOKIE_NAME}=image-download-fixture; Path=/")])
+        if path == "/download-image-redirect.png":
+            return self.send(302, headers=[("Location", "/download-image.png?" + urllib.parse.urlencode(
+                {"k": query.get("k", [""])[0], "fail": query.get("fail", ["0"])[0]}))])
+        if path == "/download-image.png":
+            servo = "Servo/" in self.headers.get("User-Agent", "")
+            self.record({"service": "image-download", "key": query.get("k", [""])[0],
+                         "has_cookie": bool(self.headers.get("Cookie")),
+                         "has_referrer": bool(self.headers.get("Referer")), "servo_agent": servo})
+            if query.get("fail") == ["1"] and not servo:
+                return self.send(403, "Download refused")
+            return self.send(200, DOWNLOAD_IMAGE, "image/png")
         if path == "/opener.html":
             # The link fills the page, so a tap anywhere in the page area follows it.
             return self.send(200, page("OPENER", "<a id='open' target='_blank' href='/solid/3b4f8a.html' "
