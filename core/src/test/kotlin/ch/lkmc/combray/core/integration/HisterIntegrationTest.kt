@@ -263,6 +263,17 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun aCaptureClaimedBeforeThePauseIsNotSent() {
+        enable()
+        capture("https://a.example/", "text")
+        val claim = runBlocking { integrations.outbox.claim("worker", 60_000) }!!
+        runBlocking { hister.setCaptureEnabled(false) }
+
+        assertEquals(DispatchResult.Cancelled("capture_disabled"), runBlocking { hister.dispatch(claim.job) })
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
     fun pausingCaptureHoldsUnsentCaptures() {
         enable()
         capture("https://a.example/", "text")
