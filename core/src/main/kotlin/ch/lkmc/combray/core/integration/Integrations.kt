@@ -291,11 +291,14 @@ class Integrations(
                 dao.observeParkedSave(url),
             ) { saved, job, parked ->
                 when {
-                    job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
+                    // A recorded bookmark is saved. A failed list step still needs the user, and
+                    // Settings offers the retry there; a merely retrying one does not.
+                    saved != null && job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
+                    saved != null -> SaveStatus.Saved
+                    job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
                     job != null -> SaveStatus.Pending
-                    saved != null -> SaveStatus.Saved
                     // Queued for an earlier address: Settings offers to send it here or discard it.
                     parked != null -> SaveStatus.NeedsAttention(parked.error)
                     else -> SaveStatus.Unsaved
@@ -366,6 +369,9 @@ class Integrations(
         if (created !is DispatchResult.Done) return created
         // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
         val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
+        // Record the acknowledged bookmark now: a later list-step failure must not hide that the
+        // bookmark exists, and a retry after choosing another list must not create a second one.
+        recordSaved(job, payload, bookmarkId)
         val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
         return when {
             added is DispatchResult.Done -> created
@@ -378,8 +384,18 @@ class Integrations(
 
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {
         if (job.kind != JobKind.KARAKEEP_SAVE) return
-        val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, done.remoteId, clock.now()))
+        val payload = try {
+            json.decodeFromString(SavePayload.serializer(), job.payload)
+        } catch (malformed: IllegalArgumentException) {
+            // The dedupe key is the URL a save was queued for; a decode failure must not lose an
+            // acknowledgment the server already gave.
+            SavePayload(job.dedupeKey, null)
+        }
+        recordSaved(job, payload, done.remoteId)
+    }
+
+    private suspend fun recordSaved(job: OutboxJobEntity, payload: SavePayload, remoteId: String?) {
+        dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, remoteId, clock.now()))
     }
 
     companion object {

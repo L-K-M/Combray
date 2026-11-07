@@ -20,6 +20,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -695,6 +696,33 @@ class IntegrationsTest {
     }
 
     @Test
+    fun aListStepFailureDoesNotHideTheStoredBookmark() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        // The list is deleted on the server after the choice: the PUT answers 404.
+        server.lists.remove("reading")
+
+        save()
+        drain()
+
+        // The bookmark exists and is recorded even though the list step failed.
+        assertTrue(URL in server.bookmarks)
+        assertNotNull(database.integrations().observeSaved(service().fingerprint, URL).first())
+        // The list failure still needs the user, and Settings offers the retry there.
+        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+
+        // Choosing another list and retrying adds the same bookmark, without a second create.
+        server.lists["another"] = mutableSetOf()
+        chooseList("another")
+        integrations.retry(job().id)
+        drain()
+        assertEquals(1, server.bookmarks.size)
+        assertTrue(server.bookmarks.getValue(URL) in server.lists.getValue("another"))
+        assertEquals(SaveStatus.Saved, status())
+    }
+
+    @Test
     fun aListBoundSaveRetriesAMissingIdAndRecoversTheSameBookmark() = runBlocking {
         server.lists["reading"] = mutableSetOf()
         configure()
@@ -800,7 +828,8 @@ class IntegrationsTest {
         assertEquals(1, server.bookmarks.size)
         assertEquals(JobState.RETRY_WAIT, job().state)
         assertEquals(1, job().attempts)
-        assertEquals(SaveStatus.Pending, status())
+        // The bookmark itself is acknowledged; only the list step is still retrying.
+        assertEquals(SaveStatus.Saved, status())
 
         listsOffline = false
         now = job().nextAttemptAt
