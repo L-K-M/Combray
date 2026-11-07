@@ -66,6 +66,9 @@ internal class PageKeyboardTracker {
         return had
     }
 
+    /** Whether a page field currently owns the keyboard. */
+    fun current(): Boolean = page != PageKeyboard.NONE
+
     override fun toString() = "page=$page onScreen=$onScreen appHiding=$appHiding"
 
     enum class KeyboardChange {
