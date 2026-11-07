@@ -383,8 +383,9 @@ private fun ServiceSettings(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
         Button(
             onClick = {
+                // At click time, like Check: a coroutine body runs on the next dispatch.
+                val generation = ++messageGeneration
                 scope.launch {
-                    val generation = ++messageGeneration
                     val result = configure(address, credential.ifBlank { null }, alternate)
                     if (messageGeneration == generation) message = describe(resources, labels, result)
                     if (result == Configured.Saved) {
@@ -423,7 +424,11 @@ private fun ServiceSettings(
                     confirmRemove = false
                     editedAddress = null
                     editedAlternate = null
-                    scope.launch { remove(); message = null; messageGeneration++ }
+                    val generation = ++messageGeneration
+                    scope.launch {
+                        remove()
+                        if (messageGeneration == generation) message = null
+                    }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.action_cancel)) } },
