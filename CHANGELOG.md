@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page's scripted `window.open` chain or burst can no longer pile up
+  unlimited tabs: at most ten page-opened windows become tabs per minute,
+  and a refused window is closed and reported like a blocked pop-up.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

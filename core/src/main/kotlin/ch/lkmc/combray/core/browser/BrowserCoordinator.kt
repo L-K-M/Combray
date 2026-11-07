@@ -133,6 +133,9 @@ class BrowserCoordinator(
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
 
+    /** When page-opened windows were adopted, newest last, within [ADOPTION_WINDOW_MS]. */
+    private val adoptedWindowTimes = ArrayDeque<Long>()
+
     /** What pages see as `prefers-color-scheme`; the engine gets it as soon as it runs. */
     private var appearance = Appearance.LIGHT
 
@@ -1152,6 +1155,18 @@ class BrowserCoordinator(
             engine.closeView(event.view.tab)
             return
         }
+        // A page can also open windows without a tap, and each adopted window can open the
+        // next: cap how many become tabs per minute process-wide, so a burst or chain cannot
+        // pile them up (renderers are capped by maxLiveViews; tabs were not).
+        val now = clock.now()
+        while (adoptedWindowTimes.isNotEmpty() && now - adoptedWindowTimes.first() > ADOPTION_WINDOW_MS) adoptedWindowTimes.removeFirst()
+        if (adoptedWindowTimes.size >= MAX_ADOPTED_WINDOWS) {
+            Log.w(LOG_TAG, "refusing a window from tab ${opener.tabId}: $MAX_ADOPTED_WINDOWS adopted within ${ADOPTION_WINDOW_MS}ms")
+            engine.closeView(event.view.tab)
+            state.update { it.copy(notice = Notice.PopupBlocked) }
+            return
+        }
+        adoptedWindowTimes.addLast(now)
         val tabId = createTab(url = null, openerTabId = opener.tabId)
         val view = LiveView(tabId, event.view.tab).also { it.generation = event.view.generation }
         liveByTab[tabId] = view
@@ -1888,6 +1903,12 @@ class BrowserCoordinator(
         }
     }
 }
+
+/** Page-opened windows adopted per [ADOPTION_WINDOW_MS], process-wide: renderers are capped, tabs now too. */
+internal const val MAX_ADOPTED_WINDOWS = 10
+
+/** The window in which [MAX_ADOPTED_WINDOWS] applies, in milliseconds. */
+internal const val ADOPTION_WINDOW_MS = 60_000L
 
 /** Whether open tabs the user has not used for the retention period close by themselves. */
 enum class UnusedTabs { KEEP, CLOSE }
