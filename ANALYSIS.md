@@ -90,6 +90,27 @@ remaining nice-to-have findings are folded into the sections below. It ran
 `cargo fmt --check`, the Kotlin unit/lint gates, the report-service tests and
 `git diff --check`; no native build, device check or personal-service test.
 
+The longcat-3 review (7 November 2026, base `3224345`) passed the Kotlin
+unit/lint gates, `check_docs.py`, `git diff --check` and the documentation
+checks; no native build, device check or personal-service test. Its blocking
+and important findings are implemented in open PRs #208, #211, #216, #223,
+#224, #229, #235, #239, #249, #294 and #296 and are omitted per the rule
+above; its nice-to-have findings implemented in open PRs #299, #300, #303,
+#304, #306, #307, #308 and #309 are omitted too. Concurrent open PRs cover
+several of the same findings (#219, #225, #230, #242, #244, #250, #269), so
+the entries below keep only the unimplemented parts. Its remaining nice-to-have
+findings are folded into the sections below.
+
+The longcat-4 review (7 November 2026, base `3387c8a`, with main
+advancing during the session) passed the Kotlin unit/lint gates,
+`check_docs.py` and `git diff --check`; no native build, device check or
+personal-service test. Its blocking and important findings are implemented
+in open PRs #222, #227, #232, #251, #253, #298, #305, #310, #311, #312,
+#313, #314, #315 and #316 and are omitted per the rule above; concurrent open
+PRs cover several of the same findings, so the entries below keep only the
+unimplemented parts. Its remaining nice-to-have findings are folded into the
+sections below.
+
 ## Still open
 
 ### Fix the stale-frame defect after hidden-view churn
@@ -293,7 +314,7 @@ general issues — important
 Service fingerprints identify roots, not accounts. Replacing credentials for
 another account on the same Karakeep/Hister server can reuse local Saved state
 or explicitly resume jobs whose account identity was never established.
-Canonicalizing URL spellings, already being implemented in an open PR, is a
+Canonicalizing URL spellings, already being implemented in open PR #311, is a
 separate problem. Key rotation cannot be inferred to mean account replacement.
 
 Suggested fix: inspect the deployed read-only identity contract or introduce
@@ -349,7 +370,8 @@ accessibility tree for rendered page content. Blind users need page navigation
 and an accurate editor state, not just labeled toolbar buttons. The inherited
 AccessKit APIs are leads, not proof of a working Servo-to-TalkBack bridge.
 `EngineSurfaceView.onCheckIsTextEditor` now follows the page field's keyboard
-ownership in open PR #244; that is chrome state, not page accessibility.
+ownership in open PRs #244 and #312; that is chrome state, not page
+accessibility.
 
 Suggested fix: investigate the pinned downstream accessibility interfaces and
 verify actual TalkBack reading, focus, links, fields, document replacement and
@@ -485,7 +507,8 @@ names can still fail. Copies are streamed without per-pick/total byte budgets
 and retained until restart, so repeated deliberately selected large
 attachments accumulate for the whole process and unknown-length providers are
 copied to completion. A 200 MB per-file cap, a specific refusal message and
-rollback of the failed pick are in open PR #270 (the mimo-2 review's fix);
+rollback of the failed pick are in open PR #270 (the mimo-2 review's fix),
+with a 64 MB per-pick cap and clear/stage serialization in open PR #313;
 total budgets, filename bytes and early release remain. Startup
 lifetime/privacy fixes are implemented in open
 PRs and are intentionally not repeated here. No page-to-JNI arbitrary
@@ -498,6 +521,47 @@ once Servo no longer needs its path.
 Verify traversal/symlink/staging-root boundaries where actually exposed,
 duplicate names, repeated large picks, cancellation and disk-full without
 deleting active attachments. Effort: about half a day.
+
+### Commit browser preferences synchronously
+
+general issues — nice-to-have
+
+`BrowserSettings.write` uses `SharedPreferences.apply()`, which writes to
+disk asynchronously. Process death right after a tap (before the write lands)
+reverts the theme, tab counter or unused-tab choice; the in-memory StateFlow
+masks it until then.
+
+Suggested fix: use `commit()` for this tiny write. Effort: about an hour.
+
+### Order focus changes monotonically
+
+general issues — nice-to-have
+
+`BrowserCoordinator.activate` writes `now - 1` to the tab losing focus, and
+`retireVisit` does the same for the tab being left, so two focus changes in
+the same millisecond get identical values and a tab focused at exactly `now`
+is rewritten to a smaller one. `BrowserDao.openTabs()` and `observeOpenTabs()`
+order by `lastFocusedAt` with no tiebreaker, so Recent order and
+`closeLogically`'s successor choice become rowid-dependent when links open
+fast.
+
+Suggested fix: write `maxOf(old, now - 1)` and add a deterministic tiebreaker
+(id) to the ordering queries. Test two same-millisecond focus changes.
+Effort: about half a day.
+
+### Preserve collapsed inline separators in captured text
+
+bugs — nice-to-have (native; needs a device run)
+
+`native/src/capture.js` drops whitespace-only text nodes, so
+`<b>one</b> <i>two</i>` is captured as `onetwo` and a Hister search for the
+original words fails. Block boundaries already add newlines.
+
+Suggested fix: keep the collapsed space for whitespace-only nodes
+(`data !== ""` instead of `data !== " "`) and let the final newline
+normalization remove it at block edges. Run engine fixtures for spans,
+links, emphasis, blocks, preformatted/multibyte text and a separator at the
+byte limit. Effort: about half a day plus a device run.
 
 ### Report oversized HTTP responses explicitly
 
@@ -520,10 +584,10 @@ performance problems, stuttering, and jank — nice-to-have
 `IntegrationDao.observeOpenJobs` returns every unfinished row (PENDING,
 RUNNING, RETRY_WAIT, AUTH_REQUIRED and FAILED), and Settings renders them
 non-lazily inside a scrolling Column. The per-row payload decode is already
-off the UI thread in open PR #242, with a persisted `url` column in open PR
-#225; the remaining cost is the non-lazy rendering of a large queue. No phone
-frame-time measurement is claimed. Deliberate failed saves are unbounded and
-must not be silently expired to hide the cost.
+off the UI thread in open PR #242, with a persisted `url` column in open
+PRs #225 and #298; the remaining cost is the non-lazy rendering of a large
+queue. No phone frame-time measurement is claimed. Deliberate failed saves
+are unbounded and must not be silently expired to hide the cost.
 
 Suggested fix: measure page/lazy rendering of large queues, retaining
 Retry/Discard and destination binding. Keep explicit saves until the user
@@ -545,6 +609,19 @@ Retry, Discard and expiry release the budget. Cover failed-body expiry and
 warning recovery without another capture, without silently discarding explicit
 saves or reopening the fixed replacement bug. Effort: about half a day after
 the policy is chosen.
+
+### Normalize a report address's trailing slash
+
+bugs — nice-to-have
+
+`ReportAddress.siteAndPath` trims to the site and path but keeps a trailing
+slash on the bare host: `https://example.org/` and `https://example.org` trim
+to different strings, and a scheme-less `example.org/` keeps its slash. The
+service treats both as the same site, so the preview can show a different
+address than the user gets by restoring the full address.
+
+Suggested fix: drop a trailing slash on the bare host (or document the choice)
+and add a `ReportAddressTest` case. Effort: under an hour.
 
 ### Define a total deadline for integration HTTP attempts
 
@@ -606,9 +683,11 @@ bugs — nice-to-have
 
 Forgetting already shares a transaction with cancellation, and
 `pageForgotten` prevents requests/results for an open tab's forgotten page
-from returning to history or capture. The inherited unresolved candidate is a
-site shown without a Visit or a timer racing the forget transaction, not the
-already fixed ordinary forgotten-page case. One residual candidate from the
+from returning to history or capture. The timer-cancellation half is
+implemented in open PR #314. The inherited unresolved candidate is a site
+shown without a Visit whose tombstone is written before the surrounding
+transaction commits, not the already fixed ordinary forgotten-page case.
+One residual candidate from the
 mimo-2 review: `forgetHost`/`forgetUrl` write the in-memory tombstone and bump
 the policy generation before the surrounding Room transaction commits, so a
 rolled-back forget would leave a tombstone that still cancels that site's
@@ -621,21 +700,6 @@ another tombstone mechanism. Cancel or fence only genuinely remaining delayed
 captures, and verify no erased content is re-enqueued after restart. A direct
 concurrent sink test is not proof of a normal coordinator Forget race.
 Effort: about half a day after the open policy work is integrated.
-
-### Keep recency deterministic when focus times tie
-
-bugs — nice-to-have
-
-`BrowserCoordinator.activate` rewrites the previous tab's `lastFocusedAt` to
-`now - 1`, while MRU queries sort only that timestamp. Same-millisecond focus
-changes can tie or move a timestamp backward, affecting All/MRU successor
-selection. Fixed creation-time Open-tab/swipe ordering is already implemented
-and is a different invariant.
-
-Suggested fix: reproduce focus/close/undo ties with a fake clock, then use a
-monotonic focus sequence or an explicitly justified timestamp/tie-break rule.
-Do not reintroduce focus-based reordering into Open tabs or swipes. Effort:
-about half a day including restart ordering.
 
 ### Document WorkManager replacement behavior
 
@@ -667,21 +731,6 @@ Any future render-only coalescing must retain every point for gesture/activation
 trackers, deliver final coordinates and preserve down/up/cancel order. Keep
 the existing long-press clock rule: measure from app handling, not the queued
 event timestamp. Effort: about one day with real touch fixtures.
-
-### Profile stateful publication
-
-performance problems, stuttering, and jank — nice-to-have
-
-Inert events already skip coordinator `publish()`, and tab counts use
-`SELECT COUNT(*)`. Stateful title/load bursts still query/publish. Stable
-browser-screen callbacks have an open PR, so that implementation is not
-repeated here. The old emulator idle-timeout observation is not a current
-phone benchmark.
-
-Suggested fix: count Room queries and use frame/recomposition traces before
-adding cached snapshots or dirty flags. Preserve navigation/title delivery
-and transactional counts; isolate remaining broad state reads only where
-measurements justify it. Effort: about one day.
 
 ### Publish the player snapshot only when it changes
 
@@ -985,8 +1034,19 @@ Pending, Saved, partial membership and Needs attention in text as well as
 color. Preserve the original payload and destination through
 switching/response loss. Localize coordinator problems through typed notices
 mapped to app resources, not resource IDs in core. Effort: about one day.
-Creation-receipt persistence is implemented in open PR #230; this is the
-remaining presentation and recovery task.
+Creation-receipt persistence is implemented in open PRs #230 and #253; this is
+the remaining presentation and recovery task.
+
+### Avoid a Save-button flash on every navigation
+
+usability: fast, convenient, clear — nice-to-have
+
+`BrowserScreen.kt` keys the Save status flow on `tab?.url` and seeds it with
+`PageSaveStatus(null, Unsaved)`, so the Save icon briefly shows Unsaved on
+every navigation before the real status arrives.
+
+Suggested fix: keep the previous page's status until the new URL's first
+emission, or seed the flow with the current URL. Effort: under an hour.
 
 ### Let audio play with the screen off, or say it stops
 
@@ -1009,8 +1069,10 @@ do not add one silently). If it is not, say so in `docs/VIDEO.md`. Effort:
 usability: fast, convenient, clear — nice-to-have
 
 Recent and Settings have headings; address entry has an On this device heading
-only when suggestions exist. Engine starting/missing/failed/crashed overlays
-and load starts need a current TalkBack announcement check. The old More-sheet
+only when suggestions exist. The address pane title and the engine/reader
+overlay live regions are implemented in open PR #315. Engine
+starting/missing/failed/crashed overlays and load starts still need a current
+TalkBack announcement check. The old More-sheet
 implementation has since become a toolbar menu, so its earlier missing-heading
 claim must be reverified rather than copied blindly.
 
