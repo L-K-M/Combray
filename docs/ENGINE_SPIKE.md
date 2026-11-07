@@ -3163,7 +3163,93 @@ keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left ar
     as two paragraphs, `hio` and `y`, with the keyboard opening on the tap.
 - The full device suite runs in this PR's Engine workflow.
 
-## 52. Image downloads (7 November 2026)
+## 52. Bot-check device verification (6 November 2026)
+
+The owner sent an article address and a phone screenshot of a bot-protection block page. The site
+and the protection vendor are not named here, and the captured traffic stayed on the Mac.
+
+Validated source: `8720afc00e4daead852b8f7f63bb59e87e0b2a99` on `combray/0.7`, which merges
+downstream [PR #36](https://github.com/L-K-M/servo/pull/36) onto §51's pin `5aa68fd29b6b`. The
+reload change, [PR #37](https://github.com/L-K-M/servo/pull/37), came with §51's pin. Upstream
+base still v0.7.0.
+
+### Diagnosis
+
+Desktop servoshell at the old pin, with Combray's preferences, reproduced the block. The vendor's
+device check runs in a cross-origin frame, posts its measurements and receives a verdict: a hard
+block, an interactive challenge, or a pass with a cookie and a reload of the page.
+
+- Network: Safari in a private window on the same Mac and network loaded the article, so the
+  address is not blocked as such.
+- User agent: a plain Firefox for Android string, and a desktop Firefox string at desktop size, got
+  the same block. The verdict's reason codes changed only in their first entry. The `Gecko/` token
+  from §50 does not help here.
+- TLS: through a re-encrypting proxy, which replaces Servo's TLS handshake with the proxy's own,
+  Servo stayed blocked. Playwright's headless Firefox 157 through the same proxy got an interactive
+  challenge.
+- Engine features: traces of the Web API calls the check makes (a userscript wrapping prototype
+  methods and getters, replayed offline from the proxy) differ in dozens of places between Servo
+  and Firefox. Firefox was then made to look like Servo in 15 feature groups at once and in a
+  4-bit combination of them (five live runs). It reproduced Servo's block and reason codes exactly
+  when, and only when, the SVG geometry methods were removed: `getBBox()`, `createSVGPoint()`,
+  `isPointInFill()`. The check draws an SVG fingerprint with them. Firefox missing every other
+  difference (navigator properties, `speechSynthesis`, WebGL debug info, OffscreenCanvas in
+  workers, timing values, media types and others) still passed.
+- Reload: with the SVG methods present, the verdict passed, but the reload it triggers was
+  challenged again. Rewriting Servo's reload request toward Firefox's in the proxy, one header group
+  at a time, isolated the `Referer` header. Servo sent the page's own URL; Firefox sends what the
+  original request sent, here nothing, as HTML requires.
+
+### Engine changes
+
+- [PR #36](https://github.com/L-K-M/servo/pull/36) adds `SVGGraphicsElement.getBBox()`,
+  `SVGGeometryElement.isPointInFill()` and `SVGSVGElement.createSVGPoint()`, `createSVGMatrix()`
+  and `createSVGRect()`, computed from the elements' attributes. Text and nested viewports with a
+  `viewBox` throw `NotSupportedError`.
+  - It also makes a negative ellipse radius take the other radius, for `getTotalLength()` too.
+  - Checks: a new 21-case WPT test fails all 21 before the change and passes after; Firefox passes
+    all 21 and Chromium 19. 227 more passing subtests in `svg/`, with no other change against the
+    unchanged build on the same Mac. A 16-page seed sweep turns one `js-error` into `ok` and
+    changes nothing else.
+- [PR #37](https://github.com/L-K-M/servo/pull/37) reloads with the referrer and referrer policy of
+  the request that fetched the document, for `location.reload()` and the embedder's reload alike.
+  - Checks: a new 4-case WPT test fails all 4 before the change and passes after; Firefox passes
+    all 4 and Chromium does not. No change in the 102 upstream tests that reload.
+- Reviews:
+  - Before the PRs: Devin SWE-2, Reflection Beam 1.0 and LongCat 2.5.
+  - On them: GLM 5.3, three rounds on #36 and two on #37.
+  - The PRs list each finding and how it was handled. Two remain open: a style-sheet
+    `display: none` on a direct child of `svg` is still not seen, as servo.css's `svg > *` rule
+    hides it from the rasterizer as well; and `use` of a `symbol` with a `viewBox` throws.
+
+### End to end
+
+Desktop servoshell with both changes, Servo's own user agent, the same network:
+
+- It passes the device check and loads the article.
+- With Servo's Android user agent at phone size, the check offers its interactive challenge instead
+  of the block. Two things fit that: the Mac's fonts and hardware contradict an Android user agent,
+  and the check probes OS-specific fonts. Emulating the phone's pointer, touch, platform and pixel
+  ratio did not change that verdict.
+
+On an arm64 API 36 emulator with the same network, Combray at the old pin and Combray with both
+changes (a local build, `COMBRAY_ABI=arm64 scripts/build.sh --debug`) both stop at the vendor's
+interactive challenge, not at the block. Real Firefox 157 with a Firefox for Android user agent
+and touch emulation on the Mac is blocked as well (reason `25` and another). Neither desktop nor
+emulator therefore shows what a phone gets.
+
+The phone itself is not yet confirmed.
+
+### Not changed
+
+These differences remain, did not decide this check, and are candidates for later work:
+
+- Servo exposes no `navigator.webdriver` or `navigator.maxTouchPoints`.
+- OffscreenCanvas stays behind `dom_offscreen_canvas_enabled`, so the check's worker tasks throw.
+- `performance.timing.navigationStart` is 0.
+- A script reload sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-User: ?1`.
+
+## 53. Image downloads (7 November 2026)
 
 Owner request: offer Download image in the long-press image menu. It is separate
 from Open in new tab and a link's existing Open in background action; those keep
@@ -3194,8 +3280,10 @@ Limits and trust boundary:
   image addresses longer than 8,192 characters are refused. The menu hides the
   download action for non-web schemes. General attachment/file downloads remain
   out of scope.
-- No native, downstream Servo, dependency or manifest changes. The tested engine
-  pin is `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a`.
+- No native, downstream Servo, dependency or manifest changes in the image feature.
+  Its original tested engine pin is `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a`.
+  Main's later engine pin `8720afc00e4daead852b8f7f63bb59e87e0b2a99` is retained
+  when integrating the report-JSON fix from PR #202; section 52 records that update.
 
 Evidence on macOS arm64, JDK 21, Rust 1.97.1 and Android SDK under
 `~/Library/Android/sdk` (Rust's toolchain `bin` added to `PATH`):
@@ -3222,14 +3310,23 @@ Evidence on macOS arm64, JDK 21, Rust 1.97.1 and Android SDK under
 - The same API-36 run also passes all eight `PageControlsTest` and 32
   `AccessibilityTest` checks (43 total), including foreground Open in new tab and
   the image/linked-image menus' targets.
-- Local evidence: `/tmp/combray-download-images-logs/`. The full x86_64 fixture suite
-  runs in Engine PR checks. No physical phone or live personal service was used.
+- The original full API-30 x86_64 Engine run passed 205 checks, with no failed
+  report-only checks. The updated merge revision reruns the suite in PR checks.
+- The original CI blocker is resolved by main's merged PR #202: JSON depth is
+  explicitly bounded at 32 containers instead of depending on a Python
+  `RecursionError`. The combined revision passes all 209 report-service tests
+  locally on Python 3.13 and 3.15.2, including the 50,000-level regression and
+  exact depth-limit boundary. The image-download implementation is unchanged.
+- Original local evidence: `/tmp/combray-download-images-logs/`. Merge-validation
+  evidence: `/tmp/combray-download-images-merge-logs/`. No physical phone or live
+  personal service was used.
 
 Reproduction:
 
 ```sh
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
 python3 -I -m unittest discover -s scripts/tests
+python3 -I -m unittest discover -s services/site-reports/tests -t services/site-reports
 COMBRAY_ABI=arm64 scripts/build-native.sh
 scripts/check-app.sh <serial> ch.lkmc.combray.ImageDownloadTest ch.lkmc.combray.PageControlsTest ch.lkmc.combray.AccessibilityTest
 python3 scripts/check_docs.py
