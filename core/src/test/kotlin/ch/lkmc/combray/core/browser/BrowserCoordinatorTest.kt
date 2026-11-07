@@ -24,6 +24,7 @@ import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ReloadPullPhase
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,12 +78,16 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
+    private fun newCoordinator(
+        navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
+        workItemTimeoutMs: Long = 30_000L,
+    ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
+            workItemTimeoutMs = workItemTimeoutMs,
         ).also { it.start() }
     }
 
@@ -1921,6 +1926,22 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aStalledStepIsCancelledAndLaterStepsStillRun() {
+        browser = newCoordinator(workItemTimeoutMs = STALL_TIMEOUT_MS)
+        idle()
+
+        // A step that suspends forever (a wedged database call, a hung await) must not freeze
+        // every later state change behind it.
+        val stalled = CompletableDeferred<Unit>()
+        browser.submitForTest { stalled.await() }
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { withTimeout(TEST_WAIT_MS) { browser.awaitIdle() } }
+
+        assertEquals("https://a.test/", state().activeTab?.url)
+        assertEquals(Notice.Problem("Something went wrong; the last action may not have completed."), state().notice)
+    }
+
+    @Test
     fun aCrashedViewIsReplacedOnReloadAndItsLateEventsAreIgnored() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
@@ -3164,5 +3185,7 @@ class BrowserCoordinatorTest {
         const val TAB_ORDER_PAUSE_MS = 4_000L
         /** Longer than any test: a request does not time out unless the test means it to. */
         const val LONG_TIMEOUT_MS = 10L * 60 * 1000
+        /** Short enough for a unit test, long enough not to flake on a loaded CI runner. */
+        const val STALL_TIMEOUT_MS = 200L
     }
 }

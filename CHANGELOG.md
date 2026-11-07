@@ -602,3 +602,6 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A wedged browser-state step can no longer freeze every later tab,
+  navigation and engine event behind it: a step still running after
+  30 seconds is cancelled, reported, and the queue continues.
