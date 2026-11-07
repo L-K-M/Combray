@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Karakeep's connection check verifies a bookmarks-list response before
+  reporting a working connection. A proxy login page or unrelated HTTP 200
+  response now reports the wrong address instead of a false success.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
