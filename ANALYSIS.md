@@ -1,12 +1,17 @@
 # Combray: outstanding analysis and future work
 
-Consolidated on 7 November 2026 from the existing backlog and the sol-1 source
-review. Completed work and findings implemented in open PRs are omitted. Open
-PRs are not claims about behavior on main. Remaining inherited candidates are
+Consolidated on 7 November 2026 from the existing backlog and the sol-1,
+mistral-2 and sol-2 source reviews. Completed work and findings implemented
+in open PRs are omitted. Open PRs are not claims about behavior on main.
+Remaining inherited candidates are
 identified as such where their current impact still needs reproduction. The
 7 November 2026 mistral-2 review's blocking/important findings are open PRs
 (#204, #207, #213, #220, #225, #226, #231) and are omitted per the rule above;
 its remaining nice-to-have findings are folded into the sections below.
+Sol-2's important findings are implemented in open PRs #206, #217, #221, #230
+and #246. Concurrent PRs #215 and #226/#222 cover its reserved pagination and
+query-handoff slices; sol-2 did not duplicate or verify those implementations.
+Those findings are omitted too, without implying they have landed on main.
 
 Read [AGENTS.md](AGENTS.md), the [implementation plan](docs/IMPLEMENTATION_PLAN.md)
 and [integration evidence](docs/INTEGRATIONS.md) before implementation. Servo is
@@ -17,12 +22,18 @@ Current engine facts and measured results belong in
 assumptions. The earlier source reviews remain useful provenance: `SWE2.md`,
 `Sol.md`, `GeminiFlash.md`, `fusion.md`, `inkling.md` and `glm.md`.
 
-The November audit passed documentation/whitespace checks, 117 host script
+The sol-1 November audit passed documentation/whitespace checks, 117 host script
 tests, and 207 report-service tests on Python 3.13. Each of its four feature
 PRs passed failing-first regressions and the full local Kotlin
 unit/lint/debug-assembly gate. It performed no native build, device check or
 personal-service test: this worktree lacked the disposable Servo checkout.
 Those limits do not replace the project's existing device evidence.
+Sol-2 also passed the Kotlin gates for its changes, 118 script tests, eight
+capture-script checks and 169 Rust host tests. It built the pinned native
+engine for arm64 and passed targeted capture/search, save and real-Keystore
+checks on a fresh API-36 arm64 emulator. Exact commands and limitations are in
+its feature PRs. These are not a full browser-suite run, physical-phone results
+or deployed-service acceptance; pending CI/reviews remain on the open PRs.
 
 ## Still open
 
@@ -41,21 +52,6 @@ verified downstream embedding. Until then, pin the actual engine titles with
 a device regression and test an ordinary page using the same title. Preserve
 failed-load versus committed-document semantics. Effort: one to two days plus
 native/device validation.
-
-### Preserve spaces between captured inline words
-
-bugs — important
-
-`native/src/capture.js` drops whitespace-only text nodes, so markup such as
-`<b>one</b> <i>two</i>` can become `onetwo`. This affects Hister recall even
-though URL/title attribution and byte bounds are otherwise correct. The
-inherited Sol S19 finding needs a current real-engine fixture before fixing.
-
-Suggested fix: retain collapsed inline separators within the UTF-8 budget.
-Cover spans, links, emphasis, block boundaries, preformatted/multibyte text and
-a separator at the byte limit. Prove the original separate words are
-searchable through the fake Hister, not merely present in a mocked callback.
-Effort: about one day plus native/device checks.
 
 ### Bind queued keyboard edits to the original field
 
@@ -297,6 +293,22 @@ several days once device/configuration access is available.
 
 ## Nice-to-have
 
+### Reconcile stale milestone and toolchain summaries
+
+general issues — nice-to-have
+
+SOL2-11: `README.md:16` still presents the original 18-check snapshot;
+`docs/IMPLEMENTATION_PLAN.md:3,469` mixes Servo 0.6/no-Stop statements with
+later implemented capabilities. `docs/BUILDING.md:36` lists Gradle 9.8.1
+while the wrapper pins 9.8.2. Historical runs remain useful evidence, but
+present-tense summaries can misdirect implementation and release assessment.
+
+Suggested fix: reconcile summaries and verified toolchain tables with the
+pinned source and dated run evidence. Preserve what was and was not tested,
+including fixture versus deployed services and emulator versus physical phone;
+do not manufacture a new acceptance claim from documentation cleanup.
+Effort: about half a day.
+
 ### Validate safe upload names and resource policy
 
 bugs — nice-to-have
@@ -335,27 +347,35 @@ server. Effort: about half a day.
 performance problems, stuttering, and jank — nice-to-have
 
 `IntegrationDao.observeOpenJobs` returns all FAILED rows, and Settings renders
-them non-lazily. Deliberate failed saves should not be silently expired, but a
-large accumulated queue need not all be materialized and composed at once.
+them non-lazily. SOL2-13 also identifies `SettingsSheet.kt:431,620` calling
+`Integrations.kt:141–145` to JSON-decode full capture payloads during
+composition just to read their URLs. Queue emissions can therefore parse a
+20 MiB queue's worth of text on the UI path; no phone frame-time measurement
+is claimed. Deliberate failed saves are unbounded and must not be silently
+expired to hide the cost.
 
-Suggested fix: measure and page/lazily display large failed queues while
-retaining Retry/Discard and destination binding. Keep explicit saves until the
-user resolves them. Effort: about one day including large synthetic queues.
+Suggested fix: project lightweight host/status data outside composition and
+measure page/lazy rendering of large queues, retaining Retry/Discard and
+destination binding. If metadata is persisted, use a preserving Room migration.
+Keep explicit saves until the user resolves them. Effort: one to two days
+including populated-queue migration and responsiveness checks.
 
-### Account for atomically superseded capture bodies at admission
+### Explain failed automatic captures' budget retention
 
 bugs — nice-to-have
 
-`HisterIntegration.captured` checks current queued bytes plus a replacement
-body before the outbox atomically supersedes the old body. Near capacity an
-equal/smaller replacement can be refused even though its net usage fits.
-FAILED capture bodies also remain in the age-bounded budget. The live budget
-warning itself is already implemented and should not be rebuilt.
+FAILED automatic capture bodies remain in the seven-day transient budget, so
+accumulated permanent failures can pause capture of other pages. The live
+budget warning and replacement-aware transactional admission are already
+implemented, the latter in open PR #206; neither needs another implementation.
+The remaining question is the intended treatment and explanation of failed
+automatic text, not the admission arithmetic.
 
-Suggested fix: define replacement-aware admission and the intended treatment
-of failed automatic captures, without silently evicting explicit saves. Test
-same-key equal/smaller replacements near capacity, expiry, drain/discard and
-warning recovery without another capture. Effort: about one day.
+Suggested fix: confirm and document that retention policy, explaining how
+Retry, Discard and expiry release the budget. Cover failed-body expiry and
+warning recovery without another capture, without silently discarding explicit
+saves or reopening the fixed replacement bug. Effort: about half a day after
+the policy is chosen.
 
 ### Define a total deadline for integration HTTP attempts
 
@@ -435,19 +455,6 @@ Suggested fix: reproduce focus/close/undo ties with a fake clock, then use a
 monotonic focus sequence or an explicitly justified timestamp/tie-break rule.
 Do not reintroduce focus-based reordering into Open tabs or swipes. Effort:
 about half a day including restart ordering.
-
-### Verify preference durability before adding synchronous writes
-
-general issues — nice-to-have
-
-`BrowserSettings.write` uses SharedPreferences `apply()`. The old review
-raised immediate process-death durability, but ordinary Android lifecycle
-handling must be accounted for before asserting a lost-toggle defect. Moving
-all writes to main-thread `commit()` can introduce avoidable IO stalls.
-
-Suggested fix: fault-inject the narrow persistence boundary for theme/tab
-choices, document the actual guarantee, and use a durable off-main-thread
-path only if the test establishes a requirement gap. Effort: a few hours.
 
 ### Document WorkManager replacement behavior
 
@@ -619,10 +626,10 @@ half a day to measure, then a bounded optimization.
 
 usability: fast, convenient, clear — nice-to-have
 
-`HisterSearchPanel.kt` and `KarakeepPanel.kt` clear old answers on each
-keystroke, leaving blank space during debounce/network delay. Pagination
-single-flight/error handling is already implemented in an open PR and is not
-a second task here.
+`HisterSearchPanel.kt:69–75` and `KarakeepPanel.kt:74–78` clear old answers
+on each keystroke, leaving blank space during debounce/network delay.
+Pagination single-flight/error handling is already implemented in an open PR
+and is not a second task here.
 
 Suggested fix: try retaining the prior answer visibly tagged as belonging to
 its old query, with stale rows disabled or unmistakably distinct, until the
@@ -718,7 +725,8 @@ instead of opaque IDs, and distinguish Pending, Saved, partial membership and
 Needs attention in text as well as color. Preserve the original payload and
 destination through switching/response loss. Localize coordinator problems
 through typed notices mapped to app resources, not resource IDs in core.
-Effort: about one day; partial-save persistence is the separate important item.
+Effort: about one day. Creation-receipt persistence is implemented in open
+PR #230; this is the remaining presentation and recovery task.
 
 ### Give address and state changes clear accessibility context
 
@@ -873,9 +881,9 @@ proven isolation/storage semantics. Effort: several days of engine/device work.
 missing features — nice-to-have
 
 The PDFium-wasm viewer renders pages, but `native/src/find.js` and `reader.js`
-still exclude its labels/content until the planned text slice. This limits
-long-document reading and recall; it is not evidence that PDF display itself
-is missing.
+still exclude its labels/content until the planned text slice. Non-embedded
+CJK text also needs the planned font slice. These limit long-document reading
+and recall; they are not evidence that PDF display itself is missing.
 
 Suggested fix: follow [docs/PDF.md](docs/PDF.md)'s bounded PDFium text and CJK
 font work, retaining actual document identity, opt-in capture and exclusions.
@@ -886,8 +894,9 @@ several days with native/device PDF fixtures.
 
 novel, delightful, or quirky ideas worth trying — nice-to-have
 
-`ReaderView.kt` owns a new lazy-list state when Reader is recreated. A brief
-trip to the page or another tab can therefore lose a long article's place.
+`ReaderView.kt:168–228` owns a new lazy-list state when Reader is recreated.
+A brief trip to the page or another tab can therefore lose a long article's
+place.
 A quiet progress/reading-time cue could also support reading without becoming
 a dashboard. The shared Text size control is already implemented; a second
 Reader size setting is not needed.
@@ -958,7 +967,7 @@ stay direct.
 Suggested fix: snapshot the optional metadata with the original payload and
 destination, keep creation acknowledgment distinct from metadata failure, and
 use existing SavedItem records without a recommendation feed. Effort: about
-one day after partial-save persistence is addressed.
+one day after the receipt work is integrated and the interaction is selected.
 
 ### Add a deliberate open-copied-link affordance
 
@@ -1045,8 +1054,14 @@ Inherited cheap gaps include Notice.Problem reaching its snackbar, failed
 visits/current-open visits in search, literal `%`/`_` plus Unicode case/accent
 matching, pasted URL tabs/newlines, and one full address
 suggestion/rotation/IME flow. Fixture ports
-remain fixed at 8766, which complicates concurrent isolated sessions. Old
-review-specific runs are not proof of today's integrated tree.
+remain fixed at 8766, which complicates concurrent isolated sessions; sol-2's
+final capture rerun hit a real port collision before a successful retry. Old
+review-specific runs are not proof of today's integrated tree. Sol-2 also saw
+one report-service SIGTERM test timeout on Python 3.15; its focused rerun
+passed, and all 207 service tests pass on the pinned Python 3.13. The separate
+nesting regression has open PR #202. Recheck the full service suite on a
+proposed replacement runtime without presenting that one timeout as a
+confirmed production shutdown defect.
 
 Suggested fix: add independently expected regressions where missing,
 parameterize fixture ports for isolated sessions, and rerun the relevant
@@ -1181,10 +1196,14 @@ like the Karakeep panel. Effort: trivial plus a test.
 usability: fast, convenient, clear — nice-to-have
 
 `SettingsSheet.kt:339` holds the credential field in plain `remember`, so a
-rotation loses a just-typed API key or token while the address fields survive
-(`rememberSaveable`). The field is never persisted either way.
+rotation loses a just-typed API key or token while address fields survive.
+Unlike plain memory, `rememberSaveable` can serialize the credential into
+Android saved state; it must not be described as never persisting the field.
 
-Suggested fix: `rememberSaveable` for the field. Effort: trivial.
+Suggested fix: retain the unsaved draft in a scoped, memory-only holder across
+rotation, clearing it on dismissal and process death. Do not re-display stored
+credentials or put the draft into a saved-state Bundle. Verify rotation,
+dismissal and process-loss behavior. Effort: about half a day.
 
 ### Reject out-of-range ports in the address policy
 
