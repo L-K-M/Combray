@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -56,6 +57,10 @@ private sealed interface BookmarksUi {
 fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by integrations.karakeepService.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // The local Recent filter prefills this field. It is sent only once the user submits it (the
+    // Search key) or types here: switching scopes must not forward the local filter unseen.
+    var submitted by rememberSaveable { mutableStateOf(initialQuery.isBlank()) }
+    var askEpoch by rememberSaveable { mutableIntStateOf(0) }
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
@@ -67,7 +72,8 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     // key (a new main address, a new alternate or a new key). Not the whole row: choosing a list
     // or dropping the alternate rewrites it without changing what a read returns, and must not
     // reset the loaded pages.
-    LaunchedEffect(query, service?.fingerprint, service?.generation) {
+    LaunchedEffect(query, service?.fingerprint, service?.generation, askEpoch) {
+        if (!submitted) return@LaunchedEffect
         val mine = ++generation
         ui = BookmarksUi.Idle
         bookmarks = emptyList()
@@ -91,11 +97,12 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; submitted = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.karakeep_search_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { submitted = true; askEpoch++ }),
             modifier = Modifier.fillMaxWidth(),
         )
         if (ui == BookmarksUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
