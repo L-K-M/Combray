@@ -271,6 +271,11 @@ All notable changes to this project are documented here. The format follows
 - Reader view sets the article in a serif reading face (the system's Noto
   Serif) with a larger title, and has a "Show the page" button at the top.
 
+### Changed
+
+- Engine events name the schema they are written for, and a native/Kotlin
+  schema mismatch fails loudly instead of misparsing events one by one.
+
 ### Fixed
 
 - Sites whose firewall refused Combray with only "Access denied" open again.

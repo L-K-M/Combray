@@ -10,14 +10,25 @@ import org.junit.Test
 /** Events as libcombray_engine.so emits them (copied from M0 run reports). */
 class EngineEventTest {
     @Test
+    fun rejectsAnEventOfAnotherOrNoSchema() {
+        // A bump must fail loudly here, not drop events one by one after a silent misparse.
+        assertThrows(IllegalArgumentException::class.java) {
+            EngineEvent.parse("""{"schema":2,"type":"surface_unbound"}""")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            EngineEvent.parse("""{"type":"surface_unbound"}""")
+        }
+    }
+
+    @Test
     fun parsesDocumentBoundReloadPullsAndRejectsInvalidProgress() {
         val event = EngineEvent.parse(
-            """{"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":0.5}""",
+            """{"schema":1,"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":0.5}""",
         )
         assertEquals(EngineEvent.ReloadPull(PageRef(ViewRef(3, 4), 7), ReloadPullPhase.PULLING, 0.5f), event)
         for (progress in listOf("-1", "2", "\"NaN\"", "\"Infinity\"", "null")) {
             assertThrows(IllegalArgumentException::class.java) {
-                EngineEvent.parse("""{"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":$progress}""")
+                EngineEvent.parse("""{"schema":1,"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":$progress}""")
             }
         }
     }
@@ -160,13 +171,13 @@ class EngineEventTest {
 
     @Test
     fun keepsUnknownTypesAsOther() {
-        assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"type":"default_handled","request":"x"}"""))
+        assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"schema":1,"type":"default_handled","request":"x"}"""))
     }
 
     @Test
     fun parsesAPagePasteMenu() {
         val event = EngineEvent.parse(
-            """{"type":"control_shown","control":7,"kind":"paste_menu","tab":1,"generation":2}""",
+            """{"schema":1,"type":"control_shown","control":7,"kind":"paste_menu","tab":1,"generation":2}""",
         ) as EngineEvent.ControlShown
 
         assertEquals(ViewRef(1, 2), event.view)
@@ -195,35 +206,35 @@ class EngineEventTest {
         )
 
         val prompt = EngineEvent.parse(
-            """{"type":"control_shown","control":6,"kind":"prompt","message":"Name?","default":"Zoë","tab":1,"generation":2}""",
+            """{"schema":1,"type":"control_shown","control":6,"kind":"prompt","message":"Name?","default":"Zoë","tab":1,"generation":2}""",
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.Prompt("Name?", "Zoë"), prompt.content)
 
         val files = EngineEvent.parse(
-            """{"type":"control_shown","control":7,"kind":"files","multiple":true,"extensions":["png","pdf"],"tab":1,"generation":2}""",
+            """{"schema":1,"type":"control_shown","control":7,"kind":"files","multiple":true,"extensions":["png","pdf"],"tab":1,"generation":2}""",
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.Files(true, listOf("png", "pdf")), files.content)
 
         val menu = EngineEvent.parse(
-            """{"type":"control_shown","control":8,"kind":"link_menu","link":"https://a.test/","image":null,"tab":1,"generation":2}""",
+            """{"schema":1,"type":"control_shown","control":8,"kind":"link_menu","link":"https://a.test/","image":null,"tab":1,"generation":2}""",
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.LinkMenu("https://a.test/", null), menu.content)
 
         val signIn = EngineEvent.parse(
-            """{"type":"control_shown","control":9,"kind":"sign_in","origin":"https://a.test:8443","proxy":false,"tab":1,"generation":2}""",
+            """{"schema":1,"type":"control_shown","control":9,"kind":"sign_in","origin":"https://a.test:8443","proxy":false,"tab":1,"generation":2}""",
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.SignIn("https://a.test:8443", proxy = false), signIn.content)
 
         assertEquals(
             EngineEvent.ControlHidden(ViewRef(1, 2), 7),
-            EngineEvent.parse("""{"type":"control_hidden","control":7,"tab":1,"generation":2}"""),
+            EngineEvent.parse("""{"schema":1,"type":"control_hidden","control":7,"tab":1,"generation":2}"""),
         )
     }
 
     @Test
     fun parsesLeavePageQuestion() {
         val leave = EngineEvent.parse(
-            """{"type":"control_shown","control":10,"kind":"leave_page","tab":1,"generation":2}""",
+            """{"schema":1,"type":"control_shown","control":10,"kind":"leave_page","tab":1,"generation":2}""",
         ) as EngineEvent.ControlShown
         assertEquals(PageControlContent.LeavePage, leave.content)
     }
@@ -258,11 +269,11 @@ class EngineEventTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsUnknownControlKind() {
-        EngineEvent.parse("""{"type":"control_shown","control":1,"kind":"launch","tab":1,"generation":2}""")
+        EngineEvent.parse("""{"schema":1,"type":"control_shown","control":1,"kind":"launch","tab":1,"generation":2}""")
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsKnownTypeWithMissingFields() {
-        EngineEvent.parse("""{"type":"tab_created","tab":1}""")
+        EngineEvent.parse("""{"schema":1,"type":"tab_created","tab":1}""")
     }
 }
