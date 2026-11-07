@@ -2,6 +2,7 @@ package ch.lkmc.combray.core.integration
 
 import ch.lkmc.combray.core.data.ServiceEntity
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Chooses which of a service's addresses a request goes to. The address that last answered
@@ -46,7 +47,14 @@ internal class ServiceRoutes(private val transport: HttpTransport) {
     private class AttemptTransport(private val transport: HttpTransport) : HttpTransport {
         @Volatile var notConnected = false
 
-        override fun execute(request: HttpRequest): HttpOutcome =
-            transport.execute(request).also { if (it is HttpOutcome.NotConnected) notConnected = true }
+        private val used = AtomicBoolean(false)
+
+        override fun execute(request: HttpRequest): HttpOutcome {
+            // The one-request-per-attempt contract is a comment otherwise: a handler that sends
+            // twice would re-send a request that may already have reached the server on the next
+            // root. Failing here is a visible bug, not a silent double-send.
+            check(used.compareAndSet(false, true)) { "an attempt makes exactly one request" }
+            return transport.execute(request).also { if (it is HttpOutcome.NotConnected) notConnected = true }
+        }
     }
 }
