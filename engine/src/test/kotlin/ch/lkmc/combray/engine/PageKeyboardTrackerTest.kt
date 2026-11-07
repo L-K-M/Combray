@@ -78,6 +78,26 @@ class PageKeyboardTrackerTest {
         assertEquals(KeyboardChange.HIDDEN, tracker.observed(onScreen = false))
     }
 
+    /** The surface is an editor only while a page field owns the keyboard. */
+    @Test
+    fun onlyAPageFieldsKeyboardIsAnEditor() {
+        assertFalse(tracker.current())
+
+        tracker.showRequested()
+        assertTrue(tracker.current())
+
+        tracker.observed(onScreen = true)
+        assertTrue(tracker.current())
+
+        tracker.hideRequested()
+        assertFalse(tracker.current())
+
+        tracker.showRequested()
+        tracker.observed(onScreen = true)
+        assertTrue(tracker.reset())
+        assertFalse(tracker.current())
+    }
+
     @Test
     fun resetReportsOnlyAKeyboardAPageFieldAskedFor() {
         assertFalse(tracker.reset())

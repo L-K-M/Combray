@@ -194,7 +194,11 @@ class EngineSurfaceView(
         if (change == PageKeyboardTracker.KeyboardChange.DISMISSED) reportDismissal(Dismissal.CLOSED_BY_USER)
     }
 
-    override fun onCheckIsTextEditor(): Boolean = engineRunning()
+    /**
+     * Only a page field's surface is an editor. Always true made TalkBack announce the whole
+     * page as an editable field and let the IME reappear with no field focused.
+     */
+    override fun onCheckIsTextEditor(): Boolean = engineRunning() && pageKeyboard.current()
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!engineRunning()) return null
@@ -218,7 +222,7 @@ class EngineSurfaceView(
     fun showKeyboard(kind: String = TEXT) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
-        useFieldKind(kind, keyboard)
+        useFieldKind(kind, keyboard, force = true)
         pageKeyboard.showRequested()
         val shown = keyboard.showSoftInput(this, 0)
         Log.i(LOG_TAG, "keyboard show for $kind: accepted=$shown, $pageKeyboard")
@@ -252,8 +256,11 @@ class EngineSurfaceView(
         if (engineRunning()) NativeEngine.imeDismissed()
     }
 
-    private fun useFieldKind(kind: String, keyboard: InputMethodManager) {
-        if (kind == fieldKind) return
+    private fun useFieldKind(kind: String, keyboard: InputMethodManager, force: Boolean = false) {
+        // Showing the keyboard always restarts: after a window refocus the old input
+        // connection can be dead, and typing would go nowhere. Preparing a field that is
+        // already the right kind needs no restart.
+        if (!force && kind == fieldKind) return
         fieldKind = kind
         keyboard.restartInput(this)
     }
@@ -271,6 +278,9 @@ class EngineSurfaceView(
         const val PASSWORD = "password"
     }
 }
+
+/** Longest deletion one IME request may turn into key events. */
+internal const val MAX_DELETION_CHARS = 256
 
 /**
  * Minimal IME bridge: committed text becomes a composition end in the focused element;
@@ -311,8 +321,13 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
     }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-        repeat(beforeLength) { tapKey(KeyEvent.KEYCODE_DEL) }
-        repeat(afterLength) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
+        // A buggy or hostile IME can ask for an unbounded range, and each character is two
+        // JNI calls. Truncate to a documented maximum rather than queue thousands of them.
+        repeat(beforeLength.coerceIn(0, MAX_DELETION_CHARS)) { tapKey(KeyEvent.KEYCODE_DEL) }
+        repeat(afterLength.coerceIn(0, MAX_DELETION_CHARS)) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
+        // The IME is replacing the text around the cursor; a buffered composition it has not
+        // committed must not surface afterwards as text the user already deleted.
+        composing = ""
         return true
     }
 
