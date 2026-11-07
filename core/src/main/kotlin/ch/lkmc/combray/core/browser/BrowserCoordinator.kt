@@ -102,6 +102,9 @@ class BrowserCoordinator(
     private val liveByNative = HashMap<Long, LiveView>()
     private var nextNativeTab = 1L
     private var nextRequest = 1L
+
+    /** The last focus stamp handed out; see [nextFocusStamp]. */
+    private var focusStamp = 0L
     private var selectedNative: Long? = null
     private var engineReady = false
 
@@ -453,7 +456,7 @@ class BrowserCoordinator(
                 dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null))
                 return@withTransaction
             }
-            dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null, lastFocusedAt = now))
+            dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null))
             activate(tab.id, now)
         }
         reconcile()
@@ -1337,9 +1340,10 @@ class BrowserCoordinator(
      */
     private suspend fun createBackgroundTab(url: String, active: TabEntity) {
         val now = clock.now()
-        val tab = newOpenTab(url, createdAt = now, lastFocusedAt = now - 1)
+        val stamp = nextFocusStamp(now)
+        val tab = newOpenTab(url, createdAt = now, lastFocusedAt = stamp - 1)
         database.withTransaction {
-            dao.updateTab(active.copy(lastFocusedAt = now))
+            dao.updateTab(active.copy(lastFocusedAt = stamp))
             dao.insertTab(tab)
         }
         state.update { it.copy(notice = Notice.OpenedInBackground(tab.id)) }
@@ -1359,25 +1363,33 @@ class BrowserCoordinator(
     private suspend fun focus(tab: TabEntity) {
         val now = clock.now()
         database.withTransaction {
-            dao.updateTab(tab.copy(lastFocusedAt = now))
             activate(tab.id, now)
         }
     }
 
     /**
      * Makes [tabId] the focused tab. The tab losing focus was in use until now: its
-     * [TabEntity.lastFocusedAt] moves to just before [now], so a tab read for days is not
+     * [TabEntity.lastFocusedAt] moves to just before the new tab's, so a tab read for days is not
      * "unused" the moment the user switches away, and keeps its place right after the new one.
+     * The stamps are strictly increasing, so two focus changes in one millisecond cannot tie.
      */
     private suspend fun activate(tabId: String, now: Long) {
+        val stamp = nextFocusStamp(now)
         val previous = dao.session()?.activeTabId
         if (previous != null && previous != tabId) {
-            dao.tab(previous)?.takeIf { it.state == TabState.OPEN }?.let { dao.updateTab(it.copy(lastFocusedAt = now - 1)) }
+            dao.tab(previous)?.takeIf { it.state == TabState.OPEN }?.let { dao.updateTab(it.copy(lastFocusedAt = stamp - 1)) }
             previousTabId = previous
         }
+        dao.tab(tabId)?.let { dao.updateTab(it.copy(lastFocusedAt = stamp)) }
         dao.setSession(SessionEntity(activeTabId = tabId))
         if (tabId != otherAppTab) otherAppTab = null
         keepOpenersFor(tabId)
+    }
+
+    /** A wall-clock focus stamp that never goes backwards and never ties within a millisecond. */
+    private fun nextFocusStamp(now: Long): Long {
+        focusStamp = maxOf(focusStamp + 1, now)
+        return focusStamp
     }
 
     /**
@@ -1413,7 +1425,7 @@ class BrowserCoordinator(
                 // An unused Home tab must not hide the next page in Recent.
                 val remaining = dao.openTabs()
                 val successor = remaining.firstOrNull { it.url != null } ?: remaining.firstOrNull()
-                successor?.let { dao.updateTab(it.copy(lastFocusedAt = now)) }
+                successor?.let { dao.updateTab(it.copy(lastFocusedAt = nextFocusStamp(now))) }
                 dao.setSession(SessionEntity(activeTabId = successor?.id))
                 keepOpenersFor(successor?.id)
             }

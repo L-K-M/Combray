@@ -150,6 +150,23 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun focusChangesInTheSameMillisecondKeepOrder() {
+        ready()
+        // The test clock does not move: all three focuses land in the same millisecond.
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB)
+        idle()
+        browser.openUrl("https://c.test/", Placement.NEW_TAB)
+        idle()
+
+        val tabs = runBlocking { database.browser().openTabs() }
+        assertEquals(listOf("https://c.test/", "https://b.test/", "https://a.test/"), tabs.map { it.url })
+        // Strictly decreasing, so the order never falls back to rowid.
+        assertTrue(tabs.zipWithNext().all { (newer, older) -> newer.lastFocusedAt > older.lastFocusedAt })
+    }
+
+    @Test
     fun aLinkForAnotherAppFromTheShownPageIsHandedOnOnce() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
