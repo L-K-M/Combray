@@ -43,8 +43,6 @@ import kotlinx.coroutines.launch
 private sealed interface BookmarksUi {
     data object Idle : BookmarksUi
 
-    data object Loading : BookmarksUi
-
     data class Answer(val read: KarakeepRead<KarakeepPage>) : BookmarksUi
 }
 
@@ -56,9 +54,14 @@ private sealed interface BookmarksUi {
 fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by integrations.karakeepService.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // The field can be prefilled from Recent's local filter, but only text typed here is sent.
+    // Until it is edited, the panel shows the newest bookmarks instead.
+    var typed by rememberSaveable { mutableStateOf(false) }
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -67,18 +70,25 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     // key (a new main address, a new alternate or a new key). Not the whole row: choosing a list
     // or dropping the alternate rewrites it without changing what a read returns, and must not
     // reset the loaded pages.
-    LaunchedEffect(query, service?.fingerprint, service?.generation) {
+    LaunchedEffect(query, service?.fingerprint, service?.generation, typed) {
         val mine = ++generation
-        ui = BookmarksUi.Idle
-        bookmarks = emptyList()
-        nextCursor = null
-        if (service == null) return@LaunchedEffect
+        loadingMore = false
+        if (service == null) {
+            ui = BookmarksUi.Idle
+            bookmarks = emptyList()
+            nextCursor = null
+            loading = false
+            return@LaunchedEffect
+        }
 
+        // A prefilled query is not sent until it is edited; the newest bookmarks show instead.
+        val search = bookmarkQuery(query, typed)
         // The newest bookmarks show at once; a search waits for a pause in typing.
-        if (query.isNotBlank()) delay(SEARCH_DEBOUNCE_MS)
-        ui = BookmarksUi.Loading
-        val answer = integrations.karakeepBookmarks(query)
+        loading = true
+        if (search.isNotBlank()) delay(SEARCH_DEBOUNCE_MS)
+        val answer = integrations.karakeepBookmarks(search)
         if (mine != generation) return@LaunchedEffect
+        loading = false
         // Null: the service went away meanwhile; its removal restarts this effect.
         ui = answer?.let { BookmarksUi.Answer(it) } ?: BookmarksUi.Idle
         if (answer is KarakeepRead.Ok) {
@@ -91,20 +101,20 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; typed = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.karakeep_search_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (ui == BookmarksUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
         val answer = (ui as? BookmarksUi.Answer)?.read
         val notice = when {
             service == null -> stringResource(R.string.karakeep_search_not_configured)
             answer == null -> null
             answer is KarakeepRead.Ok && bookmarks.isEmpty() ->
-                stringResource(if (query.isBlank()) R.string.karakeep_bookmarks_empty else R.string.karakeep_search_empty)
+                stringResource(if (!typed || query.isBlank()) R.string.karakeep_bookmarks_empty else R.string.karakeep_search_empty)
             else -> karakeepProblem(answer)
         }
         notice?.let {
@@ -130,13 +140,20 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
             )
         }
         nextCursor?.let { cursor ->
+            // One page at a time: the button waits, disabled, under a progress bar.
+            if (loadingMore) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) }
             item {
                 TextButton(
                     onClick = {
+                        // Two taps in one frame both see the button still enabled.
+                        if (loadingMore) return@TextButton
                         val mine = generation
+                        loadingMore = true
                         scope.launch {
-                            val more = integrations.karakeepBookmarks(query, cursor) ?: return@launch
+                            val more = integrations.karakeepBookmarks(query.trim(), cursor) ?: return@launch
+                            // A newer query owns the list and the loading state now.
                             if (mine != generation) return@launch
+                            loadingMore = false
                             // A failed page keeps the rows shown and says why above them.
                             ui = BookmarksUi.Answer(more)
                             if (more !is KarakeepRead.Ok) return@launch
@@ -144,6 +161,7 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
                             nextCursor = more.value.nextCursor
                         }
                     },
+                    enabled = !loadingMore,
                     modifier = Modifier.padding(16.dp).heightIn(min = 48.dp),
                 ) { Text(stringResource(R.string.search_all_more)) }
             }
@@ -160,5 +178,12 @@ fun karakeepProblem(read: KarakeepRead<*>): String? = when (read) {
     is KarakeepRead.ServerError -> stringResource(R.string.karakeep_read_error, read.status)
     KarakeepRead.Malformed -> stringResource(R.string.karakeep_read_malformed)
 }
+
+/**
+ * The query to send for the newest bookmarks. Only text typed in this field is sent: a
+ * prefilled query is not sent until it is edited, and the panel shows the newest bookmarks.
+ */
+internal fun bookmarkQuery(query: String, typed: Boolean): String =
+    if (typed) query.trim() else ""
 
 private const val SEARCH_DEBOUNCE_MS = 400L

@@ -4,10 +4,11 @@ import android.text.format.DateFormat as AndroidDateFormat
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -71,6 +74,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -125,7 +129,7 @@ internal fun recentEmpty(query: String, matching: List<RecentItem>, shown: List<
  * [initialScope] normally shows tabs; a new [restartKey] returns to it. Filtering stays on
  * the device; Hister and Karakeep are separate, labeled scopes.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun RecentSheet(
     browser: BrowserCoordinator,
@@ -140,6 +144,7 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable(restartKey) { mutableStateOf("") }
     var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
+    val keyboard = LocalSoftwareKeyboardController.current
     // One subscription per depth: browsing reads the newest rows, a search the retained ones.
     // The filter runs in memory, so typing does not restart three Room observers per keystroke.
     val depth = HistoryDepth.forQuery(query)
@@ -191,9 +196,12 @@ fun RecentSheet(
                             Text(stringResource(R.string.action_new_tab), modifier = Modifier.padding(start = 8.dp))
                         }
                     }
-                    Row(
+                    // Flow, not a horizontal scroller: on a narrow phone the last chips start
+                    // off-screen with no cue that Hister and Karakeep exist.
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp).selectableGroup(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).selectableGroup(),
                     ) {
                         RecentScope.entries.forEach { option ->
                             FilterChip(
@@ -211,6 +219,8 @@ fun RecentSheet(
                             onValueChange = { query = it },
                             singleLine = true,
                             placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         )
                     }

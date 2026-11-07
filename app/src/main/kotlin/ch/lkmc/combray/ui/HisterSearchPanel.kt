@@ -44,8 +44,6 @@ import kotlinx.coroutines.launch
 private sealed interface SearchUi {
     data object Idle : SearchUi
 
-    data object Loading : SearchUi
-
     data class Answer(val result: HisterSearch) : SearchUi
 }
 
@@ -57,28 +55,37 @@ private sealed interface SearchUi {
 fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by hister.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // The field can be prefilled from Recent's local filter, but only text typed here is sent:
+    // the first request waits for an edit.
+    var typed by rememberSaveable { mutableStateOf(false) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
     var nextPage by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
     var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    LaunchedEffect(query, service, typed) {
         val mine = ++generation
-        // The last answer belongs to the last query: no stale count while the next one waits.
-        ui = SearchUi.Idle
-        hits = emptyList()
-        nextPage = null
         loadingMore = false
-        if (service == null || query.isBlank()) {
+        val search = searchQuery(query, typed)
+        if (service == null || search == null) {
             ui = SearchUi.Idle
+            hits = emptyList()
+            nextPage = null
+            loading = false
             return@LaunchedEffect
         }
+        // The previous answer stays on screen while the new one loads: clearing it on every
+        // keystroke makes the list flicker and reads as "no results".
+        loading = true
         delay(SEARCH_DEBOUNCE_MS)
-        ui = SearchUi.Loading
-        val answer = hister.search(query.trim()) ?: return@LaunchedEffect
+        val answer = hister.search(search)
         if (mine != generation) return@LaunchedEffect
+        loading = false
+        // Null: the service went away meanwhile; its removal restarts the search.
+        if (answer == null) return@LaunchedEffect
         ui = SearchUi.Answer(answer)
         if (answer is HisterSearch.Results) {
             hits = answer.hits
@@ -89,14 +96,14 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; typed = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.search_all_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (ui == SearchUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
         val notice = when {
             service == null -> stringResource(R.string.search_all_not_configured)
             else -> when (val state = ui) {
@@ -178,5 +185,12 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         }
     }
 }
+
+/**
+ * The query to send, or null when the panel must not contact the server. Only text typed in
+ * this field is sent: a prefilled query waits for an edit, and a blank one searches nothing.
+ */
+internal fun searchQuery(query: String, typed: Boolean): String? =
+    if (!typed || query.isBlank()) null else query.trim()
 
 private const val SEARCH_DEBOUNCE_MS = 400L
