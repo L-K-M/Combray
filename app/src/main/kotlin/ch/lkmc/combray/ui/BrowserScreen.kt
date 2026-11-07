@@ -134,6 +134,9 @@ fun BrowserScreen(
     var reportStarting by remember { mutableStateOf(false) }
     val reportDraft by graph.reportDrafts.current.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val snackbar = remember { SnackbarHostState() }
+    // The page's offer to play its media lasts until it is played or closed, so it has a host of
+    // its own: in the notices' queue it would hold back every notice after it.
+    val offerHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -186,6 +189,8 @@ fun BrowserScreen(
     }
     // One entry plays at once; several open a choice. Only for the page the tab still shows: a notice that outlived its page says so.
     val playMedia = { page: MediaPageRef ->
+        // Played from the offer, the address field or More: either way the offer has done its job.
+        browser.dismissMediaOffer(page)
         val shown = browser.browserState.value.activeTab?.takeIf { it.mediaPage == page }
         when (shown?.media?.size ?: 0) {
             0 -> notify(mediaPageLeft)
@@ -215,15 +220,22 @@ fun BrowserScreen(
                     if (result == SnackbarResult.ActionPerformed) browser.selectTab(notice.tabId)
                 }
                 Notice.MediaUnplayable -> snackbar.showSnackbar(mediaUnsupported)
-                is Notice.MediaPlayable -> {
-                    // Replaces the page's plain notice if it still shows: one page, one message.
-                    snackbar.currentSnackbarData?.takeIf { it.visuals.message == mediaUnsupported }?.dismiss()
-                    // Long: with an action, Material extends it to the accessibility timeout.
-                    val result = snackbar.showSnackbar(mediaPlayable, actionLabel = play, duration = SnackbarDuration.Long)
-                    if (result == SnackbarResult.ActionPerformed) playMedia(notice.page)
-                }
                 Notice.PopupBlocked -> snackbar.showSnackbar(popupBlocked)
             }
+        }
+    }
+
+    // The page's offer stays until it is played or closed (owner decision, 6 November 2026). The
+    // coordinator ends it when its page leaves the screen, which restarts this and removes it.
+    val offer = state.mediaOffer
+    LaunchedEffect(offer) {
+        if (offer == null) return@LaunchedEffect
+        // Replaces the page's plain notice if it still shows: one page, one message.
+        snackbar.currentSnackbarData?.takeIf { it.visuals.message == mediaUnsupported }?.dismiss()
+        val result = offerHost.showSnackbar(mediaPlayable, actionLabel = play, withDismissAction = true, duration = SnackbarDuration.Indefinite)
+        when (result) {
+            SnackbarResult.ActionPerformed -> playMedia(offer)
+            SnackbarResult.Dismissed -> browser.dismissMediaOffer(offer)
         }
     }
 
@@ -590,6 +602,7 @@ fun BrowserScreen(
                 readerDisplay = readerDisplay,
                 onStop = { tab?.let { browser.stopLoading(it.id) } },
                 onReader = { if (state.reader != null) browser.closeReader() else browser.openReader() },
+                onPlayMedia = tab?.mediaPage?.takeIf { tab.media.isNotEmpty() }?.let { page -> { playMedia(page) } },
                 onNewTab = newTab,
                 onHister = { openRecent(RecentScope.HISTER) },
                 onKarakeep = { openRecent(RecentScope.KARAKEEP) },
@@ -645,15 +658,18 @@ fun BrowserScreen(
         // separate window over this one and shows the snackbars itself while it is open. The
         // visible bar includes navigation insets; hidden controls reserve only those insets.
         if (sheet != Sheet.RECENT) {
-            NoticeHost(
-                snackbar,
+            Box(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .imePadding()
                     .padding(bottom = noticeInset + SNACKBAR_GAP)
-                    // The host itself, without its offset: empty while no snackbar shows.
+                    // The hosts themselves, without their offset: empty while no snackbar shows.
                     .onGloballyPositioned { snackbarTop = it.takeIf { host -> host.size.height > 0 }?.boundsInRoot()?.top },
-            )
+            ) {
+                NoticeHost(snackbar)
+                // A notice takes the offer's place while it shows; the offer comes back after it.
+                if (snackbar.currentSnackbarData == null) NoticeHost(offerHost)
+            }
         }
         ToolbarMenu(menu, tab, readerDisplay, selectMenuAction)
     }

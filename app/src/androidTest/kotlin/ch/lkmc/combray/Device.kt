@@ -162,6 +162,13 @@ object Fixtures {
      */
     fun canPlay(key: String) = "$BASE/canplay.html?k=$key"
 
+    /**
+     * A site's own player over the top half of the page: [clip] with [key] in an open shadow
+     * root, out of hit testing under an overlay with a play button in its middle. Titled
+     * `PLAYER:errors:<n>:outside:<n>:plays:<n>`: its errors, clicks below it, clicks on its button.
+     */
+    fun player(key: String) = "$BASE/media-player.html?k=$key"
+
     /** A `<video>` whose only `<source>` is [clip] with [key] typed `video/mp4`; titled `TYPED:errors:<n>`. */
     fun typedSource(key: String) = "$BASE/media-source.html?k=$key"
 

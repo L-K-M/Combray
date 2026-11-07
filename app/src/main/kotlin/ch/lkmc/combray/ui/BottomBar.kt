@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Badge
@@ -111,6 +112,8 @@ fun BottomBar(
     readerDisplay: ReaderDisplay,
     onStop: () -> Unit,
     onReader: () -> Unit,
+    /** Plays the page's media, as More › Play audio or video does; null while the page has none. */
+    onPlayMedia: (() -> Unit)?,
     /** Recent on its Hister scope; used by the home dock. */
     onHister: () -> Unit,
     /** Recent on its Karakeep scope; used by the home dock. */
@@ -209,7 +212,7 @@ fun BottomBar(
                         homeSearch()
                     } else if (stacked || home) {
                         AddressChip(
-                             tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader,
+                             tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia,
                             hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
                             // The chip supplies its gutter; do not inset it past the actions.
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -232,7 +235,9 @@ fun BottomBar(
                         IconButton(onClick = onBack, enabled = backEnabled) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
-                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, Modifier.weight(1f))
+                        if (!stacked) {
+                            AddressChip(tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia, Modifier.weight(1f))
+                        }
                         SaveButton(saveStatus, enabled = tab?.url != null, onSave)
                         IconButton(onClick = onCloseTab) {
                             Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_tab))
@@ -438,6 +443,7 @@ private fun AddressChip(
     readerDisplay: ReaderDisplay,
     onStop: () -> Unit,
     onReader: () -> Unit,
+    onPlayMedia: (() -> Unit)?,
     modifier: Modifier,
     @StringRes hint: Int = R.string.address_placeholder,
 ) {
@@ -458,7 +464,7 @@ private fun AddressChip(
         modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Separate targets: stopping or toggling Reader must not edit or copy the address.
+            // Separate targets: stopping, playing or toggling Reader must not edit or copy the address.
             Row(
                 Modifier
                     .weight(1f)
@@ -500,6 +506,12 @@ private fun AddressChip(
                 )
             }
             }
+            // The page's media stays a tap away after its offer is gone (owner decision, 6 November 2026).
+            if (url != null && onPlayMedia != null) {
+                IconButton(onClick = onPlayMedia) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.action_play_media))
+                }
+            }
             if (url != null) {
                 if (tab.loading) {
                     IconButton(onClick = onStop) {
@@ -522,8 +534,8 @@ private val BAR_HEIGHT = 64.dp
 /** One action's touch target: Android's and Material's 48dp minimum. */
 private val ACTION_TARGET = 48.dp
 
-/** The room the address needs beside the actions to still name a site. */
-private val ADDRESS_MIN_WIDTH = 132.dp + ACTION_TARGET
+/** The room the address needs beside the actions to still name a site, with Play and Reader in the chip. */
+private val ADDRESS_MIN_WIDTH = 132.dp + ACTION_TARGET * 2
 
 /**
  * Below this width the address gets its own row: six actions (Back, Save, Close tab, New tab,

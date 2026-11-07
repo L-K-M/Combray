@@ -61,6 +61,12 @@ Pages
                              when the claim is No
   /hls-noext.html?k=<alnum>  the same, but the playlist is /media/hls-manifest: no .m3u8 for
                              the player to infer from
+  /media-player.html?k=<alnum>
+                             a site's own player: in an open shadow root, a <video> of
+                             /media/clip.mp4?k=... taken out of hit testing under an overlay with
+                             an error line and a play button, over the top half of the page; title
+                             PLAYER:errors:<n>:outside:<n>:plays:<n> counts its errors, clicks
+                             below it and clicks on its button
   /media-redirect.html?to=clip|file[&k=<alnum>]
                              <video> from /media/redirect; title REDIRECT:errors:<n>
   /media-local.html          a data: and a file: <video>, neither of them a web address; title LOCAL:errors:<n>
@@ -666,6 +672,34 @@ def canplay_page(key):
     )
 
 
+def player_page(key):
+    """A site's own player: the <video> sits in an open shadow root, out of hit testing, under an
+    overlay with its error line and play button, as custom players draw it. Clicks on the button
+    and below the player are counted, so a check knows a tap reached the page."""
+    return page(
+        "PLAYER",
+        "<div id='player'></div><div id='below'></div>"
+        "<script>var errors = 0, outside = 0, plays = 0;"
+        " function report() { document.title = 'PLAYER:errors:' + errors + ':outside:' + outside + ':plays:' + plays; }"
+        " var root = document.getElementById('player').attachShadow({ mode: 'open' });"
+        " root.innerHTML = \"<style>:host{display:block;position:relative;height:50vh;background:#000}"
+        "video{display:block;width:100%;height:100%;pointer-events:none}"
+        ".overlay{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;flex-direction:column;"
+        "align-items:center;justify-content:center;color:#fff;font-size:24px}"
+        # The error line is out of the flow, so the button stays in the middle of the player.
+        "p{position:absolute;top:8px;left:0;right:0;margin:0;text-align:center}"
+        "button{font-size:40px;padding:24px 48px}</style>"
+        "<video></video><div class='overlay'><p id='error' hidden>Playback failed.</p><button>&#9654;</button></div>\";"
+        " var video = root.querySelector('video');"
+        " video.addEventListener('error', function () { errors++; root.querySelector('#error').hidden = false; report(); });"
+        " root.querySelector('button').addEventListener('click', function () {"
+        " plays++; report(); var played = video.play(); if (played) played.catch(function () {}); });"
+        " document.getElementById('below').addEventListener('click', function () { outside++; report(); });"
+        f" video.src = '/media/clip.mp4?k={key}'; report();</script>",
+        "<style>html,body{margin:0}#below{height:150vh;background:#2e6b4f}</style>",
+    )
+
+
 def typed_source_page(key):
     """A <video> whose only <source> has a codec-claiming type; a No skips it before its fetch."""
     return page(
@@ -1266,6 +1300,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, media_page("AUDIO", "audio", "/media/tone.wav"))
         if path == "/canplay.html":
             return self.send(200, canplay_page(media_key(query)))
+        if path == "/media-player.html":
+            return self.send(200, player_page(media_key(query)))
         if path == "/media-source.html":
             return self.send(200, typed_source_page(media_key(query)))
         if path == "/hls.html":

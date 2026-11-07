@@ -119,6 +119,13 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesMediaTappedWithItsDocument() {
+        val event = EngineEvent.parse("""{"type":"media_tapped","document":4294967331,"tab":2,"generation":5,"schema":1}""")
+
+        assertEquals(EngineEvent.MediaTapped(ViewRef(2, 5), 4294967331L), event)
+    }
+
+    @Test
     fun parsesEngineReadyWithTheUserAgent() {
         val event = EngineEvent.parse(
             """{"type":"engine_ready","width":720,"height":1280,""" +

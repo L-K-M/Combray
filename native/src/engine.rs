@@ -56,7 +56,8 @@ use crate::events::{
 use crate::find::{self, FindAction};
 use crate::keyboard::{self, TapTracker};
 use crate::media::{
-    self, MediaBudget, MediaKind, MediaReport, PageMedia, PendingMedia, UnattributedMedia,
+    self, MediaBudget, MediaDocuments, MediaKind, MediaReport, PageMedia, PendingMedia,
+    UnattributedMedia,
 };
 use crate::media_backend;
 use crate::native_window::NativeWindow;
@@ -229,6 +230,9 @@ struct Tab {
     held: VecDeque<HeldReport>,
     /// Media the current page loaded, so each URL is reported once per page (see `media`).
     page_media: PageMedia,
+    /// Documents that reported a media URL, whose taps `check_tap_on_media` checks; the
+    /// application knows which of their pages has media to offer.
+    media_documents: MediaDocuments<PipelineId>,
     /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
     /// pushState loop stays bounded; restarts when another document commits.
     media_budget: MediaBudget,
@@ -288,7 +292,10 @@ impl Tab {
                     .page_media
                     .note(load.url.as_deref(), &mut self.media_budget, now_ms)
                 {
-                    MediaReport::Playable(url) => Some(url),
+                    MediaReport::Playable(url) => {
+                        self.media_documents.note(document);
+                        Some(url)
+                    },
                     MediaReport::Unplayable => None,
                     MediaReport::Nothing => continue,
                 };
@@ -438,6 +445,14 @@ type TapCheck = (
 );
 type TapChecks = Rc<RefCell<Vec<TapCheck>>>;
 
+/// A tap checked against a view's media elements: the view, its document and the page's answer.
+type MediaTapCheck = (
+    ViewKey,
+    PipelineId,
+    Result<JSValue, JavaScriptEvaluationError>,
+);
+type MediaTapChecks = Rc<RefCell<Vec<MediaTapCheck>>>;
+
 struct Engine {
     config: EngineConfig,
     wake: Sender<Command>,
@@ -458,6 +473,7 @@ struct Engine {
     reload_pull_feedback: PullFeedback,
     reload_pull_release: Option<(f32, f32, Instant)>,
     tap_checks: TapChecks,
+    media_tap_checks: MediaTapChecks,
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
     evaluation_results: EvaluationResults,
@@ -507,6 +523,7 @@ impl Engine {
             reload_pull_feedback: Default::default(),
             reload_pull_release: None,
             tap_checks: Default::default(),
+            media_tap_checks: Default::default(),
             delegate_queue: Default::default(),
             capture_results: Default::default(),
             evaluation_results: Default::default(),
@@ -700,6 +717,7 @@ impl Engine {
         self.drain_evaluations();
         self.drain_find_results();
         self.drain_tap_checks();
+        self.drain_media_tap_checks();
         self.expire_captures();
         self.expire_leave_page_questions();
         self.expire_media_holds();
@@ -1002,6 +1020,7 @@ impl Engine {
                 retired: HashSet::new(),
                 held: VecDeque::new(),
                 page_media: PageMedia::default(),
+                media_documents: MediaDocuments::default(),
                 media_budget: MediaBudget::default(),
                 pending_media: PendingMedia::default(),
                 frames_painted: 0,
@@ -1367,8 +1386,10 @@ impl Engine {
             self.note_activation();
         }
 
+        // The field tracker sees every gesture, so its taps are the page's taps too.
         if let Some((x, y)) = field_tap {
             self.check_tap_on_field(x, y);
+            self.check_tap_on_media(x, y);
         }
     }
 
@@ -1587,6 +1608,53 @@ impl Engine {
             field.keyboard = Keyboard::Open;
             let event = field.shown_event(view);
             self.emit(event);
+        }
+    }
+
+    /// A tap on the selected page after its document reported a media URL: if the tap landed on
+    /// a media element without data, or on controls the page laid over one, the application
+    /// offers the page's media again (`media::tap_hits_media_script`). Servo handles the tap at
+    /// the same time, so the page's own player reacts as well.
+    fn check_tap_on_media(&mut self, x: f32, y: f32) {
+        let Some(tab) = self.active.and_then(|tab| self.tabs.get(&tab)) else {
+            return;
+        };
+        let Some(document) = tab.current_document else {
+            return;
+        };
+        if !tab.media_documents.contains(document) {
+            return;
+        }
+        // As for a field: without Servo's pinch-zoom offset, a tap on a zoomed page can miss.
+        let scale = tab.webview.device_pixels_per_css_pixel().get();
+        let Some(script) = media::tap_hits_media_script(x / scale, y / scale) else {
+            return;
+        };
+        let view = tab.view;
+        let checks = self.media_tap_checks.clone();
+        tab.webview
+            .evaluate_javascript_in_document(document, script, move |result| {
+                checks.borrow_mut().push((view, document, result))
+            });
+    }
+
+    fn drain_media_tap_checks(&mut self) {
+        let checks: Vec<_> = self.media_tap_checks.borrow_mut().drain(..).collect();
+        for (view, document, result) in checks {
+            // Anything but a plain yes (a script error, a replaced document) offers nothing.
+            if !matches!(result, Ok(JSValue::Boolean(true))) || self.active != Some(view.tab) {
+                continue;
+            }
+            if self
+                .live_tab(view)
+                .is_none_or(|tab| tab.current_document != Some(document))
+            {
+                continue;
+            }
+            self.emit(EngineEvent::MediaTapped {
+                view,
+                document: u64::from(document),
+            });
         }
     }
 
