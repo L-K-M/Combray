@@ -40,6 +40,11 @@ or deployed-service acceptance; pending CI/reviews remain on the open PRs.
 The devin-2 review re-verified the backlog at `3224345`; its blocking and
 important findings are open PRs and are omitted, and its remaining nice-to-have
 findings are folded into the sections below.
+The devin-fable review re-verified the same `3224345` tree. Its important
+finding (the remote search panels clearing their results while a search waits)
+is implemented in open PR #254 and is omitted; its other open PRs (#257, #259,
+#261, #262, #264, #268) implement the matching nice-to-have entries. Its
+remaining nice-to-have findings are folded into the sections below.
 
 ## Still open
 
@@ -676,21 +681,6 @@ frame/input timing; bound preprocessing where it helps and pursue interruption
 only in the downstream engine. Do not claim a callback timeout stops
 JavaScript. Effort: about one day for evidence, further work depends on the
 result.
-
-### Preserve visible context while remote search waits
-
-usability: fast, convenient, clear — nice-to-have
-
-`HisterSearchPanel.kt:69–75` and `KarakeepPanel.kt:74–78` clear old answers
-on each keystroke, leaving blank space during debounce/network delay.
-Pagination single-flight/error handling is already implemented in an open PR
-and is not a second task here.
-
-Suggested fix: try retaining the prior answer visibly tagged as belonging to
-its old query, with stale rows disabled or unmistakably distinct, until the
-new answer arrives. Keep errors separate from empty results and never relabel
-old rows as current. Effort: about one day with delayed-query/configuration
-regressions.
 
 ### Offer retry and settings actions for a failed search
 
@@ -1413,3 +1403,137 @@ article.
 Suggested fix: add a "Copy link" action next to "Show the page", reusing
 `copyAddressToClipboard` (sensitive-marked like the bar's long-press copy).
 Effort: small.
+
+### Keep the engine-start overlay behind the engine state
+
+visual issues and layout problems — nice-to-have
+
+`BrowserScreen.kt:888-891` (`PageOverlay`) checks `tab.crashed` before
+`state.engine == EngineStatus.STARTING`, so a crashed tab during engine start
+shows "page crashed" with a Reload button that cannot work yet.
+
+Suggested fix: check `STARTING` before `tab.crashed`. Effort: about 15 minutes.
+
+### Paint Home's wordmark before the links arrive
+
+visual issues and layout problems — nice-to-have
+
+`HomeScreen.kt:104-108` paints an empty background while the links flow is
+loading; the wordmark, heading and tiles appear together a moment later on
+every cold start on Home.
+
+Suggested fix: paint the wordmark and heading at once and load only the tiles
+below them. Effort: about an hour.
+
+### Re-request Find focus after the keyboard hides
+
+usability: fast, convenient, clear — nice-to-have
+
+`FindBar.kt:70` requests focus once per composition. After the user dismisses
+the keyboard (Back), the find field keeps no focus and hardware-keyboard typing
+goes nowhere until they tap it.
+
+Suggested fix: re-request focus when the IME hides while the find bar is open,
+or make the whole bar focusable. Effort: about 30 minutes.
+
+### Do not wake the process to refresh relative times
+
+performance problems, stuttering, and jank — nice-to-have
+
+`HomeScreen.kt:199` and `RecentSheet.kt:159` run a `produceState` loop that
+wakes the process every 60 s / 30 s for as long as they are composed, even when
+nothing visible changes. `RecentSheet`'s tick recomposes the whole sheet,
+including the server panels, which do not read the clock.
+
+Suggested fix: derive the relative time from one tick at the screen level, or
+tick only while the sheet is actually visible; scope the tick to the local
+rows' headers and times. Effort: about an hour.
+
+### Run Recent's filter off the main thread
+
+performance problems, stuttering, and jank — nice-to-have
+
+`RecentSheet.kt:153` filters up to 5,000 retained rows with
+`contains(ignoreCase = true)` during composition on the main thread, on every
+keystroke. A large history makes the filter a few milliseconds of jank.
+
+Suggested fix: run the filter on `Dispatchers.Default`, as
+`AddressSuggestions.rank` already does. Effort: about an hour.
+
+### Answer a second intent without dropping the first sheet
+
+usability: fast, convenient, clear — nice-to-have
+
+`MainActivity.kt:92` sets `launchRequest.value = incoming`, overwriting a
+pending launch request. Two shares or a share plus a launcher shortcut in quick
+succession lose the first sheet.
+
+Suggested fix: ignore a new request while one is pending, or queue them.
+Effort: about 15 minutes.
+
+### Prefer the subject's link when a share's text names another
+
+bugs — nice-to-have
+
+`IncomingIntents.kt:104` (`sharedText`) prefers a link found in the text over
+one found in the subject. A share whose text mentions one link and whose
+subject is another opens the text's link and silently drops the subject's.
+
+Suggested fix: prefer the subject when the text's link is not the shared link,
+or document the choice in the KDoc. Effort: about 15 minutes.
+
+### Keep the address decision's host visible at large type
+
+visual issues and layout problems — nice-to-have
+
+`AddressSheet.kt:351-353` places the decision button's lead, host and path as
+three unweighted `Text` composables in a `RowScope`. At 200% font the host can
+take the room and push the path out of the button, or the lead can clip without
+an ellipsis.
+
+Suggested fix: give the host `weight(1f)` and ellipsize the lead and tail.
+Effort: about 30 minutes.
+
+### Reset a swiped tab row before the list updates
+
+visual issues and layout problems — nice-to-have
+
+`RecentSheet.kt:338` creates `SwipeToDismissBoxState` with `remember {}` and
+leaves it at the dismissed value; a row stays fully swiped, showing its close
+background, until the list updates and removes it.
+
+Suggested fix: reset the state to `Settled` in `onDismiss` before closing.
+Effort: about 15 minutes.
+
+### Offer a recently closed tabs list
+
+missing features — nice-to-have
+
+The Undo snackbar covers one close; an older closed tab cannot be reopened from
+Recent, and closing the wrong tab a minute later means retyping the address.
+
+Suggested fix: add a "Recently closed" section backed by the existing CLOSED
+tab rows, with the same open and forget actions. Effort: about a day.
+
+### Offer copy and share for the article text
+
+missing features — nice-to-have
+
+Reader text is selectable, but copying a whole article takes a long
+press-and-drag, and Share sends only the address and title. A passage or the
+whole article cannot be copied or shared as text without leaving Reader.
+
+Suggested fix: add a More action that copies or shares the article's plain
+text, reusing the existing clipboard and chooser paths. Effort: about two
+hours.
+
+### Long-press the tab counter to open Recent
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+The tab counter shows the number of tabs but is inert; a long-press would be a
+shortcut to the tab list, distinct from the Recent button's long-press
+(previous tab).
+
+Suggested fix: add a `combinedClickable` long-press on the counter that opens
+Recent on `RecentScope.OPEN`. Effort: about an hour.
