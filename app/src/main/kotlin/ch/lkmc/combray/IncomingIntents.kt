@@ -45,8 +45,9 @@ object IncomingIntents {
     private const val MAX_TEXT_LENGTH = 2_000
 
     // Any app can share without a tap, and this runs on the main thread: a huge share is searched
-    // for a link only this far.
-    private const val MAX_SCANNED_LENGTH = 65_536
+    // for a link only this far. A mebibyte is far more prose than a share holds, and the scan is
+    // linear, so a link after the old 64 KiB limit is still found.
+    private const val MAX_SCANNED_LENGTH = 1_048_576
 
     // The longest link taken from shared text, as in the engine (native MAX_URL_CHARS).
     private const val MAX_LINK_LENGTH = 32_768

@@ -83,10 +83,16 @@ class IncomingIntentsTest {
 
     @Test
     fun aLinkRunningPastTheSearchedPartOfAHugeShareIsRefusedNotCut() {
-        // Only the first 65,536 characters are searched for a link.
-        val text = "a ".repeat(32_760) + "https://a.example/" + "x".repeat(100)
+        // Only the first mebibyte is searched for a link.
+        val text = "a ".repeat(524_280) + "https://a.example/" + "x".repeat(100)
         assertNull(IncomingIntents.firstWebAddress(text))
-        assertNull(IncomingIntents.firstWebAddress("a ".repeat(40_000) + "https://a.example/"))
+        assertNull(IncomingIntents.firstWebAddress("a ".repeat(600_000) + "https://a.example/"))
+    }
+
+    @Test
+    fun aLinkAfterTheOldScanLimitIsStillFound() {
+        // 80,000 characters of prose, then the link: well past the old 64 KiB limit.
+        assertEquals("https://a.example/", IncomingIntents.firstWebAddress("a ".repeat(40_000) + "https://a.example/"))
     }
 
     @Test
