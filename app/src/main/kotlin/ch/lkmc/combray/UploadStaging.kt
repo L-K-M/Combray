@@ -6,6 +6,8 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -20,24 +22,38 @@ import java.util.UUID
  * ```
  *
  * Copies stay until the next process start ([clear]): a page may send its form much later.
+ * A pick is bounded by [maxPickBytes]; a larger provider answer fails that pick and rolls back
+ * its directory, so one hostile or mistaken pick cannot fill the disk.
  */
-class UploadStaging(private val root: File, private val resolver: ContentResolver) {
-    fun clear() {
-        root.deleteRecursively()
-    }
+class UploadStaging(
+    private val root: File,
+    private val resolver: ContentResolver,
+    private val maxPickBytes: Int = MAX_PICK_BYTES,
+) {
+    /**
+     * Copy and cleanup share one lock: a process-start [clear] cannot delete a directory a
+     * [stage] is writing, and a stage cannot leave files a clear is about to miss.
+     */
+    private val lock = Mutex()
+
+    /** Removes every copy from earlier picks. Serialized with [stage]. */
+    suspend fun clear() = lock.withLock { root.deleteRecursively() }
 
     /** Paths of the copies, or null if any file could not be read (nothing is uploaded then). */
     suspend fun stage(uris: List<Uri>): List<String>? = withContext(Dispatchers.IO) {
-        val pick = File(root, UUID.randomUUID().toString())
-        try {
-            // One directory per file: two picked files may share a name.
-            uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
-        } catch (failure: Exception) {
-            // Another app's provider may throw anything (IO, permission, bad URI): cancel the upload.
-            // No suspension point in the block, so cancellation cannot be swallowed here.
-            Log.w(LOG_TAG, "could not copy a picked file", failure)
-            pick.deleteRecursively()
-            null
+        lock.withLock {
+            val pick = File(root, UUID.randomUUID().toString())
+            try {
+                // One directory per file: two picked files may share a name.
+                uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
+            } catch (failure: Exception) {
+                // Another app's provider may throw anything (IO, permission, bad URI, an
+                // oversized file): cancel the upload. No suspension point in the block, so
+                // cancellation cannot be swallowed here.
+                Log.w(LOG_TAG, "could not copy a picked file", failure)
+                pick.deleteRecursively()
+                null
+            }
         }
     }
 
@@ -45,7 +61,19 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
         if (!directory.mkdirs()) throw IOException("cannot create upload directory")
         val target = File(directory, safeName(displayName(uri)))
         val input = resolver.openInputStream(uri) ?: throw IOException("no content")
-        input.use { source -> target.outputStream().use { source.copyTo(it) } }
+        input.use { source ->
+            target.outputStream().use { out ->
+                val buffer = ByteArray(COPY_BUFFER_BYTES)
+                var copied = 0L
+                while (true) {
+                    val read = source.read(buffer)
+                    if (read < 0) break
+                    if (copied + read > maxPickBytes) throw IOException("picked file is larger than $maxPickBytes bytes")
+                    out.write(buffer, 0, read)
+                    copied += read
+                }
+            }
+        }
         return target.path
     }
 
@@ -56,6 +84,12 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
 
     companion object {
         private const val LOG_TAG = "CombrayUpload"
+
+        /** Combray's own bound for one pick; a page's file upload should not fill the disk. */
+        internal const val MAX_PICK_BYTES = 64 * 1024 * 1024
+
+        private const val COPY_BUFFER_BYTES = 8192
+
         private const val MAX_NAME_CHARS = 120
         private const val FALLBACK_NAME = "upload"
         private const val ANY_TYPE = "*/*"
