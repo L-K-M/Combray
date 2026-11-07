@@ -45,6 +45,9 @@ finding (the remote search panels clearing their results while a search waits)
 is implemented in open PR #254 and is omitted; its other open PRs (#257, #259,
 #261, #262, #264, #268) implement the matching nice-to-have entries. Its
 remaining nice-to-have findings are folded into the sections below.
+The longcat-2 review's blocking and important findings are implemented in open
+PRs #219, #237, #243, #244, #250, #256 and #267 and are omitted; its remaining
+nice-to-have findings are folded into the sections below.
 
 ## Still open
 
@@ -87,19 +90,17 @@ bugs — important
 `engine/EngineSurfaceView.kt`, `EngineInputConnection`, and the native input
 commands implement a minimal bridge. Composition is buffered without visible
 page preview; surrounding-text, caps and selection synchronization are absent.
-`ImeShown.multiline` is not applied to the editor configuration, hardware
-modifiers are not carried as modifiers, and `deleteSurroundingText` can emit
-two JNI commands per requested character without a work cap. These are
-inherited concrete implementation limits; rich-text typing added later must
-not be mistaken for a complete Android IME contract.
+`ImeShown.multiline` is not applied to the editor configuration, and hardware
+modifiers are not carried as modifiers. Bounded deletions and a dead-input
+restart are implemented in open PR #244. These are inherited concrete
+implementation limits; rich-text typing added later must not be mistaken for a
+complete Android IME contract.
 
 Suggested fix: establish bounded, field-attributed editing semantics with
 AOSP/Gboard and CJK/correction/emoji tests. Verify dismissal does not flush an
-old composition into another field, same-kind field changes do not reuse a
-dead connection, `ACTION_MULTIPLE` does not become bogus key releases, and
-large deletion requests do not block the UI. Preserve complete edits or
-explicitly decline unsupported operations rather than silently clipping them.
-Effort: several days with real-engine and keyboard evidence.
+old composition into another field, `ACTION_MULTIPLE` does not become bogus key
+releases, and unsupported operations are declined rather than silently
+clipped. Effort: several days with real-engine and keyboard evidence.
 
 ### Clear every obsolete page control on document replacement
 
@@ -239,16 +240,15 @@ text out of logs. Effort: about one day plus native/device checks.
 missing features — important
 
 Native target/label tests cover portions of Combray's chrome, not an Android
-accessibility tree for rendered page content. `EngineSurfaceView` also reports
-itself as a text editor whenever the engine runs, rather than only for an
-active page field. Blind users need page navigation and an accurate editor
-state, not just labeled toolbar buttons. The inherited AccessKit APIs are
-leads, not proof of a working Servo-to-TalkBack bridge.
+accessibility tree for rendered page content. Blind users need page navigation
+and an accurate editor state, not just labeled toolbar buttons. The inherited
+AccessKit APIs are leads, not proof of a working Servo-to-TalkBack bridge.
+`EngineSurfaceView.onCheckIsTextEditor` now follows the page field's keyboard
+ownership in open PR #244; that is chrome state, not page accessibility.
 
 Suggested fix: investigate the pinned downstream accessibility interfaces and
 verify actual TalkBack reading, focus, links, fields, document replacement and
-keyboard ownership. Test changing `onCheckIsTextEditor` with real IME reopen
-behavior before narrowing it. Never claim chrome semantics establish page
+keyboard ownership. Never claim chrome semantics establish page
 accessibility. Effort: several days of engine investigation and device tests.
 
 ### Restore page copy and manual text selection
@@ -362,18 +362,15 @@ performance problems, stuttering, and jank — nice-to-have
 
 `IntegrationDao.observeOpenJobs` returns every unfinished row (PENDING,
 RUNNING, RETRY_WAIT, AUTH_REQUIRED and FAILED), and Settings renders them
-non-lazily inside a scrolling Column. SOL2-13 also identifies
-`SettingsSheet.kt:431,620` calling `Integrations.kt:141–145` to JSON-decode
-full capture payloads during composition just to read their URLs. Queue
-emissions can therefore parse a 20 MiB queue's worth of text on the UI path;
-no phone frame-time measurement is claimed. Deliberate failed saves are
-unbounded and must not be silently expired to hide the cost.
+non-lazily inside a scrolling Column. The per-row payload decode is already
+off the UI thread in open PR #242, with a persisted `url` column in open PR
+#225; the remaining cost is the non-lazy rendering of a large queue. No phone
+frame-time measurement is claimed. Deliberate failed saves are unbounded and
+must not be silently expired to hide the cost.
 
-Suggested fix: project lightweight host/status data outside composition and
-measure page/lazy rendering of large queues, retaining Retry/Discard and
-destination binding. If metadata is persisted, use a preserving Room migration.
-Keep explicit saves until the user resolves them. Effort: one to two days
-including populated-queue migration and responsiveness checks.
+Suggested fix: measure page/lazy rendering of large queues, retaining
+Retry/Discard and destination binding. Keep explicit saves until the user
+resolves them. Effort: about one day including responsiveness checks.
 
 ### Explain failed automatic captures' budget retention
 
@@ -536,7 +533,11 @@ Effort: about one hour.
 performance problems, stuttering, and jank — nice-to-have
 
 Recent can re-sort after flow emissions; search now correctly covers retained
-history and caps after filtering. Home's top-sites flow likewise parses,
+history and caps after filtering. `BrowserCoordinator.recent()` combines and
+sorts up to 5,000 rows without `flowOn(Dispatchers.Default)`, unlike `topSites`
+and `continueTab`, so its transform runs in the UI collector's context; the
+other projections already move this work off the main thread. Home's top-sites
+flow likewise parses,
 sensitivity-checks and groups every retained visit on each emission and each
 cutoff tick, then caps the tiles at six. Address suggestions rank parsed hosts,
 and several DAO paths have possible index/N+1 costs: history filtering/order,
@@ -654,17 +655,17 @@ a burst and preserve document attribution. Effort: about half a day.
 
 performance problems, stuttering, and jank — nice-to-have
 
-The native capture path expands a large script template for requests, and
-`HisterClient.boundedBody` can rebuild a near-MiB JSON body through truncation
-iterations. The earlier claim that every HttpURLConnection request necessarily
-pays a new TCP/TLS handshake also needs measurement against actual pooling
-behavior, not assumption.
+The native capture path expands a large script template for requests. The
+earlier claim that every HttpURLConnection request necessarily pays a new
+TCP/TLS handshake also needs measurement against actual pooling behavior, not
+assumption. `HisterClient.boundedBody` now cuts once per request in open PR
+#256.
 
 Suggested fix: benchmark template expansion, serialization and repeated
-requests with synthetic payloads; cache stable script parts or improve bounded
-construction where useful. Any connection reuse must preserve no-redirect,
-credential isolation, response caps and destination identity. Effort: about
-half a day to measure, then a bounded optimization.
+requests with synthetic payloads; cache stable script parts where useful. Any
+connection reuse must preserve no-redirect, credential isolation, response
+caps and destination identity. Effort: about half a day to measure, then a
+bounded optimization.
 
 ### Measure capture's worst-case responsiveness
 
@@ -717,10 +718,10 @@ horizontal scroller without an overflow cue. Narrow widths or 200% text can
 hide core service scopes. Date headers, active/open markers, host tiles and
 times already exist; this is not a request to rebuild Recent.
 
-Suggested fix: verify at 320dp/200% type, then wrap chips or add an unobtrusive
-trailing cue while keeping single-choice TalkBack semantics and local/remote
-scope clarity. Cover duplicate tabs, the last row and pagination with the
-keyboard up. Effort: about half a day.
+The chips now wrap onto a second line in open PR #237. Suggested fix for the
+remaining work: verify at 320dp/200% type, keeping single-choice TalkBack
+semantics and local/remote scope clarity. Cover duplicate tabs, the last row
+and pagination with the keyboard up. Effort: about half a day.
 
 ### Retain each remote scope's query and paging
 
@@ -791,33 +792,33 @@ Effort: about half a day.
 
 usability: fast, convenient, clear — nice-to-have
 
-`RecentSheet.kt:209–216` has a single-line filter with no explicit IME
-completion action. The keyboard unnecessarily occupies list space, while
-remote fields request Search but need their actual action behavior verified.
+`RecentSheet.kt:209–216` has a single-line filter. Open PR #237 gives it
+`ImeAction.Search` and hides the keyboard on the action; the remote fields'
+Search action behavior still needs verification.
 
-Suggested fix: use Done to hide the local keyboard without clearing its
-query; wire remote Search deliberately without bypassing privacy/submission
-rules. Verify Android Back and focus behavior with nested sheets. Effort:
-a few hours plus UI/IME tests.
+Suggested fix: wire remote Search deliberately without bypassing
+privacy/submission rules. Verify Android Back and focus behavior with nested
+sheets. Effort: a few hours plus UI/IME tests.
 
 ### Improve failure copy and save receipts
 
 usability: fast, convenient, clear — nice-to-have
 
 `SettingsSheet.kt:611–628` exposes safe but technical categories such as
-`http_401` and can fall back to an opaque dedupe key. Save status also lacks a
-compact acknowledged destination/list receipt and direct details/retry path.
-A new unexpected-response category could improve proxy/captive-portal copy,
-but `WrongAddress` currently intentionally includes reachable non-service
-responses; that naming suggestion is not a connection-check correctness bug.
+`http_401`. Save status also lacks a compact acknowledged destination/list
+receipt and direct details/retry path. A new unexpected-response category
+could improve proxy/captive-portal copy, but `WrongAddress` currently
+intentionally includes reachable non-service responses; that naming suggestion
+is not a connection-check correctness bug. The opaque dedupe-key fallback is
+gone in open PR #250.
 
-Suggested fix: map categories to localized recovery actions, use Unknown page
-instead of opaque IDs, and distinguish Pending, Saved, partial membership and
-Needs attention in text as well as color. Preserve the original payload and
-destination through switching/response loss. Localize coordinator problems
-through typed notices mapped to app resources, not resource IDs in core.
-Effort: about one day. Creation-receipt persistence is implemented in open
-PR #230; this is the remaining presentation and recovery task.
+Suggested fix: map categories to localized recovery actions and distinguish
+Pending, Saved, partial membership and Needs attention in text as well as
+color. Preserve the original payload and destination through
+switching/response loss. Localize coordinator problems through typed notices
+mapped to app resources, not resource IDs in core. Effort: about one day.
+Creation-receipt persistence is implemented in open PR #230; this is the
+remaining presentation and recovery task.
 
 ### Let audio play with the screen off, or say it stops
 
@@ -908,21 +909,6 @@ The original source artwork is already square, opaque and edge-to-edge.
 Suggested fix: generate and visually test a separate monochrome asset if the
 owner values it, including platform tinting. Never bake launcher masking or
 rounded outer corners into `media-sources/icon.png`. Effort: about half a day.
-
-### Give Recent rows copy and share actions
-
-usability: fast, convenient, clear — nice-to-have
-
-The visit menu has Remove and Forget but no direct Copy link/Share. Address
-long-press copy and page Share already exist, so this is a convenience gap,
-not a request for another clipboard backend. Optional long-press Share or a
-visible Paste and go route should not obscure existing accessible actions.
-
-Suggested fix: reuse safe native clipboard/chooser paths, keep exact recorded
-URLs and tab identities, and test API 30–32 versus Android 13+ confirmation.
-Verify a physical long press, actual clipboard contents and TalkBack, not only
-an exposed semantics action. Never read the clipboard in the background.
-Effort: about half a day.
 
 ### Make destructive history actions understandable and reversible
 
@@ -1382,15 +1368,20 @@ address" message.
 Suggested fix: treat ports above 65535 as `MALFORMED_ADDRESS` in
 `AddressPolicy`. Effort: small plus a unit test.
 
-### Fix the address policy's space-handling comment
+### Fix the address policy's space handling
 
 bugs — nice-to-have
 
 `AddressPolicy.kt:97-99` documents that a known-scheme address navigates "as
-typed", but `AddressPolicy.kt:108` encodes its spaces as `%20` first.
+typed", but `AddressPolicy.kt:108` encodes only literal spaces as `%20`. Tabs
+and other whitespace inside a pasted `https:` link are left in place; the
+authority check accepts them and the engine may refuse the address, showing
+"address not opened" for a link that looked valid.
 
-Suggested fix: correct the doc comment to match the encoding (or stop encoding
-if the engine is meant to parse the raw text). Effort: trivial.
+Suggested fix: replace every whitespace character with `%20` (the existing
+`WHITESPACE` regex), or reject the address as malformed, and correct the doc
+comment to match. Add a policy test for a tab inside a pasted link. Effort:
+trivial.
 
 ### Offer copying the article's address from Reader view
 
