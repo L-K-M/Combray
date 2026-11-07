@@ -59,6 +59,7 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
+    var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -72,6 +73,7 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
         ui = BookmarksUi.Idle
         bookmarks = emptyList()
         nextCursor = null
+        loadingMore = false
         if (service == null) return@LaunchedEffect
 
         // The newest bookmarks show at once; a search waits for a pause in typing.
@@ -130,13 +132,22 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
             )
         }
         nextCursor?.let { cursor ->
+            // One page at a time: the button waits, disabled, under a progress bar.
+            if (loadingMore) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) }
             item {
                 TextButton(
                     onClick = {
+                        // Two taps in one frame both see the button still enabled.
+                        if (loadingMore) return@TextButton
                         val mine = generation
+                        loadingMore = true
                         scope.launch {
-                            val more = integrations.karakeepBookmarks(query, cursor) ?: return@launch
+                            val more = integrations.karakeepBookmarks(query, cursor)
+                            // A newer query owns the list and the loading state now.
                             if (mine != generation) return@launch
+                            loadingMore = false
+                            // Null: the service went away meanwhile; its removal restarts the search.
+                            more ?: return@launch
                             // A failed page keeps the rows shown and says why above them.
                             ui = BookmarksUi.Answer(more)
                             if (more !is KarakeepRead.Ok) return@launch
@@ -144,6 +155,7 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
                             nextCursor = more.value.nextCursor
                         }
                     },
+                    enabled = !loadingMore,
                     modifier = Modifier.padding(16.dp).heightIn(min = 48.dp),
                 ) { Text(stringResource(R.string.search_all_more)) }
             }
