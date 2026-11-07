@@ -188,7 +188,8 @@ class BrowserCoordinator(
                     null
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (failed: Exception) {
+                } catch (failed: Throwable) {
+                    // An Error must not skip publish(): the stored tabs are shown either way.
                     failed
                 }
                 publish()

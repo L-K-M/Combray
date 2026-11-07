@@ -167,6 +167,22 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun anErrorInMaintenanceStillPublishesTheStoredTabs() {
+        runBlocking {
+            database.browser().insertTab(TabEntity("tab1", TabState.OPEN, null, "https://a.test/", "A", START, START, null))
+            database.browser().setSession(SessionEntity(activeTabId = "tab1"))
+        }
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now }, newId = { "id${ids++}" },
+            unusedTabs = { throw AssertionError("boom") },
+        ).also { it.start() }
+        runBlocking { failing.awaitIdle() }
+
+        assertEquals("tab1", failing.browserState.value.activeTab?.id)
+        assertTrue(failing.browserState.value.notice is Notice.Problem)
+    }
+
+    @Test
     fun aThrowingJobDoesNotKillTheConsumer() {
         val base = FakeEngine()
         val failing = object : EnginePort by base {
