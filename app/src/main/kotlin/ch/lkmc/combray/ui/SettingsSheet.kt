@@ -84,6 +84,8 @@ import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Where the source of this build is published (MPL-2.0 §3.2). The engine's exact source is
@@ -312,6 +314,47 @@ private data class ServiceLabels(
 )
 
 /**
+ * One service form's configuration actions. They run one at a time, and a completion applies only
+ * while the form still has the edit generation its action started from: a delayed check or save
+ * cannot overwrite a newer edit or a newer action's feedback, and a repeated tap cannot queue a
+ * second operation.
+ */
+internal class ServiceFormActions {
+    private val lock = Mutex()
+    private var generation = 0
+    private var inFlight = 0
+
+    /** Whether an action is in flight; the form's action buttons wait for it. */
+    var isBusy by mutableStateOf(false)
+        private set
+
+    /** A field was edited: an action that started before this no longer owns the form. */
+    fun edited() {
+        generation++
+    }
+
+    /**
+     * Runs [action] as the only action in flight. [apply] runs on its result only when the form
+     * has not been edited since this call started, so a completion never clears or describes a
+     * newer form.
+     */
+    suspend fun <T> perform(action: suspend () -> T, apply: (T) -> Unit) {
+        inFlight++
+        isBusy = true
+        try {
+            lock.withLock {
+                val started = generation
+                val result = action()
+                if (generation == started) apply(result)
+            }
+        } finally {
+            inFlight--
+            if (inFlight == 0) isBusy = false
+        }
+    }
+}
+
+/**
  * Server address and credential for one service. The credential is write-only: a saved one is
  * never shown again, only replaced. Checking the connection is read-only.
  */
@@ -341,6 +384,8 @@ private fun ServiceSettings(
     var message by remember { mutableStateOf<String?>(null) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    // One configuration action at a time; a completion describes only the form it started from.
+    val actions = remember { ServiceFormActions() }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
     LaunchedEffect(current) { credentialSaved = current?.let { integrations.hasCredential(secret, it) } == true }
@@ -349,7 +394,7 @@ private fun ServiceSettings(
     Text(stringResource(labels.explanation))
     OutlinedTextField(
         value = address,
-        onValueChange = { editedAddress = it },
+        onValueChange = { editedAddress = it; actions.edited(); message = null },
         label = { Text(stringResource(R.string.karakeep_url)) },
         placeholder = { Text(stringResource(labels.urlHint)) },
         singleLine = true,
@@ -358,7 +403,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = alternate,
-        onValueChange = { editedAlternate = it },
+        onValueChange = { editedAlternate = it; actions.edited(); message = null },
         label = { Text(stringResource(R.string.settings_alternate_url)) },
         placeholder = { Text(stringResource(R.string.settings_alternate_url_hint)) },
         supportingText = { Text(stringResource(R.string.settings_alternate_url_help)) },
@@ -368,7 +413,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = credential,
-        onValueChange = { credential = it },
+        onValueChange = { credential = it; actions.edited(); message = null },
         label = { Text(stringResource(labels.secret)) },
         supportingText = if (credentialSaved) ({ Text(stringResource(labels.secretSaved)) }) else null,
         singleLine = true,
@@ -379,29 +424,46 @@ private fun ServiceSettings(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
         Button(
             onClick = {
+                val addressAtTap = address
+                val alternateAtTap = alternate
+                val credentialAtTap = credential
                 scope.launch {
-                    val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
-                    if (result == Configured.Saved) {
-                        editedAddress = null
-                        editedAlternate = null
-                    }
-                    credential = ""
+                    actions.perform(
+                        action = { configure(addressAtTap, credentialAtTap.ifBlank { null }, alternateAtTap) },
+                        apply = { result ->
+                            message = describe(resources, labels, result)
+                            if (result == Configured.Saved) {
+                                editedAddress = null
+                                editedAlternate = null
+                                credential = ""
+                            }
+                        },
+                    )
                 }
             },
+            enabled = !actions.isBusy,
             modifier = Modifier.heightIn(min = 48.dp),
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
             onClick = {
-                message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
+                scope.launch {
+                    actions.perform(
+                        action = {
+                            message = resources.getString(R.string.check_running)
+                            check()
+                        },
+                        apply = { result -> message = result?.let { describe(resources, labels, it) } },
+                    )
+                }
             },
-            enabled = current != null,
+            enabled = current != null && !actions.isBusy,
             modifier = Modifier.heightIn(min = 48.dp),
         ) { Text(stringResource(R.string.action_check_connection)) }
     }
     if (current != null) {
-        TextButton(onClick = { confirmRemove = true }) { Text(stringResource(R.string.action_remove)) }
+        TextButton(onClick = { confirmRemove = true }, enabled = !actions.isBusy) {
+            Text(stringResource(R.string.action_remove))
+        }
     }
     // Removing cancels every unsent item for the service: say how many before doing it.
     if (confirmRemove) {
@@ -414,7 +476,12 @@ private fun ServiceSettings(
                     confirmRemove = false
                     editedAddress = null
                     editedAlternate = null
-                    scope.launch { remove(); message = null }
+                    scope.launch {
+                        actions.perform(
+                            action = { remove() },
+                            apply = { message = null },
+                        )
+                    }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.action_cancel)) } },
