@@ -3312,7 +3312,7 @@ The video was playable; Play was out of reach. The owner chose all three remedie
   server's host tests (17), and `./gradlew testDebugUnitTest lintDebug assembleDebug
   assembleDebugAndroidTest` pass.
 - Device, on an arm64 API 36 emulator (Pixel 7 profile) with this branch's local arm64 build:
-  `MediaPlayerTest` passes all 13 checks, check 15 and `leavingThePageTakesItsOfferAway`
+  `MediaPlayerTest` passes all 15 checks, check 15 and `leavingThePageTakesItsOfferAway`
   included. Check 1's colour sample failed once, on the first player launch after a fresh
   install, where API 36 dims the screen behind its "Viewing full screen" hint; it passes once
   the hint has been acknowledged. `AccessibilityTest` (with `playInTheAddressIsAccessible`) and
@@ -3326,3 +3326,22 @@ The video was playable; Play was out of reach. The owner chose all three remedie
   video brought the offer back as well; the sheet did not show again on a cleared profile, so
   whether that tap reached the player in Servo's hit test is open.
 - The x86_64 emulator suite runs in this PR's Engine workflow.
+
+
+### Merge validation (7 November 2026)
+
+The merge with PR #201 keeps its Servo pin `8720afc00e4daead852b8f7f63bb59e87e0b2a99`.
+On the Mac, `cargo fmt --check`, `cargo test --lib --locked` (172), the media-tap Node
+checks (13), fixture-server tests (24), and `./gradlew testDebugUnitTest lintDebug
+assembleDebug assembleDebugAndroidTest assembleRelease` pass. `COMBRAY_ABI=arm64
+scripts/build-native.sh` builds the merged bridge and engine; APKs assembled afterwards
+pass all 15 `MediaPlayerTest` checks on the same API 36 emulator.
+
+CI job 128454800698 failed before this merge in the existing media-network fixture:
+`aNameWithAClosedAndAnOpenAddressReachesTheOpenOne` chose an ephemeral port on
+`127.0.0.2`, then tried to bind the same port on `127.0.0.1`, where it can already be
+in use. The second listener is unnecessary: the exact connection-attempt assertion
+already verifies that the refused address is never tried. Removing that listener keeps
+the response and allowed-server assertions. The media-network class passes; temporarily
+classifying both addresses as allowed makes the test fail on the extra connection
+attempt, and the full Gradle gate passes after restoring the correct classification.
