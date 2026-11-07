@@ -48,6 +48,16 @@ class HisterClientTest {
     }
 
     @Test
+    fun aLargePlainTextIsCutOnceAndLandsOnTheLimit() {
+        val text = "a".repeat(1_000_000)
+        assertEquals(DispatchResult.Done(null), client.add(server.root, FakeHister.TOKEN, "https://a.example/", null, text))
+        val sent = server.requestSizes.single()
+        assertTrue(sent <= HisterClient.MAX_REQUEST_BYTES)
+        // Every code point is one byte, so dropping the excess lands exactly on the limit.
+        assertEquals(HisterClient.MAX_REQUEST_BYTES, sent)
+    }
+
+    @Test
     fun searchMergesPromotedHistoryAndDocumentsWithoutDroppingEither() {
         server.searchBody = """
             {"query":"servo","total":3,"page_key":"next-1",
