@@ -93,6 +93,9 @@ Pages
   /wide.html                 title WIDE; no viewport meta tag; a 1080 CSS px row, red on its left
                              half and green on its right (?initial-scale=1 adds a viewport meta tag
                              with width=device-width, initial-scale=1)
+  /agent.html                403 "Access denied" when the User-Agent names Firefox without a Gecko/
+                             token, as some site firewalls answer; else title AGENT:same when
+                             navigator.userAgent equals the header, AGENT:differs when not
   /document.pdf              one-page PDF (application/pdf) whose page reads PDF-FIXTURE-TEXT
   /document.bin              the same PDF as application/octet-stream with nosniff (Servo's stand-in page)
   /pdf/<name>.pdf            generated PDFs (pdf_fixtures; --write-pdfs DIR writes them for the viewer's
@@ -848,6 +851,23 @@ ZOOM_PAGE = page(
     "addEventListener('load', report); addEventListener('resize', report);</script>",
 )
 
+
+def names_firefox_without_gecko(user_agent):
+    """A site firewall rule: an agent that names Firefox without Gecko/ is taken for a forged one."""
+    return "Firefox" in user_agent and "Gecko/" not in user_agent
+
+
+def agent_page(user_agent):
+    """Titled AGENT:same when the page's navigator.userAgent is the User-Agent header it came with."""
+    # Escaped for a script element: the header is the client's, not the fixture's.
+    header = json.dumps(user_agent).replace("<", "\\u003c")
+    return page(
+        "AGENT-WAITING",
+        "<p>agent</p><script>"
+        f"document.title = 'AGENT:' + (navigator.userAgent === {header} ? 'same' : 'differs');</script>",
+    )
+
+
 # A row of an icon that cannot shrink and a long sentence, in an auto grid column: the sentence
 # must wrap, so the page stays as wide as the viewport. Servo once sized such a row's min-content
 # width to the whole sentence on one line, and the column widened the page. On one line the
@@ -1300,6 +1320,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, ZOOM_PAGE)
         if path == "/fit-width.html":
             return self.send(200, FIT_WIDTH_PAGE)
+        if path == "/agent.html":
+            agent = self.headers.get("User-Agent", "")
+            if names_firefox_without_gecko(agent):
+                return self.send(http.HTTPStatus.FORBIDDEN, "Access denied")
+            return self.send(http.HTTPStatus.OK, agent_page(agent))
         if path == "/fixed-scroll.html":
             pending_image = "<img hidden src='/scroll-pending-image'>" if query.get("loading") == ["1"] else ""
             return self.send(http.HTTPStatus.OK, fixed_scroll_page(pending_image))

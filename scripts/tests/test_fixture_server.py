@@ -49,6 +49,37 @@ class WidePageTest(unittest.TestCase):
                 self.assertEqual(initial_scale, "name='viewport'" in document)
 
 
+class AgentPageTest(unittest.TestCase):
+    """The agent page refuses what some site firewalls refuse and reports the agent it was sent."""
+
+    SERVO = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0"
+    COMBRAY = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0"
+
+    def get(self, user_agent):
+        request = Mock(path="/agent.html", headers={"User-Agent": user_agent})
+        load_server().Handler.do_GET(request)
+        return request.send.call_args.args
+
+    def test_a_firefox_agent_without_a_gecko_token_is_refused(self):
+        for agent in [self.SERVO, "Mozilla/5.0 Firefox/153.0", self.SERVO.replace("Servo/", "like Gecko Servo/")]:
+            with self.subTest(agent=agent):
+                self.assertEqual((http.HTTPStatus.FORBIDDEN, "Access denied"), self.get(agent))
+
+    def test_other_agents_get_the_page_comparing_navigator_user_agent_with_the_header(self):
+        for agent in [self.COMBRAY, "curl/8.7.1", ""]:
+            with self.subTest(agent=agent):
+                status, document = self.get(agent)
+                self.assertEqual(http.HTTPStatus.OK, status)
+                self.assertIn("<title>AGENT-WAITING</title>", document)
+                self.assertIn(f"navigator.userAgent === {json.dumps(agent)} ?", document)
+
+    def test_the_header_cannot_end_the_script(self):
+        status, document = self.get('x</script><script>document.title="AGENT:same"</script>')
+        self.assertEqual(http.HTTPStatus.OK, status)
+        self.assertEqual(1, document.count("</script>"))
+        self.assertIn("x\\u003c/script>", document)
+
+
 class RequestLogTest(unittest.TestCase):
     def setUp(self):
         self.server = load_server()

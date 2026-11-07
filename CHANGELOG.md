@@ -270,6 +270,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Sites whose firewall refused Combray with only "Access denied" open again.
+  Such firewalls take a browser that calls itself Firefox without the
+  `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
+  none. Combray now sends Firefox for Android's token in front of Servo's:
+  `Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0`.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects

@@ -15,8 +15,8 @@ class FakeEngine : EnginePort {
         /** Recorded in [selected] when the coordinator shows no view. */
         const val NONE = -1L
 
-        /** What `engine_ready` reports, as Servo 0.7.0 on Android sends it. */
-        const val USER_AGENT = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0"
+        /** What `engine_ready` reports: Servo 0.7.0's Android agent with Combray's Gecko token. */
+        const val USER_AGENT = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0"
     }
 
     private var listener: ((EngineEvent) -> Unit)? = null

@@ -199,6 +199,12 @@ object Fixtures {
      */
     const val FIT_WIDTH = "$BASE/fit-width.html"
 
+    /**
+     * Refused with 403 when the `User-Agent` names Firefox without a `Gecko/` token, as some site
+     * firewalls do; else titled `AGENT:same` when `navigator.userAgent` is that header.
+     */
+    const val AGENT = "$BASE/agent.html"
+
     /** A transparent fixed drawer over the page, optionally held loading by an image. */
     const val FIXED_SCROLL = "$BASE/fixed-scroll.html"
 
