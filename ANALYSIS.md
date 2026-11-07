@@ -7,6 +7,9 @@ Remaining inherited candidates are
 identified as such where their current impact still needs reproduction. The
 7 November 2026 mistral-2 review's blocking/important findings are open PRs
 (#204, #207, #213, #220, #225, #226, #231) and are omitted per the rule above;
+its remaining nice-to-have findings are folded into the sections below. The
+7 November 2026 devin-4 review's important findings are also open PRs
+(#205, #206, #209, #215, #217, #230, #233, #234, #245, #247) and are omitted;
 its remaining nice-to-have findings are folded into the sections below.
 Sol-2's important findings are implemented in open PRs #206, #217, #221, #230
 and #246. Concurrent PRs #215 and #226/#222 cover its reserved pagination and
@@ -316,17 +319,20 @@ bugs — nice-to-have
 `app/src/main/kotlin/ch/lkmc/combray/UploadStaging.kt` limits names to 120
 UTF-16 characters, not the filesystem's UTF-8 component limit. Long CJK/emoji
 names can still fail. Copies are streamed without per-pick/total byte budgets
-and retained until restart. Startup lifetime/privacy fixes are implemented in
-open PRs and are intentionally not repeated here. No page-to-JNI arbitrary
+and retained until restart, so repeated deliberately selected large
+attachments accumulate for the whole process and unknown-length providers are
+copied to completion. Startup lifetime/privacy fixes are implemented in open
+PRs and are intentionally not repeated here. No page-to-JNI arbitrary
 filesystem-path capability has been demonstrated.
 
 Suggested fix: bound filename bytes on code-point boundaries while preserving
 a useful extension. Agree documented limits and cancellation behavior before
 rejecting legitimate large files; enforce them while streaming unknown-length
-providers, roll back only the failed pick, and explain refusals. Verify
-traversal/symlink/staging-root boundaries where actually exposed, duplicate
-names, repeated large picks, cancellation and disk-full without deleting active
-attachments. Effort: about one day after the policy is chosen.
+providers, roll back only the failed pick, and explain refusals with a useful
+size/storage error. Release a copy only once Servo no longer needs its path.
+Verify traversal/symlink/staging-root boundaries where actually exposed,
+duplicate names, repeated large picks, cancellation and disk-full without
+deleting active attachments. Effort: about one day after the policy is chosen.
 
 ### Report oversized HTTP responses explicitly
 
@@ -346,13 +352,14 @@ server. Effort: about half a day.
 
 performance problems, stuttering, and jank — nice-to-have
 
-`IntegrationDao.observeOpenJobs` returns all FAILED rows, and Settings renders
-them non-lazily. SOL2-13 also identifies `SettingsSheet.kt:431,620` calling
-`Integrations.kt:141–145` to JSON-decode full capture payloads during
-composition just to read their URLs. Queue emissions can therefore parse a
-20 MiB queue's worth of text on the UI path; no phone frame-time measurement
-is claimed. Deliberate failed saves are unbounded and must not be silently
-expired to hide the cost.
+`IntegrationDao.observeOpenJobs` returns every unfinished row (PENDING,
+RUNNING, RETRY_WAIT, AUTH_REQUIRED and FAILED), and Settings renders them
+non-lazily inside a scrolling Column. SOL2-13 also identifies
+`SettingsSheet.kt:431,620` calling `Integrations.kt:141–145` to JSON-decode
+full capture payloads during composition just to read their URLs. Queue
+emissions can therefore parse a 20 MiB queue's worth of text on the UI path;
+no phone frame-time measurement is claimed. Deliberate failed saves are
+unbounded and must not be silently expired to hide the cost.
 
 Suggested fix: project lightweight host/status data outside composition and
 measure page/lazy rendering of large queues, retaining Retry/Discard and
@@ -521,6 +528,19 @@ only with measured benefit, preserving migrations and deletion semantics.
 The candidate `visits(failed,lastSeenAt)` index is not automatically better
 than existing indexes. Effort: one to two days.
 
+### Take only the Home tiles the row still needs
+
+performance problems, stuttering, and jank — nice-to-have
+
+`HomeLinks.kt:88–100` maps every eligible site to a `HomeLink` before taking
+`HOME_LINK_LIMIT`, even when pins already fill the row. Large histories cause
+unnecessary allocations off the main thread on every ranking emission; no
+visible jank is established.
+
+Suggested fix: take only the remaining slots with a lazy sequence, preserving
+ranking and suppression semantics; profile ranking separately before broader
+changes. Effort: about two hours.
+
 ### Measure startup, live views, memory and power on the owner's device
 
 performance problems, stuttering, and jank — nice-to-have
@@ -622,6 +642,22 @@ construction where useful. Any connection reuse must preserve no-redirect,
 credential isolation, response caps and destination identity. Effort: about
 half a day to measure, then a bounded optimization.
 
+### Measure capture's worst-case responsiveness
+
+performance problems, stuttering, and jank — nice-to-have
+
+`native/src/capture.js` checks its time budget between groups of 128 nodes,
+and work within one node (a huge text node's whitespace normalization, a
+page-defined getter) is not clocked. The documented time budget therefore does
+not bound a single huge node. This is an acknowledged engine limitation, not a
+new measured freeze.
+
+Suggested fix: benchmark synthetic huge-node and style-heavy pages with
+frame/input timing; bound preprocessing where it helps and pursue interruption
+only in the downstream engine. Do not claim a callback timeout stops
+JavaScript. Effort: about one day for evidence, further work depends on the
+result.
+
 ### Preserve visible context while remote search waits
 
 usability: fast, convenient, clear — nice-to-have
@@ -636,6 +672,19 @@ its old query, with stale rows disabled or unmistakably distinct, until the
 new answer arrives. Keep errors separate from empty results and never relabel
 old rows as current. Effort: about one day with delayed-query/configuration
 regressions.
+
+### Offer retry and settings actions for a failed search
+
+usability: fast, convenient, clear — nice-to-have
+
+`HisterSearchPanel.kt` and `KarakeepPanel.kt` show an error notice for a failed
+first search but offer no direct action: after reconnecting, the user must edit
+the query or reopen the scope, and an authentication failure has no shortcut to
+repair it.
+
+Suggested fix: add Retry for transient failures and Settings for
+authentication/configuration failures, keeping existing results during a failed
+later page. Effort: about half a day.
 
 ### Distinguish configuration loading from not configured
 
@@ -664,22 +713,39 @@ trailing cue while keeping single-choice TalkBack semantics and local/remote
 scope clarity. Cover duplicate tabs, the last row and pagination with the
 keyboard up. Effort: about half a day.
 
+### Retain each remote scope's query and paging
+
+usability: fast, convenient, clear — nice-to-have
+
+`RecentSheet.kt` composes `HisterSearchPanel` or `KarakeepPanel` conditionally,
+so each panel owns its query and paging state. Switching from Hister to Karakeep
+and back recreates the panel from the local filter rather than the remote query
+the user was refining. Open PRs (#222, #226, #235, #252) already keep a seeded
+local filter from being sent to a scope the user has not selected; the
+retention itself is not addressed.
+
+Suggested fix: retain per-scope query and scroll position for the sheet's
+lifetime and invalidate results on service identity changes. Effort: about one
+day.
+
 ### Verify Settings and Recent layouts at narrow widths
 
 visual issues and layout problems — nice-to-have
 
-`SettingsSheet.kt:379–402` uses a non-wrapping Save/Check connection action row.
-Its full narrow/large-font accessibility matrix is not recorded. Scrolling
-Home is already implemented and recovery-overlay scrolling has an open PR;
-those code fixes are not repeated here. Settings/Recent still need independent
-bounds and reachability evidence. An unweighted LazyColumn alone does not
-prove clipping.
+`SettingsSheet.kt:379–402` uses a non-wrapping Save/Check connection action row
+inside 48dp of horizontal margins. Large fonts, split-screen and longer
+translations can squeeze its labels or wrap the buttons awkwardly. Its full
+narrow/large-font accessibility matrix is not recorded. Scrolling Home is
+already implemented and recovery-overlay scrolling has an open PR; those code
+fixes are not repeated here. Settings/Recent still need independent bounds and
+reachability evidence. An unweighted LazyColumn alone does not prove clipping.
 
 Suggested fix: measure 320dp, 200% type, landscape and keyboard-visible states
-before changing layout. Use wrapping/vertical actions or scrolling only where
-reproduction requires it. Check last rows, page actions, 48dp non-overlapping
-targets and snackbar bounds; do not add blanket modifiers. Effort: about one
-day including Settings/Recent accessibility coverage.
+before changing layout. Use a wrapping/adaptive action layout, verified with
+long labels at 320dp/200% while keeping 48dp non-overlapping touch targets.
+Check last rows, page actions and snackbar bounds; do not add blanket
+modifiers. Effort: about one day including Settings/Recent accessibility
+coverage.
 
 ### Preserve readable origin under constrained layouts
 
@@ -689,12 +755,28 @@ Start ellipsis preserves a suffix, not necessarily a complete registrable
 domain. Address/chrome target tests do not prove that long IDNs, subdomains,
 RTL and large text leave the site's identity understandable. The separate
 address row at narrow widths and capped tab badge are already implemented.
+Search result rows (`KarakeepPanel.kt`, `HisterSearchPanel.kt`) clip long hosts
+at the row edge with no ellipsis, unlike their titles.
 
 Suggested fix: inspect actual rendered origins at 320/360dp, 200% text, long
 hosts and large counts. Keep engine-derived failures/cleartext indications,
 not a decorative verified lock; Page Info must not infer certificate
-verification from HTTPS. Test 0/1/99/100 badge boundaries and exact TalkBack
-counts without changing logical tab state. Effort: about half a day.
+verification from HTTPS. Give search result hosts a deliberate overflow
+(ellipsis or a second line) and retain the complete accessible label. Test
+0/1/99/100 badge boundaries and exact TalkBack counts without changing logical
+tab state. Effort: about half a day.
+
+### Cap deep Reader list indentation
+
+visual issues and layout problems — nice-to-have
+
+`ReaderView.kt` adds 16dp of start padding per list level before the marker and
+text. Nested instructions become narrow on phones and at larger type; no
+screenshot defect is claimed.
+
+Suggested fix: prototype a width-aware indentation cap while keeping semantic
+nesting and ordered markers; compare narrow, RTL and large-type examples.
+Effort: about half a day.
 
 ### Give local Recent a useful keyboard completion action
 
@@ -867,14 +949,19 @@ missing features — nice-to-have
 capabilities, and Settings has no selective cookie/storage clearing. Downloads
 also need verified downstream hooks; a long-press image-download slice has an
 open PR, so it is not repeated here. A general download manager or broad
-browser parity is not promised.
+browser parity is not promised, and no general save-to-device workflow exists
+yet: the PDF viewer is not one.
 
 Suggested fix: first verify the pinned permission/storage/download contracts.
 Give one document-attributed unsupported-permission explanation and Page Info
 detail without stale/hidden-tab spam or automatic grants. Any future prompt
 needs origin identity plus Android runtime authorization. Selective clearing
 must state what it actually removes; private browsing requires separately
-proven isolation/storage semantics. Effort: several days of engine/device work.
+proven isolation/storage semantics. A general download flow should first
+verify the pinned embedding's response/download boundary, then propose a
+bounded Android storage flow with an explicit destination choice, separate
+from PDF viewing and from replacing Servo. Effort: several days of
+engine/device work.
 
 ### Bring PDF text into Find, Reader and Hister
 
@@ -890,6 +977,18 @@ font work, retaining actual document identity, opt-in capture and exclusions.
 Use the owner-selected renderer, not a second HTML browser engine. Effort:
 several days with native/device PDF fixtures.
 
+### Offer a Reader article outline
+
+missing features — nice-to-have
+
+`ReaderView.kt` renders heading blocks with heading semantics but offers no
+outline, so a reader of a long article must scroll to rediscover sections even
+though heading blocks and lazy-list positions already exist.
+
+Suggested fix: offer a compact bottom outline sheet with accessible heading
+labels and jump-to-section actions; do not add permanent chrome. Effort: about
+one day.
+
 ### Preserve a document-keyed Reader reading seam
 
 novel, delightful, or quirky ideas worth trying — nice-to-have
@@ -903,7 +1002,10 @@ Reader size setting is not needed.
 
 Suggested fix: retain a bounded scroll seam keyed by tab and actual document,
 invalidating it on replacement rather than matching URLs. An optional
-block-based progress line must not claim exact page percentage, and any
+block-based progress line must not claim exact page percentage. A local,
+optional "time left" estimate could derive from the extracted text and reading
+position so a reader can judge whether to finish now; label it approximate and
+account for language differences, with no tracking or service request. Any
 reading-time estimate should not assume an English word rate. Effort: about
 one day with navigation/rotation tests.
 
@@ -921,6 +1023,18 @@ from normalized host. Keep letters and other non-color meaning, test contrast,
 and add address-chip tiles or real favicons only if they genuinely help.
 Never fetch icons through another network stack just for chrome. Effort:
 about half a day.
+
+### Explain why a Home tile appeared
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+Automatic frequent-site tiles and explicit pins share Home's surface, and
+`HomeLink.pinId` already records which is which. A brief "Pinned by you" /
+"From recent visits" explanation in the existing long-press menu would make the
+recommendations understandable without cluttering the grid.
+
+Suggested fix: use the existing `pinId` provenance in the options menu, keeping
+the main grid uncluttered and the ranking local. Effort: about half a day.
 
 ### Coalesce explicit offline-save completion and attention receipts
 
@@ -944,7 +1058,9 @@ novel, delightful, or quirky ideas worth trying — nice-to-have
 
 The existing Hister scope can support deliberate recall of a selected phrase,
 possibly an on this day/last week query if the deployed API actually supports
-it. The literary reference suits Combray, but it is not a reason for passive
+it. Reader view already lets a passage be selected and copied, so a
+source-attributed "copy quote with source" action is another deliberate
+keepsake shaped like the literary reference. It is not a reason for passive
 remote queries or a new AI service. The launcher history shortcut and Home's labeled Hister/Karakeep dock actions
 already exist: `BottomBar.HomeActions` is wired to the scopes in
 `BrowserScreen`, outside the `HomeScreen` body. The old proposal requiring
@@ -952,8 +1068,9 @@ another in-app Hister gesture is therefore obsolete.
 
 Suggested fix: prototype one explicit action against the established search
 contract, clearly distinguishing local, Hister and Kagi results. Date-aware
-queries must not invent server syntax. Effort: about one day for a bounded
-experiment.
+queries must not invent server syntax. A quote action must exclude credentials
+from shared links and must not automatically retain selected text. Effort:
+about one day for a bounded experiment.
 
 ### Add an optional richer save payload at the deliberate action
 
@@ -991,14 +1108,20 @@ A quiet approximate dwell line in Page Info, Reader-only Sepia/Solarized or
 E-Ink-like paper/serif palettes, coalesced quiet-reading feedback, a calmer
 Save-icon transition or a faint launcher glyph on empty Home are possible
 experiments, not confirmed
-requirements. The bottom bar already auto-hides and pull-to-reload already
-works; the old Zen Mode/pull-to-refresh backlog must not be reimplemented.
+requirements. Reader appearance is currently coupled to the chrome theme
+(`ReaderView.kt` reads the same `ThemeMode`), so a reader who prefers dark
+controls and warm light paper cannot choose that combination; the pine/ivory
+palette itself is coherent. The bottom bar already auto-hides and
+pull-to-reload already works; the old Zen Mode/pull-to-refresh backlog must not
+be reimplemented.
 
 Suggested fix: test one low-distraction idea at a time, derive dwell from
 existing focus transitions, respect reduced motion and keep pages untouched.
-Do not suppress actionable failures or change capture policy merely to make
-Reader quiet. Preserve the owner's no-pitch-black/no-Material-You-default
-choice. Effort: about half a day per experiment.
+An optional Reader-only paper/sepia/dark choice should reuse the existing
+semantic colors and pass contrast checks. Do not suppress actionable failures
+or change capture policy merely to make Reader quiet. Preserve the owner's
+no-pitch-black/no-Material-You-default choice. Effort: about half a day per
+experiment.
 
 ### Consider an explicit local offline reading copy
 
@@ -1075,6 +1198,23 @@ Fusion's archived results under
 and five selected accessibility cases without a staged engine, not a usable
 signed release or phone performance claim. Effort: about one day for the
 focused test additions.
+
+### Refresh the introductory status and architecture handoff
+
+general issues — nice-to-have
+
+`README.md:16` still says "All 18 device checks pass" and
+`docs/IMPLEMENTATION_PLAN.md:3` still dates the handoff 18/19 October 2026 and
+describes the engine as "patched Servo v0.6.0", while the plan body records
+28–171 emulator checks and the pinned downstream is now the `combray/0.7` line
+based on v0.7.0. New contributors meet old dates, a stale check count and
+Servo/Stop statements contradicted by `docs/ENGINE_SPIKE.md` and
+`docs/BUILDING.md`, which can lead to duplicate investigations or mistaken
+limitations.
+
+Suggested fix: give the introduction a current, dated summary and link to the
+detailed evidence rather than repeating volatile counts. Preserve limits on
+what was actually verified. Effort: about two hours.
 
 ### Expose automatic sites separately in the Home editor
 
