@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -77,12 +78,16 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
+    private fun newCoordinator(
+        navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
+        capture: CaptureSink? = null,
+    ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
+            capture = capture,
         ).also { it.start() }
     }
 
@@ -1631,6 +1636,31 @@ class BrowserCoordinatorTest {
         assertTrue("https://www.example.com/2" !in urls && "https://example.com/1" !in urls)
         // The open tab still shows its page.
         assertEquals("https://example.com/4", state().activeTab?.url)
+    }
+
+    @Test
+    fun forgettingASiteCancelsADueCaptureTimerForAPageWithoutAVisit() {
+        val sink = object : CaptureSink {
+            override suspend fun wantsCapture(url: String): Long? = 1L
+            override suspend fun captured(page: CapturedPage) = Unit
+            override suspend fun forgetHost(host: String, includeSubdomains: Boolean) = Unit
+            override suspend fun forgetUrl(url: String) = Unit
+        }
+        browser = newCoordinator(capture = sink)
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        // The page's visit is already gone (retention, an earlier forget), so the tab has no
+        // forgotten mark to fence a capture timer that is still due.
+        val tab = runBlocking { database.browser().openTabs() }.single()
+        runBlocking { database.browser().deleteVisit(tab.currentVisitId!!) }
+        idle()
+
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+        runBlocking { delay(2_500) }
+        idle()
+        assertTrue(engine.captures.isEmpty())
     }
 
     /**

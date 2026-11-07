@@ -532,6 +532,8 @@ class BrowserCoordinator(
             val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
             if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
+            // A due capture timer must not enqueue the page's text after the forget.
+            cancelCaptureTimers { it.currentPage?.address?.substringBefore('#') == visit.url.substringBefore('#') }
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
             capture?.forgetUrl(visit.url)
@@ -550,6 +552,13 @@ class BrowserCoordinator(
         val site = HostNames.normalize(host)?.let(HostNames::mergedSite) ?: return@submit
         val spellings = HostNames.siteSpellings(site)
         val subdomains = if (includeSubdomains) ".$site" else null
+        // A due capture timer for a page the tab still shows (one without a visit, or one whose
+        // visit is already gone) is not fenced by the page's forgotten mark: cancel it here.
+        cancelCaptureTimers { view ->
+            val address = view.currentPage?.address ?: return@cancelCaptureTimers false
+            val pageHost = HostNames.of(address) ?: return@cancelCaptureTimers false
+            spellings.any { HostNames.matches(pageHost, it, includeSubdomains) }
+        }
         database.withTransaction {
             dao.detachVisitsForHosts(spellings, subdomains)
             dao.deleteVisitsForHosts(spellings, subdomains)
@@ -1439,6 +1448,11 @@ class BrowserCoordinator(
     private fun closeView(view: LiveView) {
         engine.closeView(view.nativeTab)
         forgetView(view)
+    }
+
+    /** Cancels the capture timers of the views whose page matches [matches]. */
+    private fun cancelCaptureTimers(matches: (LiveView) -> Boolean) {
+        liveByTab.values.filter(matches).forEach { it.captureTimer?.cancel() }
     }
 
     /** Drops the bookkeeping for a renderer the engine no longer has. */
