@@ -291,6 +291,21 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun wwwMergesOnlyWhenItIsASpellingVariant() {
+        assertEquals("example.com", HostNames.mergedSite("www.example.com"))
+        assertEquals("sub.example.com", HostNames.mergedSite("www.sub.example.com"))
+        assertEquals("example.net", HostNames.mergedSite("example.net"))
+        // "www.com" names the site itself: stripping would leave the bare suffix "com".
+        assertEquals("www.com", HostNames.mergedSite("www.com"))
+        // A longer remainder still strips; "www.co.uk" cannot be a registered site anyway.
+        assertEquals("co.uk", HostNames.withoutWwwLabel("www.co.uk"))
+        // The www form of a dotless merged key is its own site, not a spelling of it.
+        assertEquals(listOf("example.com", "www.example.com"), HostNames.siteSpellings("example.com"))
+        assertEquals(listOf("com"), HostNames.siteSpellings("com"))
+        assertEquals(listOf("www.com", "www.www.com"), HostNames.siteSpellings("www.com"))
+    }
+
+    @Test
     fun onlyAnAuthorityRightAfterSchemeSlashesNamesAHost() {
         // A data: page chooses its own address: "://" inside it names no site.
         assertNull(HostNames.of("data:text/html,<!--://accounts.example.com/-->"))
