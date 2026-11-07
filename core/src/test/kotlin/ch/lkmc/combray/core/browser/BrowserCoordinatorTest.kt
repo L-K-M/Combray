@@ -150,6 +150,26 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aTitleEventPublishesWithTwoQueries() {
+        val reads = AtomicInteger()
+        database.close()
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ -> if (sql.trimStart().startsWith("SELECT", ignoreCase = true)) reads.incrementAndGet() }, Runnable::run)
+            .build()
+        browser = newCoordinator()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        idle()
+        reads.set(0)
+
+        engine.emit(EngineEvent.TitleChanged(engine.view(1), 10, "A title", Attribution.CURRENT))
+        idle()
+        // One joined active-tab query and one open-tab count; no per-field visit read for a live page.
+        assertEquals(2, reads.get())
+    }
+
+    @Test
     fun aLinkForAnotherAppFromTheShownPageIsHandedOnOnce() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
