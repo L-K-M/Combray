@@ -250,7 +250,10 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
    A burst queues stale work. Bound it, or conflate publish work, and name the
    overflow policy. Preserve ordered history, controls and capture results; never
    silently drop them. Flood diagnostics/title updates, then verify a user command
-   completes without corrupting accepted document identities.
+   completes without corrupting accepted document identities. Devin-1 review:
+   PR #212 caps each step at 30 s so one stalled step cannot freeze the queue
+   or grow it without bound; the channel itself stays unbounded, so this entry
+   remains open for the size policy.
 4. **Landed in #110:** one `Retention` instance flows from `AppGraph` to
    maintenance and the Settings history-days label. Exposing retention as a
    setting is the chrome section's configurable-retention proposal.
@@ -350,7 +353,11 @@ Files: `HisterIntegration.kt`, `OutboxDispatcher.kt`, `Outbox.kt`,
     refusals without a request, leaving the coordinator believing a dead view is
     on screen; and `pendingCaptures`/`pendingArticles` are removed only when a
     result arrives, so a crashed view leaks them for the process lifetime (fold
-    the last one into item 13's pruning when measured). `recent()`'s retention
+    the last one into item 13's pruning when measured). Devin-1 review
+    (27 October 2026): the last clause does not hold — the native side expires
+    every pending capture at its deadline and emits a result regardless of the
+    view's state, and the coordinator removes the entry on the first result,
+    so these maps stay bounded by in-flight requests. `recent()`'s retention
     window now slides while a sheet stays open (wave 2). Each is small and
     unit-testable like the PR #36 cases. File: `BrowserCoordinator.kt`. The narrow
     unscoped-STARTING failure path is already fixed on main by #65 (see
@@ -480,11 +487,19 @@ Do not claim a device reproduction for these. They are from the bridge and
    `NativeWindow` is dropped under EGL (the `mem::forget` guard exists for a
    reason). Keep or forget the old window on failed unbind. Files:
    `EngineSurfaceView.kt`, `native/src/engine.rs`, `native/src/jni_api.rs`.
+   Devin-1 review: PR #218 moves `SurfaceDestroyed`/`Shutdown` to an urgent
+   channel the engine drains before every batch, so the acknowledgement no
+   longer waits behind input backlog; the failed-unbind and surface-overwrite
+   halves remain open here.
 2. **Touch queue, coalescing and tail delivery.** Trace rapid two-pointer input
    through `EngineSurfaceView.kt`, `native/src/commands.rs` and `engine.rs`.
    The engine handles at most 64 commands per turn. If coalescing/throttling is
    needed, keep the newest move per pointer, flush final coordinates even without
-   another move, and preserve down/up/cancel order. Reproduce any claimed existing
+   another move, and preserve down/up/cancel order. Devin-1 review: do not merge
+   touch moves at all — `engine.touch` feeds the tap and touch-quiet trackers,
+   so dropping positions can turn a drag-out-and-back into a false tap; PR #218
+   instead deduplicates `Wake` per batch and gives lifecycle commands priority.
+   Reproduce any claimed existing
    throttle before adding a timer. Preserve the long-press timing fix already in
    `LongPress.kt`: measure from when the app handles the press, not a queued event's
    timestamp (documented device runs `controls7`/`browsing11`).
@@ -589,7 +604,10 @@ Do not claim a device reproduction for these. They are from the bridge and
     recomposition compiler report before and after.
 18. **Small query waste beyond the history index.** `releaseViewsBeyond` runs
     one `dao.tab()` per live view after `openTabs()`
-    (`BrowserCoordinator.releaseViewsBeyond`); `openTabs()` filters
+    (`BrowserCoordinator.releaseViewsBeyond`); Devin-1 review: the per-view
+    lookups are bounded by the live-view cap (~7 primary-key reads per
+    reconcile), not by open-tab count, so this clause is negligible — the
+    index and `observeOpenJobs` parts still stand; `openTabs()` filters
     `state='OPEN' ORDER BY lastFocusedAt` with no composite index; `observeOpenJobs` has no index on `service`;
     `deleteVisitsForHost` mixes `host =` with `substr(host, …)` and defeats its
     index; `HisterIntegration.eligible()` runs service + exclusion queries on
@@ -985,6 +1003,60 @@ device, and one emulator flow of the address sheet: type, receive a #63
 suggestion, open it, rotate with the IME up. Dark-mode screenshots of the
 finished palette (sheets, checkboxes, switches, chips) are still the missing
 visual evidence for the palette work.
+
+## Devin-1 review additions (27 October 2026)
+
+Implemented in open PRs, so not repeated here: the `www.`-host display
+collapse (#210), the wedged work-queue step (#212), and lifecycle commands
+queued behind input (#218). Verified non-issues, so future reviews need not
+re-chase them: `pendingCaptures`/`pendingArticles` are bounded by the native
+capture deadline (noted on correctness item 17); `releaseViewsBeyond`'s
+per-view lookups are capped by the live-view limit, not open tabs (noted on
+performance item 18); touch positions must not be coalesced because they feed
+the tap and scroll trackers (noted on performance item 2).
+
+### Home editor cannot curate automatic sites while six pins exist
+
+usability — nice-to-have
+
+`HomeLinks.state` caps the combined link list at `HOME_LINK_LIMIT`, and
+`HomeEditorSheet` derives its frequent-sites section from
+`state.links.filter { it.pinId == null }`. With six pins the section is
+empty, so the user cannot pin or hide an automatic site until a pin is
+first removed. Expose the uncapped ranked sites (or automatic links
+separately) in `HomeLinksState` for the editor.
+Files: `HomeLinks.kt`, `HomeEditorSheet.kt`.
+
+### File uploads stage with no progress or cancel
+
+usability — nice-to-have
+
+`PageControlDialog` answers the page's file request and copies the picked
+content URIs into app-private storage on the graph scope. A large file or a
+slow document provider leaves the page waiting with zero UI feedback; the
+user cannot tell working from hung and cannot cancel. Show a "Preparing
+upload…" affordance or bound the copy with a timeout.
+Files: `PageControlDialog.kt`, `UploadStaging.kt`.
+
+### `*.localhost` page host and media target rules disagree
+
+bugs — nice-to-have
+
+`MediaPolicy.isDevicePageHost` accepts only the exact name `localhost`,
+while `mayReachHost` treats `*.localhost` as device-scoped. A page actually
+served from a `*.localhost` name (where DNS resolves it) is not recognized
+as a device page, so its media to `localhost` targets is refused even
+though both ends are local. Align the two classifiers.
+File: `core/src/main/kotlin/ch/lkmc/combray/core/policy/MediaPolicy.kt`.
+
+### Hostless-page monograms all show the scheme letter
+
+visual issues — nice-to-have
+
+`Formatting.monogram` falls back to `displayHost`, whose hostless labels
+are scheme-derived (`data:`, `file:`, `about:blank`), so every `data:` page
+gets the same "D" tile in Recent. Use a neutral glyph for hostless pages.
+File: `app/src/main/kotlin/ch/lkmc/combray/ui/Formatting.kt`.
 
 ## How to check
 
