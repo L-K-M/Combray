@@ -62,7 +62,9 @@ class BrowserSettings(private val preferences: SharedPreferences) {
         values.firstOrNull { it.name == preferences.getString(key, null) } ?: default
 
     private fun <T : Enum<T>> write(key: String, state: MutableStateFlow<T>, choice: T) {
-        preferences.edit().putString(key, choice.name).apply()
+        // commit(), not apply(): the write is tiny, and a process death right after the tap must
+        // not silently revert the choice the user just made.
+        preferences.edit().putString(key, choice.name).commit()
         state.value = choice
     }
 

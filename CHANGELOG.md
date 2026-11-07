@@ -273,6 +273,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A settings choice you just made survives the app being killed at once.
+  The choice was written asynchronously, so a fast death could revert it.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
