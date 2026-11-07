@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -56,6 +57,10 @@ private sealed interface BookmarksUi {
 fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by integrations.karakeepService.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // A query seeded from Recent's local filter is not the user's text: it is sent only
+    // after the user types in this field or submits it. A blank query is no text at all and
+    // loads the newest bookmarks.
+    var typed by rememberSaveable { mutableStateOf(false) }
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
@@ -67,12 +72,13 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     // key (a new main address, a new alternate or a new key). Not the whole row: choosing a list
     // or dropping the alternate rewrites it without changing what a read returns, and must not
     // reset the loaded pages.
-    LaunchedEffect(query, service?.fingerprint, service?.generation) {
+    LaunchedEffect(query, service?.fingerprint, service?.generation, typed) {
         val mine = ++generation
         ui = BookmarksUi.Idle
         bookmarks = emptyList()
         nextCursor = null
         if (service == null) return@LaunchedEffect
+        if (!shouldSendQuery(query, typed)) return@LaunchedEffect
 
         // The newest bookmarks show at once; a search waits for a pause in typing.
         if (query.isNotBlank()) delay(SEARCH_DEBOUNCE_MS)
@@ -91,11 +97,12 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; typed = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.karakeep_search_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { typed = true }),
             modifier = Modifier.fillMaxWidth(),
         )
         if (ui == BookmarksUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
