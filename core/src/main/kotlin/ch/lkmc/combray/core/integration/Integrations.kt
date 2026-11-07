@@ -142,12 +142,8 @@ class Integrations(
     /** Keystore work stays off the main thread. */
     suspend fun hasCredential(name: SecretName, service: ServiceEntity): Boolean = credentials.read(name, service.fingerprint) != null
 
-    /** The address a queued save is for, for status lists. */
-    fun jobUrl(job: OutboxJobEntity): String? = when (job.kind) {
-        JobKind.KARAKEEP_SAVE -> runCatching { json.decodeFromString(SavePayload.serializer(), job.payload).url }.getOrNull()
-        JobKind.HISTER_ADD -> runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
-        JobKind.SITE_REPORT -> runCatching { json.decodeFromString(ReportPayload.serializer(), job.payload).url }.getOrNull()
-    }
+    /** The address a queued job is for, for status lists. */
+    fun jobUrl(job: OutboxJobEntity): String? = payloadUrl(job.payload)
 
     /**
      * Saves the Karakeep root, an optional alternate address and, if given, a new API key. Any
@@ -390,5 +386,22 @@ class Integrations(
         val KARAKEEP_SUFFIXES = listOf("/api/v1", "/api")
 
         private val json = Json { ignoreUnknownKeys = true }
+
+        /**
+         * The top-level `url` member of a job payload, read without decoding the whole document:
+         * a capture's text can be 256 KiB and Settings reads this once per row in composition. The
+         * lookbehind keeps a `"url":` inside a page's own title or text from posing as the
+         * member. Null when there is no such member or the payload is malformed.
+         */
+        private val URL_MEMBER = Regex("""(?<=[{,])\s*"url"\s*:\s*"((?:[^"\\]|\\.)*)""")
+
+        private fun payloadUrl(payload: String): String? {
+            val captured = URL_MEMBER.find(payload)?.groupValues?.get(1) ?: return null
+            return try {
+                json.decodeFromString<String>("\"$captured\"")
+            } catch (malformed: IllegalArgumentException) {
+                null
+            }
+        }
     }
 }
