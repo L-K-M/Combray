@@ -111,9 +111,9 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     private fun file(name: SecretName) = File(directory, "${name.name}.bin")
 
-    private fun key(): SecretKey {
+    private fun key(): SecretKey = synchronized(keyCreationLock) {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return@synchronized it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
         generator.init(
             KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -122,10 +122,13 @@ class KeystoreSecretStore(context: Context) : SecretStore {
                 .setKeySize(KEY_BITS)
                 .build(),
         )
-        return generator.generateKey()
+        generator.generateKey()
     }
 
     private companion object {
+        // Every service and store instance uses this alias. Check and create it atomically,
+        // but do not cache it: key loss must still make old ciphertext unreadable.
+        val keyCreationLock = Any()
         const val LOG_TAG = "CombraySecrets"
         const val KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "combray-integration-secrets"
