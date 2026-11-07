@@ -21,6 +21,8 @@ class FakeEngine : EnginePort {
 
     private var listener: ((EngineEvent) -> Unit)? = null
     private var nextGeneration = 1L
+    var startCount = 0
+        private set
     private val generations = HashMap<Long, Long>()
     val created = mutableListOf<Pair<Long, String>>()
     val selected = mutableListOf<Long>()
@@ -42,6 +44,7 @@ class FakeEngine : EnginePort {
     val appearances = mutableListOf<Pair<Appearance, Int>>()
 
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
+        startCount++
         this.listener = listener
         return EngineStart.STARTED
     }

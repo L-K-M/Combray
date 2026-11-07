@@ -105,6 +105,9 @@ class BrowserCoordinator(
     private var selectedNative: Long? = null
     private var engineReady = false
 
+    /** Guards [start]: a second call must not start a second work-queue consumer. */
+    @Volatile private var started = false
+
     /** The `User-Agent` Servo sends (`engine_ready`), for the media player's own requests. */
     private var userAgent: String? = null
 
@@ -146,16 +149,24 @@ class BrowserCoordinator(
 
     /**
      * Starts the engine (synchronously, so a surface created right after this can bind) and the
-     * work queue, then restores the session. Call once per process.
+     * work queue, then restores the session. Call once per process; a second call is a no-op.
      */
     fun start() {
+        synchronized(this) {
+            if (started) return
+            started = true
+        }
         startEngine()
         scope.launch {
             for (job in work) {
                 try {
                     job()
-                } catch (failure: Exception) {
-                    // A failed step must not stop the queue; it is a bug worth surfacing.
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    // A failed step must not stop the queue; it is a bug worth surfacing. An
+                    // Error (an OOM, a StackOverflowError from article JSON) is a bug too: the
+                    // alternative is a browser that silently stops processing commands forever.
                     Log.e(LOG_TAG, "browser state update failed", failure)
                     // Restoring ends even if it was this step that failed: show what there is, not a blank page.
                     state.update {
@@ -808,16 +819,25 @@ class BrowserCoordinator(
                 keyboardOwner = null
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
-            is EngineEvent.Crashed -> view(event.view)?.let {
-                Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
-                it.crashed = true
-                it.loading = false
-                it.awaitingCommit = false
-                it.pendingStop = null
-                it.controls.clear()
-                it.dialogDocument = null
-                it.dialogCount = 0
-                it.dialogsBlocked = false
+            is EngineEvent.Crashed -> {
+                // A crashed view's requests can never be answered. Drop them here, not only when
+                // a result arrives, so they cannot outlive the view or match a recreated one.
+                pendingCaptures.entries.removeAll { it.value.view.tab == event.view.tab }
+                pendingArticles.entries.removeAll { it.value.view.tab == event.view.tab }
+                val crashed = view(event.view)
+                // Reader view was waiting on that page: say so now, not when a result never comes.
+                if (crashed != null && reader?.tabId == crashed.tabId) reader = ReaderState.Unavailable(crashed.tabId)
+                crashed?.let {
+                    Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
+                    it.crashed = true
+                    it.loading = false
+                    it.awaitingCommit = false
+                    it.pendingStop = null
+                    it.controls.clear()
+                    it.dialogDocument = null
+                    it.dialogCount = 0
+                    it.dialogsBlocked = false
+                }
             }
             is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }

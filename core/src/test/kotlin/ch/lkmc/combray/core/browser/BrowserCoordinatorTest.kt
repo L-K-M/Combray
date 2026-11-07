@@ -15,6 +15,8 @@ import ch.lkmc.combray.core.integration.SensitiveUrls
 import ch.lkmc.combray.core.policy.HostNames
 import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
+import ch.lkmc.combray.engine.CaptureStatus
+import ch.lkmc.combray.engine.CapturedContent
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.LoadPhase
@@ -1918,6 +1920,48 @@ class BrowserCoordinatorTest {
         assertEquals("https://a.test/", state().activeTab?.url)
         // The user did nothing yet: the notice is about the tabs, not "the last action".
         assertEquals(Notice.Problem("Your open tabs could not be fully restored."), state().notice)
+    }
+
+    @Test
+    fun startingTwiceStartsOneEngineAndKeepsOneWorkQueue() {
+        assertEquals(1, engine.startCount)
+        browser.start()
+        assertEquals(1, engine.startCount)
+        // The single queue still serves commands.
+        browser.newTab(); idle()
+        assertTrue(state().openTabCount >= 1)
+    }
+
+    @Test
+    fun aLateArticleResultAfterACrashDoesNotReplaceTheReaderState() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openReader(); idle()
+        assertTrue(state().reader is ReaderState.Loading)
+        val capture = engine.articleCaptures.single().second
+
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        engine.emit(
+            EngineEvent.CaptureResult(
+                capture,
+                engine.view(1),
+                10,
+                CaptureStatus.CAPTURED,
+                CapturedContent(
+                    "https://a.test/",
+                    "A",
+                    """{"blocks":[{"k":"p","s":[["text"]]}]}""",
+                    10,
+                    "sha",
+                    false,
+                ),
+                null,
+            ),
+        ); idle()
+
+        // The pending article was dropped with the crashed view, so the late result changes nothing.
+        assertTrue(state().reader is ReaderState.Unavailable)
     }
 
     @Test
