@@ -62,7 +62,10 @@ class BrowserSettings(private val preferences: SharedPreferences) {
         values.firstOrNull { it.name == preferences.getString(key, null) } ?: default
 
     private fun <T : Enum<T>> write(key: String, state: MutableStateFlow<T>, choice: T) {
-        preferences.edit().putString(key, choice.name).apply()
+        // commit(), not apply(): Android can kill the process in the seconds after a tap, and
+        // a theme or text-size choice that never reached disk silently reverts on the next
+        // launch. These writes are a few bytes, so the blocking cost is negligible.
+        preferences.edit().putString(key, choice.name).commit()
         state.value = choice
     }
 
