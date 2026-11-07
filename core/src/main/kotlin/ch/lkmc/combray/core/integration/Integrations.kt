@@ -24,7 +24,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -85,9 +84,6 @@ internal fun isHeaderSafe(secret: String) = secret.all { it in ' '..'~' }
 /** Lists read from the server with [fingerprint]: a choice from them applies to that server only. */
 data class KarakeepLists(val fingerprint: String, val read: KarakeepRead<List<KarakeepList>>)
 
-@Serializable
-internal data class SavePayload(val url: String, val title: String? = null)
-
 /**
  * Integration settings, credentials and actions for the UI. Saves snapshot the page's address
  * and title when the user taps, and stay bound to the destination configured at that moment.
@@ -107,6 +103,7 @@ class Integrations(
 ) {
     private val dao = database.integrations()
     private val routes = ServiceRoutes(transport)
+    private val saves = KarakeepSaveDelivery(database, routes, clock)
 
     /** Configuration changes and dispatch read/write the service row and its secret together. */
     private val karakeepConfig = Mutex()
@@ -269,7 +266,7 @@ class Integrations(
         // matters when a request would otherwise be queued.
         val service = dao.service(ServiceKind.KARAKEEP) ?: return SaveRequest.NotConfigured
         if (SensitiveUrls.looksSensitive(url)) return SaveRequest.Sensitive
-        val payload = json.encodeToString(SavePayload.serializer(), SavePayload(url, title))
+        val payload = saves.payloadForSave(url, title, service)
         val enqueued = outbox.enqueue(JobKind.KARAKEEP_SAVE, service, Binding.CURRENT, dedupeKey = url, payload = payload, supersede = false)
         kick()
         return when (enqueued) {
@@ -357,23 +354,7 @@ class Integrations(
         if (service == null || service.fingerprint != job.fingerprint) return DispatchResult.Cancelled("destination_changed")
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
         key ?: return DispatchResult.AuthRequired("credential_missing")
-        val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        val created = routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
-
-        // The list is the one chosen when sending, not when tapping: after its list was deleted,
-        // a save can be retried into another one. Creating again finds the same bookmark (200).
-        val listId = service.listId ?: return created
-        if (created !is DispatchResult.Done) return created
-        // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
-        val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
-        val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
-        return when {
-            added is DispatchResult.Done -> created
-            // The bookmark was created, so this attempt reached the server: it counts toward the
-            // limit, and the save is not shown as waiting for a server that answered.
-            added is DispatchResult.Retry && added.delivery == Delivery.NOT_SENT -> added.copy(delivery = Delivery.MAY_HAVE_ARRIVED)
-            else -> added
-        }
+        return saves.dispatch(job, service, key)
     }
 
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {
@@ -384,7 +365,6 @@ class Integrations(
 
     companion object {
         private const val LOG_TAG = "CombrayIntegrations"
-        private const val BOOKMARK_ID_MISSING = "bookmark_id_missing"
 
         /** API suffixes users paste with the root; removed so endpoints are not doubled. */
         val KARAKEEP_SUFFIXES = listOf("/api/v1", "/api")
