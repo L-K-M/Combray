@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Sharing a very large text into Combray does less work before the address
+  editor opens: the text is read up to its first few thousand characters
+  instead of being copied and normalized in full on the screen's thread.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

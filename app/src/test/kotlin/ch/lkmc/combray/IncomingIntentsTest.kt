@@ -15,6 +15,20 @@ class IncomingIntentsTest {
         IncomingIntents.interpret(Intent.ACTION_PROCESS_TEXT, null) { if (it == Intent.EXTRA_PROCESS_TEXT) text else null }
 
     @Test
+    fun aMultiMegabyteShareStillYieldsTheBoundedLine() {
+        val text = "madeleine " + "x".repeat(30_000_000)
+        val edit = send(text) as LaunchRequest.EditNewTab
+        assertEquals(2_000, edit.text.length)
+        assertTrue(edit.text.startsWith("madeleine x"))
+    }
+
+    @Test
+    fun megabytesOfWhitespaceAroundShortTextDoNotSwallowIt() {
+        val text = " ".repeat(5_000_000) + "madeleine" + " ".repeat(5_000_000)
+        assertEquals(LaunchRequest.EditNewTab("madeleine"), send(text))
+    }
+
+    @Test
     fun aSharedLinkInASentenceOpensWithoutTheFullStop() {
         assertEquals(Incoming.Open("http://localhost:8765/a.html"), send("see http://localhost:8765/a.html."))
     }

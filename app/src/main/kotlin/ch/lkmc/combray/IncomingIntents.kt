@@ -51,6 +51,9 @@ object IncomingIntents {
     // The longest link taken from shared text, as in the engine (native MAX_URL_CHARS).
     private const val MAX_LINK_LENGTH = 32_768
 
+    // Twice the longest line oneLine can make: past it, normalizing cannot change the result.
+    private const val MAX_NORMALIZED_LENGTH = 2 * MAX_TEXT_LENGTH
+
     private val WEB_ADDRESS = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
     private val WHITESPACE = Regex("\\s+")
 
@@ -170,14 +173,32 @@ object IncomingIntents {
 
     private fun editNewTab(text: String): LaunchRequest.EditNewTab? = oneLine(text)?.let { LaunchRequest.EditNewTab(it) }
 
-    // Whether oneLine dropped the end of [text] to make [line].
-    private fun isCut(text: String, line: String) = normalized(text).length > line.length
+    // Whether oneLine dropped the end of [text] to make [line]. Only whitespace can hide past
+    // [MAX_NORMALIZED_LENGTH] (both ends are trimmed first), so a share is never normalized whole.
+    private fun isCut(text: String, line: String): Boolean {
+        val trimmed = trimmed(text)
+        return trimmed.length > MAX_NORMALIZED_LENGTH || normalized(trimmed).length > line.length
+    }
 
     private fun normalized(text: String) = text.trim().replace(WHITESPACE, " ")
 
+    /** [text] without the whitespace at both ends; the scans stop at the first content character. */
+    private fun trimmed(text: String) = text.trimStart().trimEnd()
+
+    /** [text] cut to [MAX_NORMALIZED_LENGTH], not between the two halves of a surrogate pair. */
+    private fun bounded(text: String): String {
+        if (text.length <= MAX_NORMALIZED_LENGTH) return text
+        val end = if (text[MAX_NORMALIZED_LENGTH - 1].isHighSurrogate()) MAX_NORMALIZED_LENGTH - 1 else MAX_NORMALIZED_LENGTH
+        return text.substring(0, end)
+    }
+
     /** [text] as one bounded line, or null when it is blank. */
     private fun oneLine(text: String): String? {
-        val line = normalized(text)
+        // Bounded before normalizing: this runs on the main thread of an exported entry point,
+        // and another app can share megabytes of text. The line is cut at MAX_TEXT_LENGTH well
+        // inside the bound, so only a whitespace run crossing it can differ, which the trimming
+        // above already removed at both ends.
+        val line = normalized(bounded(trimmed(text)))
         if (line.isEmpty()) return null
         if (line.length <= MAX_TEXT_LENGTH) return line
         // Not between the two halves of a surrogate pair.
