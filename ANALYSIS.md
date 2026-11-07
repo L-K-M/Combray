@@ -68,6 +68,17 @@ session could not build or verify. Its remaining findings are folded into the
 sections below. It ran the Kotlin unit/lint gates, `check_docs.py`,
 `git diff --check` and the 169 Rust host tests; no native build, device check
 or personal-service test.
+The 7 November 2026 mimo-1 review's blocking and important findings are
+implemented in open PRs #240, #255, #266, #276, #278, #283, #284 and #287,
+and in concurrent sessions' open PRs #260, #264, #273 and #275, and are
+omitted per the rule above. Three important findings have no PR and are
+recorded as entries below: the external-app link activation gap, the
+accumulating sign-in controls and the leave-page question's input gaps. It
+withdrew its outbox-receipt finding after the queue's own tests showed the
+retry-the-cycle behavior is deliberate (see the outbox completion entry).
+Its remaining findings are folded into the sections below. It ran the Kotlin
+unit/lint gates, `check_docs.py` and `git diff --check`; no native build,
+device check or personal-service test.
 
 ## Still open
 
@@ -128,7 +139,10 @@ recently current document on the next commit; a robust fix is a downstream
 signal exposing the load's pipeline. Test link, redirect and same-origin
 navigations to media pages with the document and generation guards. Effort:
 two to four days app-side, longer with a downstream patch. Found in the
-mimo-2 review's engine slice; not implemented in its session.
+mimo-2 review's engine slice; not implemented in its session. The mimo-1
+review adds the sibling gap: `GoBack`/`GoForward` (`engine.rs:616-625`) never
+start a media hold while `navigate`, `reload` and `create_tab` do, so a
+restored page's first media can go the same way.
 
 ### Use engine load failures rather than page titles
 
@@ -383,6 +397,56 @@ personal history to validate this. Establish actual service versions, path
 prefixes, TLS/network reachability and intended Hister user scope. Effort:
 several days once device/configuration access is available.
 
+### Tie external-app link activation to its document
+
+bugs — important
+
+`native/src/engine.rs:1510-1519` (`take_activation`, call site `:2258`)
+discards the document its activation was recorded for, while the sibling
+pop-up path (`take_document_activation`, `:1525-1531`) requires it "as
+browsers tie activation to the document". A tapped link whose destination
+then navigates on to `mailto:`, `tel:` or `intent:` (script or meta refresh)
+can hand the link to another app with no tap on the new document;
+`page_navigation`'s Allow branch never consumes the activation, so a stale
+tap survives into the next document.
+
+Suggested fix: require the recorded activation's document to be the view's
+current document in `take_activation`, mirroring `take_document_activation`,
+and cover link-then-redirect and link-then-refresh to external schemes in the
+delegate's own tests where possible. Effort: minutes of code plus the native
+build and device verification this session could not run.
+
+### Bound unanswered sign-in controls
+
+bugs — important
+
+`native/src/engine.rs:2283-2315` gives every HTTP 401/407 `SignIn` control a
+slot with no deadline (`ControlHandle::deadline` returns `None`, `:401`) and
+no cap, and the new-document cleanup (`:2627-2634`) drops only
+`LeavePage`/`ContextMenu`. Servo emits `RequestAuthentication` for every
+navigation-mode load, iframes included, so a page with many auth-protected
+frames queues a sign-in dialog per frame, growing the engine's `page_controls`
+and the app's `view.controls` until the tab closes. The coordinator's dialog
+cap covers only alert/confirm/prompt.
+
+Suggested fix: give `SignIn` the `LeavePage` treatment — a deadline and/or a
+per-view cap with auto-dismiss — and hide stale ones on `NewDocument`. Effort:
+about an hour of native code plus the device verification its session lacked.
+
+### Guard unsaved form text the leave-page question misses
+
+missing features — important
+
+The pinned engine's `beforeunload` question covers only navigations the page
+starts (the plan's leave-page row): a typed address, Back/Forward and closing
+a tab still lose unsaved form text, so composing in a web editor is unsafe
+against the app's own navigation. Nothing honest app-side can close the gap.
+
+Suggested fix: pursue the engine change in the downstream checkout (ask on
+embedder-started navigations too, or expose an "unsaved form" hint the app
+acts on) and keep the gap documented until device evidence says otherwise.
+Effort: an engine change, days plus a device run.
+
 ## Nice-to-have
 
 ### Reconcile stale milestone and toolchain summaries
@@ -498,7 +562,12 @@ side effect that throws rolls back an already-applied job state and the
 dispatcher retries it. `Integrations.recordDone` now decodes its payload
 defensively in open PR #219, which closes the known throw path, but the
 transaction boundary remains: any future callback that writes to the database
-or throws will still couple its fate to the finish transaction.
+or throws will still couple its fate to the finish transaction. The mimo-1
+review withdrew the stronger version of this finding: `OutboxTest`'s
+`oneBrokenJobCycleDoesNotStrandTheRestOrTheWakeup` deliberately locks the
+rollback-retry behavior, and `dispatchSave`/`recordDone` decode the same
+payload, so the known decode throw cannot follow a successful send. What
+remains is exactly the boundary above.
 
 Suggested fix: run `onDone` after the transaction commits, or document that
 callbacks must be idempotent and non-throwing. Test a throwing callback and a
@@ -1050,7 +1119,10 @@ capabilities, and Settings has no selective cookie/storage clearing. Downloads
 also need verified downstream hooks; a long-press image-download slice has an
 open PR, so it is not repeated here. A general download manager or broad
 browser parity is not promised, and no general save-to-device workflow exists
-yet: the PDF viewer is not one.
+yet: the PDF viewer is not one. Until a hook exists a download link is worse
+than absent (mimo-1 review): the request never commits and the pending-load
+line runs out its 30-second timeout (`BrowserCoordinator.awaitCommit`) and
+vanishes with no message, so the tap appears to do nothing.
 
 Suggested fix: first verify the pinned permission/storage/download contracts.
 Give one document-attributed unsupported-permission explanation and Page Info
@@ -1768,7 +1840,9 @@ per-frame recomposition shape.
 Suggested fix: isolate the reads (a `State` read only inside
 `ScrollEdgeButton`), throttle reporting to direction changes, or derive with
 `derivedStateOf`; validate with a layout-inspector trace on a device. Effort:
-one to two days.
+one to two days. The reader-block rebuild half is fixed in open PR #287
+(stable link callback, remembered block strings); the general half stays
+here.
 
 ### Parse capture results off the engine thread
 
@@ -1877,3 +1951,65 @@ without any remote data.
 Suggested fix: store the preference locally (host-merged like pins), apply it
 on committed documents through the existing reader invalidation rules, and let
 the editor undo it. Effort: about a day.
+
+### Keep the address suggestion list composed during its debounce
+
+visual issues and layout problems — nice-to-have
+
+`AddressSheet.kt:138-148,189-190` empties the suggestion list on every
+keystroke while the 150 ms pause runs and composes the list only when it has
+rows, so the field's rows vanish and return while typing and the rows below
+jump down and back up.
+
+Suggested fix: keep the previous rows composed under the loading state, or
+reserve the list's height across the pause. Effort: an hour or two.
+
+### Stop a failed configure from discarding in-flight captures
+
+bugs — nice-to-have
+
+`HisterIntegration.configure` calls `bumpPolicy()` unconditionally
+(`HisterIntegration.kt:128`), so a save attempt that fails validation
+(`MissingCredential`, `CredentialNotStored` — service row and token untouched)
+still invalidates the policy generation and `captured()` drops every capture
+in flight: page text is silently lost because the user opened Settings and
+tapped Save without entering a token.
+
+Suggested fix: bump the policy only when the configure result changed the
+destination (`Configured.Saved`). Effort: minutes plus a test.
+
+### Remember the text size chosen per site
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+More › Text size zooms pages globally (the pinned embedding exposes
+`set_page_zoom`); a reading-first browser could remember the size chosen per
+site and restore it when one of that site's pages commits, so a small-print
+forum reopens at the size last used. Local and private.
+
+Suggested fix: store per-site zoom next to Home pins, apply through the
+existing page-zoom plumbing on commit, and let the editor undo it. Effort:
+about a day.
+
+### Make Forward a gesture, not only a menu row
+
+usability: fast, convenient, clear — nice-to-have
+
+Forward is a routine navigation action but appears only in More
+(`ToolbarMenu.kt:252`), while Close tab holds a bottom-bar slot;
+back-and-forth browsing pays two taps per forward.
+
+Suggested fix: long-press Back for Forward (the bar already teaches
+long-press on Recent) with a haptic tick, keeping Forward in More as the
+visible route. Effort: hours.
+
+### Add a haptic tick at the reload-pull threshold
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+Sibling of the tab-swipe tick above: one light tick when the pull-to-reload
+gesture crosses its threshold would confirm the pending reload without
+looking.
+
+Suggested fix: vibrate once on threshold crossing in the pull tracking,
+respecting the system haptic setting. Effort: an hour.
