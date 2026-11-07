@@ -44,8 +44,6 @@ import kotlinx.coroutines.launch
 private sealed interface SearchUi {
     data object Idle : SearchUi
 
-    data object Loading : SearchUi
-
     data class Answer(val result: HisterSearch) : SearchUi
 }
 
@@ -61,28 +59,37 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
     var nextPage by remember { mutableStateOf<String?>(null) }
     var loadingMore by remember { mutableStateOf(false) }
+    // True while a search is in flight: the last answer stays on screen with the progress line,
+    // so typing does not clear the list the user is still reading.
+    var searching by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(query, service) {
         val mine = ++generation
-        // The last answer belongs to the last query: no stale count while the next one waits.
-        ui = SearchUi.Idle
-        hits = emptyList()
-        nextPage = null
-        loadingMore = false
+        // Nothing to search: a blank query or a removed service leaves no rows.
         if (service == null || query.isBlank()) {
             ui = SearchUi.Idle
+            hits = emptyList()
+            nextPage = null
+            loadingMore = false
+            searching = false
             return@LaunchedEffect
         }
+        searching = true
         delay(SEARCH_DEBOUNCE_MS)
-        ui = SearchUi.Loading
-        val answer = hister.search(query.trim()) ?: return@LaunchedEffect
+        val answer = hister.search(query.trim())
         if (mine != generation) return@LaunchedEffect
+        searching = false
+        // Null: the service went away meanwhile; its removal restarts this effect.
+        if (answer == null) return@LaunchedEffect
         ui = SearchUi.Answer(answer)
         if (answer is HisterSearch.Results) {
             hits = answer.hits
             nextPage = answer.nextPage
+        } else {
+            hits = emptyList()
+            nextPage = null
         }
     }
 
@@ -96,7 +103,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (ui == SearchUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        if (searching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
         val notice = when {
             service == null -> stringResource(R.string.search_all_not_configured)
             else -> when (val state = ui) {
@@ -158,17 +165,20 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
                         val mine = generation
                         loadingMore = true
                         scope.launch {
-                            val more = hister.search(query.trim(), page)
-                            // A newer query owns the list and the loading state now.
-                            if (mine != generation) return@launch
-                            loadingMore = false
-                            // Null: the service went away meanwhile; its removal restarts the search.
-                            more ?: return@launch
-                            // A failed page keeps the rows shown and says why above them.
-                            ui = SearchUi.Answer(more)
-                            if (more !is HisterSearch.Results) return@launch
-                            hits = hits + more.hits.filter { hit -> hits.none { it.url == hit.url } }
-                            nextPage = more.nextPage
+                            try {
+                                val more = hister.search(query.trim(), page)
+                                // A newer query owns the list and the loading state now.
+                                if (mine != generation) return@launch
+                                // Null: the service went away meanwhile; its removal restarts the search.
+                                more ?: return@launch
+                                // A failed page keeps the rows shown and says why above them.
+                                ui = SearchUi.Answer(more)
+                                if (more !is HisterSearch.Results) return@launch
+                                hits = hits + more.hits.filter { hit -> hits.none { it.url == hit.url } }
+                                nextPage = more.nextPage
+                            } finally {
+                                if (mine == generation) loadingMore = false
+                            }
                         }
                     },
                     enabled = !loadingMore,

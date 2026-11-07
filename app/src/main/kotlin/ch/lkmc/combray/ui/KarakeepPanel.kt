@@ -43,8 +43,6 @@ import kotlinx.coroutines.launch
 private sealed interface BookmarksUi {
     data object Idle : BookmarksUi
 
-    data object Loading : BookmarksUi
-
     data class Answer(val read: KarakeepRead<KarakeepPage>) : BookmarksUi
 }
 
@@ -59,6 +57,9 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     var ui by remember { mutableStateOf<BookmarksUi>(BookmarksUi.Idle) }
     var bookmarks by remember { mutableStateOf<List<KarakeepBookmark>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
+    // True while a load is in flight: the last answer stays on screen with the progress line,
+    // so typing does not clear the list the user is still reading.
+    var searching by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -69,22 +70,32 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
     // reset the loaded pages.
     LaunchedEffect(query, service?.fingerprint, service?.generation) {
         val mine = ++generation
-        ui = BookmarksUi.Idle
-        bookmarks = emptyList()
-        nextCursor = null
-        if (service == null) return@LaunchedEffect
-
+        if (service == null) {
+            ui = BookmarksUi.Idle
+            bookmarks = emptyList()
+            nextCursor = null
+            searching = false
+            return@LaunchedEffect
+        }
+        searching = true
         // The newest bookmarks show at once; a search waits for a pause in typing.
         if (query.isNotBlank()) delay(SEARCH_DEBOUNCE_MS)
-        ui = BookmarksUi.Loading
         val answer = integrations.karakeepBookmarks(query)
         if (mine != generation) return@LaunchedEffect
+        searching = false
         // Null: the service went away meanwhile; its removal restarts this effect.
-        ui = answer?.let { BookmarksUi.Answer(it) } ?: BookmarksUi.Idle
+        if (answer == null) {
+            ui = BookmarksUi.Idle
+            return@LaunchedEffect
+        }
+        ui = BookmarksUi.Answer(answer)
         if (answer is KarakeepRead.Ok) {
             // Ids key the rows below; a repeat from the server must not crash the list.
             bookmarks = answer.value.bookmarks.distinctBy { it.id }
             nextCursor = answer.value.nextCursor
+        } else {
+            bookmarks = emptyList()
+            nextCursor = null
         }
     }
 
@@ -98,7 +109,7 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (ui == BookmarksUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        if (searching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
         val answer = (ui as? BookmarksUi.Answer)?.read
         val notice = when {
             service == null -> stringResource(R.string.karakeep_search_not_configured)
