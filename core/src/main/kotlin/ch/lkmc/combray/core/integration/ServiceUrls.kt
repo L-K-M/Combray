@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.integration
 
+import java.net.IDN
 import java.net.URI
 import java.net.URISyntaxException
 import java.security.MessageDigest
@@ -42,17 +43,50 @@ object ServiceUrls {
         } catch (malformed: URISyntaxException) {
             return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         }
-        val host = uri.host?.lowercase() ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
-        if (uri.scheme?.lowercase() !in WEB_SCHEMES) return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
-        if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) {
+        val scheme = uri.scheme?.lowercase() ?: return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
+        if (scheme !in WEB_SCHEMES) return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
+        val authority = uri.rawAuthority ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
+        // java.net.URI does not read a non-ASCII (IDN) or trailing-dot authority as server-based:
+        // its host, userinfo and port then come back null even when they are present. The '@' is
+        // checked here for the same reason, so credentials cannot hide behind an IDN host.
+        if (uri.rawUserInfo != null || '@' in authority || uri.rawQuery != null || uri.rawFragment != null) {
             return ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY)
         }
+        val parsed = hostAndPort(authority) ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         var path = (uri.rawPath ?: "").trimEnd('/')
         apiSuffixes.firstOrNull { path.endsWith(it) }?.let { path = path.removeSuffix(it).trimEnd('/') }
-        val port = if (uri.port >= 0) ":${uri.port}" else ""
-        // java.net.URI already returns IPv6 literals in brackets.
-        val hostPart = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
-        return ServiceRoot.Valid("${uri.scheme.lowercase()}://$hostPart$port$path")
+        // A default port and a trailing dot are the same server as without them, so they do not
+        // change the destination identity or force queued work to be re-bound.
+        val port = parsed.port?.takeUnless { it == defaultPort(scheme) }
+        return ServiceRoot.Valid("$scheme://${parsed.host}${port?.let { ":$it" } ?: ""}$path")
+    }
+
+    /** The authority's ASCII host (IPv6 in brackets) and optional port, or null when unusable. */
+    private data class HostAndPort(val host: String, val port: Int?)
+
+    private fun hostAndPort(authority: String): HostAndPort? {
+        if (authority.startsWith("[")) {
+            val end = authority.indexOf(']')
+            if (end < 0) return null
+            val host = authority.substring(0, end + 1).lowercase()
+            val port = authority.substring(end + 1).takeIf { it.startsWith(":") }
+                ?.removePrefix(":")?.toIntOrNull()
+            return HostAndPort(host, port)
+        }
+        val written = authority.substringBefore(':').trimEnd('.')
+        if (written.isEmpty()) return null
+        val host = try {
+            IDN.toASCII(written, IDN.ALLOW_UNASSIGNED).lowercase()
+        } catch (invalid: IllegalArgumentException) {
+            return null
+        }
+        val port = authority.substringAfter(':', "").takeIf { it.isNotEmpty() }?.toIntOrNull()
+        return HostAndPort(host, port)
+    }
+
+    private fun defaultPort(scheme: String) = when (scheme) {
+        "https" -> 443
+        else -> 80
     }
 
     /** Checks both fields; a blank alternate, or one equal to the main address, is none. */
