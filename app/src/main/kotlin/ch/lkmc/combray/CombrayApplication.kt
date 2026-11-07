@@ -159,6 +159,7 @@ class AppGraph(application: Application) {
         textSize = { settings.textSize.value },
     )
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
+    val imageDownloads = ImageDownloads(application)
     val notices = ThirdPartyNotices(application.assets)
 
     /** Requests on their way to the media player: an Intent carries only an id. */
