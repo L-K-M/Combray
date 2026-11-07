@@ -137,6 +137,25 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun aCaptureWhoseJobFailedIsQueuedAgainButADeliveredOneIsNot() {
+        enable()
+        capture("https://a.example/", "same text")
+        runBlocking {
+            database.integrations().updateJob(jobs().single().copy(state = JobState.FAILED, error = "rejected"))
+        }
+
+        // The failed job carries nothing to the server: the same content must be queued again.
+        capture("https://a.example/", "same text")
+        assertEquals(listOf(JobState.SUPERSEDED, JobState.PENDING), jobs().map { it.state })
+
+        // A delivered one is still deduplicated.
+        drain()
+        assertEquals(1, server.added.size)
+        capture("https://a.example/", "same text")
+        assertEquals(2, jobs().size)
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")

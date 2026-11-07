@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page whose capture failed to reach Hister is captured again when its
+  content is captured unchanged. Before, the identical text was skipped for
+  the rest of the app's life and the page was never archived.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
