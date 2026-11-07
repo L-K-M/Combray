@@ -100,6 +100,15 @@ enum class RecentScope(@StringRes val label: Int) {
     KARAKEEP(R.string.recent_scope_karakeep),
 }
 
+/**
+ * Whether a server scope may send [query] to its service yet. A filter text handed over from the
+ * local Recent scope is prefilled into the panel, not submitted: the first request needs a
+ * keystroke or the Search key inside the panel ([interacted]), or text that differs from the
+ * prefill. A blank query is not a search (the Karakeep scope lists the newest bookmarks).
+ */
+internal fun serverScopeMaySearch(prefilled: String, query: String, interacted: Boolean): Boolean =
+    interacted || query != prefilled
+
 /** What an empty local Recent list says, and whether All has rows to offer instead. */
 internal enum class RecentEmpty(val message: Int, val offersAll: Boolean) {
     NOTHING(R.string.recent_empty, offersAll = false),
