@@ -102,7 +102,8 @@ fun KarakeepPanel(integrations: Integrations, initialQuery: String, onOpen: (Str
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.karakeep_search_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { searchRequested = true }),
+            // A blank field already shows the newest bookmarks; submitting it changes nothing.
+            keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) searchRequested = true }),
             modifier = Modifier.fillMaxWidth(),
         )
         if (ui == BookmarksUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))

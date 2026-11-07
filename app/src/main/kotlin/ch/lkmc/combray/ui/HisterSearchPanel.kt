@@ -74,10 +74,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         hits = emptyList()
         nextPage = null
         loadingMore = false
-        if (service == null || !shouldRunSearch(query, searchRequested, blankShowsAll = false)) {
-            ui = SearchUi.Idle
-            return@LaunchedEffect
-        }
+        if (service == null || !shouldRunSearch(query, searchRequested, blankShowsAll = false)) return@LaunchedEffect
         delay(SEARCH_DEBOUNCE_MS)
         ui = SearchUi.Loading
         val answer = hister.search(query.trim()) ?: return@LaunchedEffect

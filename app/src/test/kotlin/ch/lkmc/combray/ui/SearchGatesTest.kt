@@ -18,6 +18,7 @@ class SearchGatesTest {
     @Test
     fun karakeepShowsTheNewestBookmarksOnABlankFieldOnly() {
         assertTrue(shouldRunSearch("", requested = false, blankShowsAll = true))
+        assertTrue(shouldRunSearch("", requested = true, blankShowsAll = true))
         assertFalse(shouldRunSearch("madeleine", requested = false, blankShowsAll = true))
         assertTrue(shouldRunSearch("madeleine", requested = true, blankShowsAll = true))
     }
