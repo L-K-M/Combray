@@ -762,13 +762,14 @@ class IntegrationsTest {
         val error = "bookmark_id_missing_after_10_attempts"
         assertEquals(JobState.FAILED, job().state)
         assertEquals(error, job().error)
-        assertEquals(SaveStatus.NeedsAttention(error), status())
+        // The bookmark itself was acknowledged on every attempt, so the page is not "unsaved".
+        assertEquals(SaveStatus.SavedWithListFailure(error), status())
         assertTrue(server.lists.getValue("reading").isEmpty())
         assertEquals(1, server.bookmarks.size)
     }
 
     @Test
-    fun aDeletedListNeedsTheUserAndARetryUsesTheListChosenThen() {
+    fun aDeletedListKeepsTheStoredBookmarkAndRetryUsesTheListChosenThen() {
         server.lists["reading"] = mutableSetOf()
         configure()
         chooseList("reading")
@@ -777,7 +778,10 @@ class IntegrationsTest {
         drain()
         assertEquals(JobState.FAILED, job().state)
         assertEquals("list_not_found", job().error)
-        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+        // The bookmark was acknowledged, so the save is not reported as missing; the list step is.
+        assertEquals(SaveStatus.SavedWithListFailure("list_not_found"), status())
+        val saved = runBlocking { database.integrations().observeSaved(service().fingerprint, URL).first() }
+        assertEquals("bm1", saved?.remoteId)
 
         server.lists["later"] = mutableSetOf()
         chooseList("later")

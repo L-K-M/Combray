@@ -385,6 +385,8 @@ private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Uni
     val status = save.status
     val (icon, label) = when (status) {
         SaveStatus.Saved -> BookmarkAddedIcon to stringResource(R.string.save_state_saved)
+        // The link is stored; only the chosen list failed, and Settings can retry that step.
+        is SaveStatus.SavedWithListFailure -> BookmarkAddedIcon to stringResource(R.string.save_state_saved_list_failed)
         SaveStatus.Pending -> BookmarkIcon to stringResource(R.string.save_state_pending)
         // Karakeep could not be reached: nothing is being sent, so no spinner.
         SaveStatus.Waiting -> ScheduleIcon to stringResource(R.string.save_state_waiting)

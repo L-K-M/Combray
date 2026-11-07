@@ -273,6 +273,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page saved to Karakeep is no longer reported as unsaved when adding it
+  to the chosen list fails (the list was deleted, for example). The
+  bookmark is recorded as soon as Karakeep acknowledges it, so the Save
+  button says it is saved while Settings still offers Retry for the list
+  step.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
