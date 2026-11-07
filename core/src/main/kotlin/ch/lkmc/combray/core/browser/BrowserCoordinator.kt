@@ -97,6 +97,10 @@ class BrowserCoordinator(
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val state = MutableStateFlow(BrowserState())
 
+    /** Guards the one-time setup in [start]; [started] is safe to read without the lock. */
+    private val setupLock = Any()
+    @Volatile private var started = false
+
     // Runtime state, touched only by the consumer.
     private val liveByTab = HashMap<String, LiveView>()
     private val liveByNative = HashMap<Long, LiveView>()
@@ -146,43 +150,54 @@ class BrowserCoordinator(
 
     /**
      * Starts the engine (synchronously, so a surface created right after this can bind) and the
-     * work queue, then restores the session. Call once per process.
+     * work queue, then restores the session. Call once per process: a second call is a no-op,
+     * because a second work-queue consumer would break the one-consumer ordering invariant.
      */
     fun start() {
-        startEngine()
-        scope.launch {
-            for (job in work) {
-                try {
-                    job()
-                } catch (failure: Exception) {
-                    // A failed step must not stop the queue; it is a bug worth surfacing.
-                    Log.e(LOG_TAG, "browser state update failed", failure)
-                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
-                    state.update {
-                        // Before the session is restored the user has done nothing: it was the restore.
-                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
-                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+        if (started) return
+        synchronized(setupLock) {
+            if (started) return
+            startEngine()
+            scope.launch {
+                for (job in work) {
+                    try {
+                        job()
+                    } catch (cancelled: CancellationException) {
+                        // Shutdown, not a failure: the consumer stops with its scope.
+                        throw cancelled
+                    } catch (failure: Throwable) {
+                        // A failed step must not stop the queue; it is a bug worth surfacing.
+                        // An Error (article JSON parsing runs here) is caught too: losing the
+                        // consumer would silently stop every later command.
+                        Log.e(LOG_TAG, "browser state update failed", failure)
+                        // Restoring ends even if it was this step that failed: show what there is, not a blank page.
+                        state.update {
+                            // Before the session is restored the user has done nothing: it was the restore.
+                            val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+                            it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+                        }
                     }
                 }
             }
-        }
-        submit {
-            // The stored tabs are shown even if maintenance fails, and the problem is named as
-            // the restore: publishing first ends RESTORING, so the queue's handler would call it
-            // "the last action".
-            val failure = try {
-                maintain()
-                null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failed: Exception) {
-                failed
+            submit {
+                // The stored tabs are shown even if maintenance fails, and the problem is named as
+                // the restore: publishing first ends RESTORING, so the queue's handler would call it
+                // "the last action".
+                val failure = try {
+                    maintain()
+                    null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failed: Exception) {
+                    failed
+                }
+                publish()
+                if (failure != null) {
+                    Log.e(LOG_TAG, "restoring the session failed", failure)
+                    state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
+                }
             }
-            publish()
-            if (failure != null) {
-                Log.e(LOG_TAG, "restoring the session failed", failure)
-                state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
-            }
+            started = true
         }
     }
 

@@ -28,6 +28,10 @@ class FakeEngine : EnginePort {
     val navigated = mutableListOf<Triple<Long, Long, String>>()
     var reportCreated = true
 
+    /** How many times [start] ran: the coordinator must start the engine once. */
+    var startCount = 0
+        private set
+
     /** (tab, throttled) throttle commands, in order. */
     val throttling = mutableListOf<Pair<Long, Boolean>>()
 
@@ -42,6 +46,7 @@ class FakeEngine : EnginePort {
     val appearances = mutableListOf<Pair<Appearance, Int>>()
 
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
+        startCount++
         this.listener = listener
         return EngineStart.STARTED
     }

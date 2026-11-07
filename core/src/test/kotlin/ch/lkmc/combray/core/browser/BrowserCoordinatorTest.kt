@@ -17,6 +17,7 @@ import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LeavePageChoice
@@ -147,6 +148,50 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ImeHidden(engine.view(1)))
         idle()
         assertTrue(reads.get() > 0)
+    }
+
+    @Test
+    fun startingTwiceStartsTheEngineAndConsumerOnce() {
+        val counting = FakeEngine()
+        val twice = BrowserCoordinator(database, counting, scope, clock = { now }, newId = { "id${ids++}" })
+        twice.start()
+        twice.start()
+        assertEquals(1, counting.startCount)
+
+        // The ignored second start leaves a working browser.
+        counting.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { twice.awaitIdle() }
+        twice.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { twice.awaitIdle() }
+        assertEquals("https://a.test/", twice.browserState.value.activeTab?.url)
+    }
+
+    @Test
+    fun aThrowingJobDoesNotKillTheConsumer() {
+        val base = FakeEngine()
+        val failing = object : EnginePort by base {
+            var fail = true
+            override fun createView(tab: Long, url: String) {
+                if (fail) {
+                    fail = false
+                    throw AssertionError("boom")
+                }
+                base.createView(tab, url)
+            }
+        }
+        val resilient = BrowserCoordinator(database, failing, scope, clock = { now }, newId = { "id${ids++}" })
+            .also { it.start() }
+        base.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { resilient.awaitIdle() }
+
+        resilient.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { resilient.awaitIdle() }
+        // The failed command is reported; the consumer goes on.
+        assertTrue(resilient.browserState.value.notice is Notice.Problem)
+
+        resilient.newTab()
+        runBlocking { resilient.awaitIdle() }
+        assertEquals(2, resilient.browserState.value.openTabCount)
     }
 
     @Test
