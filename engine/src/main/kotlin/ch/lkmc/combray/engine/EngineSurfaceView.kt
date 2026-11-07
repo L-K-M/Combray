@@ -283,18 +283,18 @@ class EngineInputConnection(
 ) : BaseInputConnection(view, false) {
     private val composition = PageComposition(
         send = { id, phase, text ->
-            if (engineRunning()) NativeEngine.imeComposition(id, fieldContext, phase.nativeValue, text)
+            if (engineRunning() && fieldContext > 0) NativeEngine.imeComposition(id, fieldContext, phase.nativeValue, text)
         },
-        commit = { if (engineRunning()) NativeEngine.imeCommitInContext(fieldContext, it) },
+        commit = { if (engineRunning() && fieldContext > 0) NativeEngine.imeCommitInContext(fieldContext, it) },
     )
 
     override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean =
-        engineRunning() && composition.update(text.toString())
+        canEdit() && composition.update(text.toString())
 
-    override fun finishComposingText(): Boolean = engineRunning() && composition.finish()
+    override fun finishComposingText(): Boolean = canEdit() && composition.finish()
 
     override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean =
-        engineRunning() && composition.commit(text.toString())
+        canEdit() && composition.commit(text.toString())
 
     override fun closeConnection() {
         composition.close()
@@ -302,7 +302,7 @@ class EngineInputConnection(
     }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-        if (!engineRunning() || composition.closed || beforeLength < 0 || afterLength < 0) return false
+        if (!canEdit() || beforeLength < 0 || afterLength < 0) return false
         composition.finish()
         repeat(beforeLength) { tapKey(KeyEvent.KEYCODE_DEL) }
         repeat(afterLength) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
@@ -310,7 +310,7 @@ class EngineInputConnection(
     }
 
     override fun sendKeyEvent(event: KeyEvent): Boolean {
-        if (!engineRunning() || composition.closed) return false
+        if (!canEdit()) return false
         if (event.action == KeyEvent.ACTION_DOWN) composition.finish()
         val action = when (event.action) {
             KeyEvent.ACTION_DOWN -> NativeEngine.KEY_PRESS
@@ -322,11 +322,14 @@ class EngineInputConnection(
     }
 
     override fun performEditorAction(actionCode: Int): Boolean {
-        if (!engineRunning() || composition.closed) return false
+        if (!canEdit()) return false
         composition.finish()
         tapKey(KeyEvent.KEYCODE_ENTER)
         return true
     }
+
+    // Zero selects the legacy unbound hardware-key path. An InputConnection must never use it.
+    private fun canEdit(): Boolean = engineRunning() && fieldContext > 0 && !composition.closed
 
     private fun tapKey(keyCode: Int) {
         NativeEngine.keyInContext(NativeEngine.KEY_PRESS, keyCode, 0, 0, fieldContext)

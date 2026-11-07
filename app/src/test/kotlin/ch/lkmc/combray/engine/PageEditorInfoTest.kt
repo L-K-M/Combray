@@ -2,9 +2,11 @@ package ch.lkmc.combray.engine
 
 import android.app.Application
 import android.text.InputType
+import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,6 +16,21 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], manifest = Config.NONE, application = Application::class)
 class PageEditorInfoTest {
+    @Test
+    fun aConnectionWithoutANativeFieldCannotSendEditsOrUnboundKeys() {
+        val surface = EngineSurfaceView(ApplicationProvider.getApplicationContext()) { true }
+        for (context in listOf(0L, -1L)) {
+            val connection = EngineInputConnection(surface, { true }, context)
+            assertFalse(connection.setComposingText("late", 1))
+            assertFalse(connection.commitText("late", 1))
+            assertFalse(connection.finishComposingText())
+            assertFalse(connection.deleteSurroundingText(1, 0))
+            assertFalse(connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)))
+            assertFalse(connection.performEditorAction(EditorInfo.IME_ACTION_NONE))
+            connection.closeConnection()
+        }
+    }
+
     @Test
     fun editorsAndTextareasOfferANewlineRatherThanAnAction() {
         val info = EditorInfo()
