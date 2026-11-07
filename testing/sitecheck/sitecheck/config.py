@@ -79,6 +79,7 @@ ENGINE_PREFS: Mapping[str, bool] = MappingProxyType(
         "dom_fontface_enabled": True,
         "dom_indexeddb_enabled": True,
         "dom_adoptedstylesheet_enabled": True,
+        "dom_exec_command_enabled": True,
     }
 )
 

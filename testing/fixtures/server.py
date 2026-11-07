@@ -1120,6 +1120,18 @@ CONTROL_PAGES = {
         "q.oninput=function(){document.title='SHADOW:input:'+q.value+':'+pastes};"
         "q.focus()})</script>",
     ),
+    # A rich text editor, as comment boxes are: an editable element rather than a form field.
+    # The title shows the editor's text and the type of the last input the page received.
+    "/contenteditable.html": (
+        "EDITOR:ready",
+        "<div class='c' id='editor' contenteditable></div>",
+        "<script>addEventListener('load',function(){var e=document.getElementById('editor');"
+        "var kind='';"
+        "e.onfocus=function(){document.title='EDITOR:focused'};"
+        "e.onblur=function(){document.title='EDITOR:blurred'};"
+        "e.addEventListener('beforeinput',function(v){kind=v.inputType});"
+        "e.oninput=function(){document.title='EDITOR:input:'+e.textContent+':'+kind}})</script>",
+    ),
 }
 
 

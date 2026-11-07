@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
   on a phone is unconfirmed; see the [engine investigation](docs/ENGINE_SPIKE.md#40-verification-stall-and-automation-signals-2-november-2026).
 - The page Copy button and manual text selection are reported broken;
   tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
+- Rich text editors, such as many comment boxes, show no text cursor yet,
+  and a word you are typing appears when the keyboard commits it, as in
+  form fields.
 
 ### Added
 
@@ -279,6 +282,16 @@ All notable changes to this project are documented here. The format follows
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
   none. Combray now sends Firefox for Android's token in front of Servo's:
   `Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0`.
+- You can type into rich text editors, such as the comment and message
+  boxes that pages build from editable elements rather than form fields.
+  Tapping one opens the keyboard, and typed text, Backspace, Enter and the
+  left and right arrow keys reach it. Before, no keyboard opened, the
+  keyboard's text went to form fields only, editors such as Lexical
+  rejected the engine's input events, and Backspace deleted nothing in
+  them; text typed after Backspace in other editors came out huge.
+- Reloading a page sends the referrer of the request that first loaded it,
+  as Firefox does, instead of the page's own address. A bot check that
+  compared the two requests turned the reload away.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects
