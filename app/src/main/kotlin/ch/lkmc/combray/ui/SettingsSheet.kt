@@ -5,6 +5,7 @@ import android.text.format.Formatter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -312,6 +313,22 @@ private data class ServiceLabels(
 )
 
 /**
+ * Save and Check connection for one service; each keeps a 48dp target. The row wraps instead of
+ * overflowing: at large font scales two wide labels must not push a button off the screen.
+ */
+@Composable
+internal fun ServiceActions(checkEnabled: Boolean, onSave: () -> Unit, onCheck: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+        Button(onClick = onSave, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_save_settings))
+        }
+        OutlinedButton(onClick = onCheck, enabled = checkEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_check_connection))
+        }
+    }
+}
+
+/**
  * Server address and credential for one service. The credential is write-only: a saved one is
  * never shown again, only replaced. Checking the connection is read-only.
  */
@@ -376,30 +393,24 @@ private fun ServiceSettings(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        Button(
-            onClick = {
-                scope.launch {
-                    val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
-                    if (result == Configured.Saved) {
-                        editedAddress = null
-                        editedAlternate = null
-                    }
-                    credential = ""
+    ServiceActions(
+        checkEnabled = current != null,
+        onSave = {
+            scope.launch {
+                val result = configure(address, credential.ifBlank { null }, alternate)
+                message = describe(resources, labels, result)
+                if (result == Configured.Saved) {
+                    editedAddress = null
+                    editedAlternate = null
                 }
-            },
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_save_settings)) }
-        OutlinedButton(
-            onClick = {
-                message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
-            },
-            enabled = current != null,
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_check_connection)) }
-    }
+                credential = ""
+            }
+        },
+        onCheck = {
+            message = resources.getString(R.string.check_running)
+            scope.launch { message = check()?.let { describe(resources, labels, it) } }
+        },
+    )
     if (current != null) {
         TextButton(onClick = { confirmRemove = true }) { Text(stringResource(R.string.action_remove)) }
     }
