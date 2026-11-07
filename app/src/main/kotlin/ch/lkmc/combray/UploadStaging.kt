@@ -16,26 +16,31 @@ import java.util.UUID
  * uploads from filesystem paths when the form is sent; Android hands out content URIs.
  *
  * ```
- * picker ─content://…─▶ stage() ─▶ <root>/<pick>/<n>/<name> ─path─▶ Servo
+ * picker ─content://…─▶ stage() ─▶ <root>/<generation>/<pick>/<n>/<name> ─path─▶ Servo
  * ```
  *
- * Copies stay until the next process start ([clear]): a page may send its form much later.
+ * Copies stay until the next process start: a page may send its form much later. Startup
+ * cleanup ([clear]) removes only earlier process generations, never a new pick racing it.
  */
 class UploadStaging(private val root: File, private val resolver: ContentResolver) {
+    private val generation = File(root, UUID.randomUUID().toString())
+
+    /** May run after a current-process pick, or while its provider is still copying. */
     fun clear() {
-        root.deleteRecursively()
+        root.listFiles()?.filter { it != generation }?.forEach { it.deleteRecursively() }
     }
 
     /** Paths of the copies, or null if any file could not be read (nothing is uploaded then). */
     suspend fun stage(uris: List<Uri>): List<String>? = withContext(Dispatchers.IO) {
-        val pick = File(root, UUID.randomUUID().toString())
+        val pick = File(generation, UUID.randomUUID().toString())
         try {
             // One directory per file: two picked files may share a name.
             uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
         } catch (failure: Exception) {
             // Another app's provider may throw anything (IO, permission, bad URI): cancel the upload.
             // No suspension point in the block, so cancellation cannot be swallowed here.
-            Log.w(LOG_TAG, "could not copy a picked file", failure)
+            // A provider's message or causes can contain a private filename, URI or token.
+            Log.w(LOG_TAG, "could not copy a picked file: ${failure.javaClass.name}")
             pick.deleteRecursively()
             null
         }
