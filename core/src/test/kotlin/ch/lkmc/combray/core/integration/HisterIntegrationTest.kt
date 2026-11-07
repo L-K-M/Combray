@@ -137,6 +137,23 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun identicalContentIsQueuedAgainAfterARefusal() {
+        enable()
+        capture("https://a.example/", "same")
+        server.refusal = 406
+        drain()
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+
+        // The content was remembered as queued, but the job is not on its way: try again.
+        server.refusal = null
+        capture("https://a.example/", "same")
+        assertEquals(listOf(JobState.CANCELLED, JobState.PENDING), jobs().map { it.state })
+        drain()
+        assertEquals(1, server.added.size)
+        assertTrue(runBlocking { hister.captureStored("https://a.example/").first() })
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")
