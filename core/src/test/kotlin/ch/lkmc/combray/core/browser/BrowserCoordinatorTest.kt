@@ -1974,6 +1974,32 @@ class BrowserCoordinatorTest {
         assertEquals(1, state().openTabCount)
     }
 
+    /**
+     * A page's scripted window.open chain is capped per minute: each adopted window is shown
+     * next and can open the following one, so the cap is process-wide, not per opener. After
+     * the window passes, adoptions resume.
+     */
+    @Test
+    fun pageOpenedWindowsAreCappedPerMinute() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val before = state().openTabCount
+
+        repeat(MAX_ADOPTED_WINDOWS + 1) { index ->
+            // Each adopted window becomes the shown tab, so the next one's opener is it.
+            engine.openWindow(opener = engine.selected.last(), tab = PAGE_TAB + index); idle()
+        }
+        assertEquals(before + MAX_ADOPTED_WINDOWS, state().openTabCount)
+        assertTrue("the window past the cap is closed", PAGE_TAB + MAX_ADOPTED_WINDOWS in engine.closed)
+        assertEquals(Notice.PopupBlocked, state().notice)
+
+        now += ADOPTION_WINDOW_MS + 1
+        engine.openWindow(opener = engine.selected.last(), tab = PAGE_TAB + MAX_ADOPTED_WINDOWS + 1); idle()
+        assertEquals(before + MAX_ADOPTED_WINDOWS + 1, state().openTabCount)
+        assertTrue(PAGE_TAB + MAX_ADOPTED_WINDOWS + 1 !in engine.closed)
+    }
+
     @Test
     fun backOnAPageOpenedWindowClosesItAndReturnsToItsOpener() {
         ready()
