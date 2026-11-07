@@ -207,4 +207,13 @@ interface IntegrationDao {
         """,
     )
     fun observeLatestCapture(fingerprint: String, key: String): Flow<OutboxJobEntity?>
+
+    /** The newest capture once, so a capture decision can tell a queued one from a settled one. */
+    @Query(
+        """
+        SELECT * FROM outbox WHERE kind = 'HISTER_ADD' AND fingerprint = :fingerprint AND dedupeKey = :key
+        ORDER BY sequence DESC LIMIT 1
+        """,
+    )
+    suspend fun latestCapture(fingerprint: String, key: String): OutboxJobEntity?
 }

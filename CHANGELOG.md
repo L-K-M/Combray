@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page whose Hister capture failed once is captured again when you revisit
+  it with the same content. The dedupe memory now checks the job's state, so
+  a failed, cancelled, superseded or expired capture no longer silences the
+  page for the rest of the process.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

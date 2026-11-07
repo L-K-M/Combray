@@ -233,7 +233,11 @@ class HisterIntegration(
         if (!eligible(page.url, service) || page.text.isBlank()) return
 
         val key = documentKey(page.url)
-        if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
+        // Identical content is skipped only while an earlier capture of it is on its way to the
+        // server or already stored. A job that failed or left the queue must not silence a later
+        // visit: the page would otherwise never be captured again in this process.
+        val settled = dao.latestCapture(service.fingerprint, key)?.state in SETTLED_CAPTURES
+        if (!settled && synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
         if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) {
@@ -332,6 +336,9 @@ class HisterIntegration(
 
         /** Estimated largest payload: the 256 KiB text cap plus address, title and JSON slack. */
         private const val MAX_CAPTURE_PAYLOAD_BYTES = 300 * 1024
+
+        /** Capture states that will never reach the server: a new capture of the same content must run. */
+        private val SETTLED_CAPTURES = setOf(JobState.FAILED, JobState.CANCELLED, JobState.SUPERSEDED, JobState.EXPIRED)
 
         private const val HASH_MEMORY = 512
         private val json = Json { ignoreUnknownKeys = true }
