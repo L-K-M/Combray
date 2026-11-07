@@ -596,11 +596,11 @@ fun BrowserScreen(
                 // Like system Back: Reader view closes first, an open page question is answered,
                 // then Back moves through the page.
                 onBack = {
+                    val control = state.pageControl
                     when {
                         state.reader != null -> browser.closeReader()
-                        else -> state.pageControl?.let { control ->
-                            browser.answerPageControl(control.id, backResponse(control.content))
-                        } ?: backInPage?.invoke()
+                        control != null -> browser.answerPageControl(control.id, backResponse(control.content))
+                        else -> backInPage?.invoke()
                     }
                 },
                 onAddress = editAddress,
