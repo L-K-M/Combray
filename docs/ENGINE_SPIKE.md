@@ -3047,8 +3047,9 @@ The video was playable; Play was out of reach. The owner chose all three remedie
   as custom players set it under their controls. Bounded to 16 roots, 64 hits and 64 media
   elements per root.
 - `engine.rs`: every tap the field tracker recognizes also runs `check_tap_on_media`, only when
-  the document reported a media URL on any of its pages (`Tab::media_documents`, so a route
-  change or a return to a cached document that loads nothing again keeps it). The answer is
+  the document reported a media URL on any of its pages (`media::MediaDocuments`, the tab's 16
+  most recent such documents, as many as the pages a view keeps media for in the application;
+  so a route change or a return to a cached document that loads nothing again keeps it). The answer is
   drained on the engine thread like the field check and becomes `media_tapped` (`events.rs`)
   while that document is still current in the active tab.
 - `core`: `BrowserState.mediaOffer` replaces `Notice.MediaPlayable`. It is set by the page's

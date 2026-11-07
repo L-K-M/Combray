@@ -57,6 +57,10 @@ const PENDING_COMMIT_MS: u64 = 5_000;
 const REQUESTED_DOCUMENT_MS: u64 = 30_000;
 /// Loads held per tab for a document about to commit.
 const MAX_HELD_MEDIA: usize = 16;
+/// Documents per tab whose taps are checked against their media elements ([`MediaDocuments`]):
+/// as many as the pages a view keeps media for in the application (`MAX_MEDIA_PAGES` in
+/// `BrowserCoordinator.kt`), since a document has at least one page.
+const MAX_MEDIA_DOCUMENTS: usize = 16;
 
 /// What a cancelled load was for, from its fetch destination.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +230,37 @@ pub(crate) fn tap_hits_media_script(x: f32, y: f32) -> Option<String> {
             .replace("__X__", &x.to_string())
             .replace("__Y__", &y.to_string()),
     )
+}
+
+/// A tab's documents that reported a media URL on any of their pages, most recent first, at
+/// most [`MAX_MEDIA_DOCUMENTS`]. A tap on one of them is checked against its media elements,
+/// also after a route change or a return to it that loads nothing again; an older document's
+/// media is no longer kept by the application, so it has nothing to offer.
+pub(crate) struct MediaDocuments<T> {
+    recent: VecDeque<T>,
+}
+
+impl<T> Default for MediaDocuments<T> {
+    fn default() -> Self {
+        Self {
+            recent: VecDeque::new(),
+        }
+    }
+}
+
+impl<T: Copy + PartialEq> MediaDocuments<T> {
+    /// `document` reported a media URL: it becomes the most recent.
+    pub(crate) fn note(&mut self, document: T) {
+        if let Some(position) = self.recent.iter().position(|known| *known == document) {
+            self.recent.remove(position);
+        }
+        self.recent.push_front(document);
+        self.recent.truncate(MAX_MEDIA_DOCUMENTS);
+    }
+
+    pub(crate) fn contains(&self, document: T) -> bool {
+        self.recent.contains(&document)
+    }
 }
 
 /// What to tell the application about one cancelled load.
@@ -749,6 +784,24 @@ mod tests {
             PageMedia::default().note(None, &mut budget, 0),
             MediaReport::Unplayable
         );
+    }
+
+    #[test]
+    fn a_tab_keeps_its_most_recent_media_documents() {
+        let mut documents = MediaDocuments::default();
+        assert!(!documents.contains(0));
+        for document in 0..MAX_MEDIA_DOCUMENTS {
+            documents.note(document);
+        }
+        // Noted again, the first document becomes the most recent; the second is now the oldest.
+        documents.note(0);
+        documents.note(MAX_MEDIA_DOCUMENTS);
+
+        assert!(documents.contains(0));
+        assert!(!documents.contains(1));
+        assert!(documents.contains(2));
+        assert!(documents.contains(MAX_MEDIA_DOCUMENTS));
+        assert_eq!(documents.recent.len(), MAX_MEDIA_DOCUMENTS);
     }
 
     #[test]

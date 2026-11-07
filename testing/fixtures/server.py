@@ -686,9 +686,9 @@ def player_page(key):
         # The error line is out of the flow, so the button stays in the middle of the player.
         "p{position:absolute;top:8px;left:0;right:0;margin:0;text-align:center}"
         "button{font-size:40px;padding:24px 48px}</style>"
-        "<video></video><div class='overlay'><p hidden>Playback failed.</p><button>&#9654;</button></div>\";"
+        "<video></video><div class='overlay'><p id='error' hidden>Playback failed.</p><button>&#9654;</button></div>\";"
         " var video = root.querySelector('video');"
-        " video.addEventListener('error', function () { errors++; root.querySelector('p').hidden = false; report(); });"
+        " video.addEventListener('error', function () { errors++; root.querySelector('#error').hidden = false; report(); });"
         " root.querySelector('button').addEventListener('click', function () {"
         " plays++; report(); var played = video.play(); if (played) played.catch(function () {}); });"
         " document.getElementById('below').addEventListener('click', function () { outside++; report(); });"

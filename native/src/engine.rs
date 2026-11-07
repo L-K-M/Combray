@@ -56,7 +56,8 @@ use crate::events::{
 use crate::find::{self, FindAction};
 use crate::keyboard::{self, TapTracker};
 use crate::media::{
-    self, MediaBudget, MediaKind, MediaReport, PageMedia, PendingMedia, UnattributedMedia,
+    self, MediaBudget, MediaDocuments, MediaKind, MediaReport, PageMedia, PendingMedia,
+    UnattributedMedia,
 };
 use crate::media_backend;
 use crate::native_window::NativeWindow;
@@ -228,10 +229,9 @@ struct Tab {
     held: VecDeque<HeldReport>,
     /// Media the current page loaded, so each URL is reported once per page (see `media`).
     page_media: PageMedia,
-    /// Documents that reported a media URL on any of their pages. A tap on one is checked against
-    /// its media elements (`check_tap_on_media`), also after a route change or a return to it
-    /// that loads nothing again; the application knows which of its pages has media to offer.
-    media_documents: HashSet<PipelineId>,
+    /// Documents that reported a media URL, whose taps `check_tap_on_media` checks; the
+    /// application knows which of their pages has media to offer.
+    media_documents: MediaDocuments<PipelineId>,
     /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
     /// pushState loop stays bounded; restarts when another document commits.
     media_budget: MediaBudget,
@@ -292,7 +292,7 @@ impl Tab {
                     .note(load.url.as_deref(), &mut self.media_budget, now_ms)
                 {
                     MediaReport::Playable(url) => {
-                        self.media_documents.insert(document);
+                        self.media_documents.note(document);
                         Some(url)
                     },
                     MediaReport::Unplayable => None,
@@ -1006,7 +1006,7 @@ impl Engine {
                 retired: HashSet::new(),
                 held: VecDeque::new(),
                 page_media: PageMedia::default(),
-                media_documents: HashSet::new(),
+                media_documents: MediaDocuments::default(),
                 media_budget: MediaBudget::default(),
                 pending_media: PendingMedia::default(),
                 frames_painted: 0,
@@ -1608,7 +1608,7 @@ impl Engine {
         let Some(document) = tab.current_document else {
             return;
         };
-        if !tab.media_documents.contains(&document) {
+        if !tab.media_documents.contains(document) {
             return;
         }
         // As for a field: without Servo's pinch-zoom offset, a tap on a zoomed page can miss.
