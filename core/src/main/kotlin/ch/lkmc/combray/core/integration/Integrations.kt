@@ -376,9 +376,18 @@ class Integrations(
         }
     }
 
-    private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {
+    /**
+     * Records the acknowledged bookmark. A payload this cannot read is skipped, not thrown:
+     * [Outbox.finish] runs this inside its transaction, and a throw there would roll back an
+     * already-delivered save and make the dispatcher retry it to FAILURE.
+     */
+    internal suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {
         if (job.kind != JobKind.KARAKEEP_SAVE) return
-        val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
+        val payload = runCatching { json.decodeFromString(SavePayload.serializer(), job.payload) }.getOrElse {
+            // The class only: the payload is page text and must not reach the log.
+            Log.w(LOG_TAG, "a finished save's payload is unreadable: ${it.javaClass.name}")
+            return
+        }
         dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, done.remoteId, clock.now()))
     }
 
