@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,6 +64,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -71,6 +75,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -140,6 +145,8 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable(restartKey) { mutableStateOf("") }
     var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     // One subscription per depth: browsing reads the newest rows, a search the retained ones.
     // The filter runs in memory, so typing does not restart three Room observers per keystroke.
     val depth = HistoryDepth.forQuery(query)
@@ -211,6 +218,9 @@ fun RecentSheet(
                             onValueChange = { query = it },
                             singleLine = true,
                             placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
+                            // The filter applies as you type; Search just puts the keyboard away.
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); keyboard?.hide() }),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         )
                     }
