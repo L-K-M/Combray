@@ -3011,7 +3011,70 @@ Phase C2's remainder (docs/VIDEO.md): the player reads HLS, so the claim table m
 - Not run here: an X post on a phone; the emulator run in this PR's Engine workflow is the
   device evidence for the claim and the HLS source.
 
-## 50. Keeping Play reachable (6 November 2026)
+## 50. Firefox user agents without a Gecko token (6 November 2026)
+
+The owner reported a page that showed only "Access denied". Its site's firewall answers 403
+with that 13-byte body whenever the `User-Agent` contains `Firefox` but no `Gecko/` token: it
+takes such an agent for a forged one. Servo's agents claim Firefox (`rv:153.0`,
+`Firefox/153.0`) but write `Servo/0.7.0` where Firefox writes `Gecko/153.0`, so every page of
+the site was refused. Probes with curl and nothing but the agent changed:
+
+| `User-Agent` | Status |
+|---|---|
+| Servo's Android agent, Servo's Linux desktop agent | 403 |
+| `Firefox/153.0`, `Mozilla/5.0 Firefox/153.0`, `... Servo/0.7.0 FirefoxX/153.0` | 403 |
+| Servo's Android agent with `like Gecko` or a bare `Gecko` in front of `Servo/` | 403 |
+| curl's own, `Servo/0.7.0`, Servo's Android agent without its `Firefox/` token | 200 |
+| Firefox for Android's own (`... rv:144.0) Gecko/144.0 Firefox/144.0`) | 200 |
+| Servo's Android agent with `Gecko/153.0` (or `Gecko/20100101`) in front of `Servo/` | 200 |
+
+Change: `native/src/user_agent.rs` puts `Gecko/<rv>`, `<rv>` being the agent's `rv:` version,
+in front of Servo's token before Servo starts. Combray sends
+`Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0`: Firefox for
+Android's agent with Servo's token added, so it still names Servo. Servo sends its `user_agent`
+preference both as the header and as `navigator.userAgent`, and `engine_ready` reports it for
+the media player's requests, so all three stay equal. A later Servo agent without
+`rv:<version>)` or without a `Servo/` token after it is sent unchanged, with a warning in the
+log; one that already has a `Gecko/` token is kept. Done in Combray rather than in the engine
+fork because the agent is the embedder's choice (servoshell has `--user-agent` for it), and the
+transformation follows the pinned Servo's version and Firefox revision on its own.
+
+Trade-off: scripts that tell engines apart by a `Gecko/` token now see Gecko. Browser detection
+already saw Firefox in `Firefox/153.0`. A site that picks a Gecko-only code path this way can
+call something Servo lacks; no such page is known.
+
+The site-check harness sends the same agent to servoshell and Chromium
+(`USER_AGENT_TEMPLATE`). Two tests keep it in step with a pin: a Rust host test reads the pinned
+Servo's Android agent from its `prefs.rs` and fails when it differs from `SERVO_ANDROID` in
+`user_agent.rs`'s tests, and `tests/test_config.py` fails when the harness's template differs
+from `COMBRAY_ANDROID` there. Chromium results cached under the old agent are fetched again, since
+the agent is part of the cache fingerprint. The harness cannot find refusals like this one:
+Chromium is refused the same way, so the page counts as `reference-failed` and never enters the
+triage queue.
+
+Checks:
+
+- Desktop servoshell (the site-check build, headless, 412×915, `--user-agent`): with Servo's
+  Android agent the reported page shows "Access denied"; with Combray's it renders the article.
+- Rust host tests for the transformation (Servo's Android agent, another revision, an agent that
+  has the token, seven agents of other shapes) and for the pinned agent pass, as does `cargo fmt
+  --check`. The pin test fails when `SERVO_ANDROID` names another Firefox revision. The harness's
+  544 tests pass, and its new test fails when the template lacks the token.
+- The fixture server's `/agent.html` applies the firewall's rule and, when it lets the page
+  through, checks that `navigator.userAgent` equals the header; host tests in
+  `scripts/tests/test_fixture_server.py` cover the rule and the header's escaping into the page's
+  script. `UserAgentTest` loads it on the device. With main's engine (the arm64 APK of the Engine
+  run for `bf8e052`, on the arm64 API 36 emulator) it fails: the page is refused and its tab has
+  no title. With this change (a local `COMBRAY_ABI=arm64 scripts/build-native.sh` build of
+  `0575f0e`, same emulator) it passes, and the reported page opens with its article and cookie
+  notice.
+- The full device suite (`scripts/check-app.sh`) on that build and emulator: 196 passed, 3
+  failed. The three (`AccessibilityTest.theBottomBarOnANewTabIsAccessible`,
+  `ReaderScrollTest.readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles` and
+  `MediaPlayerTest.aPageVideoPlaysAfterATapWithoutServosCookie`, a video pixel colour) fail the
+  same way with main's engine on this emulator, so they predate the change.
+
+## 51. Keeping Play reachable (6 November 2026)
 
 ### Report
 

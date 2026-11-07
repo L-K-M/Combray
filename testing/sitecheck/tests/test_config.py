@@ -20,6 +20,7 @@ from sitecheck.config import ConfigError, HisterSettings, RunLockedError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENGINE_SOURCE = REPO_ROOT / "native" / "src" / "engine.rs"
+USER_AGENT_SOURCE = REPO_ROOT / "native" / "src" / "user_agent.rs"
 
 # `<receiver>.set_value("name", PrefValue::Bool(true))`, tolerating rustfmt's line
 # breaks, spacing and trailing commas.
@@ -28,6 +29,9 @@ _BOOL_PREF_CALL = re.compile(
 )
 _ANY_PREF_CALL = re.compile(r"\.set_value\(\s*\"(?P<name>[A-Za-z0-9_.]+)\"")
 _LINE_COMMENT = re.compile(r"//[^\n]*")
+# The agent user_agent.rs's tests expect the app to send for Servo's Android one.
+_COMBRAY_AGENT_CONSTANT = re.compile(r"const COMBRAY_ANDROID: &str =\s*\"(?P<agent>[^\"]+)\";")
+_SERVO_VERSION_TOKEN = re.compile(r" Servo/(?P<version>[^ ]+) ")
 
 
 class TempDirTest(unittest.TestCase):
@@ -342,7 +346,19 @@ class UserAgentTest(TempDirTest):
     def test_user_agent_format(self) -> None:
         self.assertEqual(
             config.user_agent("0.6.0"),
-            "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.6.0 Firefox/153.0",
+            "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.6.0 Firefox/153.0",
+        )
+
+    def test_user_agent_is_the_apps(self) -> None:
+        match = _COMBRAY_AGENT_CONSTANT.search(USER_AGENT_SOURCE.read_text(encoding="utf-8"))
+        self.assertIsNotNone(match, "no COMBRAY_ANDROID constant in user_agent.rs")
+        agent = match.group("agent")
+        version = _SERVO_VERSION_TOKEN.search(agent)
+        self.assertIsNotNone(version, f"no Servo version in {agent!r}")
+        self.assertEqual(
+            config.user_agent(version.group("version")),
+            agent,
+            "the harness's USER_AGENT_TEMPLATE differs from the agent the app sends",
         )
 
     def test_user_agent_rejects_odd_versions(self) -> None:

@@ -70,6 +70,7 @@ use crate::reload_pull::{
     DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
     StartPosition,
 };
+use crate::user_agent;
 use crate::wakeup::{self, PaintRetry};
 
 /// Receives engine events on the engine thread.
@@ -847,6 +848,15 @@ impl Engine {
         preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_adoptedstylesheet_enabled", PrefValue::Bool(true));
         set_pdf_viewer_preferences(&mut preferences);
+        // Firefox for Android's Gecko token, or firewalls that take a Firefox agent without one
+        // for a forged one refuse every page (see `user_agent`).
+        match user_agent::with_gecko_token(&preferences.user_agent) {
+            Some(agent) => preferences.user_agent = agent,
+            None => warn!(
+                "Servo's user agent has an unexpected shape, so it is sent without a Gecko token: {}",
+                preferences.user_agent
+            ),
+        }
         // The application's own fetches (the media player) send what Servo sends.
         let user_agent = preferences.user_agent.clone();
 

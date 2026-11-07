@@ -234,8 +234,10 @@ pub(crate) fn tap_hits_media_script(x: f32, y: f32) -> Option<String> {
 
 /// A tab's documents that reported a media URL on any of their pages, most recent first, at
 /// most [`MAX_MEDIA_DOCUMENTS`]. A tap on one of them is checked against its media elements,
-/// also after a route change or a return to it that loads nothing again; an older document's
-/// media is no longer kept by the application, so it has nothing to offer.
+/// also after a route change or a return to it that loads nothing again. The bound follows the
+/// application's, which keeps the media of a view's most recently shown pages; the two orders
+/// differ (reports here, visits there), so a document revisited often without loading media
+/// again can drop out here while the application still offers its media in the address field.
 pub(crate) struct MediaDocuments<T> {
     recent: VecDeque<T>,
 }

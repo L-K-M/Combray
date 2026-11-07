@@ -17,8 +17,8 @@
 //! ```
 //!
 //! `activation`, `animations`, `events`, `keyboard`, `media`, `navigation`, `page_zoom`,
-//! `panic_policy`, `profile`, `userinfo` and the pure parts of `capture`, `find` and `pdf` build
-//! on any host so their tests run without Servo.
+//! `panic_policy`, `profile`, `user_agent`, `userinfo` and the pure parts of `capture`, `find` and
+//! `pdf` build on any host so their tests run without Servo.
 
 pub mod activation;
 mod animations;
@@ -34,6 +34,7 @@ mod panic_policy;
 pub mod pdf;
 mod profile;
 pub mod reload_pull;
+mod user_agent;
 mod userinfo;
 mod wakeup;
 
