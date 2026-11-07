@@ -135,6 +135,29 @@ class IntegrationsTest {
     }
 
     @Test
+    fun anUnreadableSavePayloadDoesNotRollBackTheAcknowledgedDelivery() {
+        configure()
+        // A payload the recorder cannot decode must not undo a delivery the server acknowledged:
+        // recordDone runs inside Outbox.finish's transaction.
+        runBlocking {
+            integrations.outbox.enqueue(
+                JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL,
+                payload = "not json", supersede = false,
+            )
+        }
+        val claim = runBlocking { integrations.outbox.claim("owner", 60_000) }!!
+        val finished = runBlocking {
+            integrations.outbox.finish(claim, DispatchResult.Done("bm1")) { job, done ->
+                integrations.recordDone(job, done)
+            }
+        }
+
+        assertTrue(finished)
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals("bm1", job().remoteId)
+    }
+
+    @Test
     fun retryAfterIsHonoured() {
         configure()
         server.fault = FakeKarakeep.Fault.TOO_MANY_REQUESTS
