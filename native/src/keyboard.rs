@@ -10,6 +10,27 @@
 
 use std::collections::HashSet;
 
+/// Modifier state attached to an Android key event. Directional and aggregate flags both count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyModifiers {
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl KeyModifiers {
+    pub fn from_android(meta_state: i32) -> Self {
+        // android.view.KeyEvent META_*_ON values, including the left/right variants.
+        Self {
+            shift: meta_state & (0x1 | 0x40 | 0x80) != 0,
+            alt: meta_state & (0x2 | 0x10 | 0x20) != 0,
+            control: meta_state & (0x1000 | 0x2000 | 0x4000) != 0,
+            meta: meta_state & (0x10000 | 0x20000 | 0x40000) != 0,
+        }
+    }
+}
+
 /// Servo's tap/pan threshold (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`) at 100%
 /// page zoom: a finger that moves further than this on either axis pans, and Servo sends no
 /// click. Servo scales it by the density and the page zoom.
@@ -109,6 +130,23 @@ mod tests {
     use super::*;
 
     const DENSITY: f32 = 2.0;
+
+    #[test]
+    fn modifiers_include_directional_flags_but_not_lock_or_function_keys() {
+        assert_eq!(KeyModifiers::from_android(0), KeyModifiers::default());
+        let all = KeyModifiers {
+            shift: true,
+            control: true,
+            alt: true,
+            meta: true,
+        };
+        assert_eq!(KeyModifiers::from_android(0x11003), all);
+        assert_eq!(KeyModifiers::from_android(0x24050), all);
+        assert_eq!(
+            KeyModifiers::from_android(0x700108),
+            KeyModifiers::default()
+        );
+    }
 
     #[test]
     fn a_lift_near_the_press_is_a_tap_at_the_lift() {

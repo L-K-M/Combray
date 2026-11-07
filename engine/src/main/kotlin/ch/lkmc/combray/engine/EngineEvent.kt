@@ -189,6 +189,8 @@ sealed interface EngineEvent {
         val multiline: Boolean,
         val kind: String,
         val showKeyboard: Boolean,
+        /** Native editing-context identity, not an address or an Android view identity. */
+        val context: Long = 0,
     ) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
@@ -302,6 +304,7 @@ sealed interface EngineEvent {
                     event.boolean("multiline"),
                     event.optionalString("kind") ?: "text",
                     event.boolean("show_keyboard"),
+                    event.long("context"),
                 )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))

@@ -112,13 +112,13 @@ enum class ReopenFocus {
 
 sealed interface KeyboardRequest {
     /** A page field took focus; [kind] is its type ("text", "password", "email", ...). */
-    data class Show(val kind: String) : KeyboardRequest
+    data class Show(val kind: String, val multiline: Boolean = false, val context: Long = 0) : KeyboardRequest
 
     /**
      * A page field took focus before the user used the page (a field focused on load): set the
      * keyboard up for [kind] without opening it. A tap on the field brings a [Show].
      */
-    data class Prepare(val kind: String) : KeyboardRequest
+    data class Prepare(val kind: String, val multiline: Boolean = false, val context: Long = 0) : KeyboardRequest
 
     data object Hide : KeyboardRequest
 }

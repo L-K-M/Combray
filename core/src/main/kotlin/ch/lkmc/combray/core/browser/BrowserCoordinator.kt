@@ -801,7 +801,11 @@ class BrowserCoordinator(
                 // Only a field that opens the keyboard owns it: one the next document focuses on
                 // load must not keep the previous document's keyboard through the navigation.
                 if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
-                val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
+                val request = if (event.showKeyboard) {
+                    KeyboardRequest.Show(event.kind, event.multiline, event.context)
+                } else {
+                    KeyboardRequest.Prepare(event.kind, event.multiline, event.context)
+                }
                 state.update { it.copy(keyboard = request) }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {

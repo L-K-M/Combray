@@ -2,7 +2,6 @@ package ch.lkmc.combray.engine
 
 import android.content.Context
 import android.os.SystemClock
-import android.text.InputType
 import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -88,6 +87,7 @@ class EngineSurfaceView(
     }
 
     override fun onDetachedFromWindow() {
+        retireInputConnection()
         removeCallbacks(longPressCheck)
         scrollGesture.release()
         onScroll = {}
@@ -163,12 +163,16 @@ class EngineSurfaceView(
         if (event.keyCode == KeyEvent.KEYCODE_BACK || !engineRunning()) return false
         // So do keys the engine would drop: volume, media and call keys must still work.
         if (!EngineKeys.handles(event.keyCode, event.unicodeChar)) return false
-        NativeEngine.key(action, event.keyCode, event.unicodeChar)
+        if (action == NativeEngine.KEY_PRESS) inputConnection?.finishComposingText()
+        NativeEngine.keyWithModifiers(action, event.keyCode, event.unicodeChar, event.metaState)
         return true
     }
 
     /** Type of the focused page field ("password", "email", ...), from the engine's ime_shown. */
     private var fieldKind = TEXT
+    private var fieldMultiline = false
+    private var fieldContext = 0L
+    private var inputConnection: EngineInputConnection? = null
 
     /** Whether the keyboard is a page field's, so that its closing can be told apart. */
     private val pageKeyboard = PageKeyboardTracker()
@@ -198,27 +202,16 @@ class EngineSurfaceView(
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!engineRunning()) return null
-        outAttrs.inputType = when (fieldKind) {
-            // Never suggestions or a learned dictionary for passwords.
-            PASSWORD -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            "email" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            "url" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            "number" -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
-            "tel" -> InputType.TYPE_CLASS_PHONE
-            else -> InputType.TYPE_CLASS_TEXT
-        }
-        var options = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
-        if (fieldKind == PASSWORD) options = options or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-        if (fieldKind == "search") options = options or EditorInfo.IME_ACTION_SEARCH
-        outAttrs.imeOptions = options
-        return EngineInputConnection(this)
+        retireInputConnection()
+        configurePageEditor(outAttrs, fieldKind, fieldMultiline)
+        return EngineInputConnection(this, engineRunning, fieldContext).also { inputConnection = it }
     }
 
     /** Shows the keyboard for a page field of [kind] (as reported by the engine). */
-    fun showKeyboard(kind: String = TEXT) {
+    fun showKeyboard(kind: String = TEXT, multiline: Boolean = false, contextId: Long = 0) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
-        useFieldKind(kind, keyboard)
+        useFieldKind(kind, multiline, contextId, keyboard)
         pageKeyboard.showRequested()
         val shown = keyboard.showSoftInput(this, 0)
         Log.i(LOG_TAG, "keyboard show for $kind: accepted=$shown, $pageKeyboard")
@@ -232,11 +225,12 @@ class EngineSurfaceView(
      * the user used the page); the engine asks for [showKeyboard] when the user taps the field.
      * Focus is not taken: a sheet the user is typing in keeps it.
      */
-    fun prepareKeyboard(kind: String) {
-        useFieldKind(kind, context.getSystemService(InputMethodManager::class.java))
+    fun prepareKeyboard(kind: String, multiline: Boolean = false, contextId: Long = 0) {
+        useFieldKind(kind, multiline, contextId, context.getSystemService(InputMethodManager::class.java))
     }
 
     fun hideKeyboard() {
+        retireInputConnection()
         pageKeyboard.hideRequested()
         context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
         Log.i(LOG_TAG, "keyboard hide, $pageKeyboard")
@@ -248,14 +242,24 @@ class EngineSurfaceView(
      * a tap on it then opens the keyboard again.
      */
     private fun reportDismissal(cause: Dismissal) {
+        retireInputConnection()
         Log.i(LOG_TAG, "keyboard dismissal sent to the page: $cause")
         if (engineRunning()) NativeEngine.imeDismissed()
     }
 
-    private fun useFieldKind(kind: String, keyboard: InputMethodManager) {
-        if (kind == fieldKind) return
+    private fun useFieldKind(kind: String, multiline: Boolean, contextId: Long, keyboard: InputMethodManager) {
+        // Even an identically typed field is a new editing context. Never keep an old
+        // InputConnection that could deliver a delayed word into its replacement.
+        retireInputConnection()
         fieldKind = kind
+        fieldMultiline = multiline
+        fieldContext = contextId
         keyboard.restartInput(this)
+    }
+
+    private fun retireInputConnection() {
+        inputConnection?.closeConnection()
+        inputConnection = null
     }
 
     private enum class Dismissal {
@@ -268,67 +272,64 @@ class EngineSurfaceView(
     private companion object {
         const val LOG_TAG = "CombrayEngine"
         const val TEXT = "text"
-        const val PASSWORD = "password"
     }
 }
 
-/**
- * Minimal IME bridge: committed text becomes a composition end in the focused element;
- * deletions and editor actions become key events. A word being composed reaches the page when
- * the keyboard commits or finishes it (the page shows no composition preview); selection sync
- * with the page is not implemented.
- */
-class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view, false) {
-    /** The keyboard's current composition, not yet sent to the page. */
-    private var composing = ""
+/** Live, replaceable IME composition. Page selection/surrounding-text synchronization is separate. */
+class EngineInputConnection(
+    view: EngineSurfaceView,
+    private val engineRunning: () -> Boolean,
+    private val fieldContext: Long,
+) : BaseInputConnection(view, false) {
+    private val composition = PageComposition(
+        send = { id, phase, text ->
+            if (engineRunning()) NativeEngine.imeComposition(id, fieldContext, phase.nativeValue, text)
+        },
+        commit = { if (engineRunning()) NativeEngine.imeCommitInContext(fieldContext, it) },
+    )
 
-    override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
-        composing = text.toString()
-        return true
-    }
+    override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean =
+        engineRunning() && composition.update(text.toString())
 
-    override fun finishComposingText(): Boolean {
-        sendComposing()
-        return true
-    }
+    override fun finishComposingText(): Boolean = engineRunning() && composition.finish()
 
-    /** Replaces the composition, as the IME contract defines. */
-    override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
-        composing = ""
-        NativeEngine.imeCommit(text.toString())
-        return true
-    }
+    override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean =
+        engineRunning() && composition.commit(text.toString())
 
     override fun closeConnection() {
-        sendComposing()
+        composition.close()
         super.closeConnection()
     }
 
-    private fun sendComposing() {
-        if (composing.isEmpty()) return
-        NativeEngine.imeCommit(composing)
-        composing = ""
-    }
-
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+        if (!engineRunning() || composition.closed || beforeLength < 0 || afterLength < 0) return false
+        composition.finish()
         repeat(beforeLength) { tapKey(KeyEvent.KEYCODE_DEL) }
         repeat(afterLength) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
         return true
     }
 
     override fun sendKeyEvent(event: KeyEvent): Boolean {
-        val action = if (event.action == KeyEvent.ACTION_DOWN) NativeEngine.KEY_PRESS else NativeEngine.KEY_RELEASE
-        NativeEngine.key(action, event.keyCode, event.unicodeChar)
+        if (!engineRunning() || composition.closed) return false
+        if (event.action == KeyEvent.ACTION_DOWN) composition.finish()
+        val action = when (event.action) {
+            KeyEvent.ACTION_DOWN -> NativeEngine.KEY_PRESS
+            KeyEvent.ACTION_UP -> NativeEngine.KEY_RELEASE
+            else -> return false
+        }
+        NativeEngine.keyInContext(action, event.keyCode, event.unicodeChar, event.metaState, fieldContext)
         return true
     }
 
     override fun performEditorAction(actionCode: Int): Boolean {
+        if (!engineRunning() || composition.closed) return false
+        composition.finish()
         tapKey(KeyEvent.KEYCODE_ENTER)
         return true
     }
 
     private fun tapKey(keyCode: Int) {
-        NativeEngine.key(NativeEngine.KEY_PRESS, keyCode, 0)
-        NativeEngine.key(NativeEngine.KEY_RELEASE, keyCode, 0)
+        NativeEngine.keyInContext(NativeEngine.KEY_PRESS, keyCode, 0, 0, fieldContext)
+        NativeEngine.keyInContext(NativeEngine.KEY_RELEASE, keyCode, 0, 0, fieldContext)
     }
 }
