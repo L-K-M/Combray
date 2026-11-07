@@ -49,10 +49,16 @@ object ServiceUrls {
         }
         var path = (uri.rawPath ?: "").trimEnd('/')
         apiSuffixes.firstOrNull { path.endsWith(it) }?.let { path = path.removeSuffix(it).trimEnd('/') }
-        val port = if (uri.port >= 0) ":${uri.port}" else ""
+        // The same server spelled with its scheme's default port or a trailing dot is the same
+        // destination: keep one fingerprint, or the credential and queued work are needlessly
+        // re-entered and rebound.
+        val scheme = uri.scheme.lowercase()
+        val defaultPort = if (scheme == "http") 80 else 443
+        val port = if (uri.port >= 0 && uri.port != defaultPort) ":${uri.port}" else ""
+        val bareHost = host.trimEnd('.')
         // java.net.URI already returns IPv6 literals in brackets.
-        val hostPart = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
-        return ServiceRoot.Valid("${uri.scheme.lowercase()}://$hostPart$port$path")
+        val hostPart = if (bareHost.contains(':') && !bareHost.startsWith("[")) "[$bareHost]" else bareHost
+        return ServiceRoot.Valid("${scheme}://$hostPart$port$path")
     }
 
     /** Checks both fields; a blank alternate, or one equal to the main address, is none. */

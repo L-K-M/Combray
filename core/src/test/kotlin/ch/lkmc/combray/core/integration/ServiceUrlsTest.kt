@@ -43,6 +43,20 @@ class ServiceUrlsTest {
     }
 
     @Test
+    fun defaultPortsAndTrailingDotsAreTheSameServer() {
+        assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example:443"))
+        assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example."))
+        assertEquals(ServiceRoot.Valid("http://keep.example"), root("http://keep.example:80"))
+        assertEquals(ServiceRoot.Valid("http://keep.example:8080"), root("http://keep.example:8080"))
+        for (spelling in listOf("https://keep.example", "https://keep.example:443", "https://keep.example.")) {
+            assertEquals(
+                ServiceUrls.fingerprint("https://keep.example"),
+                addresses(spelling, null).let { (it as ServiceAddresses.Valid).fingerprint },
+            )
+        }
+    }
+
+    @Test
     fun fingerprintIdentifiesTheDestination() {
         assertEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://a.example"))
         assertNotEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://b.example"))
