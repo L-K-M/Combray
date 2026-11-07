@@ -285,6 +285,9 @@ All notable changes to this project are documented here. The format follows
   keyboard's text went to form fields only, editors such as Lexical
   rejected the engine's input events, and Backspace deleted nothing in
   them; text typed after Backspace in other editors came out huge.
+- Reloading a page sends the referrer of the request that first loaded it,
+  as Firefox does, instead of the page's own address. A bot check that
+  compared the two requests turned the reload away.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects

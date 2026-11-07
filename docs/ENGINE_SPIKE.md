@@ -3076,8 +3076,10 @@ Checks:
 
 ## 51. Typing into rich text editors (7 November 2026)
 
-Validated source: `a584945cffd7ddb1cd42f7e21f9c4287f8674928`, the head of downstream
-[PR #35](https://github.com/L-K-M/servo/pull/35) onto §48's pin `4778c513e962`.
+Validated source: `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a` on `combray/0.7`, which merges
+downstream [PR #35](https://github.com/L-K-M/servo/pull/35) onto the merge of
+[PR #37](https://github.com/L-K-M/servo/pull/37), on §48's pin `4778c513e962`. Its tree is that of
+the PR's head `6588db0749a`, which the local device checks below ran on.
 
 ### Report
 
@@ -3114,7 +3116,12 @@ clicked and typed `hello`, Backspace, `p`, Enter, `world`.
     removal or loss of `contenteditable`;
   - after review: `modify()` moves over images, form controls and non-editable blocks in one
     step (a non-editable block trapped the caret, and the position after a trailing image was
-    unreachable), and a host whose focus listener moves focus on asks for no input method.
+    unreachable); a host whose focus listener moves focus on asks for no input method; the
+    restore after deleting converts every recorded size form (`5`, `x-large`, `20px`); and a
+    hidden `<img>` or `<br>` no longer counts as content beside a `<br>`.
+- The pin also takes [PR #37](https://github.com/L-K-M/servo/pull/37), merged before #35:
+  `location.reload()` and Reload send the referrer and referrer policy of the request that fetched
+  the document, as Firefox does, instead of the document's own URL.
 - Here: the pin; `dom_exec_command_enabled`, which runs editing-host typing and gives pages
   `document.execCommand` as other browsers do; `ime_commit` sends `ImeEvent::Commit` (as Servo's
   own Android shell now does) instead of a composition end; the fixture `/contenteditable.html` and
@@ -3147,4 +3154,11 @@ keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left ar
   mozilla WPT test failed 4 of 4 before. WPT `editing/`, `input-events/` and `selection/` (1086
   tests) against the unchanged engine on the same Mac: 453 subtests newly pass, none regress.
 - Here: `scripts/tests/test_notices.py` (the notices' crate set is unchanged; only the pin script's
-  hash moves) and `scripts/check_docs.py` pass. The device checks run in this PR's Engine workflow.
+  hash moves), `scripts/check_docs.py`, the site-check harness tests, `./gradlew testDebugUnitTest
+  lintDebug`, and `cargo fmt --check` and `cargo test --lib` (164) in `native/` pass.
+- On the local arm64 API 36 emulator (`combray-api36`), with a debug APK built at this pin:
+  - `KeyboardTest` (8 tests, the new case included), `UserAgentTest` and `BrowsingTest` (30)
+    pass.
+  - By hand, with Gboard, the Lexical test page took `h`, `i`, space, Backspace, `o`, Enter, `y`
+    as two paragraphs, `hio` and `y`, with the keyboard opening on the tap.
+- The full device suite runs in this PR's Engine workflow.
