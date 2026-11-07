@@ -317,10 +317,10 @@ class HisterIntegrationTest {
 
         val dispatcher = OutboxDispatcher(
             integrations.outbox,
-            mapOf(JobKind.HISTER_ADD to JobHandler { job ->
+            mapOf(JobKind.HISTER_ADD to JobHandler { claim ->
                 // The first request takes the second body past its retention deadline.
                 now += 2_000
-                hister.dispatch(job)
+                hister.dispatch(claim.job)
             }),
             onDone = { _, _ -> },
             scheduler = {},

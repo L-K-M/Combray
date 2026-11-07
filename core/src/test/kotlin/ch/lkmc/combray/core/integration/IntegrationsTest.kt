@@ -714,7 +714,8 @@ class IntegrationsTest {
                 val remoteId = server.bookmarks.getValue(url)
                 assertEquals(JobState.RETRY_WAIT, pending.state)
                 assertEquals("bookmark_id_missing", pending.error)
-                assertEquals(SaveStatus.Pending, status(url))
+                // The link was acknowledged, so the page is saved even while the list step waits.
+                assertEquals(SaveStatus.Saved, status(url))
                 assertTrue(remoteId !in server.lists.getValue("reading"))
 
                 now = pending.nextAttemptAt
@@ -746,7 +747,7 @@ class IntegrationsTest {
     }
 
     @Test
-    fun aPermanentlyMissingIdNeedsAttentionAfterTenAttempts() = runBlocking {
+    fun aPermanentlyMissingIdStillRecordsTheAcknowledgedBookmark() = runBlocking {
         server.lists["reading"] = mutableSetOf()
         configure()
         chooseList("reading")
@@ -762,7 +763,8 @@ class IntegrationsTest {
         val error = "bookmark_id_missing_after_10_attempts"
         assertEquals(JobState.FAILED, job().state)
         assertEquals(error, job().error)
-        assertEquals(SaveStatus.NeedsAttention(error), status())
+        // The bookmark exists, so the page is saved; the failed list step stays in Settings.
+        assertEquals(SaveStatus.Saved, status())
         assertTrue(server.lists.getValue("reading").isEmpty())
         assertEquals(1, server.bookmarks.size)
     }
@@ -777,14 +779,35 @@ class IntegrationsTest {
         drain()
         assertEquals(JobState.FAILED, job().state)
         assertEquals("list_not_found", job().error)
-        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+        // The acknowledged link is saved; the list failure stays in Settings.
+        assertEquals(SaveStatus.Saved, status())
 
         server.lists["later"] = mutableSetOf()
         chooseList("later")
+        val postsBeforeRetry = server.requests.count { it.startsWith("POST") }
         runBlocking { integrations.outbox.retryNow("job0") }
         drain()
         assertEquals(SaveStatus.Saved, status())
         assertEquals(setOf("bm1"), server.lists["later"])
+        assertEquals(1, server.bookmarks.size)
+        // The retry resumed the list step with the acknowledged bookmark, not a second link.
+        assertEquals(postsBeforeRetry, server.requests.count { it.startsWith("POST") })
+    }
+
+    @Test
+    fun discardingAListFailureKeepsTheAcknowledgedBookmark() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        server.lists.remove("reading")
+        save()
+        drain()
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals(SaveStatus.Saved, status())
+
+        // Giving up on the list step does not unsave the link the server acknowledged.
+        runBlocking { integrations.discard("job0") }
+        assertEquals(SaveStatus.Saved, status())
         assertEquals(1, server.bookmarks.size)
     }
 
@@ -800,7 +823,8 @@ class IntegrationsTest {
         assertEquals(1, server.bookmarks.size)
         assertEquals(JobState.RETRY_WAIT, job().state)
         assertEquals(1, job().attempts)
-        assertEquals(SaveStatus.Pending, status())
+        // The link was acknowledged, so the page is saved while the list step waits.
+        assertEquals(SaveStatus.Saved, status())
 
         listsOffline = false
         now = job().nextAttemptAt

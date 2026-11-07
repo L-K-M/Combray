@@ -12,6 +12,7 @@ import ch.lkmc.combray.core.data.ServiceKind
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -105,8 +106,8 @@ class OutboxTest {
     fun aBrokenHandlerStopsItsJobButNotTheDrain() {
         val first = enqueue(dedupeKey = "https://a.test/") as Enqueued.Queued
         val second = enqueue(dedupeKey = "https://b.test/") as Enqueued.Queued
-        val handler = JobHandler { job ->
-            if (job.id == first.job.id) error("handler bug") else DispatchResult.Done(remoteId = "kept")
+        val handler = JobHandler { claim ->
+            if (claim.job.id == first.job.id) error("handler bug") else DispatchResult.Done(remoteId = "kept")
         }
         val dispatcher = OutboxDispatcher(
             outbox = outbox,
@@ -216,6 +217,29 @@ class OutboxTest {
 
         assertNull(runBlocking { outbox.claim("last", LEASE_MS) })
         assertEquals(JobState.FAILED, job(queued.job.id).state)
+    }
+
+    @Test
+    fun aCheckpointSurvivesOnlyUnderTheClaimThatMadeIt() {
+        val queued = enqueue() as Enqueued.Queued
+        val claim = runBlocking { outbox.claim("owner", LEASE_MS) }!!
+
+        var acknowledged = false
+        assertTrue(runBlocking { outbox.checkpoint(claim, "bm1") { acknowledged = true } })
+        assertEquals("bm1", job(queued.job.id).remoteId)
+        assertTrue(acknowledged)
+
+        // The lease expired and a new worker took over: the old claim cannot move the checkpoint.
+        now += LEASE_MS + 1
+        val reclaimed = runBlocking { outbox.claim("new-owner", LEASE_MS) }!!
+        var lateAcknowledged = false
+        assertFalse(runBlocking { outbox.checkpoint(claim, "bm2") { lateAcknowledged = true } })
+        assertFalse(lateAcknowledged)
+        assertEquals("bm1", job(queued.job.id).remoteId)
+
+        // The current owner can still record its own acknowledgment.
+        assertTrue(runBlocking { outbox.checkpoint(reclaimed, "bm2") { } })
+        assertEquals("bm2", job(queued.job.id).remoteId)
     }
 
     @Test

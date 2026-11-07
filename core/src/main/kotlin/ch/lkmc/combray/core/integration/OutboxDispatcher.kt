@@ -13,9 +13,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-/** Sends one job. Rechecks policy and destination first; never retargets the payload. */
+/** Sends one job under its claim. Rechecks policy and destination first; never retargets the payload. */
 fun interface JobHandler {
-    suspend fun dispatch(job: OutboxJobEntity): DispatchResult
+    suspend fun dispatch(claim: Claim): DispatchResult
 }
 
 /** Asks the platform to run [OutboxDispatcher.drain] at [atMillis] (null: nothing scheduled). */
@@ -114,7 +114,7 @@ class OutboxDispatcher(
     private suspend fun dispatch(claim: Claim): DispatchResult {
         val handler = handlers[claim.job.kind] ?: return DispatchResult.Rejected("no_handler")
         return try {
-            withContext(Dispatchers.IO) { handler.dispatch(claim.job) }
+            withContext(Dispatchers.IO) { handler.dispatch(claim) }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
