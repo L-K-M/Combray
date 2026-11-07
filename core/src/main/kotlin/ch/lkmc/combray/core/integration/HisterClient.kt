@@ -94,13 +94,24 @@ class HisterClient(private val transport: HttpTransport) {
         while (true) {
             val body = buildJsonObject {
                 put("url", url)
-                title?.let { put("title", it.take(MAX_TITLE_CHARS)) }
+                // Bounded by bytes, not characters: a multibyte title would otherwise take room
+                // from the page text for no reason.
+                title?.let { put("title", it.takeUtf8Bytes(MAX_TITLE_CHARS)) }
                 put("text", kept)
             }.toString().toByteArray(Charsets.UTF_8)
             if (body.size <= MAX_REQUEST_BYTES || kept.isEmpty()) return body
             val excess = body.size - MAX_REQUEST_BYTES
             kept = kept.dropLastCodePoints(maxOf(excess / 2, 1))
         }
+    }
+
+    /** At most [maxBytes] of UTF-8, without splitting a character. */
+    private fun String.takeUtf8Bytes(maxBytes: Int): String {
+        val bytes = toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) return this
+        var end = maxBytes
+        while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
+        return String(bytes, 0, end, Charsets.UTF_8)
     }
 
     private fun parseResults(body: ByteArray): HisterSearch {

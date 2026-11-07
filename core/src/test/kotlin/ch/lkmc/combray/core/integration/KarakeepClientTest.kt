@@ -103,4 +103,15 @@ class KarakeepClientTest {
         val result = create()
         assertTrue(result is DispatchResult.Retry)
     }
+
+    @Test
+    fun aLongSearchQueryIsCapped() {
+        create("https://a.example/", "Alpha")
+
+        client.bookmarks(server.root, FakeKarakeep.KEY, query = "a".repeat(5_000))
+
+        val uri = server.uris.last()
+        val query = uri.substringAfter("q=", "").substringBefore('&')
+        assertEquals(2_000, query.length)
+    }
 }

@@ -48,6 +48,17 @@ class HisterClientTest {
     }
 
     @Test
+    fun aMultibyteTitleIsBoundedByBytesNotCharacters() {
+        // 4096 two-byte characters would be 8 KiB; the title is bounded to 4096 bytes.
+        val title = "é".repeat(HisterClient.MAX_TITLE_CHARS)
+        assertEquals(DispatchResult.Done(null), client.add(server.root, FakeHister.TOKEN, "https://a.example/", title, "text"))
+
+        val body = server.added.single()
+        val sent = Regex("\"title\":\"([^\"]*)\"").find(body)!!.groupValues[1]
+        assertEquals(HisterClient.MAX_TITLE_CHARS, sent.toByteArray(Charsets.UTF_8).size)
+    }
+
+    @Test
     fun searchMergesPromotedHistoryAndDocumentsWithoutDroppingEither() {
         server.searchBody = """
             {"query":"servo","total":3,"page_key":"next-1",
