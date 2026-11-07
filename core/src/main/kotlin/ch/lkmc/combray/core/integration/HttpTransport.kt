@@ -41,8 +41,12 @@ class UrlConnectionTransport(
 ) : HttpTransport {
     override fun execute(request: HttpRequest): HttpOutcome {
         val connection = try {
-            URL(request.url).openConnection() as HttpURLConnection
+            val url = URL(request.url)
+            if (!ServiceUrls.isValidPort(url.port)) return HttpOutcome.Failure("bad_url")
+            url.openConnection() as? HttpURLConnection ?: return HttpOutcome.Failure("bad_url")
         } catch (malformed: IOException) {
+            return HttpOutcome.Failure("bad_url")
+        } catch (malformed: IllegalArgumentException) {
             return HttpOutcome.Failure("bad_url")
         }
         return try {

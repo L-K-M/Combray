@@ -43,6 +43,25 @@ class ServiceUrlsTest {
     }
 
     @Test
+    fun servicePortsMustBeUsableTcpPorts() {
+        for (host in listOf("keep.example", "[::1]")) {
+            for (port in listOf(0, 65536, 99999)) {
+                val invalid = "https://$host:$port/sub/api/v1"
+                assertEquals(invalid, ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root(invalid))
+                assertEquals(
+                    invalid,
+                    ServiceAddresses.Invalid(AddressField.ALTERNATE, ServiceRootProblem.NOT_A_URL),
+                    addresses("https://keep.example", invalid),
+                )
+            }
+            for (port in listOf(1, 443, 65535)) {
+                assertEquals(ServiceRoot.Valid("https://$host:$port/sub"), root("https://$host:$port/sub/api/v1"))
+            }
+        }
+        assertEquals(ServiceRoot.Valid("https://keep.example/sub"), root("https://keep.example/sub"))
+    }
+
+    @Test
     fun fingerprintIdentifiesTheDestination() {
         assertEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://a.example"))
         assertNotEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://b.example"))
