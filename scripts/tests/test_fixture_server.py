@@ -80,6 +80,44 @@ class AgentPageTest(unittest.TestCase):
         self.assertIn("x\\u003c/script>", document)
 
 
+class ImageDownloadFixtureTest(unittest.TestCase):
+    def test_the_original_is_a_fixed_one_pixel_png(self):
+        fixture = load_server()
+        request = Mock(path="/download-image.png?k=fixture", headers={})
+        fixture.Handler.do_GET(request)
+        status, image, content_type = request.send.call_args.args
+        self.assertEqual(200, status)
+        self.assertEqual("image/png", content_type)
+        self.assertEqual(b"\x89PNG\r\n\x1a\n", image[:8])
+        self.assertEqual((1, 1), struct.unpack(">II", image[16:24]))
+        self.assertEqual("71123a98501f2e9a093d18927e529396c01b7fbd7c41879b1c07bf4470263cd9", hashlib.sha256(image).hexdigest())
+        self.assertEqual({"service": "image-download", "key": "fixture", "has_cookie": False,
+                          "has_referrer": False, "servo_agent": False}, request.record.call_args.args[0])
+
+    def test_a_linked_image_has_a_distinct_destination_and_a_browser_cookie(self):
+        request = Mock(path="/image-download.html?k=fixture&linked=1&redirect=1")
+        load_server().Handler.do_GET(request)
+        status, document = request.send.call_args.args
+        self.assertEqual(200, status)
+        self.assertIn("<a href='/solid/3b4f8a.html'>", document)
+        self.assertIn("src='/download-image-redirect.png?k=fixture&amp;fail=0'", document)
+        self.assertEqual([("Set-Cookie", "combray=image-download-fixture; Path=/")], request.send.call_args.kwargs["headers"])
+
+    def test_a_redirect_keeps_the_check_key_and_failure_mode(self):
+        request = Mock(path="/download-image-redirect.png?k=fixture&fail=1")
+        load_server().Handler.do_GET(request)
+        self.assertEqual((302,), request.send.call_args.args)
+        self.assertEqual([("Location", "/download-image.png?k=fixture&fail=1")], request.send.call_args.kwargs["headers"])
+
+    def test_the_failure_variant_renders_in_servo_but_refuses_the_separate_downloader(self):
+        fixture = load_server()
+        for agent, expected in [("fixture Servo/0.7.0", 200), ("AndroidDownloadManager", 403)]:
+            with self.subTest(agent=agent):
+                request = Mock(path="/download-image.png?k=fixture&fail=1", headers={"User-Agent": agent})
+                fixture.Handler.do_GET(request)
+                self.assertEqual(expected, request.send.call_args.args[0])
+
+
 class RequestLogTest(unittest.TestCase):
     def setUp(self):
         self.server = load_server()

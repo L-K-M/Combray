@@ -3162,3 +3162,76 @@ keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left ar
   - By hand, with Gboard, the Lexical test page took `h`, `i`, space, Backspace, `o`, Enter, `y`
     as two paragraphs, `hio` and `y`, with the keyboard opening on the tap.
 - The full device suite runs in this PR's Engine workflow.
+
+## 52. Image downloads (7 November 2026)
+
+Owner request: offer Download image in the long-press image menu. It is separate
+from Open in new tab and a link's existing Open in background action; those keep
+their behavior. A linked image downloads its image address, not its link.
+
+Implementation default: `app/src/main/kotlin/ch/lkmc/combray/ImageDownloads.kt`
+validates and canonicalizes an HTTP(S) address, then hands it to Android DownloadManager on an IO dispatcher.
+Android owns the download after enqueue, including retries and progress/completion
+notifications. Files go to public Downloads without an added storage permission
+(minSdk 30). Names keep a safe image suffix when known and use a unique UUID to
+avoid overwriting earlier files. They contain no query, fragment, path separators,
+control characters or arbitrary executable suffix; the response determines MIME.
+The native menu dismisses first, then a process-scoped coroutine queues the original
+address. The toast says queued only after the platform accepts it; a refused enqueue
+gets an error, never a saved claim. Tab selection does not change.
+
+Limits and trust boundary:
+
+- This is a new HTTP(S) request through Android, not an export of Servo's cached
+  pixels or authenticated response. No cookies, referrer or integration headers
+  are added. Protected/hotlink-gated images may fail; a server can return different
+  bytes or a sign-in page. Signed image query parameters are retained deliberately
+  for the user-requested download, but never used as a filename or logged by the app.
+- Android's downloader owns redirect/network policy, not the native player's
+  `MediaPolicy`. There is no page-JavaScript download API, automatic download or
+  automatic file opening. Only the native menu's user action hands over an address.
+- `data:`, `blob:`, `file:`, content-provider addresses, embedded credentials and
+  image addresses longer than 8,192 characters are refused. The menu hides the
+  download action for non-web schemes. General attachment/file downloads remain
+  out of scope.
+- No native, downstream Servo, dependency or manifest changes. The tested engine
+  pin is `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a`.
+
+Evidence on macOS arm64, JDK 21, Rust 1.97.1 and Android SDK under
+`~/Library/Android/sdk` (Rust's toolchain `bin` added to `PATH`):
+
+- Nine `ImageDownloadsTest` checks cover destination/naming, no headers, query
+  retention without fragments, unsupported/credential URLs, duplicate filenames,
+  provider refusal and cancellation. Eight failed against the unavailable stub
+  before implementation; all nine pass after it.
+- Six `ImageDownloadMenuTest` checks cover plain/linked images, dismissal before
+  download, unchanged link background behavior, and hidden unsupported actions.
+- Full JVM/lint/debug/test/release checks pass: 750 tests, no failures or skips.
+  All 121 Python script tests pass, including four new fixture checks. Native
+  formatting and all 169 host tests pass.
+- `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh` passes (11m52s),
+  and `verify-apk.py --expected-arch arm64` passes on the packaged debug APK.
+- Three `ImageDownloadTest` checks pass on an isolated API-36 arm64 emulator
+  (`emulator-5592`, 360×720dp, SwiftShader): a real long-press downloads the original
+  69-byte PNG with its independently pinned SHA-256 and MIME; a linked image follows
+  its image redirect, not its page link; and a separate downloader refused with 403
+  reports Android's failed status. The browser's fixture cookie reaches Servo's
+  image request, but neither it nor the page referrer reaches the download request.
+  The same logical tab stays selected and its image stays painted. Each check removes
+  only its own uniquely addressed download and file.
+- The same API-36 run also passes all eight `PageControlsTest` and 32
+  `AccessibilityTest` checks (43 total), including foreground Open in new tab and
+  the image/linked-image menus' targets.
+- Local evidence: `/tmp/combray-download-images-logs/`. The full x86_64 fixture suite
+  runs in Engine PR checks. No physical phone or live personal service was used.
+
+Reproduction:
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 -I -m unittest discover -s scripts/tests
+COMBRAY_ABI=arm64 scripts/build-native.sh
+scripts/check-app.sh <serial> ch.lkmc.combray.ImageDownloadTest ch.lkmc.combray.PageControlsTest ch.lkmc.combray.AccessibilityTest
+python3 scripts/check_docs.py
+git diff --check
+```

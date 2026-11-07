@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.res.Resources
 import android.os.Build
 import android.os.PersistableBundle
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -65,6 +66,7 @@ import ch.lkmc.combray.AppGraph
 import ch.lkmc.combray.ExternalLinks
 import ch.lkmc.combray.ExternalOutcome
 import ch.lkmc.combray.LaunchRequest
+import ch.lkmc.combray.ImageDownloadResult
 import ch.lkmc.combray.R
 import ch.lkmc.combray.core.browser.ActiveTab
 import ch.lkmc.combray.core.browser.BrowserState
@@ -806,6 +808,20 @@ fun BrowserScreen(
                         // No title: the link's page is not loaded, and Karakeep fills it in when it fetches the page.
                         val request = graph.integrations.save(link.url, null)
                         reportSave(request, snackbar, resources, queued = resources.getString(R.string.link_save_queued), onOpenSettings = openSettings)
+                    }
+                }
+            },
+            onDownloadImage = { url ->
+                // The system download and its confirmation outlive this dialog and Activity.
+                val application = context.applicationContext
+                graph.scope.launch {
+                    val message = when (graph.imageDownloads.enqueue(url)) {
+                        ImageDownloadResult.QUEUED -> R.string.image_download_queued
+                        ImageDownloadResult.UNSUPPORTED_ADDRESS -> R.string.image_download_unsupported
+                        ImageDownloadResult.UNAVAILABLE -> R.string.image_download_unavailable
+                    }
+                    withContext(Dispatchers.Main.immediate) {
+                        Toast.makeText(application, message, Toast.LENGTH_SHORT).show()
                     }
                 }
             },
