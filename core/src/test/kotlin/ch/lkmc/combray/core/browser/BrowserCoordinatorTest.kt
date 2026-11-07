@@ -77,12 +77,16 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
+    private fun newCoordinator(
+        navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
+        workQueueCapacity: Int = DEFAULT_WORK_QUEUE_CAPACITY,
+    ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
+            workQueueCapacity = workQueueCapacity,
         ).also { it.start() }
     }
 
@@ -147,6 +151,27 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ImeHidden(engine.view(1)))
         idle()
         assertTrue(reads.get() > 0)
+    }
+
+    /**
+     * The work queue is bounded; its overflow policy is backpressure, so a flood larger than
+     * the capacity still runs every job, in submission order, with none dropped.
+     */
+    @Test
+    fun aFloodOfCommandsIsNeverDroppedAndKeepsOrder() {
+        browser = newCoordinator(workQueueCapacity = 8)
+        ready()
+        engine.appearances.clear() // engine_ready sends the initial appearance
+        val flood = 200
+        for (i in 0 until flood) {
+            browser.setAppearance(if (i % 2 == 0) Appearance.DARK else Appearance.LIGHT)
+        }
+        idle()
+        val sent = engine.appearances.map { it.first }
+        assertEquals("every command ran", flood, sent.size)
+        for (i in 0 until flood) {
+            assertEquals(if (i % 2 == 0) Appearance.DARK else Appearance.LIGHT, sent[i])
+        }
     }
 
     @Test
