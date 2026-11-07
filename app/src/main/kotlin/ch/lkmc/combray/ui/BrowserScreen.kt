@@ -900,10 +900,12 @@ private fun PageOverlay(
 private fun OverlayMessage(message: String, action: @Composable () -> Unit = {}) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         // Scrollable, and centered only while the content fits: at the largest font on a narrow
-        // screen the headline and its button would otherwise clip past the viewport.
-        BoxWithConstraints(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // screen the headline and its button would otherwise clip past the viewport. The scroll
+        // modifier stays on the Column: on the BoxWithConstraints it would leave the scope's
+        // maxHeight unbounded and make the heightIn(min) a no-op.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
             Column(
-                Modifier.fillMaxWidth().heightIn(min = maxHeight).padding(24.dp),
+                Modifier.fillMaxWidth().heightIn(min = maxHeight).verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
