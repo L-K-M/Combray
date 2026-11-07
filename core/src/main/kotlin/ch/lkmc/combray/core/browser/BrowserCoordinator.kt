@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.browser
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.room.withTransaction
 import ch.lkmc.combray.core.data.CombrayDatabase
@@ -92,6 +93,11 @@ class BrowserCoordinator(
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
     /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
     private val textSize: () -> TextSize = { TextSize.DEFAULT },
+    /** Monotonic milliseconds since boot, to tell a wall-clock jump from real elapsed time. */
+    private val elapsedRealtime: () -> Long = { SystemClock.elapsedRealtime() },
+    /** The (wall, monotonic) reading persisted by the last maintenance, across process death. */
+    private val readClockAnchor: () -> Pair<Long, Long>? = { null },
+    private val writeClockAnchor: (wall: Long, monotonic: Long) -> Unit = { _, _ -> },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -142,6 +148,14 @@ class BrowserCoordinator(
     /** Document keys are only meaningful within one process: prefix them with its identity. */
     private val processKey = newId().take(PROCESS_KEY_LENGTH)
 
+    /**
+     * The wall-clock reading the monotonic clock anchors to, and its monotonic reading: any
+     * wall time beyond `wallBase + elapsed + MAX_CLOCK_SKEW_MS` is a forward jump of the device
+     * clock (manual date, bad NTP), not time that passed, and retention must not act on it.
+     */
+    private var wallBase = 0L
+    private var wallAnchorMono = 0L
+
     val browserState: StateFlow<BrowserState> = state.asStateFlow()
 
     /**
@@ -149,6 +163,7 @@ class BrowserCoordinator(
      * work queue, then restores the session. Call once per process.
      */
     fun start() {
+        anchorClock()
         startEngine()
         scope.launch {
             for (job in work) {
@@ -1585,8 +1600,42 @@ class BrowserCoordinator(
         dao.updateTab(tab.copy(url = recoveryUrl, title = null, currentVisitId = null, pageForgotten = false))
     }
 
+    /**
+     * Anchors the wall clock to the monotonic one: [wallBase] is the wall reading the anchor
+     * implies now, so a wall clock set far forward (manual date, bad NTP) shows up as
+     * `clock.now() - wallBase` far beyond real elapsed time. A persisted anchor survives
+     * process death while the device stays on (a reboot resets the monotonic clock, and the
+     * wall clock is then trusted: a jump while the device was off is indistinguishable from
+     * time that really passed).
+     */
+    private fun anchorClock() {
+        val mono = elapsedRealtime()
+        val stored = readClockAnchor()
+        wallAnchorMono = mono
+        wallBase = if (stored != null && mono >= stored.second) {
+            stored.first + (mono - stored.second)
+        } else {
+            clock.now()
+        }
+    }
+
+    /**
+     * The wall-clock time to act on: never more than [MAX_CLOCK_SKEW_MS] past what the
+     * monotonic clock says has passed, so a forward-jumped device clock cannot wipe history
+     * and close unused tabs in one go. The anchor persists the clamped reading, so the guard
+     * stays armed while the clock stays wrong and disarms itself when it is corrected.
+     */
+    private fun guardedNow(): Long {
+        val mono = elapsedRealtime()
+        val expected = wallBase + (mono - wallAnchorMono)
+        val raw = clock.now()
+        val now = if (raw > expected + MAX_CLOCK_SKEW_MS) expected + MAX_CLOCK_SKEW_MS else raw
+        writeClockAnchor(now, mono)
+        return now
+    }
+
     private suspend fun maintain() {
-        val cutoff = clock.now() - retention.closedHistoryMillis
+        val cutoff = guardedNow() - retention.closedHistoryMillis
         if (unusedTabs() == UnusedTabs.CLOSE) {
             val active = dao.session()?.activeTabId
             dao.openTabs().filter { it.id != active && it.lastFocusedAt < cutoff }.forEach { closeLogically(it) }
@@ -1797,6 +1846,12 @@ class BrowserCoordinator(
     private companion object {
         const val LOG_TAG = "CombrayBrowser"
         const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
+
+        /**
+         * How far the wall clock may run ahead of the monotonic clock before it counts as a
+         * forward jump: generous enough for NTP slew, far below a manual date change.
+         */
+        private const val MAX_CLOCK_SKEW_MS = 60L * 60 * 1000
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val PROCESS_KEY_LENGTH = 8
 

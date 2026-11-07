@@ -77,12 +77,16 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
+    private fun newCoordinator(
+        navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
+        elapsedRealtime: () -> Long = { now },
+    ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
+            elapsedRealtime = elapsedRealtime,
         ).also { it.start() }
     }
 
@@ -1384,6 +1388,46 @@ class BrowserCoordinatorTest {
         assertTrue(items.any { it is RecentItem.OpenTab && it.url == "https://old-open.test/" })
         assertTrue(items.none { it.url == "https://old-closed.test/" })
         assertEquals(1, runBlocking { database.browser().openTabs() }.size)
+    }
+
+    /**
+     * A device clock set far forward (manual date, bad NTP) must not wipe history: with the
+     * monotonic clock barely advanced, the wall clock's year is a jump, not elapsed time, so
+     * retention keeps the old visit. The default fake clock advances with [now], which models
+     * ordinary time passing; here it stays put while the wall clock jumps.
+     */
+    @Test
+    fun aForwardJumpedClockDoesNotWipeHistory() {
+        browser = newCoordinator(elapsedRealtime = { 1_000L })
+        ready()
+        browser.openUrl("https://keep.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://keep.test/")
+        browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://old.test/")
+        browser.closeTab(state().activeTab!!.id); idle()
+
+        now += 365 * DAY
+        browser.runMaintenance(); idle()
+
+        // The row survives in the database (Recent's own filter still uses the raw clock, so
+        // it only reappears once the clock is corrected).
+        val stored = runBlocking { database.browser().observeHistory(Long.MIN_VALUE, 5000).first() }
+        assertTrue("the jumped clock must not expire history", stored.any { it.url == "https://old.test/" })
+        assertEquals(1, runBlocking { database.browser().openTabs() }.size)
+    }
+
+    /** Ordinary time passing (wall and monotonic clocks advance together) still expires history. */
+    @Test
+    fun elapsedTimeStillExpiresHistoryWhenTheClockIsHonest() {
+        ready()
+        browser.openUrl("https://old-closed.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://old-closed.test/")
+        browser.closeTab(state().activeTab!!.id); idle()
+
+        now += 8 * DAY // elapsedRealtime follows now in the default fake, as on a healthy clock
+        browser.runMaintenance(); idle()
+
+        assertTrue(recent().none { it.url == "https://old-closed.test/" })
     }
 
     @Test

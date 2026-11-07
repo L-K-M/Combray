@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A device clock set far forward (manual date change, bad NTP sync) no
+  longer wipes local history and closes unused tabs in one go: retention
+  now anchors the wall clock to the monotonic clock, persisted across
+  process death, and clamps forward jumps.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
