@@ -26,7 +26,7 @@ The sol-1 November audit passed documentation/whitespace checks, 117 host script
 tests, and 207 report-service tests on Python 3.13. Each of its four feature
 PRs passed failing-first regressions and the full local Kotlin
 unit/lint/debug-assembly gate. It performed no native build, device check or
-personal-service test: this worktree lacked the disposable Servo checkout.
+personal-service test: its checkout lacked the disposable Servo build input.
 Those limits do not replace the project's existing device evidence.
 Sol-2 also passed the Kotlin gates for its changes, 118 script tests, eight
 capture-script checks and 169 Rust host tests. It built the pinned native
@@ -1058,7 +1058,7 @@ remain fixed at 8766, which complicates concurrent isolated sessions; sol-2's
 final capture rerun hit a real port collision before a successful retry. Old
 review-specific runs are not proof of today's integrated tree. Sol-2 also saw
 one report-service SIGTERM test timeout on Python 3.15; its focused rerun
-passed, and all 207 service tests pass on the pinned Python 3.13. The separate
+passed; all 207 service tests also passed on local Python 3.13. The separate
 nesting regression has open PR #202. Recheck the full service suite on a
 proposed replacement runtime without presenting that one timeout as a
 confirmed production shutdown defect.
