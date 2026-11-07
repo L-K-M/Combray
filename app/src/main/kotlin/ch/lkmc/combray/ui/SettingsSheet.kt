@@ -36,6 +36,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -339,6 +340,9 @@ private fun ServiceSettings(
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    // A slow save or check must not replace the result of a newer one: each request takes the
+    // next generation, and only the newest generation writes the status line.
+    var messageGeneration by remember { mutableIntStateOf(0) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -380,8 +384,9 @@ private fun ServiceSettings(
         Button(
             onClick = {
                 scope.launch {
+                    val generation = ++messageGeneration
                     val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
+                    if (messageGeneration == generation) message = describe(resources, labels, result)
                     if (result == Configured.Saved) {
                         editedAddress = null
                         editedAlternate = null
@@ -393,8 +398,12 @@ private fun ServiceSettings(
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
             onClick = {
+                val generation = ++messageGeneration
                 message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
+                scope.launch {
+                    val checked = check()?.let { describe(resources, labels, it) }
+                    if (messageGeneration == generation) message = checked
+                }
             },
             enabled = current != null,
             modifier = Modifier.heightIn(min = 48.dp),
@@ -414,7 +423,7 @@ private fun ServiceSettings(
                     confirmRemove = false
                     editedAddress = null
                     editedAlternate = null
-                    scope.launch { remove(); message = null }
+                    scope.launch { remove(); message = null; messageGeneration++ }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.action_cancel)) } },
