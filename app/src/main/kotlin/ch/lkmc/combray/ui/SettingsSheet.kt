@@ -339,6 +339,7 @@ private fun ServiceSettings(
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -379,16 +380,23 @@ private fun ServiceSettings(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
         Button(
             onClick = {
+                if (saving) return@Button
+                saving = true
                 scope.launch {
-                    val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
-                    if (result == Configured.Saved) {
-                        editedAddress = null
-                        editedAlternate = null
+                    try {
+                        val result = configure(address, credential.ifBlank { null }, alternate)
+                        message = describe(resources, labels, result)
+                        if (result == Configured.Saved) {
+                            editedAddress = null
+                            editedAlternate = null
+                        }
+                        credential = ""
+                    } finally {
+                        saving = false
                     }
-                    credential = ""
                 }
             },
+            enabled = !saving,
             modifier = Modifier.heightIn(min = 48.dp),
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
@@ -396,7 +404,7 @@ private fun ServiceSettings(
                 message = resources.getString(R.string.check_running)
                 scope.launch { message = check()?.let { describe(resources, labels, it) } }
             },
-            enabled = current != null,
+            enabled = current != null && !saving,
             modifier = Modifier.heightIn(min = 48.dp),
         ) { Text(stringResource(R.string.action_check_connection)) }
     }
