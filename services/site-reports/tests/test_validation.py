@@ -749,6 +749,11 @@ class JsonDecodingTest(ValidationTestCase):
         body = b'{"a":' * 50_000 + b"1" + b"}" * 50_000
         self.assert_rejected(body, ErrorCode.INVALID_JSON, None)
 
+    def test_nesting_past_the_limit_is_refused_before_any_recursion_limit(self) -> None:
+        body = b'{"a":[' * 20 + b"1" + b"]}" * 20
+        error = self.assert_rejected(body, ErrorCode.INVALID_JSON, None)
+        self.assertEqual(error.detail, "nested too deeply")
+
     def test_a_body_with_too_many_values_is_refused_before_parsing(self) -> None:
         body = b'{"client":[' + b"{}," * 70_000 + b"{}]}"
         error = self.assert_rejected(body, ErrorCode.INVALID_JSON, None)
