@@ -602,3 +602,7 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A site whose name begins with "www." and has no further dots, such as
+  `www.com`, no longer shows as its bare suffix (`com`) in the address
+  bar, tab switcher, Recent and the new-tab page: the label is dropped
+  only when a longer name follows it.
