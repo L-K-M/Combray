@@ -87,4 +87,26 @@ class PageKeyboardTrackerTest {
         tracker.observed(onScreen = true)
         assertEquals(KeyboardChange.HIDDEN, tracker.observed(onScreen = false))
     }
+
+    @Test
+    fun hasFieldIsTrueOnlyWhileAPageFieldHasTheKeyboard() {
+        assertFalse(tracker.hasField())
+
+        tracker.showRequested()
+        assertTrue(tracker.hasField())
+        tracker.observed(onScreen = true)
+        assertTrue(tracker.hasField())
+
+        tracker.hideRequested()
+        assertFalse(tracker.hasField())
+    }
+
+    @Test
+    fun hasFieldIsFalseAfterTheUserClosesTheKeyboard() {
+        tracker.showRequested()
+        tracker.observed(onScreen = true)
+
+        assertEquals(KeyboardChange.DISMISSED, tracker.observed(onScreen = false))
+        assertFalse(tracker.hasField())
+    }
 }

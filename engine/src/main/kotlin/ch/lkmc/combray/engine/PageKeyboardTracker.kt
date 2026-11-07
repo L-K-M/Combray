@@ -66,6 +66,9 @@ internal class PageKeyboardTracker {
         return had
     }
 
+    /** Whether a page field has the keyboard, or has asked for it: the view is a text editor. */
+    fun hasField(): Boolean = page != PageKeyboard.NONE
+
     override fun toString() = "page=$page onScreen=$onScreen appHiding=$appHiding"
 
     enum class KeyboardChange {

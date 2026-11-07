@@ -194,7 +194,12 @@ class EngineSurfaceView(
         if (change == PageKeyboardTracker.KeyboardChange.DISMISSED) reportDismissal(Dismissal.CLOSED_BY_USER)
     }
 
-    override fun onCheckIsTextEditor(): Boolean = engineRunning()
+    /**
+     * Only a page field makes this view a text editor. Returning true whenever the engine runs
+     * makes TalkBack announce the whole page area as an editable field, and lets the IME
+     * re-show after a window refocus with no page field.
+     */
+    override fun onCheckIsTextEditor(): Boolean = engineRunning() && pageKeyboard.hasField()
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (!engineRunning()) return null
