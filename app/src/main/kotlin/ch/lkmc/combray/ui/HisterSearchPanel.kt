@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -57,6 +58,11 @@ private sealed interface SearchUi {
 fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by hister.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // The local Recent filter's text is prefilled, not submitted: the first server request needs
+    // a keystroke or the Search key in this panel.
+    val prefilled = remember { initialQuery }
+    var interacted by remember { mutableStateOf(false) }
+    var searchKey by remember { mutableIntStateOf(0) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
     var nextPage by remember { mutableStateOf<String?>(null) }
@@ -64,7 +70,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    LaunchedEffect(query, service, interacted, searchKey) {
         val mine = ++generation
         // The last answer belongs to the last query: no stale count while the next one waits.
         ui = SearchUi.Idle
@@ -75,6 +81,7 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
             ui = SearchUi.Idle
             return@LaunchedEffect
         }
+        if (!serverScopeMaySearch(prefilled, query, interacted)) return@LaunchedEffect
         delay(SEARCH_DEBOUNCE_MS)
         ui = SearchUi.Loading
         val answer = hister.search(query.trim()) ?: return@LaunchedEffect
@@ -89,11 +96,12 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; interacted = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.search_all_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { interacted = true; searchKey++ }),
             modifier = Modifier.fillMaxWidth(),
         )
         if (ui == SearchUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
