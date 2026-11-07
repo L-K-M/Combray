@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Combray never sends the same service request twice to one address. A bug
+  in a request could have re-sent it after a failure; each attempt now
+  serves exactly one request.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

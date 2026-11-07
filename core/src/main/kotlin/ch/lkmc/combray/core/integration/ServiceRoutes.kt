@@ -45,8 +45,16 @@ internal class ServiceRoutes(private val transport: HttpTransport) {
     /** Remembers whether a request of this attempt could not connect. */
     private class AttemptTransport(private val transport: HttpTransport) : HttpTransport {
         @Volatile var notConnected = false
+        private var used = false
 
-        override fun execute(request: HttpRequest): HttpOutcome =
-            transport.execute(request).also { if (it is HttpOutcome.NotConnected) notConnected = true }
+        /**
+         * One request per attempt. A second request would re-send on failover to the alternate
+         * address; a lambda that reaches it is a bug, so the second request is refused, not sent.
+         */
+        override fun execute(request: HttpRequest): HttpOutcome {
+            if (used) return HttpOutcome.Failure("reused_attempt")
+            used = true
+            return transport.execute(request).also { if (it is HttpOutcome.NotConnected) notConnected = true }
+        }
     }
 }
