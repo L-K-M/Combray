@@ -36,6 +36,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -339,6 +340,8 @@ private fun ServiceSettings(
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    // A save and a connection check can run at once; only the newest may write the message.
+    var messageGeneration by remember { mutableIntStateOf(0) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -380,8 +383,9 @@ private fun ServiceSettings(
         Button(
             onClick = {
                 scope.launch {
+                    val generation = ++messageGeneration
                     val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
+                    if (generation == messageGeneration) message = describe(resources, labels, result)
                     if (result == Configured.Saved) {
                         editedAddress = null
                         editedAlternate = null
@@ -393,8 +397,12 @@ private fun ServiceSettings(
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
             onClick = {
+                val generation = ++messageGeneration
                 message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
+                scope.launch {
+                    val result = check()
+                    if (generation == messageGeneration) message = result?.let { describe(resources, labels, it) }
+                }
             },
             enabled = current != null,
             modifier = Modifier.heightIn(min = 48.dp),

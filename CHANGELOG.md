@@ -273,6 +273,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Settings no longer lets a slow connection check overwrite a newer save
+  result. Saving and checking at the same time showed the older answer.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
