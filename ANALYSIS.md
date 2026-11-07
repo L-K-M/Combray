@@ -53,8 +53,77 @@ The longcat-1 review's important findings are implemented in open PRs #233,
 omitted; its nice-to-have findings are implemented in open PRs #271, #272,
 #274 and #275 and are omitted, except for the remaining outbox transaction
 note below.
+The 7 November 2026 mimo-2 review's blocking and important findings are
+implemented in open PRs #238, #248, #258, #265, #270, #273 and #277 and are
+omitted per the rule above; its nice-to-have findings implemented in open PRs
+#279, #280 and #281 are omitted too. The blocking stale-frame defect and the
+important IME editor-action and media-load attribution gaps have no PR and are
+recorded as entries below; the surface-detach wait and the signed release path
+were already recorded here and are not repeated. It left the first three
+unimplemented rather than ship android-only native or input changes its
+session could not build or verify. Its remaining findings are folded into the
+sections below. It ran the Kotlin unit/lint gates, `check_docs.py`,
+`git diff --check` and the 169 Rust host tests; no native build, device check
+or personal-service test.
 
 ## Still open
+
+### Fix the stale-frame defect after hidden-view churn
+
+bugs — blocking
+
+The known M0 defect (docs/ENGINE_SPIKE.md section 6): after several hidden-tab
+create/close cycles, navigating the visible tab can leave the surface painting
+the old document forever while history, titles and captures report the new
+one. A same-size surface rebind (Home and back) does not recover the frame; a
+resize such as rotation does. `native/src/engine.rs`'s paint path, `resize`'s
+same-size early return (`:901`) and `surface_created` (`:747`) are the current
+suspects. Every user on a long session can meet a frozen page.
+
+Suggested fix: run the documented cheap experiment first (force a resize, or
+an unconditional `webview.resize` on every `surface_created`) under the
+painted-pixel reproduction the acceptance entry names; if that does not hold,
+per-tab render contexts or a painter rebuild after view churn. The mimo-2review could not verify any of it: the change is in android-only native code
+and its session had no Servo build or device. Effort: one to two days for the
+experiment, one to two weeks for a structural fix.
+
+### Model the keyboard's editor actions in the input pipeline
+
+missing features — important
+
+`EngineSurfaceView.kt:325` (`performEditorAction`) ignores the action code and
+sends Enter for every IME action, and `:206-216` never offers
+`IME_ACTION_NEXT/DONE/GO/SEND`: a keyboard's Next on a multi-field form
+submits it instead of moving to the next field, and there is no way to finish
+a form from the keyboard. Form filling with a soft or hardware keyboard is
+materially worse than on other browsers.
+
+Suggested fix: model the actions end to end — engine commands for next andprevious field and for blur, `imeOptions` from the field kind, SEARCH kept as
+submit — with device runs over real forms. The mimo-2 review left it
+unimplemented: "move to the next field" needs a new android-only native
+command its session could not build or verify. Effort: two to four days.
+
+### Credit media loads overtaken by a navigation to their new page
+
+bugs — important
+
+A link navigation's first media load can overtake the new document's
+`LoadStatus::Started`. With no app request pending, `native/src/engine.rs`
+(`media_blocked`, `:2167`) credits the load to the committed document being
+replaced, and `BrowserCoordinator.onMediaBlocked`/`recordMedia` then drop it
+as a replaced document's report or record it under the old page: a tapped link
+to a video page can lose its Play offer, and an offer recorded for the old
+page is dead (`findPlayback` rechecks the shown page). The native comment trail
+above `media_blocked` documents the race.
+
+Suggested fix: either arm a short post-commit hold in the engine (credit
+unattributed loads to the just-committed document) or extend the coordinator's
+`heldMedia` mechanism beyond `awaitingCommit` to re-attribute reports for a
+recently current document on the next commit; a robust fix is a downstream
+signal exposing the load's pipeline. Test link, redirect and same-origin
+navigations to media pages with the document and generation guards. Effort:
+two to four days app-side, longer with a downstream patch. Found in the
+mimo-2 review's engine slice; not implemented in its session.
 
 ### Use engine load failures rather than page titles
 
@@ -132,7 +201,8 @@ bugs — important
 and native surface binding need a current failure-path check. The inherited
 review found a five-second UI-thread acknowledgment wait, success reported
 after an unsuccessful unbind, and a subsequent bind dropping a still-bound
-`NativeWindow`. Lifecycle-command prioritization is being implemented in an
+`NativeWindow`. The bounded wait also stalls rotation and backgrounding by up
+to five seconds while the engine thread is busy, an ANR risk (the mimo-2review's angle). Lifecycle-command prioritization is being implemented in an
 open PR; it does not by itself establish correct EGL ownership after failure.
 
 Suggested fix: acknowledge actual release, retain or deliberately leak the
@@ -209,7 +279,8 @@ server contract/owner decision is available.
 performance problems, stuttering, and jank — important
 
 `HisterIntegration.forgotten`, `LiveView.documentVisits` and native
-document/retired maps can grow through repeated navigation/forget loops. A
+document/retired maps (`native/src/engine.rs:225-227`) can grow through
+repeated navigation/forget loops. A
 six-live-renderer cap does not bound documents in one long-lived tab. The
 inherited growth claim needs current measurements. The concurrent Devin-1
 review corrected the pending capture/article claim: native deadlines emit a
@@ -334,18 +405,20 @@ UTF-16 characters, not the filesystem's UTF-8 component limit. Long CJK/emoji
 names can still fail. Copies are streamed without per-pick/total byte budgets
 and retained until restart, so repeated deliberately selected large
 attachments accumulate for the whole process and unknown-length providers are
-copied to completion. Startup lifetime/privacy fixes are implemented in open
+copied to completion. A 200 MB per-file cap, a specific refusal message and
+rollback of the failed pick are in open PR #270 (the mimo-2 review's fix);
+total budgets, filename bytes and early release remain. Startup
+lifetime/privacy fixes are implemented in open
 PRs and are intentionally not repeated here. No page-to-JNI arbitrary
 filesystem-path capability has been demonstrated.
 
 Suggested fix: bound filename bytes on code-point boundaries while preserving
-a useful extension. Agree documented limits and cancellation behavior before
-rejecting legitimate large files; enforce them while streaming unknown-length
-providers, roll back only the failed pick, and explain refusals with a useful
-size/storage error. Release a copy only once Servo no longer needs its path.
+a useful extension. Agree total-pick budgets and cancellation behavior, and
+enforce them while streaming unknown-length providers. Release a copy only
+once Servo no longer needs its path.
 Verify traversal/symlink/staging-root boundaries where actually exposed,
 duplicate names, repeated large picks, cancellation and disk-full without
-deleting active attachments. Effort: about one day after the policy is chosen.
+deleting active attachments. Effort: about half a day.
 
 ### Report oversized HTTP responses explicitly
 
@@ -451,10 +524,15 @@ Forgetting already shares a transaction with cancellation, and
 `pageForgotten` prevents requests/results for an open tab's forgotten page
 from returning to history or capture. The inherited unresolved candidate is a
 site shown without a Visit or a timer racing the forget transaction, not the
-already fixed ordinary forgotten-page case. Claim/admission policy fencing is
+already fixed ordinary forgotten-page case. One residual candidate from the
+mimo-2 review: `forgetHost`/`forgetUrl` write the in-memory tombstone and bump
+the policy generation before the surrounding Room transaction commits, so a
+rolled-back forget would leave a tombstone that still cancels that site's
+pending captures. Claim/admission policy fencing is
 being implemented in an open PR.
 
-Suggested fix: reproduce those specific timer/document cases before adding
+Suggested fix: reproduce those specific timer, rollback and document cases
+before adding
 another tombstone mechanism. Cancel or fence only genuinely remaining delayed
 captures, and verify no erased content is re-enqueued after restart. A direct
 concurrent sink test is not proof of a normal coordinator Forget race.
@@ -749,19 +827,18 @@ day.
 
 visual issues and layout problems — nice-to-have
 
-`SettingsSheet.kt:379–402` uses a non-wrapping Save/Check connection action row
-inside 48dp of horizontal margins. Large fonts, split-screen and longer
-translations can squeeze its labels or wrap the buttons awkwardly. Its full
-narrow/large-font accessibility matrix is not recorded. Scrolling Home is
+`SettingsSheet.kt`'s Save/Check connection action row wraps in open PR #273
+(the mimo-2 review's fix); the row overflow at large fonts is no longer an
+open task. What remains is evidence: Settings/Recent still need independent
+bounds and reachability measurements. Scrolling Home is
 already implemented and recovery-overlay scrolling has an open PR; those code
-fixes are not repeated here. Settings/Recent still need independent bounds and
-reachability evidence. An unweighted LazyColumn alone does not prove clipping.
+fixes are not repeated here. An unweighted LazyColumn alone does not prove clipping.
 
 Suggested fix: measure 320dp, 200% type, landscape and keyboard-visible states
-before changing layout. Use a wrapping/adaptive action layout, verified with
-long labels at 320dp/200% while keeping 48dp non-overlapping touch targets.
+before changing layout, keeping the wrapped row's 48dp non-overlapping touch
+targets and verifying its wrapped labels with long translations.
 Check last rows, page actions and snackbar bounds; do not add blanket
-modifiers. Effort: about one day including Settings/Recent accessibility
+modifiers. Effort: about half a day of Settings/Recent accessibility
 coverage.
 
 ### Preserve readable origin under constrained layouts
@@ -1535,3 +1612,272 @@ shortcut to the tab list, distinct from the Recent button's long-press
 
 Suggested fix: add a `combinedClickable` long-press on the counter that opens
 Recent on `RecentScope.OPEN`. Effort: about an hour.
+
+### Book an outbox wakeup when a job is claimed
+
+bugs — nice-to-have
+
+`OutboxDispatcher.drain` books the next wakeup only in its `finally`. A
+process kill between `claim()` and that `finally` leaves the job `RUNNING`
+under a lease with no alarm booked, so delivery recovers only when WorkManager
+re-runs the interrupted `OutboxWorker` (it never returned a `Result`) or the
+user opens the app. That is likely but not guaranteed on every device.
+
+Suggested fix: book a wakeup right after a successful claim, at the claim's
+`leaseUntil`, so a kill always leaves an alarm behind. Test a kill between
+claim and finish. Effort: under a day.
+
+### Map a handler's own cancellation to a failed attempt
+
+bugs — nice-to-have
+
+`OutboxDispatcher.step` maps a `CancellationException` thrown by a handler's
+own internals (not the drain's cancellation, which is rethrown) to `null`, and
+`drain` then records `DispatchResult.Retry("dispatch_failed")`: a handler bug
+that cancels itself is retried to the attempt limit instead of failing
+honestly. `dispatch` rethrows such exceptions into exactly this path.
+
+Suggested fix: distinguish a handler-originated cancellation and map it to
+`Rejected`/`Failed`, reserving `Retry` for explicit transport outcomes.
+Effort: a few hours.
+
+### Complete the engine's per-view cleanup paths
+
+bugs — nice-to-have
+
+Four small state-cleanup gaps from the mimo-2 review's engine slice, all in
+android-only native code its session could not build or test.
+`close_tab` (`native/src/engine.rs:1172-1210`) does not `cancel_reload_pull()`,
+so a pull armed on the closing tab fires for a closed view, and `:1178` emits
+`ImeHidden` for a merely focused (withheld) field, which can hide the app's
+keyboard spuriously. `set_throttling(Throttled)` (`:1060-1078`) skips the
+cleanup `select_none` performs (reload pull, keyboard, off-screen leave-page
+questions). `open_page_tab` (`:1022`) never arms `pending_media.navigation_requested`
+as `create_tab` does, so a page-opened window's early media loads can be
+dropped.
+
+Suggested fix: mirror `select_none`'s cleanup in `close_tab` and the throttled
+branch, gate `ImeHidden` on `Keyboard::Open`, and arm the media hold in
+`open_page_tab`; each has an obvious regression to write on the host side.
+Effort: under an hour each once the android-only build and a device run are
+available.
+
+### Harden KeystoreSecretStore writes and reads
+
+bugs — nice-to-have
+
+`SecretStore.kt:103-105` writes through a fixed `<name>.tmp` path: two
+concurrent writes to one `SecretName` can interleave bytes into a corrupt
+ciphertext, and a kill between write and rename leaves an orphan that is never
+cleaned. `:86-90` treats every `ProviderException` on read as a lost Keystore
+key, so a transient failure (boot, load) makes the UI demand a credential that
+is intact.
+
+Suggested fix: unique temp name per write plus rename, drop stale `*.tmp`
+files at startup, and distinguish key-loss from transient failure, reporting
+the latter as temporarily unavailable. Effort: a few hours.
+
+### Keep one media player at a time
+
+bugs — nice-to-have
+
+`PlayerActivity` has standard launch mode and no `onNewIntent`
+(`app/src/main/AndroidManifest.xml:56-58`), so two quick Play taps stack two
+players that fight over audio focus and reveal each other on close.
+`PlaybackRequests.kt:13-20` evicts at four entries: a fifth rapid offer evicts
+an id whose activity is still launching, and that player flashes and closes.
+
+Suggested fix: `launchMode="singleTop"` with `onNewIntent` replacing the
+request (or a single-player guard), and refuse or hold offers while a player
+is starting. Effort: about half a day with a device run.
+
+### Claim H.264 profiles precisely until the codec probe exists
+
+bugs — nice-to-have
+
+`native/src/media.rs:158-166` (`mp4_codec`) accepts bare `avc1`/`avc3` and any
+profile prefix as `Probably`, so a page can pick an H.264 profile the device
+cannot decode and fail in the player instead of falling back. The planned
+phase-B codec probe (docs/VIDEO.md) is the real fix.
+
+Suggested fix: until the probe, require a profile level (`avc1.PPCCLL`) for
+`Probably` and answer a bare codec `Maybe`. Effort: half a day for the parser
+tightening.
+
+### Screen report addresses with SensitiveUrls
+
+general issues — nice-to-have
+
+Saves, captures, shares and pins all screen addresses with `SensitiveUrls`,
+but `SiteReports.payloadOf` does not: a password-reset or session-token URL is
+sent to the report service and on to the agents that read reports, where the
+app treats the same address as a credential elsewhere. The preview does show
+the address before Send.
+
+Suggested fix: flag a `looksSensitive` address in the report preview for an
+explicit confirmation (not a silent refusal: the user may deliberately report
+that page). Effort: a few hours.
+
+### Prune saved_items when a service is removed
+
+general issues — nice-to-have
+
+The `saved_items` dedupe table grows with every distinct saved URL and is
+never pruned; it is only consulted for save status and duplicate suppression.
+Deliberate failed saves are separately tracked and must not be silently
+expired (see the failed-save queue entry above).
+
+Suggested fix: delete a service's `saved_items` rows when the service is
+removed, and consider a documented age bound that never touches outbox rows.
+Effort: a few hours.
+
+### Quiet the remaining compiler and lint warnings
+
+general issues — nice-to-have
+
+Every build carries two kotlinc warnings: an unnecessary safe call in
+`BottomBar.kt:236` and a redundant `else` in `ReportSheet.kt:163`. Lint
+flags `BrowserScreen.kt:940` (`InlinedApi`: `ClipDescription.EXTRA_IS_SENSITIVE`
+needs API 33; the constant is inlined and benign but deserves a guarded
+suppression with a reason) and `EngineSurfaceView.kt:108`
+(`ClickableViewAccessibility`: `onTouchEvent` without `performClick`).
+`BottomBar.kt` is also changed by open PR #199; land the cleanup after it.
+
+Suggested fix: the two kotlinc cleanups, a `Build.VERSION` guard or reasoned
+`@SuppressLint`, and `performClick` delegation in the surface view. Effort:
+an hour.
+
+### Isolate scroll-direction state from the page's composition
+
+performance problems, stuttering, and jank — nice-to-have
+
+The engine reports a `ScrollEdge` on every `ACTION_MOVE` past slop, and
+`BrowserScreen.kt:159-161` writes `scrollActivity` (always) and
+`scrollEdge`/`barDirection` (on change) into states read in the page `Box`'s
+content lambda, so the page subtree recomposes on every scroll frame
+(`ReaderView.kt:168-190` does the same for the article). Compose scopes skip
+most children, so the real cost is unmeasured, but this is the classic
+per-frame recomposition shape.
+
+Suggested fix: isolate the reads (a `State` read only inside
+`ScrollEdgeButton`), throttle reporting to direction changes, or derive with
+`derivedStateOf`; validate with a layout-inspector trace on a device. Effort:
+one to two days.
+
+### Parse capture results off the engine thread
+
+performance problems, stuttering, and jank — nice-to-have
+
+A 256 KiB page capture is serialized to JSON on the engine thread
+(`native/src/events.rs`) and parsed again there before reaching the
+coordinator (`NativeEngineHost.deliver`): tens of milliseconds on the thread
+that paints, visible as dropped frames when a large page captures.
+
+Suggested fix: hand the raw JSON to the coordinator's dispatcher and parse it
+there, or parse only the small fields natively and stream the text separately.
+Effort: about half a day.
+
+### Avoid recomposing the bottom bar on every swipe move
+
+performance problems, stuttering, and jank — nice-to-have
+
+`BottomBar.kt:167,281` reads `swipeProgress` in composition for the threshold
+line, so the whole bar recomposes on every pointer move of a tab swipe (the
+drag offset itself is correctly kept in a `graphicsLayer`).
+
+Suggested fix: derive a boolean or draw the line from a `State` read in the
+draw phase. Effort: an hour or two.
+
+### Show notices while a modal sheet is open
+
+usability: fast, convenient, clear — nice-to-have
+
+`NoticeHost` lives in the activity window (`BrowserScreen.kt:647-655`), but
+every `ModalBottomSheet` is its own dialog window on top: while Address,
+Settings, Media, Home-editor or Report is open, notices (media playable,
+popup blocked, opened-in-background Show, Undo) are invisible behind the
+sheet. Only Recent hosts its own snackbars.
+
+Suggested fix: render a notice host inside each sheet as Recent does, or move
+the host above sheets. Effort: half a day.
+
+### Guard Karakeep's More results against double taps
+
+usability: fast, convenient, clear — nice-to-have
+
+`KarakeepPanel.kt:132-150` has no in-flight guard (Hister's button disables
+itself via `loadingMore`), so two quick taps fire two fetches; rows dedupe by
+id, but the duplicate request and the transient stale answer are visible.
+
+Suggested fix: mirror Hister's `loadingMore` guard. Effort: an hour.
+
+### Restore the splash icon's tile
+
+visual issues and layout problems — nice-to-have
+
+`values/themes.xml:13-16` uses `ic_launcher_foreground` (the ivory glyph and
+its pine tile) on the `window_background` color: against the dark night
+background the pine tile at roughly 1.6:1 all but disappears, and against
+light paper the ivory glyph at roughly 1.1:1 half-does, so the launch screen
+never reads as the launcher icon.
+
+Suggested fix: set `windowSplashScreenBackground` to the icon's pine tile
+color, or use the full adaptive `@mipmap/ic_launcher`. Effort: an hour.
+
+### Keep reader chrome out of the reader zoom
+
+visual issues and layout problems — nice-to-have
+
+`ReaderView.kt:149,202,227-235` applies the reader's density override
+(`fontScale * textSize.zoom`) to the whole article subtree including the
+app's own "Show the page" button and scroll control, so reader chrome inflates
+with the reading size (at 150% the label dwarfs its 48dp target).
+
+Suggested fix: move `ShowPageBar` and the scroll control outside the
+`CompositionLocalProvider`. Effort: an hour or two.
+
+### Smooth the bottom-bar hide/show viewport change
+
+usability: fast, convenient, clear — nice-to-have
+
+The page viewport grows and shrinks when the bottom bar hides or shows
+(`BrowserScreen.kt:377-380`), reflowing content on every transition. This
+follows the owner's explicit design (hidden controls free page space, 31
+October 2026); only the abruptness is open, not the behavior.
+
+Suggested fix: animate the inset change if the owner wants it smoother; do
+not change the freed-space requirement. Effort: about a day.
+
+### Add a haptic tick at the tab-swipe threshold
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+The bottom-bar tab swipe shows a directional line filling toward its 56dp
+threshold; one light haptic tick as it fills would confirm the pending switch
+without looking.
+
+Suggested fix: vibrate once when the gesture crosses the threshold, respecting
+the system haptic setting. Effort: an hour.
+
+### Offer Save to Karakeep on the opened-in-background notice
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+The "opened in background" snackbar offers Show. A second action, Save to
+Karakeep, would serve the open-later/keep-forever split through the existing
+durable save queue.
+
+Suggested fix: add the action to the existing notice, routing through the
+same save checks and receipt as the bar's Save. Effort: an hour or two.
+
+### Offer a per-site "always open in Reader" preference
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+Reader view is opened per page from More. A one-tap "always for this site"
+offer after opening it could remember a reading-first site next to Home pins,
+without any remote data.
+
+Suggested fix: store the preference locally (host-merged like pins), apply it
+on committed documents through the existing reader invalidation rules, and let
+the editor undo it. Effort: about a day.
