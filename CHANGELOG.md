@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A save Karakeep already stored stays recorded when adding it to a manual
+  list fails. The bookmark is written as soon as Karakeep acknowledges it, so
+  a deleted list or an offline retry no longer hides the save or creates a
+  second bookmark.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

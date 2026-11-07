@@ -20,6 +20,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -785,6 +786,27 @@ class IntegrationsTest {
         drain()
         assertEquals(SaveStatus.Saved, status())
         assertEquals(setOf("bm1"), server.lists["later"])
+        assertEquals(1, server.bookmarks.size)
+    }
+
+    /** The link is recorded as soon as Karakeep acknowledges it, even when the list step fails. */
+    @Test
+    fun aFailedListStepStillRecordsTheBookmarkKarakeepCreated() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        server.lists.remove("reading")
+        save()
+        drain()
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals("list_not_found", job().error)
+        // The job still needs attention, but the bookmark itself is already recorded.
+        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+        assertNotNull(runBlocking { database.integrations().observeSaved(service().fingerprint, URL).first() })
+
+        // Giving up on the list step must not hide a save Karakeep already stored.
+        integrations.discard(job().id)
+        assertEquals(SaveStatus.Saved, status())
         assertEquals(1, server.bookmarks.size)
     }
 

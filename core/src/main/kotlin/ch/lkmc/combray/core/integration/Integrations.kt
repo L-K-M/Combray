@@ -360,6 +360,10 @@ class Integrations(
         val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
         val created = routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
 
+        // The link exists as soon as creation is acknowledged. Record it even when the list step
+        // below fails, so a retry does not hide a save Karakeep already stored.
+        if (created is DispatchResult.Done) recordSaved(job, payload, created.remoteId)
+
         // The list is the one chosen when sending, not when tapping: after its list was deleted,
         // a save can be retried into another one. Creating again finds the same bookmark (200).
         val listId = service.listId ?: return created
@@ -379,7 +383,12 @@ class Integrations(
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {
         if (job.kind != JobKind.KARAKEEP_SAVE) return
         val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, done.remoteId, clock.now()))
+        recordSaved(job, payload, done.remoteId)
+    }
+
+    /** The bookmark Karakeep acknowledged, independent of the job's later list step. */
+    private suspend fun recordSaved(job: OutboxJobEntity, payload: SavePayload, remoteId: String?) {
+        dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, remoteId, clock.now()))
     }
 
     companion object {
