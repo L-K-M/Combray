@@ -3076,6 +3076,9 @@ Checks:
 
 ## 51. Typing into rich text editors (7 November 2026)
 
+This records the first typing change. The caret, composition, selection and keyboard-action
+limits below are continued in [§53](#53-rich-editor-carets-composition-and-navigation-7-november-2026).
+
 Validated source: `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a` on `combray/0.7`, which merges
 downstream [PR #35](https://github.com/L-K-M/servo/pull/35) onto the merge of
 [PR #37](https://github.com/L-K-M/servo/pull/37), on §48's pin `4778c513e962`. Its tree is that of
@@ -3162,3 +3165,95 @@ keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left ar
   - By hand, with Gboard, the Lexical test page took `h`, `i`, space, Backspace, `o`, Enter, `y`
     as two paragraphs, `hio` and `y`, with the keyboard opening on the tap.
 - The full device suite runs in this PR's Engine workflow.
+
+## 53. Rich-editor carets, composition and navigation (7 November 2026)
+
+Validated candidate: `3487d1369b9ce212e3e963156f5487a43427c9ae`, downstream
+[Servo PR #40](https://github.com/L-K-M/servo/pull/40), based on `80788879d1b`.
+The PR and its independent review are still pending; this is local validation, not a claim that
+CI or the reported signed-in editor has been checked. No personal history or reports were read.
+
+### Changes
+
+- Servo paints focused editing carets in text, empty, br-only, plaintext-only and shadow editors,
+  without changing the DOM selection or inserting placeholder text. Glyphs cannot cover the
+  caret; content clips, scrolling and later positioned content still apply. Empty-line geometry
+  uses real font metrics, not a `font-size * 1.2` approximation.
+- Up/Down/Home/End use shaped lines, including soft wraps. Vertical movement retains its inline
+  position across shorter lines; wrap affinity prevents a repeated End from jumping to the next
+  line. Shift selection fires cancelable `selectstart` and revalidates focus and selection after
+  listeners run. Meter/progress controls are atomic units; nested editable hosts have regressions.
+- Android sends each composition preview immediately, including an empty update. Servo retains
+  its own live replacement range separately from the caret. It captures the inserted interval
+  before `input` listeners run, rejects a lost focus epoch, and sends `compositionend` on blur
+  without inserting the preview again. Read-only controls refuse late updates.
+- Native focus-context IDs are process-global, so recreating the engine cannot reuse an old
+  connection's token. A composition's monotonically increasing session ID also rejects older
+  Starts and completions. Retired or contextless input connections refuse edits and cannot enter
+  the compatibility unbound-key path. The original M0 key/commit entry points remain available.
+- The multiline flag now reaches Android's editor configuration. Multiline fields use the
+  newline action; single-line search and password privacy flags remain. Android may commit LF
+  instead of sending Enter: Servo classifies that editing-host action as `insertParagraph` with
+  null data, so paragraph-specific `beforeinput` cancellation works.
+- Keyboard modifiers reach Servo. Fixture reports assert input payloads, DOM structure and
+  selection, including closed shadow roots, cancellation and unfocused isolation.
+
+Principal engine files: `components/layout/caret.rs`, `layout/display_list/`,
+`script/dom/selection{,/geometry,/modify}.rs`, `script/dom/document/editing.rs`,
+`document/document_event_handler/composition.rs`, `execcommand/execcommands.rs`, the text controls,
+`script/layout_dom/servo_layout_node.rs` and `shared/layout/`. `DOWNSTREAM.md` records checks and
+upstream drop conditions. The WPT executor also preserves integer preference types; parsing the
+caret-blink preference as a float panicked Servo's typed preference conversion.
+
+### Checks and red evidence
+
+Local environment: arm64 Mac, Rust 1.97.1, NDK `29.0.14206865`, JDK 21, Android API 36 emulator
+`combray-api36` (`emulator-5570`). This is not phone acceptance.
+
+- The original Android bridge plus the old `5aa68fd` engine failed the live-preview check:
+  after `setComposingText("n", 1)` the page stayed focused instead of showing the preview.
+- Native host tests: **181 passed**; `cargo fmt --check` passes. New context-allocation and replay
+  tests failed with the previous per-engine counter and permissive Start handling.
+- Fixture-server tests: **28 passed**. JVM tests, lint, debug app and instrumentation APK assembly
+  pass. The contextless-connection JVM regression first reached JNI; it now rejects every edit
+  without a native call.
+- Servo: **10 embedder tests**, each in a separate process, pass with
+  `cargo test --profile medium -p servo --no-default-features --features bundled,js_jit --test webview <name> -- --exact`.
+  The new cases cover live/empty/Unicode replacements, blur/refocus, input-listener mutation,
+  read-only controls and a committed newline's payload and cancellation. Before the guards,
+  an input listener made the next update delete unrelated text, a blur/refocus revived a stale
+  composition, and a read-only input still changed. Blur now also ends the page's composition.
+- Desktop: `./mach build --profile medium --media-stack dummy` passes. All **19 Mozilla editing
+  files plus two standard caret references** pass. The normal-line-height case and both standard
+  preserved-newline references failed before using real font metrics.
+- Same-machine WPT comparison against an exact build of `80788879d1b`: **1,104 files** across
+  `selection/`, `editing/`, `input-events/` and Mozilla editing; **52 subtests and 10 caret
+  references newly pass**, with no formerly passing checks left failing. One shared-clipboard
+  test read another parallel test's text; it passed twice on each engine when run alone.
+  Known upstream failures remain. These are new measurements, not §51's counts.
+- WPT executor pytest: **15 passed**. Servo tidy was unavailable: flake8 and cargo-deny are absent;
+  this is a validation gap, not a passing check.
+- First Android candidate `acc61c0c06e`: the three IME cases passed, but four keyboard cases failed
+  because Enter arrived as `insertText` and paragraph cancellation did not run. After the LF
+  classification fix, **EditorImeTest (3) and KeyboardTest (12) pass**, including real paragraphs,
+  exact payloads, cancellation, nested/shadow hosts and stale-connection rejection.
+
+Reproduction here:
+
+```sh
+COMBRAY_ABI=arm64 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+scripts/check-app.sh emulator-5570 ch.lkmc.combray.EditorImeTest ch.lkmc.combray.KeyboardTest
+```
+
+This Mac's `adb reverse` connects to `::1`; an uncommitted local TCP forwarder bridges port 8766
+from `::1` to the fixture server on `127.0.0.1`. APK hashes, instrumentation output, fixture
+requests and logcat are in the run's `COMBRAY_RESULTS` directory, outside Git.
+
+### Remaining limits
+
+This is not full Android text-input synchronization: surrounding text, selection/extracted-text
+updates and `newCursorPosition` semantics remain unimplemented. Line movement is horizontal;
+sentence, paragraph and bidi-specific movement remain unsupported. `getTargetRanges()` remains
+empty. The signed-in reported editor has not been inspected, and no live-service acceptance is
+claimed. Full hosted CI and independent PR review still need to finish before merge.
