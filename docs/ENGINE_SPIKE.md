@@ -3076,7 +3076,7 @@ Checks:
 
 ## 51. Typing into rich text editors (7 November 2026)
 
-Validated source: `eac185da746e7bf27b5caa22f2dac5e4a350790f`, the head of downstream
+Validated source: `a584945cffd7ddb1cd42f7e21f9c4287f8674928`, the head of downstream
 [PR #35](https://github.com/L-K-M/servo/pull/35) onto §48's pin `4778c513e962`.
 
 ### Report
@@ -3111,7 +3111,10 @@ clicked and typed `hello`, Backspace, `p`, Enter, `world`.
   - Input Events `beforeinput`/`input` with `inputType` and `data` for user input in editing
     hosts, input only into the focused editing host, and the left and right arrow keys;
   - a multiline text input method requested by a focused editing host and released on blur,
-    removal or loss of `contenteditable`.
+    removal or loss of `contenteditable`;
+  - after review: `modify()` moves over images, form controls and non-editable blocks in one
+    step (a non-editable block trapped the caret, and the position after a trailing image was
+    unreachable), and a host whose focus listener moves focus on asks for no input method.
 - Here: the pin; `dom_exec_command_enabled`, which runs editing-host typing and gives pages
   `document.execCommand` as other browsers do; `ime_commit` sends `ImeEvent::Commit` (as Servo's
   own Android shell now does) instead of a composition end; the fixture `/contenteditable.html` and
