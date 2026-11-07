@@ -111,21 +111,30 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     private fun file(name: SecretName) = File(directory, "${name.name}.bin")
 
-    private fun key(): SecretKey {
+    /**
+     * The check-then-generate below is a critical section. Two services configuring for the first
+     * time at once (Karakeep and Hister hold different mutexes) would otherwise both see no key and
+     * both generate one for the same alias: the second can replace the first, leaving the first's
+     * just-written ciphertext unreadable. The lock is process-wide because the alias is fixed.
+     */
+    private fun key(): SecretKey = synchronized(KEY_LOCK) {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
-        generator.init(
-            KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(KEY_BITS)
-                .build(),
-        )
-        return generator.generateKey()
+        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey) ?: run {
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
+            generator.init(
+                KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(KEY_BITS)
+                    .build(),
+            )
+            generator.generateKey()
+        }
     }
 
     private companion object {
+        /** Serializes [key]; see the comment there. */
+        private val KEY_LOCK = Any()
         const val LOG_TAG = "CombraySecrets"
         const val KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "combray-integration-secrets"
