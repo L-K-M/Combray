@@ -142,8 +142,12 @@ class Integrations(
     /** Keystore work stays off the main thread. */
     suspend fun hasCredential(name: SecretName, service: ServiceEntity): Boolean = credentials.read(name, service.fingerprint) != null
 
-    /** The address a queued save is for, for status lists. */
-    fun jobUrl(job: OutboxJobEntity): String? = when (job.kind) {
+    /**
+     * The address a queued job is for, for status lists: the row's [OutboxJobEntity.url], which
+     * is set at enqueue, so the payload is never decoded for it. Rows written before schema 6
+     * fall back to one decode.
+     */
+    fun jobUrl(job: OutboxJobEntity): String? = job.url.takeIf { it.isNotEmpty() } ?: when (job.kind) {
         JobKind.KARAKEEP_SAVE -> runCatching { json.decodeFromString(SavePayload.serializer(), job.payload).url }.getOrNull()
         JobKind.HISTER_ADD -> runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
         JobKind.SITE_REPORT -> runCatching { json.decodeFromString(ReportPayload.serializer(), job.payload).url }.getOrNull()

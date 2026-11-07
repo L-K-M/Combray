@@ -114,6 +114,27 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun version6KeepsJobsAndAddsAnEmptyUrl() {
+        helper.createDatabase(DB, 5).use {
+            it.execSQL(
+                "INSERT INTO services (kind, baseUrl, fingerprint, generation, captureEnabled, updatedAt, alternateUrl, listId, listName) " +
+                    "VALUES ('KARAKEEP', 'https://keep.example', 'fp', 3, 0, 1, NULL, NULL, NULL)",
+            )
+            it.execSQL(
+                "INSERT INTO outbox (id, kind, service, fingerprint, generation, dedupeKey, sequence, payload, payloadBytes, state, attempts, nextAttemptAt, leaseOwner, leaseUntil, fence, error, remoteId, createdAt, updatedAt) " +
+                    "VALUES ('j', 'KARAKEEP_SAVE', 'KARAKEEP', 'fp', 3, 'https://a.example/', 1, '{}', 2, 'PENDING', 0, 1, NULL, NULL, 0, NULL, NULL, 1, 1)",
+            )
+        }
+        helper.runMigrationsAndValidate(DB, 6, true).use { db ->
+            db.query("SELECT dedupeKey, url FROM outbox").use { row ->
+                row.moveToFirst()
+                assertEquals("https://a.example/", row.getString(0))
+                assertEquals("", row.getString(1))
+            }
+        }
+    }
+
     /**
      * Room rewrites a version's schema file whenever an entity changes, and the tests above read
      * those files, so an entity change without a version bump would pass them and then fail to open
@@ -149,6 +170,7 @@ class MigrationTest {
             3 to "ca194eaf23c7010cf9ee87695093f140",
             4 to "783659b8d5966f6a926345b2bf922f59",
             5 to "212d54a2850997a2dffd0c90a1878867",
+            6 to "d44958d1dc23b915e4a29e6d715e740a",
         )
     }
 }

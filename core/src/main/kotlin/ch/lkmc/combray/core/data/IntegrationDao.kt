@@ -93,12 +93,13 @@ interface IntegrationDao {
     /**
      * Captured text and report contents (address, title, comment) are dropped as soon as their
      * job is finished (sent, replaced, cancelled, expired), not after the finished-row retention.
+     * The url column goes with the payload, so a finished capture or report names no page.
      * Saves keep theirs.
      */
     @Query(
         """
-        UPDATE outbox SET payload = '', payloadBytes = 0
-        WHERE kind IN ('HISTER_ADD', 'SITE_REPORT') AND state IN ('SUCCEEDED', 'CANCELLED', 'SUPERSEDED', 'EXPIRED') AND payload != ''
+        UPDATE outbox SET payload = '', payloadBytes = 0, url = ''
+        WHERE kind IN ('HISTER_ADD', 'SITE_REPORT') AND state IN ('SUCCEEDED', 'CANCELLED', 'SUPERSEDED', 'EXPIRED') AND (payload != '' OR url != '')
         """,
     )
     suspend fun dropFinishedTransientPayloads(): Int

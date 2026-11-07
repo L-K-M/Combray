@@ -320,8 +320,13 @@ class HisterIntegration(
         return Site(host, wildcard)
     }
 
-    private fun jobHost(job: OutboxJobEntity): String? =
-        runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()?.let(HostNames::of)
+    private fun jobHost(job: OutboxJobEntity): String? {
+        // The row's url column first; only a pre-schema-6 row decodes its payload here, inside
+        // the forget transaction, never in composition.
+        val url = job.url.takeIf { it.isNotEmpty() }
+            ?: runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
+        return url?.let(HostNames::of)
+    }
 
     companion object {
         val HISTER_SUFFIXES = listOf("/api")
