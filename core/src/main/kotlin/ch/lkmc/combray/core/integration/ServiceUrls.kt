@@ -69,24 +69,34 @@ object ServiceUrls {
             val end = authority.indexOf(']')
             if (end < 0) return null
             val host = authority.substring(0, end + 1).lowercase()
-            val port = authority.substring(end + 1).takeIf { it.startsWith(":") }
-                ?.removePrefix(":")?.toIntOrNull()
+            // Only nothing, ":" or ":" + a valid port may follow the literal; anything else is
+            // not an authority, not a silently dropped suffix.
+            val rest = authority.substring(end + 1)
+            val port = when {
+                rest.isEmpty() || rest == ":" -> null
+                !rest.startsWith(":") -> return null
+                else -> rest.substring(1).toIntOrNull()?.takeIf { it in 0..65535 } ?: return null
+            }
             return HostAndPort(host, port)
         }
         val written = authority.substringBefore(':').trimEnd('.')
-        if (written.isEmpty()) return null
+        // A percent-encoded reg-name is not a host the app can resolve; the old URI parse refused it.
+        if (written.isEmpty() || '%' in written) return null
         val host = try {
             IDN.toASCII(written, IDN.ALLOW_UNASSIGNED).lowercase()
         } catch (invalid: IllegalArgumentException) {
             return null
         }
-        val port = authority.substringAfter(':', "").takeIf { it.isNotEmpty() }?.toIntOrNull()
+        // A present but malformed or out-of-range port is refused, never read as the default port.
+        val port = authority.substringAfter(':', "").takeIf { it.isNotEmpty() }
+            ?.let { it.toIntOrNull()?.takeIf { parsed -> parsed in 0..65535 } ?: return null }
         return HostAndPort(host, port)
     }
 
     private fun defaultPort(scheme: String) = when (scheme) {
         "https" -> 443
-        else -> 80
+        "http" -> 80
+        else -> error("not a web scheme: $scheme")
     }
 
     /** Checks both fields; a blank alternate, or one equal to the main address, is none. */

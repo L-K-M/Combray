@@ -66,6 +66,28 @@ class ServiceUrlsTest {
     }
 
     @Test
+    fun malformedPortsAndAuthoritiesAreRefused() {
+        // IPv6: junk after "]" and invalid ports are not silently dropped.
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1]evil:8080/"))
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1]:70000/"))
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1]:x/"))
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1"))
+        assertEquals(ServiceRoot.Valid("https://[::1]"), root("https://[::1]:/"))
+        assertEquals(ServiceRoot.Valid("https://[::1]:8443"), root("https://[::1]:8443/"))
+
+        // A present but malformed or out-of-range port is refused, not read as the default.
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:443x/"))
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:1:2/"))
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:-1/"))
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:99999/"))
+        assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example:/"))
+        assertEquals(ServiceRoot.Valid("https://keep.example:8443"), root("https://keep.example:8443/"))
+
+        // A percent-encoded reg-name is not a host the app can resolve.
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://%62%C3%BCcher.example/"))
+    }
+
+    @Test
     fun fingerprintIdentifiesTheDestination() {
         assertEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://a.example"))
         assertNotEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://b.example"))
