@@ -375,7 +375,9 @@ private fun SelectDialog(id: Long, content: PageControlContent.Select, onAnswer:
         },
         confirmButton = {
             if (content.multiple) {
-                TextButton(onClick = { onAnswer(ControlResponse.Select(chosen.toList())) }) { Text(stringResource(R.string.action_ok)) }
+                // Sorted, not the set's iteration order: a page that reads the selection
+                // positionally sees the same order after a rotation as before it.
+                TextButton(onClick = { onAnswer(ControlResponse.Select(chosen.sorted())) }) { Text(stringResource(R.string.action_ok)) }
             }
         },
         dismissButton = { TextButton(onClick = { onAnswer(ControlResponse.Dismiss) }) { Text(stringResource(R.string.action_cancel)) } },
