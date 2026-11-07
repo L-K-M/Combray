@@ -47,7 +47,14 @@ internal suspend fun copyFrame(view: SurfaceView, timeoutMs: Long = COPY_TIMEOUT
             }
         }
     }
-    if (result == PixelCopy.SUCCESS) FrameCopy.Copied(bitmap) else FrameCopy.Unavailable(ScreenshotOmission.COPY_FAILED)
+    if (result == PixelCopy.SUCCESS) {
+        FrameCopy.Copied(bitmap)
+    } else {
+        // A failed copy (a stuck compositor, a timeout, a surface that went away) leaves the
+        // allocation behind: recycle it rather than waiting for the GC.
+        bitmap.recycle()
+        FrameCopy.Unavailable(ScreenshotOmission.COPY_FAILED)
+    }
 }
 
 /** PixelCopy usually answers within a frame or two; a stuck compositor must not hold the report. */
