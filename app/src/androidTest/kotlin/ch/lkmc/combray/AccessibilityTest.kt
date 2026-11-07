@@ -150,6 +150,18 @@ class AccessibilityTest {
         assertTrue(address.left >= back.right)
     }
 
+    /** The page's media keeps a labeled Play in the address field, beside Reader, at full size. */
+    @Test
+    fun playInTheAddressIsAccessible() {
+        show(LARGE_FONT) {
+            Bar(PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved, onPlayMedia = {})
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Play audio or video").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Reader view").assertIsDisplayed()
+    }
+
     @Test
     fun aPageSentToHisterHasAQuietAccessibleMark() {
         show(DEFAULT_FONT) {
@@ -613,6 +625,7 @@ class AccessibilityTest {
         readerDisplay: ReaderDisplay = ReaderDisplay.PAGE,
         onStop: () -> Unit = {},
         onReader: () -> Unit = {},
+        onPlayMedia: (() -> Unit)? = null,
         width: Dp = NARROW_WIDTH,
     ) = BottomBar(
         tab = tab,
@@ -628,6 +641,7 @@ class AccessibilityTest {
         readerDisplay = readerDisplay,
         onStop = onStop,
         onReader = onReader,
+        onPlayMedia = onPlayMedia,
         onHister = {},
         onKarakeep = {},
         onNewTab = {},

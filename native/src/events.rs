@@ -333,6 +333,13 @@ pub enum EngineEvent {
         /// The origin of the referrer Servo computed for the load, when http(s).
         referrer: Option<String>,
     },
+    /// The user tapped a media element of `document` that has no data (its load was cancelled),
+    /// or controls the page laid over one, after the page reported a media URL
+    /// (`media::tap_hits_media_script`). The application offers the page's media again.
+    MediaTapped {
+        view: ViewKey,
+        document: u64,
+    },
     /// A page control waits for an answer; `control` names it in `respondToControl`.
     ControlShown {
         view: ViewKey,
@@ -580,6 +587,10 @@ impl EngineEvent {
                     "referrer": referrer,
                 }),
             ),
+            EngineEvent::MediaTapped { view, document } => with_view(
+                view,
+                json!({ "type": "media_tapped", "document": document }),
+            ),
             EngineEvent::ControlShown {
                 view,
                 control,
@@ -807,6 +818,29 @@ mod tests {
         assert_eq!(json["referrer"], Value::Null);
         // Present, so the application can tell "no URL" from an older engine.
         assert!(json.as_object().unwrap().contains_key("url"));
+    }
+
+    #[test]
+    fn media_tapped_names_its_document() {
+        let event = EngineEvent::MediaTapped {
+            view: ViewKey {
+                tab: 2,
+                generation: 5,
+            },
+            document: 4294967331,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "media_tapped",
+                "document": 4294967331u64,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
     }
 
     #[test]

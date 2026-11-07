@@ -92,11 +92,11 @@ sealed interface Notice {
     /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
     data class OpenedInBackground(val tabId: String) : Notice
 
-    /** The shown page has audio or video that nothing can play; its media was not downloaded. */
+    /**
+     * The shown page has audio or video that nothing can play; its media was not downloaded.
+     * Media the player can fetch is offered through [BrowserState.mediaOffer] instead.
+     */
     data object MediaUnplayable : Notice
-
-    /** The shown page has audio or video at a web address ([ActiveTab.media]); it was not downloaded. */
-    data class MediaPlayable(val page: MediaPageRef) : Notice
 
     /** The shown page asked for a window without the user's tap, and it was not opened. */
     data object PopupBlocked : Notice
@@ -192,6 +192,12 @@ data class BrowserState(
     /** Find in page over the focused tab's page, while the find bar is open. */
     val find: FindState? = null,
     val notice: Notice? = null,
+    /**
+     * The focused page offers its media ([ActiveTab.mediaPage]) to play: from its first address,
+     * or when the user taps one of its media elements, until the user plays or closes the offer,
+     * or the page leaves the screen. Unlike a [Notice], it lasts as long as the page it names.
+     */
+    val mediaOffer: MediaPageRef? = null,
     val reloadPull: ReloadPullState? = null,
 )
 

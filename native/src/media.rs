@@ -26,6 +26,11 @@
 //! budget per tab and document ([`MediaBudget`]) bounds the reports of a page that keeps changing
 //! its media URL or its address. A load names no document, so the engine credits it to the
 //! committed one, except while a new document is awaited ([`PendingMedia`]).
+//!
+//! Once a document has reported a URL, a tap on one of its media elements, or on controls the
+//! page laid over one, has the application offer the page's media again
+//! ([`tap_hits_media_script`]): sites draw their own player with their own error message, and
+//! that is where you tap.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
@@ -52,6 +57,10 @@ const PENDING_COMMIT_MS: u64 = 5_000;
 const REQUESTED_DOCUMENT_MS: u64 = 30_000;
 /// Loads held per tab for a document about to commit.
 const MAX_HELD_MEDIA: usize = 16;
+/// Documents per tab whose taps are checked against their media elements ([`MediaDocuments`]):
+/// as many as the pages a view keeps media for in the application (`MAX_MEDIA_PAGES` in
+/// `BrowserCoordinator.kt`), since a document has at least one page.
+const MAX_MEDIA_DOCUMENTS: usize = 16;
 
 /// What a cancelled load was for, from its fetch destination.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +213,56 @@ pub(crate) fn reportable_url(kind: MediaKind, url: &str) -> Option<&str> {
 /// the page; the application uses the same rule.
 pub(crate) fn page_key(url: &str) -> &str {
     url.split_once('#').map_or(url, |(page, _)| page)
+}
+
+/// Says whether a tap landed on a media element with no data (`media_tap.js`).
+const TAP_TEMPLATE: &str = include_str!("media_tap.js");
+
+/// The script for the current document that says whether a tap at (`x`, `y`), in CSS pixels of
+/// the viewport, landed on a media element whose load was cancelled, or on controls the page laid
+/// over it (`media_tap.js`). None for a point that is not finite.
+pub(crate) fn tap_hits_media_script(x: f32, y: f32) -> Option<String> {
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    Some(
+        TAP_TEMPLATE
+            .replace("__X__", &x.to_string())
+            .replace("__Y__", &y.to_string()),
+    )
+}
+
+/// A tab's documents that reported a media URL on any of their pages, most recent first, at
+/// most [`MAX_MEDIA_DOCUMENTS`]. A tap on one of them is checked against its media elements,
+/// also after a route change or a return to it that loads nothing again. The bound follows the
+/// application's, which keeps the media of a view's most recently shown pages; the two orders
+/// differ (reports here, visits there), so a document revisited often without loading media
+/// again can drop out here while the application still offers its media in the address field.
+pub(crate) struct MediaDocuments<T> {
+    recent: VecDeque<T>,
+}
+
+impl<T> Default for MediaDocuments<T> {
+    fn default() -> Self {
+        Self {
+            recent: VecDeque::new(),
+        }
+    }
+}
+
+impl<T: Copy + PartialEq> MediaDocuments<T> {
+    /// `document` reported a media URL: it becomes the most recent.
+    pub(crate) fn note(&mut self, document: T) {
+        if let Some(position) = self.recent.iter().position(|known| *known == document) {
+            self.recent.remove(position);
+        }
+        self.recent.push_front(document);
+        self.recent.truncate(MAX_MEDIA_DOCUMENTS);
+    }
+
+    pub(crate) fn contains(&self, document: T) -> bool {
+        self.recent.contains(&document)
+    }
 }
 
 /// What to tell the application about one cancelled load.
@@ -727,6 +786,34 @@ mod tests {
             PageMedia::default().note(None, &mut budget, 0),
             MediaReport::Unplayable
         );
+    }
+
+    #[test]
+    fn a_tab_keeps_its_most_recent_media_documents() {
+        let mut documents = MediaDocuments::default();
+        assert!(!documents.contains(0));
+        for document in 0..MAX_MEDIA_DOCUMENTS {
+            documents.note(document);
+        }
+        // Noted again, the first document becomes the most recent; the second is now the oldest.
+        documents.note(0);
+        documents.note(MAX_MEDIA_DOCUMENTS);
+
+        assert!(documents.contains(0));
+        assert!(!documents.contains(1));
+        assert!(documents.contains(2));
+        assert!(documents.contains(MAX_MEDIA_DOCUMENTS));
+        assert_eq!(documents.recent.len(), MAX_MEDIA_DOCUMENTS);
+    }
+
+    #[test]
+    fn the_media_tap_script_gets_the_point_in_css_pixels() {
+        let script = tap_hits_media_script(12.5, 40.0).unwrap();
+        assert!(script.trim_end().ends_with("})(12.5, 40)"), "{script}");
+        assert!(!script.contains("__X__") && !script.contains("__Y__"));
+        assert!(script.contains("elementsFromPoint(x, y)"));
+        assert_eq!(tap_hits_media_script(f32::NAN, 1.0), None);
+        assert_eq!(tap_hits_media_script(1.0, f32::INFINITY), None);
     }
 
     #[test]

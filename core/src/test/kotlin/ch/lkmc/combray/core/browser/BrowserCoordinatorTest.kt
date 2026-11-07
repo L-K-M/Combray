@@ -2172,6 +2172,19 @@ class BrowserCoordinatorTest {
 
     private fun mediaNames() = state().activeTab!!.media.map { it.name }
 
+    /** The engine says the user tapped a media element of [document]. */
+    private fun tapped(native: Long, document: Long) {
+        engine.emit(EngineEvent.MediaTapped(engine.view(native), document))
+        idle()
+    }
+
+    /** The page shown offers its media: the offer names that page's media. */
+    private fun offer(): MediaPageRef {
+        val offer = checkNotNull(state().mediaOffer) { "no media offer" }
+        assertEquals(state().activeTab!!.mediaPage, offer)
+        return offer
+    }
+
     @Test
     fun theFirstMediaAddressOfThePageShownOffersItAtOnce() {
         ready()
@@ -2180,8 +2193,7 @@ class BrowserCoordinatorTest {
 
         // While the page still loads.
         media(1, 10, "https://cdn.example.org/videos/Caf%C3%A9+clip.mp4?sig=1", referrer = "https://example.org")
-        val notice = state().notice as Notice.MediaPlayable
-        assertEquals(state().activeTab!!.id, notice.page.tabId)
+        assertEquals(state().activeTab!!.id, offer().tabId)
         val entry = state().activeTab!!.media.single()
         assertEquals(MediaKind.VIDEO, entry.kind)
         assertEquals("Café+clip.mp4", entry.name)
@@ -2191,21 +2203,25 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aPageGetsOneNoticeHoweverMuchMediaItHas() {
+    fun aPageGetsOneOfferHoweverMuchMediaItHas() {
         ready()
         browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://example.org/")
 
         media(1, 10, "https://example.org/a.mp4")
-        val first = state().notice
-        assertTrue(first is Notice.MediaPlayable)
-        shown(first)
+        val first = offer()
+        // Later media joins the offer shown.
         media(1, 10, "https://example.org/b.mp3", MediaKind.AUDIO)
+        assertEquals(first, offer())
+        // Closed, it does not come back with more media.
+        browser.dismissMediaOffer(first)
+        media(1, 10, "https://example.org/c.mp4")
         media(1, 10, null, MediaKind.TRACK)
         loaded(1, 10)
         assertNull(state().notice)
-        assertEquals(listOf("b.mp3", "a.mp4"), mediaNames())
-        assertEquals(listOf(MediaKind.AUDIO, MediaKind.VIDEO), state().activeTab!!.media.map { it.kind })
+        assertNull(state().mediaOffer)
+        assertEquals(listOf("c.mp4", "b.mp3", "a.mp4"), mediaNames())
+        assertEquals(listOf(MediaKind.VIDEO, MediaKind.AUDIO, MediaKind.VIDEO), state().activeTab!!.media.map { it.kind })
     }
 
     @Test
@@ -2247,9 +2263,7 @@ class BrowserCoordinatorTest {
         media(1, 10, null, MediaKind.TRACK)
         assertNull(state().notice)
         media(1, 10, "https://example.org/a.mp4")
-        val notice = state().notice
-        assertTrue(notice is Notice.MediaPlayable)
-        shown(notice)
+        offer()
         loaded(1, 10)
         assertNull(state().notice)
     }
@@ -2277,9 +2291,9 @@ class BrowserCoordinatorTest {
 
         // The engine credits the load to the page still committed; its referrer names the pending one.
         media(1, 10, "https://cdn.b.example/clip.mp4", referrer = "https://b.example")
-        assertNull(state().notice)
+        assertNull(state().mediaOffer)
         commit(1, 11, "https://b.example/watch")
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
     }
 
@@ -2289,15 +2303,14 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://example.org/one")
         media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
-        assertTrue(state().notice is Notice.MediaPlayable)
-        shown(state().notice)
+        val first = offer()
         browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
 
-        // Credited to the page still committed, which already showed its Play notice.
+        // Credited to the page still committed, which already has its offer, and held for the next.
         media(1, 10, "https://example.org/two.mp4", referrer = "https://example.org")
-        assertNull(state().notice)
+        assertEquals(first, state().mediaOffer)
         commit(1, 11, "https://example.org/two", index = 1, length = 2)
-        assertTrue(state().notice is Notice.MediaPlayable)
+        assertNotEquals(first, offer())
         assertEquals(listOf("two.mp4"), mediaNames())
     }
 
@@ -2312,14 +2325,14 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
 
         media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
-        assertNull(state().notice)
+        assertNull(state().mediaOffer)
         // A 204 answer commits nothing: once the app stops waiting, the report is the shown page's.
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TEST_WAIT_MS)
         while (state().activeTab!!.loading && System.nanoTime() < deadline) {
             Thread.sleep(50)
             idle()
         }
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("one.mp4"), mediaNames())
     }
 
@@ -2333,6 +2346,7 @@ class BrowserCoordinatorTest {
         media(1, 10, "https://cdn.c.example/clip.mp4", referrer = "https://c.example")
         commit(1, 11, "https://b.example/")
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
     }
 
@@ -2344,7 +2358,7 @@ class BrowserCoordinatorTest {
 
         // An embedded player's frame is another origin; nothing is pending, so it is this page's.
         media(1, 10, "https://video.embed.example/clip.mp4", referrer = "https://embed.example")
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
     }
 
@@ -2357,16 +2371,17 @@ class BrowserCoordinatorTest {
 
         media(1, 10, null)
         assertEquals(Notice.MediaUnplayable, state().notice)
-        // The playable notice replaces the plain one, shown or not.
+        // The offer replaces the plain notice the UI has not taken yet (the UI drops a shown one).
         media(1, 10, "https://example.org/a.mp4")
-        val notice = state().notice
-        assertTrue(notice is Notice.MediaPlayable)
-        shown(notice)
+        val offer = offer()
+        assertNull(state().notice)
+        browser.dismissMediaOffer(offer)
 
         // Two notices at most for the page.
         media(1, 10, "https://example.org/b.mp4")
         media(1, 10, null)
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2382,12 +2397,14 @@ class BrowserCoordinatorTest {
         media(1, 10, "https://a.test/a.mp4")
         media(1, 10, null)
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
 
         val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
         browser.selectTab(tabA); idle()
         assertEquals(listOf("a.mp4"), mediaNames())
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2399,6 +2416,7 @@ class BrowserCoordinatorTest {
 
         media(1, 10, "https://a.test/a.mp4")
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
     }
 
@@ -2408,18 +2426,21 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://a.test/")
         media(1, 10, "https://a.test/a.mp4")
-        shown(state().notice)
+        val first = offer()
 
+        // The offer ends with its page.
         commit(1, 11, "https://b.test/", index = 1, length = 2)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
         media(1, 11, "https://a.test/a.mp4")
-        assertTrue(state().notice is Notice.MediaPlayable)
-        shown(state().notice)
+        assertNotEquals(first, offer())
 
         // Back to the cached first document: its elements failed already and will not report again.
+        // Its media is found again, without an offer: the address field and More still play it.
         commit(1, 10, "https://a.test/", index = 0, length = 2)
         assertEquals(listOf("a.mp4"), mediaNames())
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
 
         // The same address in a new document (a reload) is a new page.
         commit(1, 12, "https://a.test/", index = 0, length = 2)
@@ -2432,21 +2453,24 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://app.test/feed", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://app.test/feed")
         media(1, 10, "https://cdn.test/1.mp4")
-        shown(state().notice)
+        val first = offer()
 
+        // Another fragment is the same page, and keeps its offer.
         commit(1, 10, "https://app.test/feed#top", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
         assertEquals(listOf("1.mp4"), mediaNames())
+        assertEquals(first, offer())
 
-        // A route change in a single-page app is a new page, with its own notice.
+        // A route change in a single-page app is a new page, with its own offer.
         commit(1, 10, "https://app.test/post/2", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
         assertTrue(state().activeTab!!.media.isEmpty())
+        assertNull(state().mediaOffer)
         media(1, 10, "https://cdn.test/2.mp4")
-        assertTrue(state().notice is Notice.MediaPlayable)
-        shown(state().notice)
+        assertNotEquals(first, offer())
 
         commit(1, 10, "https://app.test/feed", HistoryKind.SAME_DOCUMENT, index = 0, length = 3)
         assertEquals(listOf("1.mp4"), mediaNames())
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2561,6 +2585,7 @@ class BrowserCoordinatorTest {
         assertTrue(state().activeTab!!.media.isEmpty())
         assertNull(state().activeTab!!.mediaPage)
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         loaded(1, 10)
         assertEquals(Notice.MediaUnplayable, state().notice)
     }
@@ -2572,7 +2597,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "http://192.168.1.10:8096/web/")
 
         media(1, 10, "http://192.168.1.10:8096/videos/1/stream.mp4", referrer = "http://192.168.1.10:8096")
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("stream.mp4"), mediaNames())
     }
 
@@ -2582,8 +2607,7 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://example.org/watch", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://example.org/watch")
         media(1, 10, "https://cdn.example.org/v/clip.mp4?sig=1", referrer = "https://example.org")
-        val page = (state().notice as Notice.MediaPlayable).page
-        assertEquals(page, state().activeTab!!.mediaPage)
+        val page = offer()
         val entry = state().activeTab!!.media.single()
 
         val request = runBlocking { browser.playbackRequest(page, entry.id) }!!
@@ -2622,6 +2646,124 @@ class BrowserCoordinatorTest {
         assertNull(runBlocking { browser.playbackRequest(page, entry) })
         // So does another tab's reference.
         assertNull(runBlocking { browser.playbackRequest(page.copy(tabId = "another tab"), entry) })
+    }
+
+    @Test
+    fun theOfferStaysUntilClosedAndATapOnThePagesMediaOffersItAgain() {
+        ready()
+        browser.openUrl("https://example.org/watch", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/watch")
+        media(1, 10, "https://cdn.example.org/a.mp4")
+        val offer = offer()
+
+        // Loading ends and other notices come and go: the offer stays.
+        loaded(1, 10)
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1))); idle()
+        assertEquals(Notice.PopupBlocked, state().notice)
+        assertEquals(offer, state().mediaOffer)
+        // Closing another page's offer leaves this one.
+        browser.dismissMediaOffer(offer.copy(pageId = offer.pageId + 1_000))
+        assertEquals(offer, state().mediaOffer)
+
+        browser.dismissMediaOffer(offer)
+        assertNull(state().mediaOffer)
+        // The player's own error is where the user taps: that offers the page's media again.
+        tapped(1, 10)
+        assertEquals(offer, offer())
+        // A tap while it shows changes nothing.
+        tapped(1, 10)
+        assertEquals(offer, offer())
+    }
+
+    @Test
+    fun aTapOffersOnlyThePageShownWithMediaToPlay() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        media(1, 10, "https://a.test/a.mp4")
+        browser.dismissMediaOffer(offer())
+
+        // A tap reported for a document the tab no longer shows.
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+        tapped(1, 10)
+        assertNull(state().mediaOffer)
+        // A page whose media has no address the player may fetch.
+        media(1, 11, "data:video/mp4;base64,AAAA")
+        tapped(1, 11)
+        assertNull(state().mediaOffer)
+
+        // A tab behind another one.
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        commit(1, 10, "https://a.test/", index = 0, length = 2)
+        tapped(1, 10)
+        assertNull(state().mediaOffer)
+
+        // A crashed page.
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
+        browser.selectTab(tabA); idle()
+        assertEquals(listOf("a.mp4"), mediaNames())
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        tapped(1, 10)
+        assertNull(state().mediaOffer)
+    }
+
+    @Test
+    fun aCrashedPagesLateMediaIsNeitherOfferedNorTold() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+
+        // Loads the engine held for the page come after its crash.
+        media(1, 10, "https://a.test/a.mp4")
+        media(1, 10, null)
+        assertNull(state().mediaOffer)
+        assertNull(state().notice)
+        assertNull(state().activeTab!!.mediaPage)
+    }
+
+    @Test
+    fun aTapAfterARouteReturnOffersThatRoutesMedia() {
+        ready()
+        browser.openUrl("https://app.test/feed", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://app.test/feed")
+        media(1, 10, "https://cdn.test/1.mp4")
+        val feed = offer()
+        browser.dismissMediaOffer(feed)
+
+        // Away and back within the document: the feed's player loads nothing again.
+        commit(1, 10, "https://app.test/post/2", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
+        tapped(1, 10)
+        assertNull("a route without media offers nothing", state().mediaOffer)
+        commit(1, 10, "https://app.test/feed", HistoryKind.SAME_DOCUMENT, index = 0, length = 2)
+        tapped(1, 10)
+        assertEquals(feed, offer())
+    }
+
+    @Test
+    fun theOfferEndsWhenItsPageLeavesTheScreen() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        media(1, 10, "https://a.test/a.mp4")
+        val offer = offer()
+
+        browser.newTab(); idle()
+        assertTrue(state().activeTab!!.isHome)
+        assertNull(state().mediaOffer)
+
+        // Back on the page, its media is a tap away in the address field; the offer is not repeated.
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
+        browser.selectTab(tabA); idle()
+        assertEquals(offer, state().activeTab!!.mediaPage)
+        assertNull(state().mediaOffer)
+
+        tapped(1, 10)
+        assertEquals(offer, offer())
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        assertNull(state().mediaOffer)
     }
 
     @Test

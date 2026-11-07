@@ -3332,3 +3332,106 @@ scripts/check-app.sh <serial> ch.lkmc.combray.ImageDownloadTest ch.lkmc.combray.
 python3 scripts/check_docs.py
 git diff --check
 ```
+
+## 54. Keeping Play reachable (6 November 2026)
+
+### Report
+
+The owner reported a page whose own video player shows its error and never plays (the site is
+not named here). Reproduced on an arm64 API 36 emulator with the Engine workflow's APK of
+PR 196's head, and read from the site's player code:
+
+- The player sits in an open shadow root. Without `MediaSource` it sets `video.src` to a
+  progressive H.264/AAC MP4 listed in the page's own data, whatever `canPlayType` answers
+  (headless Chromium with MSE removed, once with every answer empty and once with Combray's
+  claim table). Combray cancels the load, the element fails with `MEDIA_ERR_SRC_NOT_SUPPORTED`,
+  and the player draws its own error over the video. The MP4 needs no cookie and has its `moov`
+  first.
+- The load was reported and offered: the playable notice came about 7 s after the load
+  started, over the site's cookie sheet on a first visit, and was gone 10 s later
+  (`SnackbarDuration.Long`). More › "Play audio or video" opened the player, which showed the
+  video.
+- A tap on the site's player brought nothing back: the failed element's `play()` is refused
+  without a new load, and the engine reports each address once per page.
+
+The video was playable; Play was out of reach. The owner chose all three remedies offered
+([VIDEO.md](VIDEO.md#owner-decisions)).
+
+### Changes
+
+- `native/src/media_tap.js`, filled by `media::tap_hits_media_script`: whether a tap's point,
+  in CSS pixels, lies in the box of a `<video>` or `<audio>` with `readyState` 0 that was given
+  a source (`networkState` not empty), in the document or in the open shadow roots under the
+  point. The topmost element there must be that element or a container of it across shadow
+  roots, or controls drawn on it: inside its parent and inside its box (1 px slack). A banner
+  sharing the video's parent once counted; the review of this PR caught it. Boxes, not the hit
+  stack: Servo's `ShadowRoot.elementsFromPoint` leaves out a video with `pointer-events: none`,
+  as custom players set it under their controls. Bounded to 16 roots, 64 hits and 64 media
+  elements per root.
+- `engine.rs`: every tap the field tracker recognizes also runs `check_tap_on_media`, only when
+  the document reported a media URL on any of its pages (`media::MediaDocuments`, the tab's 16
+  most recent such documents, as many as the pages a view keeps media for in the application;
+  so a route change or a return to a cached document that loads nothing again keeps it). The answer is
+  drained on the engine thread like the field check and becomes `media_tapped` (`events.rs`)
+  while that document is still current in the active tab.
+- `core`: `BrowserState.mediaOffer` replaces `Notice.MediaPlayable`. It is set by the page's
+  first offered address and by `media_tapped`, cleared by `dismissMediaOffer` and, in
+  `publish()`, as soon as it no longer names the shown page's media.
+- `app`: the offer shows from its own `SnackbarHostState` (`Indefinite`, with a close button),
+  stepping aside while a notice shows; the address chip shows Play while the page has media;
+  the single-row bar stacks below 516dp instead of 468dp.
+- `testing/fixtures/server.py`: `/media-player.html`, a site-style player (shadow root, video
+  out of hit testing, overlay with a play button) that counts its errors, its button's clicks
+  and clicks below it in its title.
+
+### Checks
+
+- Desktop servoshell (`servo-sitecheck`, `--profile medium`, fresh profile) over WebDriver: on
+  `/media-player.html` the script says yes on the play button and on the overlay's corner, no
+  just below the player and no on a fixed banner laid over it. On the reported page, also with
+  a fresh profile: yes at the player's centre and on its controls row, no above and below it.
+  Headless Chromium gives the fixture answers too.
+- `cargo test --lib` in `native/` (165), `node --test native/src/test/*.test.mjs` (13),
+  `cargo fmt --check`, `cargo check --target aarch64-linux-android --locked`, the fixture
+  server's host tests (17), and `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest` pass.
+- Device, on an arm64 API 36 emulator (Pixel 7 profile) with this branch's local arm64 build:
+  `MediaPlayerTest` passes all 15 checks, check 15 and `leavingThePageTakesItsOfferAway`
+  included. Check 1's colour sample failed once, on the first player launch after a fresh
+  install, where API 36 dims the screen behind its "Viewing full screen" hint; it passes once
+  the hint has been acknowledged. `AccessibilityTest` (with `playInTheAddressIsAccessible`) and
+  `BrowsingTest.mediaIsCancelledBeforeDownloadingAndThePageIsTold` pass except
+  `theBottomBarOnANewTabIsAccessible`, which fails the same way on main's build on that
+  emulator ("New tab" and "Recent" share a touch area on Home at 200% font): not this change.
+- The reported page on the same emulator: the offer stays past ten seconds, with Play in the
+  address field; closed, it stays closed while untouched and after a tap beside the video,
+  and comes back after a tap on the player's error text, its play button or its mute button
+  (which the site also handles). Once, a tap on the site's cookie sheet where it covered the
+  video brought the offer back as well; the sheet did not show again on a cleared profile, so
+  whether that tap reached the player in Servo's hit test is open.
+- The x86_64 emulator suite runs in this PR's Engine workflow.
+
+
+### Merge validation (7 November 2026)
+
+The merge with PR #201 keeps its Servo pin `8720afc00e4daead852b8f7f63bb59e87e0b2a99`.
+On the Mac, `cargo fmt --check`, `cargo test --lib --locked` (172), the media-tap Node
+checks (13), fixture-server tests (24), and `./gradlew testDebugUnitTest lintDebug
+assembleDebug assembleDebugAndroidTest assembleRelease` pass. `COMBRAY_ABI=arm64
+scripts/build-native.sh` builds the merged bridge and engine; APKs assembled afterwards
+pass all 15 `MediaPlayerTest` checks on the same API 36 emulator.
+
+CI job 128454800698 failed before this merge in the existing media-network fixture:
+`aNameWithAClosedAndAnOpenAddressReachesTheOpenOne` chose an ephemeral port on
+`127.0.0.2`, then tried to bind the same port on `127.0.0.1`, where it can already be
+in use. The second listener is unnecessary: the exact connection-attempt assertion
+already verifies that the refused address is never tried. Removing that listener keeps
+the response and allowed-server assertions. The media-network class passes; temporarily
+classifying both addresses as allowed makes the test fail on the extra connection
+attempt, and the full Gradle gate passes after restoring the correct classification.
+
+
+The later merge with PR #214 keeps the same engine pin and adds image downloads to the
+screen. The merged tree passes the full Gradle gate above, 28 fixture-server tests, and
+all 18 `MediaPlayerTest` plus `ImageDownloadTest` checks on the arm64 API 36 emulator.
+The native build is unchanged and passes again; the hit-test script is unchanged.

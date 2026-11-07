@@ -194,6 +194,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Play stays within reach on pages whose own video player shows an error:
+  the offer to open the page's audio or video in the player now stays
+  until you play or close it, the address field shows Play while the page
+  has media, and tapping the page's player brings the offer back.
 - The engine sleeps until a message or pending deadline instead of polling
   every 250 ms. Capture, dialog, reload-pull, media and paint retries stay timed.
 - The media notice offers Play.
