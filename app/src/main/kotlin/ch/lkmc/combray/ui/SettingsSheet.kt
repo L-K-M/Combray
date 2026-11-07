@@ -36,6 +36,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -339,6 +340,8 @@ private fun ServiceSettings(
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    // Save and Check share one message; only the newest request may publish its result.
+    var request by remember { mutableIntStateOf(0) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -379,9 +382,11 @@ private fun ServiceSettings(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
         Button(
             onClick = {
+                val mine = ++request
                 scope.launch {
                     val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
+                    // A check started earlier must not replace the newer save's result.
+                    if (request == mine) message = describe(resources, labels, result)
                     if (result == Configured.Saved) {
                         editedAddress = null
                         editedAlternate = null
@@ -393,8 +398,12 @@ private fun ServiceSettings(
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
             onClick = {
+                val mine = ++request
                 message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
+                scope.launch {
+                    val result = check()
+                    if (request == mine) message = result?.let { describe(resources, labels, it) }
+                }
             },
             enabled = current != null,
             modifier = Modifier.heightIn(min = 48.dp),
@@ -616,8 +625,12 @@ private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: Out
         JobState.AUTH_REQUIRED -> stringResource(labels.queuePaused, error)
         else -> stringResource(R.string.queue_failed, error)
     }
+    val unknown = stringResource(R.string.queue_unknown_page)
+    // A capture payload can hold 256 KiB of page text. Decode it once per row and payload,
+    // not again on every recomposition of the sheet.
+    val title = remember(job.id, job.payload) { integrations.jobUrl(job)?.let(::displayHost) ?: unknown }
     Column(Modifier.padding(vertical = 4.dp)) {
-        Text(integrations.jobUrl(job)?.let(::displayHost) ?: job.dedupeKey, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(state, style = MaterialTheme.typography.bodySmall)
         // A paused item can be dropped on its own: "Resume all" is not the only way out.
         if (job.state in ACTIONABLE_STATES) {
