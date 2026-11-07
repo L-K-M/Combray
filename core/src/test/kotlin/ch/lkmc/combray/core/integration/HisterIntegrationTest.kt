@@ -137,6 +137,25 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun identicalContentAfterAFailedCaptureIsQueuedAgain() {
+        enable()
+        server.refusal = 400
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.FAILED, jobs().single().state)
+
+        // The identical page is visited again: the failed capture must not silence it.
+        server.refusal = null
+        capture("https://a.example/", "same text")
+        assertEquals(2, jobs().size)
+        assertEquals(JobState.SUPERSEDED, jobs().first().state)
+        assertEquals(JobState.PENDING, jobs().last().state)
+        drain()
+        assertEquals(1, server.added.size)
+        assertTrue(server.added.single().contains("same text"))
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")
