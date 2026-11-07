@@ -52,6 +52,10 @@ const VIEWER_MODULE: &str = include_str!("pdf/viewer.mjs");
 const VIEWER_STYLESHEET: &str = include_str!("pdf/viewer.css");
 const VIEWER_WORKER: &str = include_str!("pdf/worker.mjs");
 
+/// The inflated PDFium files, computed once per process (see [`ViewerFile::contents`]).
+static PDFIUM_SCRIPT: OnceLock<Vec<u8>> = OnceLock::new();
+static PDFIUM_WASM: OnceLock<Vec<u8>> = OnceLock::new();
+
 /// The random part of the viewer's host name. Not shown in logs: it is what keeps sites from
 /// finding the viewer's files.
 #[derive(Clone, PartialEq, Eq)]
@@ -183,17 +187,31 @@ impl ViewerFile {
         }
     }
 
-    /// PDFium is inflated on every request rather than kept: a viewer loads each file once, and
-    /// keeping 4.9 MB for the life of the process would cost more than inflating 2.2 MB again.
+    /// PDFium is inflated once per process rather than on every request: a viewer loads each file
+    /// once, and keeping the inflated bytes costs less than inflating 2.2 MB again for every
+    /// viewer (another tab on the same PDF, or a reload).
     fn contents(self) -> io::Result<Vec<u8>> {
         match self {
             ViewerFile::Module => Ok(VIEWER_MODULE.as_bytes().to_vec()),
             ViewerFile::Stylesheet => Ok(VIEWER_STYLESHEET.as_bytes().to_vec()),
             ViewerFile::Worker => Ok(VIEWER_WORKER.as_bytes().to_vec()),
-            ViewerFile::PdfiumScript => inflate(PDFIUM_SCRIPT_GZ),
-            ViewerFile::PdfiumWasm => inflate(PDFIUM_WASM_GZ),
+            ViewerFile::PdfiumScript => cached(&PDFIUM_SCRIPT, || inflate(PDFIUM_SCRIPT_GZ)),
+            ViewerFile::PdfiumWasm => cached(&PDFIUM_WASM, || inflate(PDFIUM_WASM_GZ)),
         }
     }
+}
+
+/// The inflated bytes of an embedded file, computed once for the process. A failure is not cached:
+/// the next request tries again.
+fn cached(
+    cache: &'static OnceLock<Vec<u8>>,
+    inflate: impl FnOnce() -> io::Result<Vec<u8>>,
+) -> io::Result<Vec<u8>> {
+    if let Some(contents) = cache.get() {
+        return Ok(contents.clone());
+    }
+    let contents = inflate()?;
+    Ok(cache.get_or_init(|| contents).clone())
 }
 
 /// The most [inflate] reserves up front: a little above the largest embedded file (pdfium.wasm,
@@ -447,6 +465,24 @@ mod tests {
 
             assert_eq!(sha256_hex(&body), digest, "{path}");
         }
+    }
+
+    #[test]
+    fn the_pdfium_files_are_inflated_once_per_process() {
+        let script = ViewerFile::PdfiumScript.contents().unwrap();
+        let wasm = ViewerFile::PdfiumWasm.contents().unwrap();
+
+        // The cache holds what the first call produced, and later calls return it.
+        assert_eq!(PDFIUM_SCRIPT.get().unwrap(), &script);
+        assert_eq!(PDFIUM_WASM.get().unwrap(), &wasm);
+        assert_eq!(
+            &ViewerFile::PdfiumScript.contents().unwrap(),
+            PDFIUM_SCRIPT.get().unwrap()
+        );
+        assert_eq!(
+            &ViewerFile::PdfiumWasm.contents().unwrap(),
+            PDFIUM_WASM.get().unwrap()
+        );
     }
 
     #[test]
