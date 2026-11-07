@@ -625,12 +625,12 @@ private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: Out
         JobState.AUTH_REQUIRED -> stringResource(labels.queuePaused, error)
         else -> stringResource(R.string.queue_failed, error)
     }
+    val unknown = stringResource(R.string.queue_unknown_page)
+    // A capture payload can hold 256 KiB of page text. Decode it once per row and payload,
+    // not again on every recomposition of the sheet.
+    val title = remember(job.id, job.payload) { integrations.jobUrl(job)?.let(::displayHost) ?: unknown }
     Column(Modifier.padding(vertical = 4.dp)) {
-        Text(
-            integrations.jobUrl(job)?.let(::displayHost) ?: stringResource(R.string.queue_unknown_page),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(state, style = MaterialTheme.typography.bodySmall)
         // A paused item can be dropped on its own: "Resume all" is not the only way out.
         if (job.state in ACTIONABLE_STATES) {
