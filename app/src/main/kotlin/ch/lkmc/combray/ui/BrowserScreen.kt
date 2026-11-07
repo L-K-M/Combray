@@ -146,14 +146,18 @@ fun BrowserScreen(
     val page = tab?.page
     val reloadPull = state.reloadPull?.takeIf { it.page == page }
     val home = tab?.url == null
-    val stopHomeInput: () -> Unit = {
-        homeMode = AddressEditorMode.IDLE
-        // The field keeps its own draft; its launch prefill must not seed a later Home.
-        homeText = ""
-        focus.clearFocus(force = true)
-        keyboard?.hide()
+    // Callbacks are remembered (keyed on the snapshot values they capture) so a browserState
+    // emission that does not change them does not recompose the bar, the sheets or the dialogs.
+    val stopHomeInput: () -> Unit = remember {
+        {
+            homeMode = AddressEditorMode.IDLE
+            // The field keeps its own draft; its launch prefill must not seed a later Home.
+            homeText = ""
+            focus.clearFocus(force = true)
+            keyboard?.hide()
+        }
     }
-    val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    val notify: (String) -> Unit = remember { { message -> scope.launch { snackbar.showSnackbar(message) } } }
     LaunchedEffect(tab?.id, tab?.url) {
         if (!home) homeMode = AddressEditorMode.IDLE
     }
@@ -178,19 +182,23 @@ fun BrowserScreen(
     val openedInBackground = stringResource(R.string.notice_opened_in_background)
     val show = stringResource(R.string.action_show)
     // The player gets an id for a request the coordinator built and checked; nothing opens if the page has changed.
-    val openPlayer = { page: MediaPageRef, entry: Long ->
-        scope.launch {
-            val request = browser.playbackRequest(page, entry) ?: return@launch
-            context.startActivity(PlayerActivity.intent(context, graph.playback.offer(request)))
+    val openPlayer = remember {
+        { page: MediaPageRef, entry: Long ->
+            scope.launch {
+                val request = browser.playbackRequest(page, entry) ?: return@launch
+                context.startActivity(PlayerActivity.intent(context, graph.playback.offer(request)))
+            }
         }
     }
     // One entry plays at once; several open a choice. Only for the page the tab still shows: a notice that outlived its page says so.
-    val playMedia = { page: MediaPageRef ->
-        val shown = browser.browserState.value.activeTab?.takeIf { it.mediaPage == page }
-        when (shown?.media?.size ?: 0) {
-            0 -> notify(mediaPageLeft)
-            1 -> openPlayer(page, shown!!.media.single().id)
-            else -> sheet = Sheet.MEDIA
+    val playMedia = remember(notify, mediaPageLeft) {
+        { page: MediaPageRef ->
+            val shown = browser.browserState.value.activeTab?.takeIf { it.mediaPage == page }
+            when (shown?.media?.size ?: 0) {
+                0 -> notify(mediaPageLeft)
+                1 -> openPlayer(page, shown!!.media.single().id)
+                else -> sheet = Sheet.MEDIA
+            }
         }
     }
     LaunchedEffect(state.notice) {
@@ -289,40 +297,48 @@ fun BrowserScreen(
 
     // The address editor submits to the tab it was opened for; null opens a new tab.
     var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
-    val editAddress = {
-        addressTab = tab?.id
-        sheet = Sheet.ADDRESS
+    val editAddress = remember(tab?.id) {
+        {
+            addressTab = tab?.id
+            sheet = Sheet.ADDRESS
+        }
     }
     // New-tab entry points all focus the existing Home field. Save its prefill before queuing
     // the blank tab so rotation cannot drop text another app sent while creation is pending.
-    val editNewTabWith = { text: String? ->
-        homeText = text.orEmpty()
-        homeEntry++
-        homeMode = AddressEditorMode.EDITING
-        sheet = Sheet.NONE
-        surfaceView?.hideKeyboard()
-        browser.newTab()
+    val editNewTabWith = remember {
+        { text: String? ->
+            homeText = text.orEmpty()
+            homeEntry++
+            homeMode = AddressEditorMode.EDITING
+            sheet = Sheet.NONE
+            surfaceView?.hideKeyboard()
+            browser.newTab()
+        }
     }
-    val newTab = { editNewTabWith(null) }
-    val openAddress = { target: String?, decision: AddressDecision ->
-        sheet = Sheet.NONE
-        stopHomeInput()
-        val open = { url: String -> if (target != null) browser.openUrlInTab(target, url) else browser.openUrl(url, Placement.NEW_TAB) }
-        when (decision) {
-            is AddressDecision.Navigate -> open(decision.url)
-            is AddressDecision.Search -> open(decision.url)
-            is AddressDecision.External -> openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
-            is AddressDecision.Rejected -> Unit
+    val newTab = remember(editNewTabWith) { { editNewTabWith(null) } }
+    val openAddress = remember(stopHomeInput, notify) {
+        { target: String?, decision: AddressDecision ->
+            sheet = Sheet.NONE
+            stopHomeInput()
+            val open = { url: String -> if (target != null) browser.openUrlInTab(target, url) else browser.openUrl(url, Placement.NEW_TAB) }
+            when (decision) {
+                is AddressDecision.Navigate -> open(decision.url)
+                is AddressDecision.Search -> open(decision.url)
+                is AddressDecision.External -> openExternally(context, decision.url, resources.getString(R.string.no_app_for_link), notify)
+                is AddressDecision.Rejected -> Unit
+            }
         }
     }
     // Cold and bounded to retained candidates; pin/hide filtering must precede the six-tile cap.
     val homeLinks = remember(graph) { graph.home.state(browser.topSites(SensitiveUrls::looksSensitive, limit = Int.MAX_VALUE)) }
     val continuation = remember(browser) { browser.continueTab(SensitiveUrls::looksSensitive) }
     var recentScope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
-    val openRecent = { initial: RecentScope ->
-        if (homeMode == AddressEditorMode.EDITING) stopHomeInput()
-        recentScope = initial
-        sheet = Sheet.RECENT
+    val openRecent = remember(stopHomeInput) {
+        { initial: RecentScope ->
+            if (homeMode == AddressEditorMode.EDITING) stopHomeInput()
+            recentScope = initial
+            sheet = Sheet.RECENT
+        }
     }
 
     // A requested sheet replaces the open one and starts fresh: the counter restarts its state.
@@ -386,14 +402,15 @@ fun BrowserScreen(
     var snackbarTop by remember { mutableStateOf<Float?>(null) }
     val snackbarReach = (snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp).coerceAtLeast(0.dp)
     val scrollButtonPadding = scrollButtonPadding(snackbarReach)
-    val openSettings = { sheet = Sheet.SETTINGS }
+    val openSettings = remember { { sheet = Sheet.SETTINGS } }
     // Cancel, Back, a swipe or another sheet ends a report: its draft and screenshot go.
     LaunchedEffect(sheet) {
         if (sheet == Sheet.REPORT) return@LaunchedEffect
         reportDraftId?.let(graph.reportDrafts::remove)
         reportDraftId = null
     }
-    val startReport: () -> Unit = start@{
+    val startReport: () -> Unit = remember(openSettings) {
+        start@{
         // Snapshot at the tap (invariant 6): the report describes what was shown then.
         val shown = browser.browserState.value
         val reported = shown.activeTab ?: return@start
@@ -432,24 +449,28 @@ fun BrowserScreen(
                 reportStarting = false
             }
         }
+        }
     }
-    val sendReport: (ReportDraftState, ReportDraft) -> Unit = { draft, report ->
-        // Stored in the process scope; this screen only tells the user how it went.
-        graph.reportDrafts.send(draft, report)?.let { stored ->
-            scope.launch {
-                val result = stored.await()
-                when {
-                    result == ReportRequest.Queued -> {
-                        if (reportDraftId == draft.id) sheet = Sheet.NONE
-                        snackbar.showSnackbar(resources.getString(R.string.report_queued))
+    val sendReport: (ReportDraftState, ReportDraft) -> Unit = remember(openSettings) {
+        { draft, report ->
+            // Stored in the process scope; this screen only tells the user how it went.
+            graph.reportDrafts.send(draft, report)?.let { stored ->
+                scope.launch {
+                    val result = stored.await()
+                    when {
+                        result == ReportRequest.Queued -> {
+                            if (reportDraftId == draft.id) sheet = Sheet.NONE
+                            snackbar.showSnackbar(resources.getString(R.string.report_queued))
+                        }
+                        // The sheet shows the problem; once it is gone, a snackbar has to.
+                        reportDraftId != draft.id -> ReportProblem.of(result)?.let { reportLost(it, snackbar, resources, openSettings) }
                     }
-                    // The sheet shows the problem; once it is gone, a snackbar has to.
-                    reportDraftId != draft.id -> ReportProblem.of(result)?.let { reportLost(it, snackbar, resources, openSettings) }
                 }
             }
         }
     }
-    val selectMenuAction: (MoreAction) -> Unit = select@{ action ->
+    val selectMenuAction: (MoreAction) -> Unit = remember(tab, readerDisplay, playMedia, startReport) {
+        select@{ action ->
         menu.dismiss()
         // A page can replace itself while the finger is held over a menu row.
         if (action !in moreActions(tab, readerDisplay)) return@select
@@ -466,15 +487,18 @@ fun BrowserScreen(
             MoreAction.TEXT_SIZE -> sheet = Sheet.TEXT_SIZE
             MoreAction.SETTINGS -> sheet = Sheet.SETTINGS
         }
+        }
     }
-    val changeHome: (suspend () -> Unit) -> Unit = { change ->
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try {
-                withContext(NonCancellable) { change() }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
+    val changeHome: (suspend () -> Unit) -> Unit = remember {
+        { change ->
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    withContext(NonCancellable) { change() }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    snackbar.showSnackbar(resources.getString(R.string.home_change_failed))
+                }
             }
         }
     }
@@ -602,40 +626,46 @@ fun BrowserScreen(
                         reportSave(graph.integrations.save(url, title), snackbar, resources, queued = null, onOpenSettings = openSettings)
                     }
                 },
-                onRecent = { openRecent(RecentScope.OPEN) },
-                onRecentLongPress = { browser.focusPreviousTab() },
-                onSwipeTab = { step -> browser.stepTab(step) },
+                onRecent = remember(openRecent) { { openRecent(RecentScope.OPEN) } },
+                onRecentLongPress = remember { { browser.focusPreviousTab() } },
+                onSwipeTab = remember { { step -> browser.stepTab(step) } },
                 homeMode = homeMode,
-                homeSearch = {
-                    AddressEditor(
-                        target = tab?.id,
-                        initialText = homeText,
-                        restartKey = homeEntry,
-                        recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
-                        onDecision = { decision -> openAddress(tab?.id, decision) },
-                        onSelectTab = { id -> stopHomeInput(); browser.selectTab(id) },
-                        onNewTab = newTab,
-                        onDismiss = stopHomeInput,
-                        mode = homeMode,
-                        focusKey = homeEntry.takeIf { homeMode == AddressEditorMode.EDITING },
-                        onFocused = { homeMode = AddressEditorMode.EDITING },
-                        placeholder = R.string.home_search_hint,
-                        modifier = if (homeMode == AddressEditorMode.EDITING) {
-                            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                        } else Modifier,
-                    )
+                homeSearch = remember(tab?.id, homeText, homeEntry, homeMode, openAddress, newTab, stopHomeInput) {
+                    {
+                        AddressEditor(
+                            target = tab?.id,
+                            initialText = homeText,
+                            restartKey = homeEntry,
+                            recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
+                            onDecision = { decision -> openAddress(tab?.id, decision) },
+                            onSelectTab = { id -> stopHomeInput(); browser.selectTab(id) },
+                            onNewTab = newTab,
+                            onDismiss = stopHomeInput,
+                            mode = homeMode,
+                            focusKey = homeEntry.takeIf { homeMode == AddressEditorMode.EDITING },
+                            onFocused = { homeMode = AddressEditorMode.EDITING },
+                            placeholder = R.string.home_search_hint,
+                            modifier = if (homeMode == AddressEditorMode.EDITING) {
+                                Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                            } else Modifier,
+                        )
+                    }
                 },
                 modifier = Modifier.onSizeChanged { barHeight = with(density) { it.height.toDp() } },
-                menuButton = {
-                    ToolbarMenuButton(menu, selectMenuAction, if (home) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON)
+                menuButton = remember(menu, selectMenuAction, home) {
+                    {
+                        ToolbarMenuButton(menu, selectMenuAction, if (home) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON)
+                    }
                 },
-                onCopyAddress = {
-                    // The rendered address as shown (a recovery URL before a commit), copied whole.
-                    tab?.url?.let { url ->
-                        copyAddressToClipboard(context, resources.getString(R.string.page_info_address), url)
-                        // Android 13+ shows its own clipboard confirmation; below it we must.
-                        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
-                            notify(resources.getString(R.string.address_copied))
+                onCopyAddress = remember(tab?.url, notify) {
+                    {
+                        // The rendered address as shown (a recovery URL before a commit), copied whole.
+                        tab?.url?.let { url ->
+                            copyAddressToClipboard(context, resources.getString(R.string.page_info_address), url)
+                            // Android 13+ shows its own clipboard confirmation; below it we must.
+                            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                                notify(resources.getString(R.string.address_copied))
+                            }
                         }
                     }
                 },
@@ -658,7 +688,7 @@ fun BrowserScreen(
         ToolbarMenu(menu, tab, readerDisplay, selectMenuAction)
     }
 
-    val dismiss = { sheet = Sheet.NONE }
+    val dismiss = remember { { sheet = Sheet.NONE } }
     when (sheet) {
         Sheet.NONE -> Unit
         Sheet.ADDRESS -> AddressSheet(

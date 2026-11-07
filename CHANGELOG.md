@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The browser screen's callbacks are remembered, so an engine event that
+  does not change what a sheet or the bar acts on no longer recomposes
+  them; open sheets stay put during loading and title updates.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
