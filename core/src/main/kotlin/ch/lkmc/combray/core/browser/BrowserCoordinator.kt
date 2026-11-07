@@ -1586,7 +1586,14 @@ class BrowserCoordinator(
     }
 
     private suspend fun maintain() {
-        val cutoff = clock.now() - retention.closedHistoryMillis
+        // A clock set far forward (a manual date, a bad NTP) would otherwise delete every
+        // visit and close every unused tab in one pass. A gap beyond a plausible idle period
+        // is treated as such a jump, and retention is then measured from the newest stored
+        // time instead of the clock. Normal idling expires as before.
+        val now = clock.now()
+        val newest = maxOf(dao.newestVisitSeenAt() ?: 0L, dao.newestTabFocusedAt() ?: 0L)
+        val jumped = newest > 0L && now - newest > CLOCK_JUMP_MS
+        val cutoff = (if (jumped) newest else now) - retention.closedHistoryMillis
         if (unusedTabs() == UnusedTabs.CLOSE) {
             val active = dao.session()?.activeTabId
             dao.openTabs().filter { it.id != active && it.lastFocusedAt < cutoff }.forEach { closeLogically(it) }
@@ -1818,6 +1825,12 @@ class BrowserCoordinator(
 
         /** How often an open Recent or new-tab page applies the retention cutoff when nothing else changes. */
         const val RECENT_CUTOFF_TICK_MS = 60_000L
+
+        /**
+         * A clock ahead of the newest stored activity by more than this is a set-forward clock,
+         * not an idle period: a month is a plausible gap, a bad NTP or a manual date is not.
+         */
+        const val CLOCK_JUMP_MS = 30L * 24 * 60 * 60 * 1000
 
         /**
          * Visits a search (Recent, the address sheet) reads at most, newest first. Far more than a

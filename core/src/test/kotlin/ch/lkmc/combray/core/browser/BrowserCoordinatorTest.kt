@@ -39,6 +39,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -1463,6 +1464,27 @@ class BrowserCoordinatorTest {
         browser.newTab(); idle()
         browser.runMaintenance(); idle()
         assertEquals(2, state().openTabCount)
+    }
+
+    @Test
+    fun aClockJumpForwardDoesNotWipeHistoryOrCloseUnusedTabs() {
+        unusedTabs = UnusedTabs.CLOSE
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val a = runBlocking { database.browser().openTabs() }.single { it.url == "https://a.test/" }
+        assertNotNull(a.currentVisitId)
+
+        // A manual date or a bad NTP sets the clock a year ahead of the newest stored time.
+        now += 365 * DAY
+        browser.runMaintenance(); idle()
+
+        // Retention is measured from the newest stored time: both tabs and A's page survive.
+        assertEquals(2, state().openTabCount)
+        val kept = runBlocking { database.browser().openTabs() }.single { it.id == a.id }
+        assertNotNull(runBlocking { database.browser().visit(kept.currentVisitId!!) })
     }
 
     @Test

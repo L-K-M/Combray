@@ -103,6 +103,14 @@ interface BrowserDao {
     @Query("DELETE FROM tabs WHERE state = 'CLOSED' AND id NOT IN (SELECT DISTINCT tabId FROM visits)")
     suspend fun deleteEmptyClosedTabs(): Int
 
+    /** The newest visit's last-use time, for clamping retention against a forward clock jump. */
+    @Query("SELECT MAX(lastSeenAt) FROM visits")
+    suspend fun newestVisitSeenAt(): Long?
+
+    /** The newest tab focus time, for the same clamp when there is no visit at all. */
+    @Query("SELECT MAX(lastFocusedAt) FROM tabs")
+    suspend fun newestTabFocusedAt(): Long?
+
     @Query("DELETE FROM visits WHERE id = :id")
     suspend fun deleteVisit(id: String): Int
 
