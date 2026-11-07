@@ -290,6 +290,25 @@ class SiteReportsTest {
     }
 
     @Test
+    fun aRepeatedTapOnAFailedReportQueuesItAgain() {
+        configure()
+        offline = true
+        val report = draft()
+        submit(report)
+        offline = false
+        // A dispatch that fails for good: the file the job needs is gone.
+        file(report).delete()
+        makeDue()
+        drain()
+        assertEquals(JobState.FAILED, job(report).state)
+
+        // The user taps Send again: the report is queued again, not merely claimed queued.
+        assertEquals(ReportRequest.Queued, submit(report))
+        assertEquals(JobState.PENDING, job(report).state)
+        assertEquals(listOf(job(report).id), jobs().map { it.id })
+    }
+
+    @Test
     fun aNewMainAddressParksReportsUntilTheUserSendsThemThere() {
         configure()
         offline = true

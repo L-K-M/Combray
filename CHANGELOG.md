@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Tapping Send again on a report whose delivery had failed queues the
+  report for delivery again. Before, it reported "queued" while the
+  failed job stayed failed and nothing was retried.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
