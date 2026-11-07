@@ -323,7 +323,7 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
     }
 
     override fun performEditorAction(actionCode: Int): Boolean {
-        tapKey(KeyEvent.KEYCODE_ENTER)
+        tapKey(editorActionKey(actionCode))
         return true
     }
 
