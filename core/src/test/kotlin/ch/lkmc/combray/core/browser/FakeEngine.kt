@@ -92,7 +92,15 @@ class FakeEngine : EnginePort {
 
     override fun goBack(tab: Long) = Unit
 
-    override fun goForward(tab: Long) = Unit
+    /** Thrown from the next [goForward] and consumed, to exercise the work queue's error handling. */
+    var forwardFailure: Throwable? = null
+
+    override fun goForward(tab: Long) {
+        forwardFailure?.let { failure ->
+            forwardFailure = null
+            throw failure
+        }
+    }
 
     data class Stop(val view: ViewRef, val request: Long)
     val stopRequests = mutableListOf<Stop>()

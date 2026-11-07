@@ -154,8 +154,14 @@ class BrowserCoordinator(
             for (job in work) {
                 try {
                     job()
-                } catch (failure: Exception) {
+                } catch (cancelled: CancellationException) {
+                    // Cancellation ends the loop; it is not a failure to surface.
+                    throw cancelled
+                } catch (failure: Throwable) {
                     // A failed step must not stop the queue; it is a bug worth surfacing.
+                    // Throwable, not Exception: an Error (OOM, StackOverflow) in one job —
+                    // article JSON parses on this queue — must not silently stop every
+                    // command the user gives for the rest of the process's life.
                     Log.e(LOG_TAG, "browser state update failed", failure)
                     // Restoring ends even if it was this step that failed: show what there is, not a blank page.
                     state.update {
@@ -175,7 +181,7 @@ class BrowserCoordinator(
                 null
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (failed: Exception) {
+            } catch (failed: Throwable) {
                 failed
             }
             publish()

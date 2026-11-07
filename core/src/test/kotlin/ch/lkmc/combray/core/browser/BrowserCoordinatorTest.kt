@@ -33,12 +33,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -1366,6 +1368,25 @@ class BrowserCoordinatorTest {
 
         assertEquals(shown, state().activeTab?.id)
         assertEquals(1, state().openTabCount)
+    }
+
+    @Test
+    fun aCommandFailingWithAnErrorDoesNotStopTheWorkQueue() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.forwardFailure = OutOfMemoryError("simulated")
+        browser.goForward()
+        // Bounded: a consumer killed by the Error would never answer again.
+        val answered = runBlocking { withTimeoutOrNull(5_000) { browser.awaitIdle() } }
+        assertNotNull("the work queue must survive an Error in one job", answered)
+
+        // The failing step is reported, and the queue keeps moving.
+        assertTrue(state().notice is Notice.Problem)
+        browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 20, "https://after.test/")
+        assertEquals("https://after.test/", state().activeTab?.url)
     }
 
     @Test

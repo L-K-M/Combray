@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A one-off internal error no longer silently freezes the browser. Before,
+  a failing state update (for example running out of memory while preparing
+  an article) stopped all navigation, tab and history actions until the app
+  was restarted; now the failure is reported and the browser keeps working.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
