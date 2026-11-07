@@ -233,7 +233,13 @@ class HisterIntegration(
         if (!eligible(page.url, service) || page.text.isBlank()) return
 
         val key = documentKey(page.url)
-        if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
+        // The same content is queued once while its job is on its way or already delivered. A job
+        // that ended without delivering (failed, cancelled, expired, parked) must not silence a
+        // later capture of the same page forever.
+        val alreadyHandled = synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256 &&
+            dao.latestCapture(service.fingerprint, key)
+                ?.let { it.state == JobState.SUCCEEDED || it.state.isActive } == true
+        if (alreadyHandled) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
         if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) {

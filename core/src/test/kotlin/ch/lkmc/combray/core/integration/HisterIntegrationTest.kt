@@ -137,6 +137,35 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun unchangedContentIsCapturedAgainAfterItsJobEndedWithoutDelivering() {
+        enable()
+        server.refusal = 422
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+
+        // The same page, unchanged: without the fix the remembered hash would drop it forever.
+        server.refusal = null
+        capture("https://a.example/", "same text")
+        assertEquals(2, jobs().size)
+        assertEquals(JobState.PENDING, jobs().last().state)
+        drain()
+        assertTrue(server.added.single().contains("same text"))
+    }
+
+    @Test
+    fun aDeliveredCaptureIsNotQueuedAgain() {
+        enable()
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.SUCCEEDED, jobs().single().state)
+
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        assertEquals(1, server.added.size)
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")
