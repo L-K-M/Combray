@@ -54,8 +54,10 @@ class HisterIntegration(
     private val dao = database.integrations()
     private val routes = ServiceRoutes(transport)
     private val policyGeneration = AtomicLong(1)
-    private val lastQueuedHash = object : LinkedHashMap<String, String>(HASH_MEMORY, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > HASH_MEMORY
+    private data class QueuedCapture(val hash: String, val jobId: String)
+
+    private val lastQueuedHash = object : LinkedHashMap<String, QueuedCapture>(HASH_MEMORY, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, QueuedCapture>?) = size > HASH_MEMORY
     }
     private val forgotten = HashMap<String, Long>()
 
@@ -104,7 +106,10 @@ class HisterIntegration(
                 // Same server, stored token kept: queued captures keep going. At most the alternate was dropped.
                 if (secret == null) {
                     if (previous != null && previous.alternateUrl != addresses.alternate) {
-                        dao.setService(previous.copy(alternateUrl = addresses.alternate, updatedAt = clock.now()))
+                        database.withTransaction {
+                            dao.setService(previous.copy(alternateUrl = addresses.alternate, updatedAt = clock.now()))
+                            bumpPolicy()
+                        }
                     }
                     return@withLock Configured.Saved
                 }
@@ -121,11 +126,11 @@ class HisterIntegration(
                     )
                     dao.setService(current)
                     outbox.onServiceChanged(previous, current)
+                    bumpPolicy()
                 }
                 Configured.Saved
             }
         }
-        bumpPolicy()
         return result
     }
 
@@ -136,11 +141,11 @@ class HisterIntegration(
                     val previous = dao.service(ServiceKind.HISTER)
                     dao.deleteService(ServiceKind.HISTER)
                     outbox.onServiceChanged(previous, null)
+                    bumpPolicy()
                 }
                 credentials.delete(SecretName.HISTER_TOKEN)
             }
         }
-        bumpPolicy()
     }
 
     /** Switches automatic capture on or off. Off also holds unsent captures until it is on again. */
@@ -150,9 +155,9 @@ class HisterIntegration(
             database.withTransaction {
                 val service = dao.service(ServiceKind.HISTER) ?: return@withTransaction
                 dao.setService(service.copy(captureEnabled = enabled, updatedAt = clock.now()))
+                bumpPolicy()
             }
         }
-        bumpPolicy()
         if (enabled) kick()
     }
 
@@ -164,13 +169,15 @@ class HisterIntegration(
     suspend fun addExclusion(input: String, includeSubdomains: Boolean): Boolean {
         val site = siteOf(input) ?: return false
         val subdomains = includeSubdomains || site.wildcard
-        dao.setExclusion(ExclusionEntity(site.host, subdomains, clock.now()))
-        bumpPolicy()
-        outbox.cancelOpen(JobKind.HISTER_ADD, "excluded") { job -> jobHost(job)?.let { HostNames.matches(it, site.host, subdomains) } == true }
+        database.withTransaction {
+            dao.setExclusion(ExclusionEntity(site.host, subdomains, clock.now()))
+            bumpPolicy()
+            outbox.cancelOpen(JobKind.HISTER_ADD, "excluded") { job -> jobHost(job)?.let { HostNames.matches(it, site.host, subdomains) } == true }
+        }
         return true
     }
 
-    suspend fun removeExclusion(host: String) {
+    suspend fun removeExclusion(host: String) = database.withTransaction {
         dao.deleteExclusion(host)
         bumpPolicy()
     }
@@ -221,35 +228,47 @@ class HisterIntegration(
 
     // --- CaptureSink --------------------------------------------------------------------------
 
-    override suspend fun wantsCapture(url: String): Long? {
-        val service = dao.service(ServiceKind.HISTER)?.takeIf { it.captureEnabled } ?: return null
-        if (!eligible(url, service)) return null
-        return policyGeneration.get()
+    override suspend fun wantsCapture(url: String): Long? = database.withTransaction {
+        val service = dao.service(ServiceKind.HISTER)?.takeIf { it.captureEnabled } ?: return@withTransaction null
+        if (!eligible(url, service)) return@withTransaction null
+        policyGeneration.get()
     }
 
     override suspend fun captured(page: CapturedPage) {
-        if (page.policyGeneration != policyGeneration.get()) return
-        val service = dao.service(ServiceKind.HISTER)?.takeIf { it.captureEnabled } ?: return
-        if (!eligible(page.url, service) || page.text.isBlank()) return
-
+        if (page.policyGeneration != policyGeneration.get() || page.text.isBlank()) return
         val key = documentKey(page.url)
-        if (synchronized(lastQueuedHash) { lastQueuedHash[key] } == page.sha256) return
         val payload = json.encodeToString(CapturePayload.serializer(), CapturePayload(page.url, page.title, page.text))
         val bytes = payload.toByteArray(Charsets.UTF_8).size
-        if (dao.queuedCaptureBytes() + bytes > MAX_QUEUED_CAPTURE_BYTES) {
-            // One that could never fit, even in an empty queue, must not hold the warning on.
-            if (bytes <= MAX_QUEUED_CAPTURE_BYTES) largestRefused.update { maxOf(it, bytes) }
-            return
+        // Policy writers use this same transaction boundary. A settings change cannot slip
+        // between validation and enqueue, and two captures cannot both spend the same space.
+        val queued = database.withTransaction {
+            if (page.policyGeneration != policyGeneration.get()) return@withTransaction false
+            val service = dao.service(ServiceKind.HISTER)?.takeIf { it.captureEnabled } ?: return@withTransaction false
+            if (!eligible(page.url, service)) return@withTransaction false
+
+            val remembered = synchronized(lastQueuedHash) { lastQueuedHash[key] }
+            if (remembered?.hash == page.sha256) {
+                val previous = dao.job(remembered.jobId)
+                if (previous != null && (previous.state.isActive || previous.state == JobState.SUCCEEDED)) return@withTransaction false
+            }
+            // enqueue supersedes these bodies atomically. A running request keeps its body
+            // until completion, so it must still count against the budget.
+            val replaced = dao.activeJobs(JobKind.HISTER_ADD, service.fingerprint, key).filter { it.state != JobState.RUNNING } +
+                dao.failedJobs(JobKind.HISTER_ADD, service.fingerprint, key)
+            val retainedBytes = dao.queuedCaptureBytes() - replaced.sumOf { it.payloadBytes.toLong() }
+            if (retainedBytes + bytes > MAX_QUEUED_CAPTURE_BYTES) {
+                if (bytes <= MAX_QUEUED_CAPTURE_BYTES) largestRefused.update { maxOf(it, bytes) }
+                return@withTransaction false
+            }
+            val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true)
+            if (enqueued !is Enqueued.Queued) return@withTransaction false
+            synchronized(lastQueuedHash) { lastQueuedHash[key] = QueuedCapture(page.sha256, enqueued.job.id) }
+            true
         }
-        val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true)
-        if (enqueued !is Enqueued.Queued) return
-        // Remembered only under the policy it was captured with: a policy change since then
-        // cleared the memory, and this hash must not survive that.
-        synchronized(lastQueuedHash) { if (policyGeneration.get() == page.policyGeneration) lastQueuedHash[key] = page.sha256 }
-        kick()
+        if (queued) kick()
     }
 
-    override suspend fun forgetHost(host: String, includeSubdomains: Boolean) {
+    override suspend fun forgetHost(host: String, includeSubdomains: Boolean): Unit = database.withTransaction {
         val now = clock.now()
         synchronized(forgotten) { forgotten[if (includeSubdomains) ".$host" else host] = now }
         bumpPolicy()
@@ -258,7 +277,7 @@ class HisterIntegration(
         }
     }
 
-    override suspend fun forgetUrl(url: String) {
+    override suspend fun forgetUrl(url: String): Unit = database.withTransaction {
         val key = documentKey(url)
         synchronized(forgotten) { forgotten["url:$key"] = clock.now() }
         bumpPolicy()
@@ -272,10 +291,22 @@ class HisterIntegration(
         if (service == null || service.fingerprint != job.fingerprint) return DispatchResult.Cancelled("destination_changed")
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
         val payload = json.decodeFromString(CapturePayload.serializer(), job.payload)
-        // The policy may have changed since the capture: recheck right before sending.
-        if (!eligible(payload.url, service) || wasForgotten(job, payload.url)) return DispatchResult.Cancelled("excluded")
+        // This is the send-authorization boundary, after credential IO. Settings and admission
+        // share the transaction; a later pause cannot recall an already authorized request.
+        val (destination, refusal) = database.withTransaction {
+            val current = dao.service(ServiceKind.HISTER)
+            current to when {
+                current == null || current.fingerprint != job.fingerprint -> DispatchResult.Cancelled("destination_changed")
+                current.generation != job.generation -> DispatchResult.AuthRequired("credential_changed")
+                !current.captureEnabled -> DispatchResult.Paused
+                !eligible(payload.url, current) || wasForgotten(job, payload.url) -> DispatchResult.Cancelled("excluded")
+                else -> null
+            }
+        }
+        if (refusal != null) return refusal
+        destination ?: return DispatchResult.Cancelled("destination_changed")
         token ?: return DispatchResult.AuthRequired("credential_missing")
-        return routes.call(service) { transport, root -> HisterClient(transport).add(root, token, payload.url, payload.title, payload.text) }
+        return routes.call(destination) { transport, root -> HisterClient(transport).add(root, token, payload.url, payload.title, payload.text) }
     }
 
     private suspend fun eligible(url: String, service: ServiceEntity): Boolean {
