@@ -3253,10 +3253,13 @@ These differences remain, did not decide this check, and are candidates for late
 - A script reload sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-User: ?1`.
 ## 53. Rich-editor carets, composition and navigation (7 November 2026)
 
-Validated candidate: `3487d1369b9ce212e3e963156f5487a43427c9ae`, downstream
+Pinned source: `5813399954091a7efd7f736ea6fe14cb1ed523b9`, the merge of downstream
 [Servo PR #40](https://github.com/L-K-M/servo/pull/40), based on `80788879d1b`.
-The PR and its independent review are still pending; this is local validation, not a claim that
-CI or the reported signed-in editor has been checked. No personal history or reports were read.
+Its tree equals the locally built and independently reviewed head `3125271cf085b80d6667363d98d2a4d61783ddf1`.
+Three local GLM 5.3 engine review rounds finished; the final round has no actionable findings.
+The paired [Combray PR #317](https://github.com/L-K-M/Combray/pull/317) has local code review and
+validation, but hosted CI remains queued. No personal history or reports were read, and no
+reported signed-in editor was checked.
 
 ### Changes
 
@@ -3265,8 +3268,9 @@ CI or the reported signed-in editor has been checked. No personal history or rep
   caret; content clips, scrolling and later positioned content still apply. Empty-line geometry
   uses real font metrics, not a `font-size * 1.2` approximation.
 - Up/Down/Home/End use shaped lines, including soft wraps. Vertical movement retains its inline
-  position across shorter lines; wrap affinity prevents a repeated End from jumping to the next
-  line. Shift selection fires cancelable `selectstart` and revalidates focus and selection after
+  position across shorter and empty lines; wrap affinity keeps repeated End on the intended line.
+  Text endpoints win ties with break boxes, preserving DOM caret identity. Shift selection fires
+  cancelable `selectstart` and revalidates focus and selection after
   listeners run. Meter/progress controls are atomic units; nested editable hosts have regressions.
 - Android sends each composition preview immediately, including an empty update. Servo retains
   its own live replacement range separately from the caret. It captures the inserted interval
@@ -3299,35 +3303,54 @@ Local environment: arm64 Mac, Rust 1.97.1, NDK `29.0.14206865`, JDK 21, Android 
   after `setComposingText("n", 1)` the page stayed focused instead of showing the preview.
 - Native host tests: **181 passed**; `cargo fmt --check` passes. New context-allocation and replay
   tests failed with the previous per-engine counter and permissive Start handling.
-- Fixture-server tests: **28 passed**. JVM tests, lint, debug app and instrumentation APK assembly
-  pass. The contextless-connection JVM regression first reached JNI; it now rejects every edit
-  without a native call.
+- Python script tests: **121 passed**, including **28 fixture-server tests**. JVM tests, lint,
+  debug/instrumentation APK assembly and release assembly pass. Debug and release APKs pass the
+  architecture, ELF, notices and Gradle metadata checks. The contextless-connection JVM regression
+  first reached JNI; it now rejects every edit without a native call.
 - Servo: **10 embedder tests**, each in a separate process, pass with
   `cargo test --profile medium -p servo --no-default-features --features bundled,js_jit --test webview <name> -- --exact`.
   The new cases cover live/empty/Unicode replacements, blur/refocus, input-listener mutation,
   read-only controls and a committed newline's payload and cancellation. Before the guards,
   an input listener made the next update delete unrelated text, a blur/refocus revived a stale
   composition, and a read-only input still changed. Blur now also ends the page's composition.
-- Desktop: `./mach build --profile medium --media-stack dummy` passes. All **19 Mozilla editing
+- Desktop: `./mach build --profile medium --media-stack dummy` passes. All **21 Mozilla editing
   files plus two standard caret references** pass. The normal-line-height case and both standard
-  preserved-newline references failed before using real font metrics.
-- Same-machine WPT comparison against an exact build of `80788879d1b`: **1,104 files** across
-  `selection/`, `editing/`, `input-events/` and Mozilla editing; **52 subtests and 10 caret
-  references newly pass**, with no formerly passing checks left failing. One shared-clipboard
-  test read another parallel test's text; it passed twice on each engine when run alone.
-  Known upstream failures remain. These are new measurements, not §51's counts.
+  preserved-newline references failed before using real font metrics. The final shell reports
+  `Servo 0.7.0-3125271cf0`; the exact baseline reports `Servo 0.7.0-80788879d1b`. The inherited
+  macOS shell build script caches its Git label: touching its watched
+  `ports/servoshell/platform/macos/count_threads.c` input reran it without a source edit. The
+  earlier interrupted broad run is excluded; targeted and broad runs finished after the refresh.
+- Down skipped an empty `br` line or could not reach the final empty line. Two new navigation
+  subtests failed before adding break-box positions. The full repeat then exposed three existing
+  End-key node-identity failures; preferring a text endpoint on equal geometry restores them.
+  GLM's proposed final-`br` geometry change was rejected: synthetic Chromium checks show `a<br>`
+  has one visible line and `a<br><br>` has two. Two pixel references preserve that behavior.
+- Same-machine WPT comparison against an exact build of `80788879d1b`: **1,106 files** across
+  `selection/`, `editing/`, `input-events/` and Mozilla editing; **56 subtests and 12 caret
+  references newly pass**, with no PASS-to-FAIL or worsened nonpassing results. All input logs
+  contain their suite-end records. This compares the raw broad results without isolated-result
+  overrides. A shared-clipboard mismatch in an earlier run passed twice per engine in isolation;
+  the final broad run and both additional candidate repeats pass it. Known upstream failures
+  remain. These are new measurements, not §51's counts.
 - WPT executor pytest: **15 passed**. Servo tidy was unavailable: flake8 and cargo-deny are absent;
   this is a validation gap, not a passing check.
 - First Android candidate `acc61c0c06e`: the three IME cases passed, but four keyboard cases failed
-  because Enter arrived as `insertText` and paragraph cancellation did not run. After the LF
-  classification fix, **EditorImeTest (3) and KeyboardTest (12) pass**, including real paragraphs,
-  exact payloads, cancellation, nested/shadow hosts and stale-connection rejection.
+  because Enter arrived as `insertText` and paragraph cancellation did not run. After the LF fix,
+  **EditorImeTest (3) and KeyboardTest (12) pass** on the actual merged pin, including real
+  paragraphs, exact payloads, cancellation, nested/shadow hosts and stale-connection rejection.
+  Both arm64 and x86_64 native builds pass; runtime validation here is arm64 only.
+- A broader arm64 run before the final visual-line follow-ups had **206 passes and 3 failures**:
+  new-tab touch-area overlap, video pixels and an RTL reader scroll button. All three fail with
+  the same assertions on exact Combray main `833d3186` and its engine `8720afc00e4d`, and again
+  as isolated checks on the final merged pin. There are no report-only failures. This is not a
+  claim that the full suite was repeated on the final pin; its full hosted suite remains queued.
 
 Reproduction here:
 
 ```sh
+COMBRAY_ABI=x86_64 scripts/build-native.sh
 COMBRAY_ABI=arm64 scripts/build-native.sh
-./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
 scripts/check-app.sh emulator-5570 ch.lkmc.combray.EditorImeTest ch.lkmc.combray.KeyboardTest
 ```
 
@@ -3340,5 +3363,8 @@ requests and logcat are in the run's `COMBRAY_RESULTS` directory, outside Git.
 This is not full Android text-input synchronization: surrounding text, selection/extracted-text
 updates and `newCursorPosition` semantics remain unimplemented. Line movement is horizontal;
 sentence, paragraph and bidi-specific movement remain unsupported. `getTargetRanges()` remains
-empty. The signed-in reported editor has not been inspected, and no live-service acceptance is
-claimed. Full hosted CI and independent PR review still need to finish before merge.
+empty. The existing `insertLineBreak` command's extra trailing-placeholder step remains a TODO;
+this slice validates committed LF paragraph insertion, not every editing command. The signed-in
+reported editor has not been inspected, and no live-service or physical-phone acceptance is
+claimed. Combray PR #317 remains open until hosted checks run and pass; local review is not a
+claim that its queued CI or hosted reviewer ran.
