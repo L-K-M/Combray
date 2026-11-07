@@ -1,5 +1,7 @@
 package ch.lkmc.combray.ui
 
+import android.content.Intent
+import android.os.Build
 import android.text.format.DateFormat as AndroidDateFormat
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
@@ -54,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -61,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -91,6 +95,7 @@ import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
 enum class RecentScope(@StringRes val label: Int) {
@@ -140,6 +145,7 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable(restartKey) { mutableStateOf("") }
     var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
+    val sheetScope = rememberCoroutineScope()
     // One subscription per depth: browsing reads the newest rows, a search the retained ones.
     // The filter runs in memory, so typing does not restart three Room observers per keystroke.
     val depth = HistoryDepth.forQuery(query)
@@ -232,6 +238,7 @@ fun RecentSheet(
                             onShowAll = { scope = RecentScope.ALL },
                             onDismiss = onDismiss,
                             onForgetSite = { forgetting = it },
+                            onNotify = { message -> sheetScope.launch { snackbar.showSnackbar(message) } },
                         )
                     }
                 }
@@ -265,6 +272,7 @@ private fun LocalRecent(
     onShowAll: () -> Unit,
     onDismiss: () -> Unit,
     onForgetSite: (String) -> Unit,
+    onNotify: (String) -> Unit,
 ) {
     if (empty != null) {
         EmptyRecent(empty, onShowAll)
@@ -297,6 +305,7 @@ private fun LocalRecent(
                         onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
                         onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
                         onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                        onNotify = onNotify,
                     )
                 }
                 if (item is RecentItem.OpenTab) {
@@ -374,6 +383,7 @@ private fun RecentRow(
     onClose: () -> Unit,
     onRemove: () -> Unit,
     onForgetSite: () -> Unit,
+    onNotify: (String) -> Unit,
 ) {
     val title = item.title?.takeIf { it.isNotBlank() }
         ?: item.url?.let { displayHost(it) }
@@ -414,7 +424,7 @@ private fun RecentRow(
                 is RecentItem.OpenTab -> IconButton(onClick = onClose) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.recent_close_tab, title))
                 }
-                is RecentItem.Visit -> VisitMenu(title, site, onRemove, onForgetSite)
+                is RecentItem.Visit -> VisitMenu(title, site, item.url, onRemove, onForgetSite, onNotify)
             }
         },
         // Rows take the sheet's colour; only the current tab stands out.
@@ -450,13 +460,45 @@ private fun SiteTile(letter: String) {
 }
 
 @Composable
-private fun VisitMenu(title: String, host: String?, onRemove: () -> Unit, onForgetSite: () -> Unit) {
+private fun VisitMenu(
+    title: String,
+    host: String?,
+    url: String?,
+    onRemove: () -> Unit,
+    onForgetSite: () -> Unit,
+    onNotify: (String) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val copied = stringResource(R.string.link_copied)
+    val addressLabel = stringResource(R.string.page_info_address)
+    val shareLabel = stringResource(R.string.share_chooser)
     Box {
         IconButton(onClick = { expanded = true }) {
             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.recent_row_actions, title))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (url != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.link_copy)) },
+                    onClick = {
+                        expanded = false
+                        copyAddressToClipboard(context, addressLabel, url)
+                        // Android 13+ confirms the copy itself; below it the app must.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onNotify(copied)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_share)) },
+                    onClick = {
+                        expanded = false
+                        val send = Intent(Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(Intent.EXTRA_TEXT, url)
+                        context.startActivity(Intent.createChooser(send, shareLabel))
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.recent_remove)) },
                 onClick = {
