@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -57,6 +58,10 @@ private sealed interface SearchUi {
 fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by hister.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // The local Recent filter prefills this field. It is sent only once the user submits it (the
+    // Search key) or types here: switching scopes must not forward the local filter unseen.
+    var submitted by rememberSaveable { mutableStateOf(initialQuery.isBlank()) }
+    var askEpoch by rememberSaveable { mutableIntStateOf(0) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
     var nextPage by remember { mutableStateOf<String?>(null) }
@@ -64,7 +69,8 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    LaunchedEffect(query, service, askEpoch) {
+        if (!submitted) return@LaunchedEffect
         val mine = ++generation
         // The last answer belongs to the last query: no stale count while the next one waits.
         ui = SearchUi.Idle
@@ -89,11 +95,12 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; submitted = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.search_all_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { submitted = true; askEpoch++ }),
             modifier = Modifier.fillMaxWidth(),
         )
         if (ui == SearchUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))

@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Switching Recent to the Hister or Karakeep scope no longer sends your
+  local filter to that server on its own. The field starts with the filter
+  text, and the Search key (or typing there) sends it.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
