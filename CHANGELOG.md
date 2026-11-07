@@ -602,3 +602,6 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- Rotating or backgrounding the app during a fast scroll no longer risks
+  a stalled surface release: surface teardown and shutdown now reach the
+  engine ahead of queued touch and paint traffic instead of behind it.
