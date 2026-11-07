@@ -26,18 +26,33 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
         root.deleteRecursively()
     }
 
-    /** Paths of the copies, or null if any file could not be read (nothing is uploaded then). */
-    suspend fun stage(uris: List<Uri>): List<String>? = withContext(Dispatchers.IO) {
+    /** What one pick produced. Only [Staged.Files] is uploaded; the other answers say why not. */
+    sealed interface Staged {
+        data class Files(val paths: List<String>) : Staged
+
+        /** Some file could not be read. */
+        data object Unreadable : Staged
+
+        /** A picked file is over [MAX_STAGED_BYTES]: no file is staged. */
+        data object TooLarge : Staged
+    }
+
+    private class FileTooLarge : IOException("file too large")
+
+    suspend fun stage(uris: List<Uri>): Staged = withContext(Dispatchers.IO) {
         val pick = File(root, UUID.randomUUID().toString())
         try {
             // One directory per file: two picked files may share a name.
-            uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
+            Staged.Files(uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) })
+        } catch (tooLarge: FileTooLarge) {
+            pick.deleteRecursively()
+            Staged.TooLarge
         } catch (failure: Exception) {
             // Another app's provider may throw anything (IO, permission, bad URI): cancel the upload.
             // No suspension point in the block, so cancellation cannot be swallowed here.
             Log.w(LOG_TAG, "could not copy a picked file", failure)
             pick.deleteRecursively()
-            null
+            Staged.Unreadable
         }
     }
 
@@ -45,7 +60,11 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
         if (!directory.mkdirs()) throw IOException("cannot create upload directory")
         val target = File(directory, safeName(displayName(uri)))
         val input = resolver.openInputStream(uri) ?: throw IOException("no content")
-        input.use { source -> target.outputStream().use { source.copyTo(it) } }
+        input.use { source ->
+            target.outputStream().use { out ->
+                if (!boundedCopy(source, out, MAX_STAGED_BYTES)) throw FileTooLarge()
+            }
+        }
         return target.path
     }
 
@@ -59,6 +78,23 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
         private const val MAX_NAME_CHARS = 120
         private const val FALLBACK_NAME = "upload"
         private const val ANY_TYPE = "*/*"
+
+        /** What a page's upload may hold; beyond it the pick is refused and nothing is staged. */
+        private const val MAX_STAGED_BYTES = 200L * 1024 * 1024
+        private const val COPY_BUFFER_BYTES = 32 * 1024
+
+        /** Copies [source] into [target], reading at most [limit] bytes; false when it is more. */
+        internal fun boundedCopy(source: java.io.InputStream, target: java.io.OutputStream, limit: Long): Boolean {
+            val buffer = ByteArray(COPY_BUFFER_BYTES)
+            var total = 0L
+            while (true) {
+                val read = source.read(buffer)
+                if (read < 0) return true
+                total += read
+                if (total > limit) return false
+                target.write(buffer, 0, read)
+            }
+        }
 
         /** The page sees this name (`File.name`); keep it but never let it leave the directory. */
         fun safeName(name: String?): String {

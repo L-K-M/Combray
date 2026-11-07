@@ -91,7 +91,7 @@ fun PageControlDialog(
     val answer = { response: ControlResponse -> onAnswer(response, DialogBlocking.KEEP_SHOWING) }
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
-        is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
+        is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed, onNotify)
         is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
             answer(ControlResponse.Dismiss)
         }
@@ -430,15 +430,25 @@ private fun FilePicker(
     scope: CoroutineScope,
     onAnswer: (ControlResponse) -> Unit,
     onUploadFailed: () -> Unit,
+    onNotify: (String) -> Unit,
 ) {
+    val tooLarge = stringResource(R.string.upload_too_large)
     val deliver = { uris: List<Uri> ->
         if (uris.isEmpty()) {
             onAnswer(ControlResponse.Dismiss)
         } else {
             scope.launch {
-                val paths = staging.stage(uris)
-                if (paths == null) onUploadFailed()
-                onAnswer(paths?.let { ControlResponse.Files(it) } ?: ControlResponse.Dismiss)
+                when (val staged = staging.stage(uris)) {
+                    is UploadStaging.Staged.Files -> onAnswer(ControlResponse.Files(staged.paths))
+                    UploadStaging.Staged.TooLarge -> {
+                        onNotify(tooLarge)
+                        onAnswer(ControlResponse.Dismiss)
+                    }
+                    UploadStaging.Staged.Unreadable -> {
+                        onUploadFailed()
+                        onAnswer(ControlResponse.Dismiss)
+                    }
+                }
             }
         }
     }
