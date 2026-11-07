@@ -172,6 +172,26 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun aClaimedCaptureIsNotSentAfterCaptureIsPaused() {
+        enable()
+        capture("https://a.example/", "text")
+        val claim = runBlocking { integrations.outbox.claim("worker", 60_000) }!!
+
+        runBlocking { hister.setCaptureEnabled(false) }
+        val held = runBlocking { hister.dispatch(claim.job) }
+        assertEquals(DispatchResult.Retry("capture_paused", delivery = Delivery.NOT_SENT), held)
+        runBlocking { integrations.outbox.finish(claim, held) }
+        assertEquals(JobState.RETRY_WAIT, jobs().single().state)
+        assertTrue(server.added.isEmpty())
+
+        // Re-enabling kicks the queue: the held capture goes out once its wait has passed.
+        runBlocking { hister.setCaptureEnabled(true) }
+        now += 60_000
+        drain()
+        assertTrue(server.added.single().contains("text"))
+    }
+
+    @Test
     fun forgettingAVisitRollsBackBothHistoryAndCancellationWhenInvalidationFails() = runBlocking {
         enable()
         val url = "https://a.example/article"
