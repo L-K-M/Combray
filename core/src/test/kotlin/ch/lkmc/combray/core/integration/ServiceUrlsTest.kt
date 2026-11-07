@@ -43,6 +43,29 @@ class ServiceUrlsTest {
     }
 
     @Test
+    fun idnHostsArePunycodedAndTheirCredentialsStillRefused() {
+        assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example"), root("https://bücher.example/"))
+        assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example:8443"), root("https://bücher.example:8443/"))
+        assertEquals(
+            ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY),
+            root("https://u:p@bücher.example/"),
+        )
+    }
+
+    @Test
+    fun defaultPortsAndTrailingDotsDoNotChangeTheDestination() {
+        assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example:443/"))
+        assertEquals(ServiceRoot.Valid("http://keep.example"), root("http://keep.example:80/"))
+        assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example./"))
+        assertEquals(ServiceRoot.Valid("https://192.168.1.1:8443"), root("https://192.168.1.1.:8443/"))
+        assertEquals(ServiceRoot.Valid("https://[::1]"), root("https://[::1]:443/"))
+        val plain = (root("https://keep.example") as ServiceRoot.Valid).root
+        for (variant in listOf("https://keep.example:443", "https://keep.example.", "https://Keep.Example")) {
+            assertEquals(ServiceUrls.fingerprint(plain), ServiceUrls.fingerprint((root(variant) as ServiceRoot.Valid).root))
+        }
+    }
+
+    @Test
     fun fingerprintIdentifiesTheDestination() {
         assertEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://a.example"))
         assertNotEquals(ServiceUrls.fingerprint("https://a.example"), ServiceUrls.fingerprint("https://b.example"))
