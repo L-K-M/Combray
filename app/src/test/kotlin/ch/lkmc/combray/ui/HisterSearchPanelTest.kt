@@ -3,6 +3,7 @@ package ch.lkmc.combray.ui
 import android.app.Application
 import android.content.Context
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performImeAction
@@ -87,6 +88,12 @@ class HisterSearchPanelTest {
         }
     }
 
+    private fun awaitFieldEnabled() {
+        compose.waitUntil(5_000) {
+            runCatching { compose.onNode(hasSetTextAction()).assertIsEnabled() }.isSuccess
+        }
+    }
+
     @Test
     fun aSeededQueryIsSentOnlyAfterTheUserTypes() {
         compose.setContent { CombrayTheme { HisterSearchPanel(hister, initialQuery = "recipe", onOpen = {}, onSettings = {}) } }
@@ -97,9 +104,19 @@ class HisterSearchPanelTest {
         assertTrue("a seeded query must not be sent", sent().isEmpty())
 
         compose.onNodeWithText("recipe").performTextInput("x")
+        compose.mainClock.autoAdvance = true
+        compose.waitUntil(5_000) { sent().any { "q=xrecipe" in it } }
+        assertEquals(listOf("http://127.0.0.1:1/keep/search?q=xrecipe&format=json"), sent())
+    }
+
+    @Test
+    fun aBlankQueryStaysIdleAndSendsNothing() {
+        compose.setContent { CombrayTheme { HisterSearchPanel(hister, initialQuery = "", onOpen = {}, onSettings = {}) } }
+        awaitFieldEnabled()
+        compose.mainClock.autoAdvance = false
         compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
-        assertEquals(listOf("http://127.0.0.1:1/keep/search?q=xrecipe&format=json"), sent())
+        assertTrue(sent().isEmpty())
     }
 
     @Test
@@ -112,8 +129,8 @@ class HisterSearchPanelTest {
         assertTrue(sent().isEmpty())
 
         compose.onNodeWithText("recipe").performImeAction()
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.waitForIdle()
+        compose.mainClock.autoAdvance = true
+        compose.waitUntil(5_000) { sent().any { "q=recipe" in it } }
         assertEquals(listOf("http://127.0.0.1:1/keep/search?q=recipe&format=json"), sent())
     }
 }

@@ -105,10 +105,9 @@ class KarakeepPanelTest {
         assertTrue("a seeded query must not be sent", sent().isEmpty())
 
         compose.onNodeWithText("recipe").performTextInput("x")
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.waitForIdle()
+        compose.mainClock.autoAdvance = true
+        compose.waitUntil(5_000) { sent().any { "q=xrecipe" in it } }
         assertEquals(1, sent().count { "/search?" in it })
-        assertTrue(sent().any { "q=xrecipe" in it })
     }
 
     @Test
@@ -121,9 +120,8 @@ class KarakeepPanelTest {
         assertTrue(sent().isEmpty())
 
         compose.onNodeWithText("recipe").performImeAction()
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.waitForIdle()
-        assertTrue(sent().any { "q=recipe" in it })
+        compose.mainClock.autoAdvance = true
+        compose.waitUntil(5_000) { sent().any { "q=recipe" in it } }
     }
 
     @Test

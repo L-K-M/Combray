@@ -75,7 +75,9 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
         hits = emptyList()
         nextPage = null
         loadingMore = false
-        if (service == null || !shouldSendQuery(query, typed)) {
+        // Hister has no default list: a blank query stays idle, as before. A seeded non-blank
+        // query is sent only after the user types or submits it.
+        if (service == null || query.isBlank() || !typed) {
             ui = SearchUi.Idle
             return@LaunchedEffect
         }
