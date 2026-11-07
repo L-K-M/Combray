@@ -109,6 +109,10 @@ class SettingsSheetTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Connected.").fetchSemanticsNodes().isNotEmpty()
         }
+        // The save is fast but involves a real database write; wait for its result too.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Settings saved.").fetchSemanticsNodes().isNotEmpty()
+        }
         // The save's own result stays visible beside the check's.
         assertEquals(1, compose.onAllNodesWithText("Settings saved.").fetchSemanticsNodes().size)
     }
