@@ -79,6 +79,16 @@ retry-the-cycle behavior is deliberate (see the outbox completion entry).
 Its remaining findings are folded into the sections below. It ran the Kotlin
 unit/lint gates, `check_docs.py` and `git diff --check`; no native build,
 device check or personal-service test.
+The 7 November 2026 Argon review passed over the newest code (the PDF viewer,
+the native media pipeline, the report service, reload-pull, the user-agent
+token and the Web Animations stub) at `3224345`. Its blocking and important
+findings are implemented in open PRs #282, #293, #295 and #297 and are
+omitted per the rule above; its nice-to-have findings implemented in open PRs
+#285, #286, #288, #289, #291, #292, #301 and #302 are omitted too. Its
+remaining nice-to-have findings are folded into the sections below. It ran
+`node --test native/src/pdf/test/viewer.test.mjs`, `cargo test --lib`,
+`cargo fmt --check`, the Kotlin unit/lint gates, the report-service tests and
+`git diff --check`; no native build, device check or personal-service test.
 
 ## Still open
 
@@ -2013,3 +2023,139 @@ looking.
 
 Suggested fix: vibrate once on threshold crossing in the pull tracking,
 respecting the system haptic setting. Effort: an hour.
+
+### Show the report id in the preview
+
+missing features — nice-to-have
+
+`ReportSheet.kt`'s details block names the app, engine, Android and display
+values, but not the report id. The id is what the service uses to recognise a
+repeated delivery, and it is the only handle the user has when talking about
+a report.
+
+Suggested fix: show the id in the details block, selectable for copying.
+Effort: under an hour.
+
+### Show a media entry's duration or size
+
+missing features — nice-to-have
+
+`MediaSheet.kt` lists a page's audio and video by name and site only. A page
+with several files gives no way to tell a 30-second clip from a three-hour
+recording before playing it.
+
+Suggested fix: show the duration once the player has probed it, or the file
+size from the response headers. Effort: about half a day.
+
+### Give the fullscreen player a share action
+
+missing features — nice-to-have
+
+`PlayerActivity.kt` has Close and the media controls, but no Share. A user who
+finds a video in a page cannot share its address from the player; they must
+leave it and use the browser's Share.
+
+Suggested fix: add a share button that sends the request's address through the
+existing chooser. Effort: about half a day.
+
+### Notify when a report is resolved
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+A user who sends a report has no idea when an agent marks it done or rejected;
+they must open Settings and look at the queue. The service already exposes the
+status history to the agent routes.
+
+Suggested fix: a local notification when a report's status changes, with the
+same coalescing and privacy rules as the save receipts. Effort: about half a
+day.
+
+### Give the find bar's status line room at 320 dp
+
+visual issues and layout problems — nice-to-have
+
+`FindBar.kt:76-100` places four 48 dp icon buttons beside the status text. At
+320 dp with 200% text the "3 of 12" line is squeezed and can wrap to two
+lines, pushing the bar taller.
+
+Suggested fix: let the status text take the remaining width and hide
+Previous/Next below a narrow width, or move them into the field's trailing
+icons. Effort: under an hour.
+
+### Scale the report preview's screenshot cap with the window
+
+visual issues and layout problems — nice-to-have
+
+`ReportSheet.kt`'s `PREVIEW_MAX_HEIGHT` is a fixed 240 dp. On a large screen
+the preview is still 240 dp tall, so the user cannot judge the screenshot they
+are about to send.
+
+Suggested fix: scale the cap with the window size class. Effort: under an
+hour.
+
+### Lift the dark scheme's darkest container
+
+aesthetics and theming — nice-to-have
+
+`Theme.kt`'s dark `surfaceContainerLowest` is `0xFF0A110D`, darker than the
+charcoal surface and close to black. On OLED it can read as a hole rather than
+a raised surface.
+
+Suggested fix: lift it to a tone that stays above the surface. Effort: under
+an hour.
+
+### Give the PDF viewer a dark appearance of its own
+
+aesthetics and theming — nice-to-have
+
+`native/src/pdf/viewer.css` fixes the viewer's surfaces, so a dark-mode page
+shows a light viewer (or vice versa). The viewer is an opaque origin and does
+not inherit the app's theme.
+
+Suggested fix: derive the viewer's colours from `prefers-color-scheme`, which
+the engine already sets. Effort: about half a day.
+
+### Add a reading-progress bar to Reader view
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+`ReaderView.kt` tracks the article's scroll position for the scroll edge
+button but shows no progress. A thin bar that fills as the user moves through
+the article gives a sense of progress and a quick way back to the top.
+
+Suggested fix: derive it from the existing scroll state. Effort: under an
+hour.
+
+### Add a "jump back in" card to Home
+
+novel, delightful, or quirky ideas worth trying — nice-to-have
+
+The Continue card names one tab; a second line with the last page the user can
+reopen would make the new-tab page more useful without a busy dashboard.
+
+Suggested fix: read the existing Recent projection. Effort: about half a
+day.
+
+### Request the find bar's focus after the field is placed
+
+usability: fast, convenient, clear — nice-to-have
+
+`FindBar.kt:70` requests focus in `LaunchedEffect(Unit)`, which can run before
+the `OutlinedTextField` is attached. The find field can then open without
+focus and the user must tap it.
+
+Suggested fix: request focus from a `LaunchedEffect` keyed on the field's
+placement, or use `Modifier.onPlaced`. Effort: under an hour.
+
+### Answer HTTP/0.9 with a valid status line on Python 3.12
+
+bugs — nice-to-have
+
+`services/site-reports/site_reports/api.py`'s `send_error` sets
+`request_version = ""` so that `send_response_only` writes a status line. On
+Python 3.13+ that method uses `protocol_version` and the response is valid;
+on Python 3.12, which the README supports, it writes `" 400 Bad Request"`
+with no version token. The pinned image is 3.13, so production is unaffected.
+
+Suggested fix: set `request_version = "HTTP/1.1"` (or write the status line
+directly). Effort: under an hour.
