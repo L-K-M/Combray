@@ -28,11 +28,11 @@ use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    AuthenticationRequest, CompositionEvent, CompositionState, ContextMenuAction, ContextMenuItem,
-    DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent,
-    InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
-    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
-    Opts, PanicReporter, PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
+    AuthenticationRequest, ContextMenuAction, ContextMenuItem, DevicePoint, EmbedderControl,
+    EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, InputEventId, InputEventResult,
+    JSValue, JavaScriptEvaluationError, Key, KeyState, KeyboardEvent, MouseButton,
+    MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest, Opts, PanicReporter,
+    PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
     SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, StopLoadingError, Theme,
     TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
     WebViewBuilder, WebViewPoint, WindowRenderingContext,
@@ -829,6 +829,10 @@ impl Engine {
         preferences.set_value("dom_fontface_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_adoptedstylesheet_enabled", PrefValue::Bool(true));
+        // Experimental in Servo 0.7 as well: typing into editable page elements (the rich text
+        // editors of comment and message boxes) runs its execCommand editing. It also gives
+        // pages document.execCommand, as other browsers do.
+        preferences.set_value("dom_exec_command_enabled", PrefValue::Bool(true));
         set_pdf_viewer_preferences(&mut preferences);
         // Firefox for Android's Gecko token, or firewalls that take a Firefox agent without one
         // for a forged one refuse every page (see `user_agent`).
@@ -1641,15 +1645,13 @@ impl Engine {
         let Some(webview) = self.active_webview() else {
             return;
         };
-        // Same sequence as Servo's own Android shell: a composition that ends with the text.
+        // Same sequence as Servo's own Android shell: committed text, which editable elements
+        // take as well as form fields (a composition ending with it reaches form fields only).
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             KeyState::Down,
             Key::Named(NamedKey::Process),
         )));
-        webview.notify_input_event(InputEvent::Ime(ImeEvent::Composition(CompositionEvent {
-            state: CompositionState::End,
-            data: text,
-        })));
+        webview.notify_input_event(InputEvent::Ime(ImeEvent::Commit(text)));
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             KeyState::Up,
             Key::Named(NamedKey::Process),
