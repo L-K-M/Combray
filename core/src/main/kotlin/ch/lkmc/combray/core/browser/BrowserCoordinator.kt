@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URLDecoder
 import java.util.UUID
@@ -90,6 +91,8 @@ class BrowserCoordinator(
     private val unusedTabs: () -> UnusedTabs = { UnusedTabs.KEEP },
     /** How long a request may wait for its page before the tab stops showing it as loading. */
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
+    /** One work-queue step may run this long before it is cancelled as wedged. */
+    private val workItemTimeoutMs: Long = WORK_ITEM_TIMEOUT_MS,
     /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
     private val textSize: () -> TextSize = { TextSize.DEFAULT },
 ) {
@@ -153,16 +156,18 @@ class BrowserCoordinator(
         scope.launch {
             for (job in work) {
                 try {
-                    job()
+                    // One stalled step must not freeze every later state change behind it:
+                    // steps are short database and engine-command sequences, so anything past
+                    // the timeout is wedged, not slow. Its partial effects stay, as they would
+                    // after process death mid-step.
+                    if (withTimeoutOrNull(workItemTimeoutMs) { job() } == null) {
+                        Log.e(LOG_TAG, "browser state update timed out after ${workItemTimeoutMs}ms")
+                        failCurrentStep()
+                    }
                 } catch (failure: Exception) {
                     // A failed step must not stop the queue; it is a bug worth surfacing.
                     Log.e(LOG_TAG, "browser state update failed", failure)
-                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
-                    state.update {
-                        // Before the session is restored the user has done nothing: it was the restore.
-                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
-                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
-                    }
+                    failCurrentStep()
                 }
             }
         }
@@ -183,6 +188,15 @@ class BrowserCoordinator(
                 Log.e(LOG_TAG, "restoring the session failed", failure)
                 state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
             }
+        }
+    }
+
+    /** Restoring ends even if it was this step that failed: show what there is, not a blank page. */
+    private fun failCurrentStep() {
+        state.update {
+            // Before the session is restored the user has done nothing: it was the restore.
+            val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+            it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
         }
     }
 
@@ -1298,6 +1312,9 @@ class BrowserCoordinator(
         work.trySend(block)
     }
 
+    /** Queues an arbitrary step, for tests that need a step the public API cannot stall. */
+    internal fun submitForTest(block: suspend () -> Unit) = submit(block)
+
     private fun withActiveView(action: (LiveView) -> Unit) = submit {
         val tab = activeTab() ?: return@submit
         liveByTab[tab.id]?.takeIf { !it.crashed }?.let(action)
@@ -1815,6 +1832,12 @@ class BrowserCoordinator(
 
         /** Proposed default: well past a slow home server, short of a stuck bar. */
         const val NAVIGATION_TIMEOUT_MS = 30_000L
+
+        /**
+         * One work-queue step is database writes and engine commands only; anything still
+         * running after this is wedged (a stalled database, a hung call), not slow.
+         */
+        const val WORK_ITEM_TIMEOUT_MS = 30_000L
 
         /** How often an open Recent or new-tab page applies the retention cutoff when nothing else changes. */
         const val RECENT_CUTOFF_TICK_MS = 60_000L
