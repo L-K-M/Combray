@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Karakeep's More results button waits for the current page, preventing
+  duplicate requests and cursor rewind after repeated taps. Failed pages
+  keep their rows and can be retried; late results from an old search or
+  server cannot append rows or unlock a newer request.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

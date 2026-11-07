@@ -1,0 +1,160 @@
+package ch.lkmc.combray.ui
+
+import android.app.Application
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import ch.lkmc.combray.core.data.ServiceEntity
+import ch.lkmc.combray.core.data.ServiceKind
+import ch.lkmc.combray.core.integration.KarakeepBookmark
+import ch.lkmc.combray.core.integration.KarakeepPage
+import ch.lkmc.combray.core.integration.KarakeepRead
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/** Delayed application-service reads, not HTTP or synthetic engine events. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30], application = Application::class, qualifiers = "w320dp-h640dp")
+class KarakeepPanelTest {
+    @get:Rule val compose = createComposeRule()
+    private val service = mutableStateOf<ServiceEntity?>(SERVICE)
+    private val requests = CopyOnWriteArrayList<Read>()
+
+    @After
+    fun releaseOutstandingReads() {
+        requests.forEach { it.answer.complete(KarakeepRead.Unreachable("test_ended")) }
+    }
+
+    @Test
+    fun twoQueuedTapsStartOnlyOnePageAndTheButtonWaits() {
+        showFirstPage()
+        val click = compose.onNodeWithText(MORE).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        // Two already queued taps can both carry the enabled button's action from the same frame.
+        compose.runOnIdle { click(); click() }
+        request(1)
+        compose.onNodeWithText(MORE).assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(2, requests.size) }
+
+        answer(1, page("Beta", "page-3"))
+        compose.onNodeWithText("Alpha").assertExists()
+        compose.onNodeWithText("Beta").assertExists()
+        compose.onNodeWithText(MORE).assertIsEnabled()
+        compose.onNodeWithText(MORE).performClick()
+        assertEquals("page-3", request(2).cursor)
+        answer(2, page("Gamma", null))
+        compose.onNodeWithText(MORE).assertDoesNotExist()
+    }
+
+    @Test
+    fun aFailedPageKeepsRowsAndCanBeRetried() {
+        showFirstPage()
+        compose.onNodeWithText(MORE).performClick()
+        answer(1, KarakeepRead.Unreachable("network"))
+        compose.onNodeWithText("Alpha").assertExists()
+        compose.onNodeWithText("Could not reach Karakeep (network).").assertExists()
+        compose.onNodeWithText(MORE).assertIsEnabled().performClick()
+        assertEquals("page-2", request(2).cursor)
+        answer(2, page("Beta", null))
+        compose.onNodeWithText("Alpha").assertExists()
+        compose.onNodeWithText("Beta").assertExists()
+        compose.onNodeWithText("Could not reach Karakeep (network).").assertDoesNotExist()
+    }
+
+    @Test
+    fun anOldQuerysPageCannotAppendOrReleaseANewerPagesGate() {
+        verifyLatePage {
+            compose.onNodeWithText("Search your Karakeep bookmarks").performTextInput("new")
+        }
+        assertEquals("new", requests[2].query)
+        assertEquals("new", requests[3].query)
+    }
+
+    @Test
+    fun anOldDestinationsPageCannotAppendOrReleaseANewerPagesGate() {
+        verifyLatePage {
+            compose.runOnIdle { service.value = SERVICE.copy(baseUrl = "https://other.example", fingerprint = "other", generation = 2) }
+        }
+        assertEquals("", requests[2].query)
+    }
+
+    private fun verifyLatePage(change: () -> Unit) {
+        showFirstPage()
+        compose.onNodeWithText(MORE).performClick()
+        request(1)
+        change()
+        compose.waitForIdle()
+        answer(2, page("New answer", "new-page-2"))
+        compose.onNodeWithText(MORE).performClick()
+        assertEquals("new-page-2", request(3).cursor)
+        answer(1, page("Stale answer", "stale-page-3"))
+        compose.onNodeWithText("Stale answer").assertDoesNotExist()
+        compose.onNodeWithText("New answer").assertExists()
+        compose.onNodeWithText(MORE).assertIsNotEnabled()
+        answer(3, page("New second page", null))
+        compose.onNodeWithText("New second page").assertExists()
+        compose.onNodeWithText(MORE).assertDoesNotExist()
+    }
+
+    private fun showFirstPage() {
+        compose.setContent {
+            CombrayTheme {
+                Column(Modifier.fillMaxSize()) {
+                    KarakeepPanelContent(service.value, "", ::read, {}, {})
+                }
+            }
+        }
+        assertEquals(null, request(0).cursor)
+        answer(0, page("Alpha", "page-2"))
+        compose.onNodeWithText(MORE).assertIsEnabled()
+    }
+
+    private suspend fun read(query: String, cursor: String?): KarakeepRead<KarakeepPage>? {
+        val request = Read(query, cursor)
+        requests += request
+        // A blocking native HTTP request can finish after cancellation: model that late answer.
+        return withContext(NonCancellable) { request.answer.await() }
+    }
+
+    private fun request(index: Int): Read {
+        compose.waitUntil(5_000) { requests.size > index }
+        return requests[index]
+    }
+
+    private fun answer(index: Int, result: KarakeepRead<KarakeepPage>) {
+        val request = request(index)
+        compose.runOnIdle { request.answer.complete(result) }
+        compose.waitForIdle()
+    }
+
+    private fun page(title: String, next: String?) = KarakeepRead.Ok(
+        KarakeepPage(listOf(KarakeepBookmark(title, "https://example.org/${title.replace(' ', '-')}", title)), next),
+    )
+
+    private data class Read(
+        val query: String,
+        val cursor: String?,
+        val answer: CompletableDeferred<KarakeepRead<KarakeepPage>?> = CompletableDeferred(),
+    )
+
+    private companion object {
+        const val MORE = "More results"
+        val SERVICE = ServiceEntity(ServiceKind.KARAKEEP, "https://keep.example", "keep", 1, false, 0)
+    }
+}
