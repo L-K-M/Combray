@@ -123,8 +123,8 @@ class Integrations(
         outbox = outbox,
         handlers = mapOf(
             JobKind.KARAKEEP_SAVE to JobHandler { dispatchSave(it) },
-            JobKind.HISTER_ADD to JobHandler { hister.dispatch(it) },
-            JobKind.SITE_REPORT to JobHandler { reports.dispatch(it) },
+            JobKind.HISTER_ADD to JobHandler { hister.dispatch(it.job) },
+            JobKind.SITE_REPORT to JobHandler { reports.dispatch(it.job) },
         ),
         onDone = ::recordDone,
         scheduler = scheduler,
@@ -291,11 +291,14 @@ class Integrations(
                 dao.observeParkedSave(url),
             ) { saved, job, parked ->
                 when {
+                    // The acknowledged link is the page's saved state (SaveStatus.Saved is not a
+                    // claim about crawling or tagging). A later list-step failure stays in
+                    // Settings; it does not turn a saved bookmark into a failed one.
+                    saved != null -> SaveStatus.Saved
                     job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
                     job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
                     job != null -> SaveStatus.Pending
-                    saved != null -> SaveStatus.Saved
                     // Queued for an earlier address: Settings offers to send it here or discard it.
                     parked != null -> SaveStatus.NeedsAttention(parked.error)
                     else -> SaveStatus.Unsaved
@@ -347,7 +350,8 @@ class Integrations(
         launchGuarded("sending queued work") { dispatcher.drain() }
     }
 
-    private suspend fun dispatchSave(job: OutboxJobEntity): DispatchResult {
+    private suspend fun dispatchSave(claim: Claim): DispatchResult {
+        val job = claim.job
         // One snapshot of row and key: a concurrent change cannot pair a new key with an old server.
         val (service, key) = karakeepConfig.withLock {
             val service = dao.service(ServiceKind.KARAKEEP)
@@ -358,13 +362,29 @@ class Integrations(
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
         key ?: return DispatchResult.AuthRequired("credential_missing")
         val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        val created = routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
+
+        // A previous attempt's acknowledged bookmark: resume at the list step instead of POSTing
+        // the link again. The checkpoint is the job's remote id, written under the claim fence.
+        val acknowledged = job.remoteId
+        val created: DispatchResult.Done = if (acknowledged != null) {
+            DispatchResult.Done(acknowledged)
+        } else {
+            val answer = routes.call(service) { transport, root -> KarakeepClient(transport).createLink(root, key, payload.url, payload.title) }
+            if (answer !is DispatchResult.Done) return answer
+            // The link is on the server now. Record that under the claim fence so a list failure,
+            // a discard or a restart cannot make the page look unsaved, and a retry resumes at
+            // the list step when the answer named the bookmark.
+            val bookmarkId = answer.remoteId
+            val checkpointed = outbox.checkpoint(claim, bookmarkId) {
+                dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, bookmarkId, clock.now()))
+            }
+            if (!checkpointed) return DispatchResult.Retry("claim_lost")
+            answer
+        }
 
         // The list is the one chosen when sending, not when tapping: after its list was deleted,
         // a save can be retried into another one. Creating again finds the same bookmark (200).
         val listId = service.listId ?: return created
-        if (created !is DispatchResult.Done) return created
-        // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
         val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
         val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
         return when {

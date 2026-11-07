@@ -193,6 +193,28 @@ class Outbox(
         true
     }
 
+    /**
+     * Records what an attempt established on the server while [claim] owns the job: [remoteId]
+     * when the answer named it, and through [acknowledged] the durable effect of that
+     * acknowledgment (a save's saved item). Runs in one transaction under the claim fence, so a
+     * worker that lost its lease cannot leave a checkpoint a newer claim would trust. Returns
+     * false when the claim was lost, and [acknowledged] does not run then.
+     */
+    suspend fun checkpoint(
+        claim: Claim,
+        remoteId: String?,
+        acknowledged: suspend () -> Unit = {},
+    ): Boolean = database.withTransaction {
+        val current = dao.job(claim.job.id) ?: return@withTransaction false
+        if (current.state != JobState.RUNNING || current.fence != claim.job.fence || current.leaseOwner != claim.owner) {
+            Log.w(LOG_TAG, "dropping a checkpoint for job ${current.id}: the claim was lost")
+            return@withTransaction false
+        }
+        if (remoteId != null) dao.updateJob(current.copy(remoteId = remoteId, updatedAt = clock.now()))
+        acknowledged()
+        true
+    }
+
     private fun transition(released: OutboxJobEntity, current: OutboxJobEntity, result: DispatchResult, now: Long): OutboxJobEntity =
         when (result) {
             is DispatchResult.Done -> released.copy(state = JobState.SUCCEEDED, remoteId = result.remoteId, error = result.note)
