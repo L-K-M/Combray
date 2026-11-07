@@ -154,6 +154,11 @@ _PNG_CHUNK_OVERHEAD = 12  # Length, type and CRC.
 # with every text field full of commas; the bound keeps a 12 MiB body of "[{},{},...]"
 # from costing hundreds of MiB as Python objects.
 _MAX_JSON_VALUES = 65_536
+# A report nests two levels (the report, then page, client or screenshot). Deeper bodies
+# are invalid JSON for this service. Checked after parsing: the json module stops deep
+# nesting only through Python's recursion limit, and Python 3.15 parses 50,000 levels
+# without reaching it.
+_MAX_JSON_DEPTH = 32
 
 # Explicit ASCII classes: \d would also accept other scripts' digits.
 _REPORT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
@@ -310,7 +315,29 @@ def _decode_object(body: bytes) -> dict[str, Any]:
         _fail(ErrorCode.INVALID_JSON, detail="not valid JSON")
     if not isinstance(value, dict):
         _fail(ErrorCode.INVALID_JSON, detail="not a JSON object")
+    if _depth(value) > _MAX_JSON_DEPTH:
+        _fail(ErrorCode.INVALID_JSON, detail="nested too deeply")
     return value
+
+
+def _depth(value: Any) -> int:
+    """Nesting depth of a parsed body, 1 for an object of plain values, counted without
+    recursion. Stops early once past _MAX_JSON_DEPTH; _MAX_JSON_VALUES bounds the walk."""
+    deepest = 0
+    pending: list[tuple[Any, int]] = [(value, 1)]
+    while pending:
+        item, depth = pending.pop()
+        if isinstance(item, dict):
+            children = list(item.values())
+        elif isinstance(item, list):
+            children = item
+        else:
+            continue
+        deepest = max(deepest, depth)
+        if deepest > _MAX_JSON_DEPTH:
+            break
+        pending.extend((child, depth + 1) for child in children)
+    return deepest
 
 
 def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

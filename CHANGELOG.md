@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The site-report service refuses JSON nested deeper than 32 levels on
+  every Python. It used to rely on Python's recursion limit, which
+  Python 3.15 no longer reaches, so CI on the new runner image failed.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -288,6 +291,12 @@ All notable changes to this project are documented here. The format follows
 - Reloading a page sends the referrer of the request that first loaded it,
   as Firefox does, instead of the page's own address. A bot check that
   compared the two requests turned the reload away.
+- Pages behind a bot check that measures SVG shapes no longer block
+  Combray as automated: Servo now answers SVG's `getBBox()`,
+  `isPointInFill()` and `createSVGPoint()` (with `createSVGMatrix()` and
+  `createSVGRect()`), as other browsers do, so the check can finish.
+  Chart libraries that lay out labels with `getBBox()` work on shapes too;
+  boxes of SVG text are not computed yet.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects

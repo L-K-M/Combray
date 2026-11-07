@@ -3162,3 +3162,89 @@ keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left ar
   - By hand, with Gboard, the Lexical test page took `h`, `i`, space, Backspace, `o`, Enter, `y`
     as two paragraphs, `hio` and `y`, with the keyboard opening on the tap.
 - The full device suite runs in this PR's Engine workflow.
+
+## 52. Bot-check device verification (6 November 2026)
+
+The owner sent an article address and a phone screenshot of a bot-protection block page. The site
+and the protection vendor are not named here, and the captured traffic stayed on the Mac.
+
+Validated source: `8720afc00e4daead852b8f7f63bb59e87e0b2a99` on `combray/0.7`, which merges
+downstream [PR #36](https://github.com/L-K-M/servo/pull/36) onto §51's pin `5aa68fd29b6b`. The
+reload change, [PR #37](https://github.com/L-K-M/servo/pull/37), came with §51's pin. Upstream
+base still v0.7.0.
+
+### Diagnosis
+
+Desktop servoshell at the old pin, with Combray's preferences, reproduced the block. The vendor's
+device check runs in a cross-origin frame, posts its measurements and receives a verdict: a hard
+block, an interactive challenge, or a pass with a cookie and a reload of the page.
+
+- Network: Safari in a private window on the same Mac and network loaded the article, so the
+  address is not blocked as such.
+- User agent: a plain Firefox for Android string, and a desktop Firefox string at desktop size, got
+  the same block. The verdict's reason codes changed only in their first entry. The `Gecko/` token
+  from §50 does not help here.
+- TLS: through a re-encrypting proxy, which replaces Servo's TLS handshake with the proxy's own,
+  Servo stayed blocked. Playwright's headless Firefox 157 through the same proxy got an interactive
+  challenge.
+- Engine features: traces of the Web API calls the check makes (a userscript wrapping prototype
+  methods and getters, replayed offline from the proxy) differ in dozens of places between Servo
+  and Firefox. Firefox was then made to look like Servo in 15 feature groups at once and in a
+  4-bit combination of them (five live runs). It reproduced Servo's block and reason codes exactly
+  when, and only when, the SVG geometry methods were removed: `getBBox()`, `createSVGPoint()`,
+  `isPointInFill()`. The check draws an SVG fingerprint with them. Firefox missing every other
+  difference (navigator properties, `speechSynthesis`, WebGL debug info, OffscreenCanvas in
+  workers, timing values, media types and others) still passed.
+- Reload: with the SVG methods present, the verdict passed, but the reload it triggers was
+  challenged again. Rewriting Servo's reload request toward Firefox's in the proxy, one header group
+  at a time, isolated the `Referer` header. Servo sent the page's own URL; Firefox sends what the
+  original request sent, here nothing, as HTML requires.
+
+### Engine changes
+
+- [PR #36](https://github.com/L-K-M/servo/pull/36) adds `SVGGraphicsElement.getBBox()`,
+  `SVGGeometryElement.isPointInFill()` and `SVGSVGElement.createSVGPoint()`, `createSVGMatrix()`
+  and `createSVGRect()`, computed from the elements' attributes. Text and nested viewports with a
+  `viewBox` throw `NotSupportedError`.
+  - It also makes a negative ellipse radius take the other radius, for `getTotalLength()` too.
+  - Checks: a new 21-case WPT test fails all 21 before the change and passes after; Firefox passes
+    all 21 and Chromium 19. 227 more passing subtests in `svg/`, with no other change against the
+    unchanged build on the same Mac. A 16-page seed sweep turns one `js-error` into `ok` and
+    changes nothing else.
+- [PR #37](https://github.com/L-K-M/servo/pull/37) reloads with the referrer and referrer policy of
+  the request that fetched the document, for `location.reload()` and the embedder's reload alike.
+  - Checks: a new 4-case WPT test fails all 4 before the change and passes after; Firefox passes
+    all 4 and Chromium does not. No change in the 102 upstream tests that reload.
+- Reviews:
+  - Before the PRs: Devin SWE-2, Reflection Beam 1.0 and LongCat 2.5.
+  - On them: GLM 5.3, three rounds on #36 and two on #37.
+  - The PRs list each finding and how it was handled. Two remain open: a style-sheet
+    `display: none` on a direct child of `svg` is still not seen, as servo.css's `svg > *` rule
+    hides it from the rasterizer as well; and `use` of a `symbol` with a `viewBox` throws.
+
+### End to end
+
+Desktop servoshell with both changes, Servo's own user agent, the same network:
+
+- It passes the device check and loads the article.
+- With Servo's Android user agent at phone size, the check offers its interactive challenge instead
+  of the block. Two things fit that: the Mac's fonts and hardware contradict an Android user agent,
+  and the check probes OS-specific fonts. Emulating the phone's pointer, touch, platform and pixel
+  ratio did not change that verdict.
+
+On an arm64 API 36 emulator with the same network, Combray at the old pin and Combray with both
+changes (a local build, `COMBRAY_ABI=arm64 scripts/build.sh --debug`) both stop at the vendor's
+interactive challenge, not at the block. Real Firefox 157 with a Firefox for Android user agent
+and touch emulation on the Mac is blocked as well (reason `25` and another). Neither desktop nor
+emulator therefore shows what a phone gets.
+
+The phone itself is not yet confirmed.
+
+### Not changed
+
+These differences remain, did not decide this check, and are candidates for later work:
+
+- Servo exposes no `navigator.webdriver` or `navigator.maxTouchPoints`.
+- OffscreenCanvas stays behind `dom_offscreen_canvas_enabled`, so the check's worker tasks throw.
+- `performance.timing.navigationStart` is 0.
+- A script reload sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-User: ?1`.
