@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Turning Hister capture off in Settings now holds a capture that was already
+  on its way to the server instead of sending it. Page text sent to Hister
+  stops at the moment you flip the switch, and the held capture is sent when
+  capture is turned on again.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

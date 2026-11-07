@@ -274,6 +274,9 @@ class HisterIntegration(
         val payload = json.decodeFromString(CapturePayload.serializer(), job.payload)
         // The policy may have changed since the capture: recheck right before sending.
         if (!eligible(payload.url, service) || wasForgotten(job, payload.url)) return DispatchResult.Cancelled("excluded")
+        // Capture off since this job was claimed: the comment on setCaptureEnabled promises the
+        // switch holds unsent captures, so this one waits for it instead of being sent.
+        if (!service.captureEnabled) return DispatchResult.Paused("capture_paused")
         token ?: return DispatchResult.AuthRequired("credential_missing")
         return routes.call(service) { transport, root -> HisterClient(transport).add(root, token, payload.url, payload.title, payload.text) }
     }

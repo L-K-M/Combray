@@ -217,6 +217,14 @@ class Outbox(
                 )
             }
             is DispatchResult.AuthRequired -> released.copy(state = JobState.AUTH_REQUIRED, error = result.category)
+            // Held by the user's policy: kept and claimable at once, with the attempt refunded
+            // (nothing was sent). The due-job query keeps it unclaimed while the policy forbids it.
+            is DispatchResult.Paused -> released.copy(
+                state = JobState.RETRY_WAIT,
+                attempts = (current.attempts - 1).coerceAtLeast(0),
+                error = result.category,
+                nextAttemptAt = now,
+            )
             is DispatchResult.Rejected -> released.copy(state = JobState.FAILED, error = result.category)
             // Refused on purpose: retrying cannot help, and captured text is not kept for it.
             is DispatchResult.Declined -> released.copy(state = JobState.CANCELLED, error = result.category)

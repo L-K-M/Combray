@@ -18,6 +18,13 @@ sealed interface DispatchResult {
     /** 401/403: pause until the user fixes the credential (or the CSRF convention). */
     data class AuthRequired(val category: String) : DispatchResult
 
+    /**
+     * The user's own policy holds this job (capture paused): kept until the policy allows it,
+     * costing no attempt budget. It is claimable again at once, and stays unclaimed while the
+     * policy forbids it.
+     */
+    data class Paused(val category: String) : DispatchResult
+
     /** Permanent: invalid request, unexpected redirect, oversized payload. Needs the user. */
     data class Rejected(val category: String) : DispatchResult
 
