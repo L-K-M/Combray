@@ -617,7 +617,11 @@ private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: Out
         else -> stringResource(R.string.queue_failed, error)
     }
     Column(Modifier.padding(vertical = 4.dp)) {
-        Text(integrations.jobUrl(job)?.let(::displayHost) ?: job.dedupeKey, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            integrations.jobUrl(job)?.let(::displayHost) ?: stringResource(R.string.queue_unknown_page),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         Text(state, style = MaterialTheme.typography.bodySmall)
         // A paused item can be dropped on its own: "Resume all" is not the only way out.
         if (job.state in ACTIONABLE_STATES) {
