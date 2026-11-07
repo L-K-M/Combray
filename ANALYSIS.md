@@ -56,7 +56,10 @@ note below.
 The 7 November 2026 mimo-2 review's blocking and important findings are
 implemented in open PRs #238, #248, #258, #265, #270, #273 and #277 and are
 omitted per the rule above; its nice-to-have findings implemented in open PRs
-#279, #280 and #281 are omitted too. The blocking stale-frame defect and the
+#279, #280 and #281 are omitted too. Concurrent open PRs cover its Karakeep
+double-tap guard (#268) and a first slice of its IME and Keystore findings
+(#264, #269), noted in the remaining entries. The blocking stale-frame defect
+and the
 important IME editor-action and media-load attribution gaps have no PR and are
 recorded as entries below; the surface-detach wait and the signed release path
 were already recorded here and are not repeated. It left the first three
@@ -96,7 +99,9 @@ sends Enter for every IME action, and `:206-216` never offers
 `IME_ACTION_NEXT/DONE/GO/SEND`: a keyboard's Next on a multi-field form
 submits it instead of moving to the next field, and there is no way to finish
 a form from the keyboard. Form filling with a soft or hardware keyboard is
-materially worse than on other browsers.
+materially worse than on other browsers. A concurrent open PR (#264) maps
+the IME Next action to Tab as a first slice; the rest of the action model
+(DONE/GO/SEND, `imeOptions`) remains.
 
 Suggested fix: model the actions end to end — engine commands for next andprevious field and for blur, `imeOptions` from the field kind, SEARCH kept as
 submit — with device runs over real forms. The mimo-2 review left it
@@ -1666,10 +1671,11 @@ available.
 
 bugs — nice-to-have
 
-`SecretStore.kt:103-105` writes through a fixed `<name>.tmp` path: two
-concurrent writes to one `SecretName` can interleave bytes into a corrupt
-ciphertext, and a kill between write and rename leaves an orphan that is never
-cleaned. `:86-90` treats every `ProviderException` on read as a lost Keystore
+`SecretStore.kt:103-105` writes through a fixed `<name>.tmp` path: a kill
+between write and rename leaves an orphan that is never cleaned, and any
+future concurrent write to one `SecretName` can interleave bytes into a
+corrupt ciphertext (the known first-creation race is serialized in open PR
+#269). `:86-90` treats every `ProviderException` on read as a lost Keystore
 key, so a transient failure (boot, load) makes the UI demand a credential that
 is intact.
 
@@ -1800,16 +1806,6 @@ sheet. Only Recent hosts its own snackbars.
 
 Suggested fix: render a notice host inside each sheet as Recent does, or move
 the host above sheets. Effort: half a day.
-
-### Guard Karakeep's More results against double taps
-
-usability: fast, convenient, clear — nice-to-have
-
-`KarakeepPanel.kt:132-150` has no in-flight guard (Hister's button disables
-itself via `loadingMore`), so two quick taps fire two fetches; rows dedupe by
-id, but the duplicate request and the transient stale answer are visible.
-
-Suggested fix: mirror Hister's `loadingMore` guard. Effort: an hour.
 
 ### Restore the splash icon's tile
 
