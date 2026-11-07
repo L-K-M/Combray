@@ -22,20 +22,30 @@ import java.util.UUID
  * Copies stay until the next process start ([clear]): a page may send its form much later.
  */
 class UploadStaging(private val root: File, private val resolver: ContentResolver) {
-    fun clear() {
+    // Cleanup and admission share this lock. The delayed Application startup task must never
+    // delete a pick already handed to Servo; preparation runs once per process-scoped instance.
+    private val preparationLock = Any()
+    private var prepared = false
+
+    /** Removes copies from the previous process, at most once and before any new pick. */
+    fun clear() = synchronized(preparationLock) {
+        if (prepared) return@synchronized
         root.deleteRecursively()
+        prepared = true
     }
 
     /** Paths of the copies, or null if any file could not be read (nothing is uploaded then). */
     suspend fun stage(uris: List<Uri>): List<String>? = withContext(Dispatchers.IO) {
         val pick = File(root, UUID.randomUUID().toString())
         try {
+            clear()
             // One directory per file: two picked files may share a name.
             uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
         } catch (failure: Exception) {
             // Another app's provider may throw anything (IO, permission, bad URI): cancel the upload.
+            // Its message and causes can name the private document: log only the class.
             // No suspension point in the block, so cancellation cannot be swallowed here.
-            Log.w(LOG_TAG, "could not copy a picked file", failure)
+            Log.w(LOG_TAG, "could not copy a picked file: ${failure.javaClass.name}")
             pick.deleteRecursively()
             null
         }

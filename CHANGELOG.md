@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A delayed startup cleanup no longer deletes files just picked for a page.
+  Upload staging finishes its one-time cleanup before admitting new copies,
+  and file-provider failures no longer put private attachment details in logs.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
