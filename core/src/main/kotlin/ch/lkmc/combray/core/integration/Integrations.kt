@@ -43,6 +43,13 @@ sealed interface SaveStatus {
     /** The server acknowledged the link (not that crawling or tagging finished). */
     data object Saved : SaveStatus
 
+    /**
+     * The link is stored, but the chosen list step failed ([reason]); Settings offers Retry.
+     * Distinct from [Saved] so a stored bookmark is never reported as missing, and from
+     * [NeedsAttention] so a failed list is not reported as a missing bookmark.
+     */
+    data class SavedWithListFailure(val reason: String?) : SaveStatus
+
     /** Delivery stopped: [reason] is an error category; Settings offers Retry or Discard. */
     data class NeedsAttention(val reason: String?) : SaveStatus
 }
@@ -291,6 +298,8 @@ class Integrations(
                 dao.observeParkedSave(url),
             ) { saved, job, parked ->
                 when {
+                    // The bookmark was acknowledged before the list step failed: the page is saved.
+                    job != null && job.state == JobState.FAILED && saved != null -> SaveStatus.SavedWithListFailure(job.error)
                     job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
                     job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
@@ -364,6 +373,9 @@ class Integrations(
         // a save can be retried into another one. Creating again finds the same bookmark (200).
         val listId = service.listId ?: return created
         if (created !is DispatchResult.Done) return created
+        // The server acknowledged the bookmark: record it now. A later list failure must not make
+        // a stored bookmark look unsaved (the row used to be written only on final Done).
+        recordCreated(job, payload, created.remoteId)
         // Creation was acknowledged, but list membership needs the ID a duplicate-safe retry can recover.
         val bookmarkId = created.remoteId ?: return DispatchResult.Retry(BOOKMARK_ID_MISSING)
         val added = routes.call(service) { transport, root -> KarakeepClient(transport).addToList(root, key, listId, bookmarkId) }
@@ -379,7 +391,12 @@ class Integrations(
     private suspend fun recordDone(job: OutboxJobEntity, done: DispatchResult.Done) {
         if (job.kind != JobKind.KARAKEEP_SAVE) return
         val payload = json.decodeFromString(SavePayload.serializer(), job.payload)
-        dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, done.remoteId, clock.now()))
+        recordCreated(job, payload, done.remoteId)
+    }
+
+    /** Writes the acknowledged bookmark; idempotent, so a final Done after a list retry is harmless. */
+    private suspend fun recordCreated(job: OutboxJobEntity, payload: SavePayload, remoteId: String?) {
+        dao.setSaved(SavedItemEntity(job.fingerprint, payload.url, payload.title, remoteId, clock.now()))
     }
 
     companion object {
