@@ -18,6 +18,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Long-press a web image and choose Download image to save it to Downloads
+  without opening a tab. Android handles progress, completion and retries,
+  including after Combray closes. This uses a new request without the page’s
+  cookies or referrer; protected images may fail. `data:` and `blob:` images
+  are not supported yet.
 - Tap a PDF link and read it: a top-level PDF opens in Combray's own
   viewer inside Servo, drawn by PDFium, with its pages one under another
   at the screen's width. The tab takes the PDF's own title when it has one,

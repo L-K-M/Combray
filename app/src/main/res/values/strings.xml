@@ -80,6 +80,10 @@
     <string name="link_copy">Copy link</string>
     <string name="link_share">Share link</string>
     <string name="image_open_new_tab">Open image in new tab</string>
+    <string name="image_download">Download image</string>
+    <string name="image_download_queued">Image download queued. See Downloads for progress.</string>
+    <string name="image_download_unsupported">This image address cannot be downloaded.</string>
+    <string name="image_download_unavailable">Could not start download. Check Android’s Download Manager.</string>
     <string name="image_copy">Copy image address</string>
     <string name="link_copied">Link copied</string>
     <string name="image_address_copied">Image address copied</string>

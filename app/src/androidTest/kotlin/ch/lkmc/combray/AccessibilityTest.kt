@@ -468,7 +468,10 @@ class AccessibilityTest {
     }
 
     @Test
-    fun anImageMenuIsAccessible() = assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+    fun anImageMenuIsAccessible() {
+        assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+        compose.onNodeWithText("Download image").assertIsDisplayed()
+    }
 
     /**
      * A linked image lists both menus. At the largest font they can need to scroll on the
@@ -519,6 +522,7 @@ class AccessibilityTest {
                 onOpenInNewTab = {},
                 onOpenInBackground = {},
                 onSaveLink = {},
+                onDownloadImage = {},
                 onShare = {},
                 onNotify = {},
             )
