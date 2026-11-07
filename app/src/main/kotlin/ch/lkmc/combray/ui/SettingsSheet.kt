@@ -36,6 +36,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -339,6 +340,9 @@ private fun ServiceSettings(
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    // A slow check must not replace a newer save's result (or the other way round).
+    var messageGeneration by remember { mutableIntStateOf(0) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -379,24 +383,36 @@ private fun ServiceSettings(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
         Button(
             onClick = {
+                if (saving) return@Button
+                saving = true
+                val generation = ++messageGeneration
                 scope.launch {
-                    val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
-                    if (result == Configured.Saved) {
-                        editedAddress = null
-                        editedAlternate = null
+                    try {
+                        val result = configure(address, credential.ifBlank { null }, alternate)
+                        if (generation == messageGeneration) message = describe(resources, labels, result)
+                        if (result == Configured.Saved) {
+                            editedAddress = null
+                            editedAlternate = null
+                        }
+                        credential = ""
+                    } finally {
+                        saving = false
                     }
-                    credential = ""
                 }
             },
+            enabled = !saving,
             modifier = Modifier.heightIn(min = 48.dp),
         ) { Text(stringResource(R.string.action_save_settings)) }
         OutlinedButton(
             onClick = {
+                val generation = ++messageGeneration
                 message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
+                scope.launch {
+                    val result = check()
+                    if (generation == messageGeneration) message = result?.let { describe(resources, labels, it) }
+                }
             },
-            enabled = current != null,
+            enabled = current != null && !saving,
             modifier = Modifier.heightIn(min = 48.dp),
         ) { Text(stringResource(R.string.action_check_connection)) }
     }
