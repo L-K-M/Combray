@@ -90,6 +90,17 @@ remaining nice-to-have findings are folded into the sections below. It ran
 `cargo fmt --check`, the Kotlin unit/lint gates, the report-service tests and
 `git diff --check`; no native build, device check or personal-service test.
 
+The longcat-3 review (7 November 2026, base `3224345`) passed the Kotlin
+unit/lint gates, `check_docs.py`, `git diff --check` and the documentation
+checks; no native build, device check or personal-service test. Its blocking
+and important findings are implemented in open PRs #208, #211, #216, #223,
+#224, #229, #235, #239, #249, #294 and #296 and are omitted per the rule
+above; its nice-to-have findings implemented in open PRs #299, #300, #303,
+#304, #306, #307, #308 and #309 are omitted too. Concurrent open PRs cover
+several of the same findings (#219, #225, #230, #242, #244, #250, #269), so
+the entries below keep only the unimplemented parts. Its remaining nice-to-have
+findings are folded into the sections below.
+
 ## Still open
 
 ### Fix the stale-frame defect after hidden-view churn
@@ -546,6 +557,19 @@ warning recovery without another capture, without silently discarding explicit
 saves or reopening the fixed replacement bug. Effort: about half a day after
 the policy is chosen.
 
+### Normalize a report address's trailing slash
+
+bugs — nice-to-have
+
+`ReportAddress.siteAndPath` trims to the site and path but keeps a trailing
+slash on the bare host: `https://example.org/` and `https://example.org` trim
+to different strings, and a scheme-less `example.org/` keeps its slash. The
+service treats both as the same site, so the preview can show a different
+address than the user gets by restoring the full address.
+
+Suggested fix: drop a trailing slash on the bare host (or document the choice)
+and add a `ReportAddressTest` case. Effort: under an hour.
+
 ### Define a total deadline for integration HTTP attempts
 
 general issues — nice-to-have
@@ -622,21 +646,6 @@ captures, and verify no erased content is re-enqueued after restart. A direct
 concurrent sink test is not proof of a normal coordinator Forget race.
 Effort: about half a day after the open policy work is integrated.
 
-### Keep recency deterministic when focus times tie
-
-bugs — nice-to-have
-
-`BrowserCoordinator.activate` rewrites the previous tab's `lastFocusedAt` to
-`now - 1`, while MRU queries sort only that timestamp. Same-millisecond focus
-changes can tie or move a timestamp backward, affecting All/MRU successor
-selection. Fixed creation-time Open-tab/swipe ordering is already implemented
-and is a different invariant.
-
-Suggested fix: reproduce focus/close/undo ties with a fake clock, then use a
-monotonic focus sequence or an explicitly justified timestamp/tie-break rule.
-Do not reintroduce focus-based reordering into Open tabs or swipes. Effort:
-about half a day including restart ordering.
-
 ### Document WorkManager replacement behavior
 
 general issues — nice-to-have
@@ -667,21 +676,6 @@ Any future render-only coalescing must retain every point for gesture/activation
 trackers, deliver final coordinates and preserve down/up/cancel order. Keep
 the existing long-press clock rule: measure from app handling, not the queued
 event timestamp. Effort: about one day with real touch fixtures.
-
-### Profile stateful publication
-
-performance problems, stuttering, and jank — nice-to-have
-
-Inert events already skip coordinator `publish()`, and tab counts use
-`SELECT COUNT(*)`. Stateful title/load bursts still query/publish. Stable
-browser-screen callbacks have an open PR, so that implementation is not
-repeated here. The old emulator idle-timeout observation is not a current
-phone benchmark.
-
-Suggested fix: count Room queries and use frame/recomposition traces before
-adding cached snapshots or dirty flags. Preserve navigation/title delivery
-and transactional counts; isolate remaining broad state reads only where
-measurements justify it. Effort: about one day.
 
 ### Publish the player snapshot only when it changes
 
@@ -987,6 +981,17 @@ switching/response loss. Localize coordinator problems through typed notices
 mapped to app resources, not resource IDs in core. Effort: about one day.
 Creation-receipt persistence is implemented in open PR #230; this is the
 remaining presentation and recovery task.
+
+### Avoid a Save-button flash on every navigation
+
+usability: fast, convenient, clear — nice-to-have
+
+`BrowserScreen.kt` keys the Save status flow on `tab?.url` and seeds it with
+`PageSaveStatus(null, Unsaved)`, so the Save icon briefly shows Unsaved on
+every navigation before the real status arrives.
+
+Suggested fix: keep the previous page's status until the new URL's first
+emission, or seed the flow with the current URL. Effort: under an hour.
 
 ### Let audio play with the screen off, or say it stops
 
