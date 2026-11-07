@@ -9,6 +9,10 @@ import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.data.ServiceKind
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 sealed interface Enqueued {
     data class Queued(val job: OutboxJobEntity) : Enqueued
@@ -95,7 +99,7 @@ class Outbox(
             val retried = failed.maxBy { it.sequence }.copy(
                 state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
                 // The user saved this page again: its current title travels, not the stale one.
-                payload = payload, payloadBytes = payloadBytes,
+                payload = payload, payloadBytes = payloadBytes, url = payloadUrl(payload),
                 leaseOwner = null, leaseUntil = null,
             ).restarted(now)
             dao.updateJob(retried)
@@ -128,6 +132,7 @@ class Outbox(
             remoteId = null,
             createdAt = now,
             updatedAt = now,
+            url = payloadUrl(payload),
         )
         dao.insertJob(job)
         dao.dropFinishedTransientPayloads()
@@ -357,6 +362,18 @@ class Outbox(
 
     companion object {
         private const val LOG_TAG = "CombrayOutbox"
+
+        /**
+         * The payload's top-level `url` field, stored on the row so the payload (which can hold
+         * 256 KiB of page text) is never parsed just to name a job. Empty for an unparseable
+         * payload; such a job fails its own validation at dispatch.
+         */
+        private fun payloadUrl(payload: String): String = try {
+            ((Json.parseToJsonElement(payload) as? JsonObject)?.get("url") as? JsonPrimitive)?.contentOrNull.orEmpty()
+        } catch (malformed: Exception) {
+            ""
+        }
+
         private const val FINISHED_RETENTION_MS = 7L * 24 * 60 * 60 * 1000
 
         /** Error prefix of a job whose last attempt could not connect, as in `unreachable_network`. */

@@ -60,6 +60,17 @@ class OutboxTest {
 
     private fun job(id: String) = runBlocking { database.integrations().job(id) }!!
 
+    /** The row carries the payload's address, so status lists never decode the payload for it. */
+    @Test
+    fun enqueueStoresThePayloadUrlOnTheRow() {
+        val queued = enqueue() as Enqueued.Queued
+        assertEquals("https://a.test/", queued.job.url)
+        assertEquals("https://a.test/", job(queued.job.id).url)
+
+        val malformed = enqueue(payload = "not json", dedupeKey = "k") as Enqueued.Queued
+        assertEquals("", malformed.job.url)
+    }
+
     /** What a crashed worker leaves behind: a claim that is never finished. */
     private fun claimAndAbandon(owner: String) {
         val claim = runBlocking { outbox.claim(owner, leaseMs = LEASE_MS) }

@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -107,6 +108,11 @@ data class OutboxJobEntity(
     val remoteId: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    /**
+     * The job's address, stored at enqueue so status lists never decode the payload (which can
+     * hold up to 256 KiB of page text) to read one field. Empty for rows written before schema 6.
+     */
+    @ColumnInfo(defaultValue = "") val url: String = "",
 )
 
 /** A link the destination acknowledged (201 new or 200 existing). Independent of tabs. */

@@ -273,6 +273,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The Settings queue no longer decodes whole job payloads (up to 256 KiB
+  of captured page text) per row while composing: jobs now store their
+  address in a `url` column (schema 6, auto-migrated), and a row without
+  one shows "Unknown page" instead of its raw dedupe key. Finished
+  captures and reports still drop their address with their payload.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
