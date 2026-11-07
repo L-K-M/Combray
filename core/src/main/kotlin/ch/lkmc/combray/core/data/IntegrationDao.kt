@@ -207,4 +207,13 @@ interface IntegrationDao {
         """,
     )
     fun observeLatestCapture(fingerprint: String, key: String): Flow<OutboxJobEntity?>
+
+    /** The newest capture for one Hister document on one server, in any state. */
+    @Query(
+        """
+        SELECT * FROM outbox WHERE kind = 'HISTER_ADD' AND fingerprint = :fingerprint AND dedupeKey = :key
+        ORDER BY sequence DESC LIMIT 1
+        """,
+    )
+    suspend fun latestCapture(fingerprint: String, key: String): OutboxJobEntity?
 }
