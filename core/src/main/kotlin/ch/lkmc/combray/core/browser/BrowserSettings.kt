@@ -57,6 +57,21 @@ class BrowserSettings(private val preferences: SharedPreferences) {
 
     fun setHomeFrequentSites(choice: HomeSectionVisibility) = write(KEY_HOME_FREQUENT, frequentSites, choice)
 
+    /**
+     * The (wall clock, monotonic clock) reading the last maintenance persisted, so the next
+     * process on the same boot can tell a forward-jumped device clock from time that passed
+     * (a reboot resets the monotonic clock; then the wall clock is trusted). Null before the
+     * first maintenance.
+     */
+    fun clockAnchor(): Pair<Long, Long>? {
+        if (!preferences.contains(KEY_CLOCK_WALL)) return null
+        return preferences.getLong(KEY_CLOCK_WALL, 0L) to preferences.getLong(KEY_CLOCK_MONO, 0L)
+    }
+
+    fun setClockAnchor(wall: Long, monotonic: Long) {
+        preferences.edit().putLong(KEY_CLOCK_WALL, wall).putLong(KEY_CLOCK_MONO, monotonic).apply()
+    }
+
     /** An unknown stored name falls back to its default: preferences never block startup. */
     private fun <T : Enum<T>> read(key: String, values: List<T>, default: T): T =
         values.firstOrNull { it.name == preferences.getString(key, null) } ?: default
@@ -74,6 +89,8 @@ class BrowserSettings(private val preferences: SharedPreferences) {
         private const val KEY_TAB_COUNTER = "tab_counter"
         private const val KEY_HOME_CONTINUE = "home_continue"
         private const val KEY_HOME_FREQUENT = "home_frequent_sites"
+        private const val KEY_CLOCK_WALL = "clock_anchor_wall"
+        private const val KEY_CLOCK_MONO = "clock_anchor_mono"
     }
 }
 
