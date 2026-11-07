@@ -276,6 +276,17 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun aCaptureClaimedBeforeTheSwitchIsNotSent() {
+        enable()
+        capture("https://a.example/", "text")
+        runBlocking { hister.setCaptureEnabled(false) }
+        // The race the recheck covers: the job was claimed before capture was turned off.
+        val result = runBlocking { hister.dispatch(jobs().single()) }
+        assertEquals(DispatchResult.Cancelled("capture_disabled"), result)
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
     fun unsentCapturesExpireAfterAWeek() {
         enable()
         capture("https://a.example/", "old text")

@@ -272,6 +272,8 @@ class HisterIntegration(
         if (service == null || service.fingerprint != job.fingerprint) return DispatchResult.Cancelled("destination_changed")
         if (service.generation != job.generation) return DispatchResult.AuthRequired("credential_changed")
         val payload = json.decodeFromString(CapturePayload.serializer(), job.payload)
+        // The switch may have flipped since the claim: off holds unsent captures, claimed ones too.
+        if (!service.captureEnabled) return DispatchResult.Cancelled("capture_disabled")
         // The policy may have changed since the capture: recheck right before sending.
         if (!eligible(payload.url, service) || wasForgotten(job, payload.url)) return DispatchResult.Cancelled("excluded")
         token ?: return DispatchResult.AuthRequired("credential_missing")
