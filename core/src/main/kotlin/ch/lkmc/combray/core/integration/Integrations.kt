@@ -391,17 +391,42 @@ class Integrations(
          * The top-level `url` member of a job payload, read without decoding the whole document:
          * a capture's text can be 256 KiB and Settings reads this once per row in composition. The
          * lookbehind keeps a `"url":` inside a page's own title or text from posing as the
-         * member. Null when there is no such member or the payload is malformed.
+         * member; [insideRootObject] keeps a nested object's `url` from winning. Null when there
+         * is no such member or the payload is malformed.
          */
         private val URL_MEMBER = Regex("""(?<=[{,])\s*"url"\s*:\s*"((?:[^"\\]|\\.)*)""")
 
         private fun payloadUrl(payload: String): String? {
-            val captured = URL_MEMBER.find(payload)?.groupValues?.get(1) ?: return null
-            return try {
-                json.decodeFromString<String>("\"$captured\"")
-            } catch (malformed: IllegalArgumentException) {
-                null
+            for (match in URL_MEMBER.findAll(payload)) {
+                if (!insideRootObject(payload, match.range.first)) continue
+                return try {
+                    json.decodeFromString<String>("\"${match.groupValues[1]}\"")
+                } catch (malformed: IllegalArgumentException) {
+                    null
+                }
             }
+            return null
+        }
+
+        /** Whether [index] sits directly inside the root object, ignoring braces in strings. */
+        private fun insideRootObject(payload: String, index: Int): Boolean {
+            var depth = 0
+            var inString = false
+            var escaped = false
+            for (i in 0 until index) {
+                val c = payload[i]
+                when {
+                    escaped -> escaped = false
+                    inString -> when (c) {
+                        '\\' -> escaped = true
+                        '"' -> inString = false
+                    }
+                    c == '"' -> inString = true
+                    c == '{' || c == '[' -> depth++
+                    c == '}' || c == ']' -> depth--
+                }
+            }
+            return depth == 1
         }
     }
 }

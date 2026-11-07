@@ -145,6 +145,15 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun theQueueRowUrlReadsTheTopLevelMemberOverANestedOne() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text")
+        val job = jobs().single()
+        val nested = """{"meta":{"url":"https://fake.example/"},"url":"https://real.example/article","text":"x"}"""
+        assertEquals("https://real.example/article", integrations.jobUrl(job.copy(payload = nested)))
+    }
+
+    @Test
     fun anExclusionCancelsUnsentCapturesAndStopsNewOnes() {
         enable()
         capture("https://bank.example/account", "balance")
