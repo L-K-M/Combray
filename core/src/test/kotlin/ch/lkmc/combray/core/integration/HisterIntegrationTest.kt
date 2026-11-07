@@ -22,6 +22,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -54,12 +56,17 @@ class HisterIntegrationTest {
     private val secrets = MemorySecrets()
     private var now = 1_760_000_000_000L
     private var ids = 0
+    private val budgetTransactions = java.util.Collections.synchronizedList(mutableListOf<Boolean>())
 
     private val hister get() = integrations.hister
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java).build()
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ ->
+                if (sql.startsWith("SELECT COALESCE(SUM(payloadBytes)")) budgetTransactions += database.inTransaction()
+            }, java.util.concurrent.Executor { it.run() })
+            .build()
         // Background kicks never run here: only drain() sends, so queue states are deterministic.
         scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher())
         integrations = newIntegrations()
@@ -96,6 +103,105 @@ class HisterIntegrationTest {
     private fun drain() = runBlocking { integrations.dispatcher.drain() }
 
     private fun jobs(): List<OutboxJobEntity> = (0 until ids).mapNotNull { runBlocking { database.integrations().job("job$it") } }
+
+    @Test
+    fun aPauseAfterClaimKeepsTheUnsentCaptureForResume() = runBlocking {
+        enable()
+        capture("https://a.example/", "retained text")
+        val claim = integrations.outbox.claim("worker", 60_000)!!
+        hister.setCaptureEnabled(false)
+
+        val result = hister.dispatch(claim.job)
+        assertTrue("Pausing an unsent claim must not contact Hister", server.added.isEmpty())
+        assertTrue(integrations.outbox.finish(claim, result))
+        val held = jobs().single()
+        assertEquals(JobState.PENDING, held.state)
+        assertEquals(0, held.attempts)
+        assertTrue(held.payload.contains("retained text"))
+        assertNull(integrations.outbox.claim("while-paused", 60_000))
+        assertNull(integrations.outbox.nextWakeup())
+
+        enable()
+        drain()
+        assertEquals(1, server.added.size)
+        assertEquals(JobState.SUCCEEDED, jobs().single().state)
+    }
+
+    @Test
+    fun identicalContentCanRecoverFromARejectedDelivery() = runBlocking {
+        enable()
+        capture("https://a.example/", "same text")
+        val claim = integrations.outbox.claim("worker", 60_000)!!
+        integrations.outbox.finish(claim, DispatchResult.Rejected("bad_response"))
+
+        capture("https://a.example/", "same text")
+
+        assertEquals(listOf(JobState.SUPERSEDED, JobState.PENDING), jobs().map { it.state })
+        drain()
+        assertEquals(1, server.added.size)
+    }
+
+    @Test
+    fun identicalContentCanBeCapturedAfterDiscard() = runBlocking {
+        enable()
+        capture("https://a.example/", "same text")
+        integrations.outbox.discard(jobs().single().id)
+
+        capture("https://a.example/", "same text")
+
+        assertEquals(listOf(JobState.CANCELLED, JobState.PENDING), jobs().map { it.state })
+    }
+
+    @Test
+    fun identicalContentCanBeCapturedAfterExpiry() = runBlocking {
+        enable()
+        capture("https://a.example/", "same text")
+        now += Outbox.CAPTURE_MAX_AGE_MS + 1
+        integrations.outbox.prune()
+
+        capture("https://a.example/", "same text")
+
+        assertEquals(listOf(JobState.EXPIRED, JobState.PENDING), jobs().map { it.state })
+    }
+
+    @Test
+    fun admissionBudgetIsReadInsideTheEnqueueTransaction() {
+        enable()
+        capture("https://a.example/", "one capture")
+
+        assertTrue(budgetTransactions.isNotEmpty())
+        assertTrue("Budget admission must share enqueue's transaction", budgetTransactions.all { it })
+    }
+
+    @Test
+    fun concurrentAdmissionsCannotOverdrawTheCaptureBudget() = runBlocking {
+        enable()
+        val generation = wants("https://a.example/")!!
+        val text = "x".repeat(256 * 1024)
+        (0 until 84).map { index ->
+            async(Dispatchers.Default) {
+                hister.captured(CapturedPage("tab", "visit", "https://a.example/$index", "Title", text, "hash", false, generation))
+            }
+        }.awaitAll()
+
+        assertTrue(database.integrations().queuedCaptureBytes() <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+        assertEquals(79, jobs().count { it.state == JobState.PENDING })
+    }
+
+    @Test
+    fun replacementAdmissionCountsOnlyTheBodiesThatWillRemain() = runBlocking {
+        enable()
+        val body = "a".repeat(256 * 1024)
+        repeat(79) { capture("https://a.example/$it", body) }
+
+        capture("https://a.example/0", "c".repeat(256 * 1024))
+
+        assertEquals(80, jobs().size)
+        assertEquals(JobState.SUPERSEDED, jobs().first().state)
+        assertEquals(JobState.PENDING, jobs().last().state)
+        assertEquals(0, jobs().first().payloadBytes)
+        assertTrue(database.integrations().queuedCaptureBytes() <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+    }
 
     @Test
     fun captureIsOptInAndSendsRenderedText() {
