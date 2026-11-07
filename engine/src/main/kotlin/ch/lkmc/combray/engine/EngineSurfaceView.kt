@@ -311,8 +311,8 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
     }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-        repeat(beforeLength) { tapKey(KeyEvent.KEYCODE_DEL) }
-        repeat(afterLength) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
+        repeat(boundedEditLength(beforeLength)) { tapKey(KeyEvent.KEYCODE_DEL) }
+        repeat(boundedEditLength(afterLength)) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
         return true
     }
 
@@ -330,5 +330,13 @@ class EngineInputConnection(view: EngineSurfaceView) : BaseInputConnection(view,
     private fun tapKey(keyCode: Int) {
         NativeEngine.key(NativeEngine.KEY_PRESS, keyCode, 0)
         NativeEngine.key(NativeEngine.KEY_RELEASE, keyCode, 0)
+    }
+
+    internal companion object {
+        /** Longest edit one IME request may turn into key events. */
+        const val MAX_EDIT_LENGTH = 512
+
+        /** An IME's edit request, capped: a buggy or hostile IME must not hang the engine thread. */
+        fun boundedEditLength(length: Int): Int = length.coerceIn(0, MAX_EDIT_LENGTH)
     }
 }

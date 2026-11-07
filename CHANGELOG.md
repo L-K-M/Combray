@@ -273,6 +273,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A page field's Backspace or Delete request can no longer hang the engine.
+  A buggy or hostile keyboard could ask to delete an unbounded number of
+  characters, sending one engine command per character; the edit is now
+  capped.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
