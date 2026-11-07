@@ -241,7 +241,7 @@ class HisterIntegration(
             if (bytes <= MAX_QUEUED_CAPTURE_BYTES) largestRefused.update { maxOf(it, bytes) }
             return
         }
-        val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true)
+        val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true, url = page.url)
         if (enqueued !is Enqueued.Queued) return
         // Remembered only under the policy it was captured with: a policy change since then
         // cleared the memory, and this hash must not survive that.

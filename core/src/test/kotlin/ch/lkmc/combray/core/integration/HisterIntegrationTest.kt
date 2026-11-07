@@ -98,6 +98,13 @@ class HisterIntegrationTest {
     private fun jobs(): List<OutboxJobEntity> = (0 until ids).mapNotNull { runBlocking { database.integrations().job("job$it") } }
 
     @Test
+    fun aQueuedCaptureRecordsItsUrl() {
+        enable()
+        capture("https://a.example/", "text")
+        assertEquals("https://a.example/", jobs().single().url)
+    }
+
+    @Test
     fun captureIsOptInAndSendsRenderedText() {
         assertNull(wants("https://a.example/"))
         enable()
