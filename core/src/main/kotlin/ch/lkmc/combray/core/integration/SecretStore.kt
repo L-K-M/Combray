@@ -111,6 +111,12 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     private fun file(name: SecretName) = File(directory, "${name.name}.bin")
 
+    /**
+     * The get-then-create must be one critical section: two first-time configures (Karakeep and
+     * Hister hold different mutexes) could otherwise race `generateKey`, and one write could
+     * fail or replace the key and orphan the other's ciphertext.
+     */
+    @Synchronized
     private fun key(): SecretKey {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }

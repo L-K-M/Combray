@@ -273,6 +273,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Saved service credentials can no longer race the device's first Keystore
+  key creation. Saving Karakeep and Hister at the same time on a fresh
+  install could orphan one credential; the key is now created under a lock.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
