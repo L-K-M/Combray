@@ -19,6 +19,9 @@ class ServiceRootsDeviceTest {
     fun equivalentAddressesKeepTheirNormalizedDestination() {
         for ((written, normalized) in listOf(
             "https://bücher.example.:443/k/api/v1" to "https://xn--bcher-kva.example/k",
+            "https://straße.example" to "https://xn--strae-oqa.example",
+            "https://ς.example" to "https://xn--3xa.example",
+            "https://ｂｕｅｃｈｅｒ.example" to "https://buecher.example",
             "https://[::1]:443/" to "https://[::1]",
             "http://192.0.2.1.:80/" to "http://192.0.2.1",
         )) {
@@ -29,7 +32,7 @@ class ServiceRootsDeviceTest {
     }
 
     @Test
-    fun explicitPortsMustBeUsableBeforeAServiceIsConfigured() {
+    fun unusableExplicitPortsAreRefusedBeforeAServiceIsConfigured() {
         for (host in listOf("example.invalid", "[::1]")) {
             for (port in listOf("0", "65536", "-1", "+80", "")) {
                 val input = "https://$host:$port/"
@@ -43,12 +46,24 @@ class ServiceRootsDeviceTest {
     }
 
     @Test
+    fun invalidUnicodeAndIpv6AreRefusedBeforeConfiguration() {
+        for (authority in listOf("a\u200Db.example", "a\u0378b.example", "[:::1]", "[not-a-v6]", "[]")) {
+            assertEquals(
+                authority,
+                ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL),
+                ServiceUrls.normalizeRoot("https://$authority/", Integrations.KARAKEEP_SUFFIXES),
+            )
+        }
+    }
+
+    @Test
     fun invalidRequestsFailBeforeOpeningAConnection() {
         val transport = UrlConnectionTransport()
         for (url in listOf(
             "http:/relative", "https:relative", "ftp:/relative", "file:///synthetic-upload",
             "http://example.invalid:0/", "https://example.invalid:65536/",
             "http://example.invalid:/", "http://[::1]:/", "http://[::1]:-1/", "http://example.invalid:+80/",
+            "https://a\u200Db.example/", "https://a\u0378b.example/", "https://[:::1]/", "https://[]/",
         )) {
             assertEquals(url, HttpOutcome.Failure("bad_url"), transport.execute(HttpRequest("GET", url, emptyMap())))
         }

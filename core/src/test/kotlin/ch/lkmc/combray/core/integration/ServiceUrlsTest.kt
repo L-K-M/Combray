@@ -2,8 +2,14 @@ package ch.lkmc.combray.core.integration
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class ServiceUrlsTest {
     private fun root(input: String) = ServiceUrls.normalizeRoot(input, Integrations.KARAKEEP_SUFFIXES)
 
@@ -36,6 +42,34 @@ class ServiceUrlsTest {
         assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example:8443/k"), root("https://bücher.example:8443/k/api"))
         // Credentials and query parts are refused before any host work.
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY), root("https://u:p@bücher.example"))
+    }
+
+    @Test
+    fun deviationCharactersKeepTheirNontransitionalDestination() {
+        assertEquals(ServiceRoot.Valid("https://xn--strae-oqa.example"), root("https://straße.example"))
+        assertEquals(ServiceRoot.Valid("https://xn--3xa.example"), root("https://ς.example"))
+        assertEquals(ServiceRoot.Valid("https://xn--strae-oqa.example"), root("https://xn--strae-oqa.example"))
+    }
+
+    @Test
+    fun invalidJoinersAndUnassignedCharactersAreNotSilentlyRemapped() {
+        for (host in listOf("a\u200Db.example", "a\u0378b.example")) {
+            assertEquals(host, ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://$host"))
+        }
+    }
+
+    @Test
+    fun widthMappingStillKeepsTheIntendedAsciiDestination() {
+        assertEquals(ServiceRoot.Valid("https://buecher.example"), root("https://ｂｕｅｃｈｅｒ.example"))
+    }
+
+    @Test
+    fun bracketedAuthoritiesRequireAValidIpv6Literal() {
+        for (host in listOf("[:::1]", "[not-a-v6]", "[]")) {
+            assertNull(host, ServiceUrls.parseAuthority(host))
+            assertEquals(host, ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://$host/"))
+        }
+        assertEquals(ServiceRoot.Valid("https://[fe80::1%25eth0]"), root("https://[fe80::1%25eth0]/"))
     }
 
     @Test

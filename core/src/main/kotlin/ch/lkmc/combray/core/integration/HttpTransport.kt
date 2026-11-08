@@ -5,6 +5,8 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.URI
+import java.net.URISyntaxException
 
 data class HttpRequest(
     val method: String,
@@ -41,13 +43,7 @@ class UrlConnectionTransport(
 ) : HttpTransport {
     override fun execute(request: HttpRequest): HttpOutcome {
         val connection = try {
-            val url = URL(request.url)
-            // The settings field already refuses these, but a caller-built URL must not reach a
-            // connection attempt: check the authority and the parsed port before opening it.
-            val authority = url.authority ?: return HttpOutcome.Failure("bad_url")
-            if (ServiceUrls.parseAuthority(authority) == null || !ServiceUrls.isValidPort(url.port)) {
-                return HttpOutcome.Failure("bad_url")
-            }
+            val url = requestUrl(request.url) ?: return HttpOutcome.Failure("bad_url")
             url.openConnection() as? HttpURLConnection ?: return HttpOutcome.Failure("bad_url")
         } catch (malformed: IOException) {
             return HttpOutcome.Failure("bad_url")
@@ -91,6 +87,21 @@ class UrlConnectionTransport(
         } finally {
             connection.disconnect()
         }
+    }
+
+    /** Builds the exact destination that will be opened, before any connection or credential. */
+    internal fun requestUrl(input: String): URL? {
+        val uri = try {
+            URI(input)
+        } catch (_: URISyntaxException) {
+            return null
+        }
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val authority = ServiceUrls.parseAuthority(uri.rawAuthority ?: return null) ?: return null
+        val file = (uri.rawPath ?: "") + (uri.rawQuery?.let { "?$it" } ?: "")
+        // Do not validate the ICU name and then open the original Unicode/JDK-IDNA2003 name.
+        return URL(scheme, authority.host, authority.port ?: -1, file)
     }
 
     private fun readBounded(stream: InputStream): ByteArray {

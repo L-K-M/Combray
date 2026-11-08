@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.integration
 
+import android.icu.text.IDNA
 import java.net.IDN
 import java.net.URI
 import java.net.URISyntaxException
@@ -75,6 +76,11 @@ object ServiceUrls {
             val end = authority.indexOf(']')
             if (end < 0) return null
             val host = authority.substring(0, end + 1).lowercase()
+            try {
+                if (URI("http://$host").host == null) return null
+            } catch (_: URISyntaxException) {
+                return null
+            }
             // Only nothing or ":" + a valid port may follow the literal; anything else is not an
             // authority, not a silently dropped suffix.
             val rest = authority.substring(end + 1)
@@ -88,14 +94,31 @@ object ServiceUrls {
         val written = authority.substringBefore(':').trimEnd('.')
         // A percent-encoded reg-name is not a host the app can resolve; the old URI parse refused it.
         if (written.isEmpty() || '%' in written) return null
-        val host = try {
-            IDN.toASCII(written, IDN.ALLOW_UNASSIGNED).lowercase()
-        } catch (invalid: IllegalArgumentException) {
-            return null
-        }
+        val host = asciiHost(written) ?: return null
         // A present but malformed or out-of-range port is refused, never read as the default port.
         val port = if (authority.contains(':')) explicitPort(authority.substringAfter(':', "")) ?: return null else null
         return Authority(host, port)
+    }
+
+    private fun asciiHost(written: String): String? {
+        val ascii = if (written.all { it.code < 128 }) {
+            // Already-ASCII names need no Unicode remapping. Preserve their label checks.
+            try {
+                IDN.toASCII(written)
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+        } else {
+            // IDNA2003 maps deviation characters such as ß to another domain. Android's ICU
+            // provides nontransitional UTS46 without bundling a second Unicode implementation.
+            val info = IDNA.Info()
+            val output = StringBuilder()
+            IDNA.getUTS46Instance(IDNA.NONTRANSITIONAL_TO_ASCII or IDNA.CHECK_BIDI or IDNA.CHECK_CONTEXTJ)
+                .nameToASCII(written, output, info)
+            if (info.hasErrors()) return null
+            output.toString()
+        }
+        return ascii.lowercase().trimEnd('.').takeIf { it.isNotEmpty() }
     }
 
     /** The port text after ":", or null when it is empty or malformed. */
