@@ -46,6 +46,7 @@ class PasteMenuPositionTest {
                     onOpenInNewTab = {},
                     onOpenInBackground = {},
                     onSaveLink = {},
+                    onDownloadImage = { error("A paste menu must not download an image") },
                     onShare = {},
                     onNotify = {},
                 )
