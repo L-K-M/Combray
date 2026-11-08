@@ -65,6 +65,22 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun connectionCheckRejectsA200ThatIsNotABookmarksResponse() {
+        for (body in listOf("", "<html>Sign in</html>", "{}", "[]", "{\"bookmarks\":null}", "{\"bookmarks\":{}}", "{\"bookmarks\":\"none\"}")) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(200, emptyMap(), body.toByteArray()) })
+            assertEquals(body, ConnectionCheck.WrongAddress(200), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+    }
+
+    @Test
+    fun connectionCheckAcceptsEmptyAndPopulatedListsWithUnknownFields() {
+        for (body in listOf("{\"bookmarks\":[]}", "{\"bookmarks\":[{\"id\":\"bm1\"}],\"nextCursor\":null,\"extra\":true}")) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(200, emptyMap(), body.toByteArray()) })
+            assertEquals(body, ConnectionCheck.Connected(null), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+    }
+
+    @Test
     fun aBookmarkIsAddedToAnExistingListOnly() {
         server.lists["reading"] = mutableSetOf()
         assertEquals(DispatchResult.Rejected("list_not_found"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))

@@ -22,6 +22,10 @@ class FakeEngine : EnginePort {
     private var listener: ((EngineEvent) -> Unit)? = null
     private var nextGeneration = 1L
     private val generations = HashMap<Long, Long>()
+
+    /** How many times [start] ran: the coordinator must start the engine once. */
+    var startCount = 0
+        private set
     val created = mutableListOf<Pair<Long, String>>()
     val selected = mutableListOf<Long>()
     val closed = mutableListOf<Long>()
@@ -42,6 +46,7 @@ class FakeEngine : EnginePort {
     val appearances = mutableListOf<Pair<Appearance, Int>>()
 
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
+        startCount++
         this.listener = listener
         return EngineStart.STARTED
     }
@@ -82,7 +87,13 @@ class FakeEngine : EnginePort {
         emit(EngineEvent.TabOpened(view(tab), view(opener)))
     }
 
+    var closeFailure: Throwable? = null
+
     override fun closeView(tab: Long) {
+        closeFailure?.let { failure ->
+            closeFailure = null
+            throw failure
+        }
         closed += tab
     }
 
@@ -92,7 +103,15 @@ class FakeEngine : EnginePort {
 
     override fun goBack(tab: Long) = Unit
 
-    override fun goForward(tab: Long) = Unit
+    /** Thrown from the next [goForward] and consumed, to exercise the work queue's error handling. */
+    var forwardFailure: Throwable? = null
+
+    override fun goForward(tab: Long) {
+        forwardFailure?.let { failure ->
+            forwardFailure = null
+            throw failure
+        }
+    }
 
     data class Stop(val view: ViewRef, val request: Long)
     val stopRequests = mutableListOf<Stop>()

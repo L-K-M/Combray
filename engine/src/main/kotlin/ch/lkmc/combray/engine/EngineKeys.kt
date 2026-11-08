@@ -8,9 +8,9 @@ import android.view.KeyEvent
  * every other key (volume, media, headset, camera, call, shortcuts Servo ignores) falls
  * through to Android instead of being dropped.
  *
- * Known limit: bare Ctrl, Alt and Meta are not forwarded. They carry no character and the
- * engine has no modifier channel, so page shortcuts such as Ctrl+F need native work first.
- * Shift works because Android puts it into the character of the key it modifies.
+ * Bare modifier keys stay with Android. The modifier state of each handled key is forwarded,
+ * including Shift with navigation keys. Shortcuts whose unicodeChar is a control character
+ * still need a printable-key mapping before the page can receive them.
  */
 internal object EngineKeys {
     /** Keys servo_key maps by code because they produce no printable character. */
