@@ -83,10 +83,11 @@ class UploadStagingIoTest {
     }
 
     @Test
-    fun aNewProcessCanCleanCopiesTheOldProcessNoLongerUses() = runBlocking {
+    fun anotherInstanceInThisProcessKeepsTheExistingPick() = runBlocking {
         val picked = File(staging.stage(listOf(uri))!!.single())
+        // Constructing another wrapper is not a process restart and must not invalidate Servo's path.
         UploadStaging(root, RuntimeEnvironment.getApplication().contentResolver).clear()
-        assertFalse(picked.exists())
+        assertTrue(picked.exists())
     }
 
     @Test
