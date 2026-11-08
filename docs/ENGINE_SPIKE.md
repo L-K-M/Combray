@@ -3077,7 +3077,7 @@ Checks:
 ## 51. Typing into rich text editors (7 November 2026)
 
 This records the first typing change. The caret, composition, selection and keyboard-action
-limits below are continued in [§57](#57-rich-editor-carets-composition-and-navigation-7-november-2026).
+limits below are continued in [§56](#56-rich-editor-carets-composition-and-navigation-7-november-2026).
 
 Validated source: `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a` on `combray/0.7`, which merges
 downstream [PR #35](https://github.com/L-K-M/servo/pull/35) onto the merge of
@@ -3474,7 +3474,7 @@ Evidence on macOS arm64: `node --test native/src/test/media_tap.test.mjs` (16),
 the fixture-server tests (28), `cargo fmt --check` and `cargo test --lib` in
 `native/`, `python3 scripts/check_docs.py`, and the Gradle unit tests.
 
-## 57. Rich-editor carets, composition and navigation (7 November 2026)
+## 56. Rich-editor carets, composition and navigation (7 November 2026)
 
 Pinned source: `5813399954091a7efd7f736ea6fe14cb1ed523b9`, the merge of downstream
 [Servo PR #40](https://github.com/L-K-M/servo/pull/40), based on `80788879d1b`.
@@ -3607,8 +3607,20 @@ reached JNI. Those requests now return false before side effects. Supported Go,
 Done, Search, Send and default/newline actions retain Enter. API-30 and API-35
 Robolectric checks also pin null surrounding-text/snapshot results.
 
+A bounded native review also found that a field can precede its document's History
+commit. Composition ownership now uses the field's stable pipeline, not the changing
+view document. After committing that document, native code replays an already-open
+field after the History event, so Android can rebind its retired connection. Each
+keyboard delivery has a distinct request ID; an older acknowledgement cannot consume
+a replay for the same context. The host commit-replay rule and coordinator late-ack
+regressions failed before the fixes. A withheld autofocus preparation stays on the
+normal activation-tap path rather than overwriting the previous page's hide request;
+its precommit accessibility/editor-state behavior remains unverified.
+
 The complete `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`
-gate passes locally after those changes. No local cap on committed/composed text
-was invented; no supported bridge limit is established. Current-head native builds,
-full emulator fixtures and hosted review remain pending. The historical arm64
-checks above do not validate these newer changes or a physical keyboard/IME.
+gate, `cargo fmt --check` and 185 native host tests pass locally after these changes.
+The host build does not compile the Android-only engine module. No local cap on
+committed/composed text was invented; no supported bridge limit is established.
+Current-head Android native builds, full emulator fixtures and hosted review remain
+pending. The historical arm64 checks above do not validate these newer changes or a
+physical keyboard/IME.

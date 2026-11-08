@@ -1780,8 +1780,9 @@ impl Engine {
     fn ime_composition(&mut self, id: u64, phase: crate::composition::Phase, text: String) {
         let owner = self.active.and_then(|id| {
             self.tabs.get(&id).and_then(|tab| {
+                // The field's pipeline is stable even when its History commit arrives later.
                 tab.ime_field
-                    .map(|field| (id, tab.current_document, field.control))
+                    .map(|field| (id, Some(field.control.pipeline_id), field.control))
             })
         });
         if !self.composition.accept(id, phase, owner) {
@@ -2738,13 +2739,25 @@ impl Engine {
 
         // Servo hides no input method when a navigation replaces the field's document (a form
         // sent with Enter). A field of the new document can be reported before its commit.
-        let field_replaced = change == HistoryChange::NewDocument
-            && tab
+        let field_commit = if change == HistoryChange::NewDocument {
+            keyboard::committed_field(
+                document,
+                tab.ime_field.map(|field| field.control.pipeline_id),
+            )
+        } else {
+            keyboard::CommittedField::None
+        };
+        let field_replaced = field_commit == keyboard::CommittedField::Hide;
+        let replay_field = match field_commit {
+            keyboard::CommittedField::Hide => {
+                tab.ime_field = None;
+                None
+            },
+            keyboard::CommittedField::Replay => tab
                 .ime_field
-                .is_some_and(|field| field.control.pipeline_id != document);
-        if field_replaced {
-            tab.ime_field = None;
-        }
+                .filter(|field| field.keyboard == Keyboard::Open),
+            keyboard::CommittedField::None => None,
+        };
 
         // Release reports that overtook this commit; discard those of replaced documents.
         let mut released = Vec::new();
@@ -2800,6 +2813,15 @@ impl Engine {
             index,
             length,
         });
+        // Android retires the old PageRef's connection on this commit. Restore an open
+        // retained field without changing its context or losing its live composition.
+        // Do not replay a withheld preparation over the old page's keyboard-hide request;
+        // its normal activation tap will prepare and open it.
+        if shown {
+            if let Some(field) = replay_field {
+                self.emit(field.shown_event(view));
+            }
+        }
         for report in released {
             self.emit_document_report(view, report, Attribution::HeldUntilCommit);
         }

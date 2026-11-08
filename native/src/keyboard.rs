@@ -31,6 +31,23 @@ impl KeyModifiers {
     }
 }
 
+/// A field may be reported before its document commits. The application retires its old
+/// connection on commit, so a retained field needs its preparation replayed afterward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommittedField {
+    None,
+    Hide,
+    Replay,
+}
+
+pub fn committed_field<D: PartialEq>(document: D, field_document: Option<D>) -> CommittedField {
+    match field_document {
+        Some(field) if field != document => CommittedField::Hide,
+        Some(_) => CommittedField::Replay,
+        None => CommittedField::None,
+    }
+}
+
 /// Servo's tap/pan threshold (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`) at 100%
 /// page zoom: a finger that moves further than this on either axis pans, and Servo sends no
 /// click. Servo scales it by the density and the page zoom.
@@ -128,6 +145,13 @@ pub fn tap_hits_focus_script(x: f32, y: f32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_field_reported_before_its_commit_is_replayed_not_forgotten() {
+        assert_eq!(committed_field(20, Some(20)), CommittedField::Replay);
+        assert_eq!(committed_field(20, Some(10)), CommittedField::Hide);
+        assert_eq!(committed_field(20, None), CommittedField::None);
+    }
 
     const DENSITY: f32 = 2.0;
 

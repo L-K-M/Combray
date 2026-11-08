@@ -729,7 +729,7 @@ class BrowserCoordinator(
     /** The user played or closed [offer]; a later offer of the same page shows again. */
     fun dismissMediaOffer(offer: MediaPageRef) = state.update { if (it.mediaOffer == offer) it.copy(mediaOffer = null) else it }
 
-    /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
+    /** Clears only this delivery; a commit replay or a different field may have posted a newer one. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
     /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
@@ -805,9 +805,9 @@ class BrowserCoordinator(
                 // load must not keep the previous document's keyboard through the navigation.
                 if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
                 val request = if (event.showKeyboard) {
-                    KeyboardRequest.Show(event.kind, event.multiline, event.context)
+                    KeyboardRequest.Show(event.kind, event.multiline, event.context, requestId = nextRequest++)
                 } else {
-                    KeyboardRequest.Prepare(event.kind, event.multiline, event.context)
+                    KeyboardRequest.Prepare(event.kind, event.multiline, event.context, requestId = nextRequest++)
                 }
                 state.update { it.copy(keyboard = request) }
             }

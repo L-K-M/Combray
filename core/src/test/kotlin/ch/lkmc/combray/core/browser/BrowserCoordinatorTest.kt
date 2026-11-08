@@ -95,6 +95,12 @@ class BrowserCoordinatorTest {
 
     private fun state() = browser.browserState.value
 
+    private fun keyboardContent(): KeyboardRequest? = when (val request = state().keyboard) {
+        is KeyboardRequest.Show -> request.copy(requestId = 0)
+        is KeyboardRequest.Prepare -> request.copy(requestId = 0)
+        else -> request
+    }
+
     /** What RecentSheet shows for [query]: the depth it subscribes to, filtered and capped. */
     private fun recent(query: String? = null) = runBlocking {
         browser.recent(HistoryDepth.forQuery(query)).first().matching(query)
@@ -2902,7 +2908,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
 
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
-        assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("password"), keyboardContent())
         browser.keyboardHandled(state().keyboard!!)
         assertNull(state().keyboard)
         engine.emit(EngineEvent.ImeHidden(engine.view(1))); idle()
@@ -2920,7 +2926,22 @@ class BrowserCoordinatorTest {
         val handling = state().keyboard!!
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         browser.keyboardHandled(handling)
-        assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("password"), keyboardContent())
+    }
+
+    @Test
+    fun handlingAPrecommitKeyboardRequestCannotClearItsReplayForTheSameField() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 20, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val beforeCommit = state().keyboard!!
+        browser.keyboardHandled(beforeCommit)
+        commit(1, 20, "https://b.test/", index = 1, length = 2)
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 20, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val replay = state().keyboard!!
+        browser.keyboardHandled(beforeCommit)
+        assertEquals("A late UI acknowledgement must not consume the post-commit delivery", replay, state().keyboard)
     }
 
     @Test
@@ -2929,12 +2950,12 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://a.test/")
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = false, context = 7)); idle()
-        assertEquals(KeyboardRequest.Prepare("text", multiline = true, context = 7), state().keyboard)
+        assertEquals(KeyboardRequest.Prepare("text", multiline = true, context = 7), keyboardContent())
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
         val oldRequest = state().keyboard!!
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 8)); idle()
         browser.keyboardHandled(oldRequest)
-        assertEquals(KeyboardRequest.Show("text", multiline = true, context = 8), state().keyboard)
+        assertEquals(KeyboardRequest.Show("text", multiline = true, context = 8), keyboardContent())
     }
 
     /** Opens a page in tab 1 and gives one of its fields the keyboard; the UI has shown it. */
@@ -2953,7 +2974,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
 
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false)); idle()
-        assertEquals(KeyboardRequest.Prepare("search"), state().keyboard)
+        assertEquals(KeyboardRequest.Prepare("search"), keyboardContent())
     }
 
     @Test
@@ -2974,7 +2995,7 @@ class BrowserCoordinatorTest {
         // Servo can report the new document's focused field before the document's commit.
         engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "text", showKeyboard = true)); idle()
         commit(1, 11, "https://a.test/next", index = 1, length = 2)
-        assertEquals(KeyboardRequest.Show("text"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("text"), keyboardContent())
     }
 
     @Test
