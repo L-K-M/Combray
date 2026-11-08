@@ -296,11 +296,11 @@ class Integrations(
             ) { saved, job, parked ->
                 when {
                     job != null && job.state == JobState.AUTH_REQUIRED -> SaveStatus.NeedsAttention(job.error)
-                    // The bookmark was acknowledged before the list step failed: the page is saved.
-                    job != null && job.state == JobState.FAILED && saved != null -> SaveStatus.SavedWithListFailure(job.error)
+                    job != null && job.state == JobState.FAILED ->
+                        if (saved != null && saves.hasCreationReceipt(job)) SaveStatus.SavedWithListFailure(job.error)
+                        else SaveStatus.NeedsAttention(job.error)
                     // A recorded bookmark is saved. A list step still retrying does not unsave it.
                     saved != null -> SaveStatus.Saved
-                    job != null && job.state == JobState.FAILED -> SaveStatus.NeedsAttention(job.error)
                     job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
                     job != null -> SaveStatus.Pending
                     // Queued for an earlier address: Settings offers to send it here or discard it.

@@ -316,7 +316,7 @@ Do not send speculative fields or require tags/lists to complete one-tap saving.
 
 Snapshot the active committed URL and title at tap time. Disable Save for blank/internal pages and unsupported schemes; report a specific reason when necessary. A local operation key prevents repeated taps from creating concurrent jobs for the same destination and exact URL. A timeout after a server accepted the bookmark is ambiguous; retrying the same link should use Karakeep's duplicate behavior rather than constructing a different URL. An optional lookup can reconcile success where supported. Keep this state separate from Hister capture success.
 
-Tag attachment and list membership use separate endpoints; implement only after quick save works. If a tag/list step fails after creation, retain the bookmark ID and retry that step without recreating or marking the link unsaved. User-initiated Karakeep saves are independent of automatic Hister exclusions, but must never leak a secret-bearing session URL. Provide an explicit explanation for a blocked sensitive URL.
+Tag attachment and list membership use separate endpoints; implement only after quick save works. If a tag/list step fails after creation, retain the bookmark ID and retry that step without recreating or marking the link unsaved. A receipt is bound to the destination and credential generation: after a key change without verified account identity, a duplicate-safe create recovers that account's ID instead of trusting the previous account's receipt. User-initiated Karakeep saves are independent of automatic Hister exclusions, but must never leak a secret-bearing session URL. Provide an explicit explanation for a blocked sensitive URL.
 
 ### Hister ingestion and search
 

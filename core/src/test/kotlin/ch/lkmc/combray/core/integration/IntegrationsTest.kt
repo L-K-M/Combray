@@ -820,9 +820,9 @@ class IntegrationsTest {
         assertEquals(2, server.requests.count { it.startsWith("POST") })
     }
 
-    /** A new key for the same server resumes the list step without creating the link again. */
+    /** A new key can name another account: recover its id with a duplicate-safe create. */
     @Test
-    fun aChangedCredentialRetriesOnlyTheListStep() = runBlocking {
+    fun aChangedCredentialRecoversTheBookmarkIdForThatAccount() = runBlocking {
         server.lists["reading"] = mutableSetOf()
         configure()
         chooseList("reading")
@@ -838,8 +838,46 @@ class IntegrationsTest {
         runBlocking { integrations.resume(ServiceKind.KARAKEEP).join() }
         drain()
         assertEquals(JobState.SUCCEEDED, job().state)
-        assertEquals(1, server.requests.count { it.startsWith("POST") })
+        assertEquals(2, server.requests.count { it.startsWith("POST") })
         assertEquals(setOf("bm1"), server.lists["reading"])
+    }
+
+    @Test
+    fun aNewCredentialDoesNotReuseAnotherAccountsBookmarkId() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        afterCreate = { server.lists.remove("reading") }
+        save()
+        drain()
+        assertEquals(JobState.FAILED, job().state)
+        afterCreate = {}
+
+        // The same root now authenticates another account whose unrelated bookmark reuses bm1.
+        server.bookmarks.clear()
+        server.bookmarks["https://other.example/"] = "bm1"
+        server.lists["reading"] = mutableSetOf()
+        server.acceptedKey = "other-account"
+        configure(key = "other-account")
+        integrations.outbox.retryNow(job().id)
+        drain()
+
+        assertEquals("bm2", server.bookmarks[URL])
+        assertEquals(setOf("bm2"), server.lists["reading"])
+        assertEquals("bm1", server.bookmarks["https://other.example/"])
+    }
+
+    @Test
+    fun aFailedCreateForAnEarlierSavedPageIsNotCalledAListFailure() = runBlocking {
+        configure()
+        save()
+        drain()
+        assertEquals(SaveStatus.Saved, integrations.saveStatus(URL).first())
+        server.fault = FakeKarakeep.Fault.BAD_REQUEST
+        server.faultCount = 1
+        save()
+        drain()
+        assertEquals(SaveStatus.NeedsAttention("http_400"), integrations.saveStatus(URL).first())
     }
 
     /** A claim that lost its lease cannot leave a receipt a later claim would trust. */

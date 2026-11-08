@@ -284,10 +284,10 @@ All notable changes to this project are documented here. The format follows
 
 - A Karakeep save is recorded as soon as its bookmark is acknowledged, so a
   failed list step, a deleted list or an offline retry no longer hides the
-  save or creates a second bookmark. The receipt stays bound to its server
-  and its claim: a parked save rebound to another address is created there
-  instead of changing a bookmark at the old one, and a corrupt payload no
-  longer rolls back an acknowledged delivery.
+  save or creates a second bookmark. The receipt stays bound to its server,
+  credential generation and claim: another account at the same address must
+  recover its own bookmark id. A failed create is not called a list failure,
+  and a corrupt payload no longer rolls back an acknowledged delivery.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
