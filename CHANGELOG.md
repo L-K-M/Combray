@@ -282,6 +282,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A share or "Search with Kagi" selection of any size is handled without
+  copying and scanning all of it on the main thread, which could jank or
+  freeze the app for a multi-megabyte share. A link is now found up to the
+  first mebibyte of the share, past the old 64 KiB scan point; a link that
+  runs past the limit is refused rather than cut.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
