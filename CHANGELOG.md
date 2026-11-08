@@ -282,6 +282,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Forgetting a page or site cancels its scheduled capture, including other
+  fragments of the same page and timers already queued for execution.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.

@@ -78,12 +78,17 @@ class BrowserCoordinatorTest {
         database.close()
     }
 
-    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
+    private fun newCoordinator(
+        navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
+        capture: CaptureSink? = null,
+        captureTiming: CaptureTiming = CaptureTiming(),
+    ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
+            capture = capture, captureTiming = captureTiming,
         ).also { it.start() }
     }
 
@@ -208,9 +213,46 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 10, "https://a.test/", 0, 1))
         runBlocking { capturing.awaitIdle() }
 
+        engine.emit(EngineEvent.LoadStatus(engine.view(1), 10, LoadPhase.COMPLETE, Attribution.CURRENT))
+        runBlocking { capturing.awaitIdle() }
         runBlocking { delay(400) }
         runBlocking { capturing.awaitIdle() }
         assertEquals(listOf("https://a.test/"), sink.requests)
+    }
+
+    @Test
+    fun forgettingASiteCancelsADueCaptureTimerForAPageWithoutAVisit() {
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 1_000, fallbackMs = 1_000, debounceMs = 1_000))
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val tab = runBlocking { database.browser().openTabs() }.single()
+        // Retention or a prior forget can remove the visit while its page is still live.
+        runBlocking { database.browser().deleteVisit(tab.currentVisitId!!) }
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+        runBlocking { delay(1_400) }; idle()
+        assertTrue(sink.requests.isEmpty())
+    }
+
+    @Test
+    fun forgettingAVisitCancelsAnotherTabsFragmentOfThatPage() {
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 1_000, fallbackMs = 1_000, debounceMs = 1_000))
+        ready()
+        browser.openUrl("https://a.test/#old", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/#old")
+        val oldVisit = runBlocking { database.browser().tab(state().activeTab!!.id) }!!.currentVisitId!!
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 11, "https://b.test/")
+        browser.openUrl("https://a.test/#new", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://a.test/#new")
+        loaded(2, 20)
+        browser.forgetVisit(oldVisit); idle()
+        runBlocking { delay(1_400) }; idle()
+        assertFalse(sink.requests.any { it.substringBefore('#') == "https://a.test/" })
+        assertTrue("The unrelated page's timer must still run", "https://b.test/" in sink.requests)
     }
 
     @Test

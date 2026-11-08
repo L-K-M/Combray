@@ -538,7 +538,7 @@ class BrowserCoordinator(
             dao.deleteEmptyClosedTabs()
             capture?.forgetUrl(visit.url)
         }
-        forgottenUrl?.let { url -> cancelPendingCapture { it == url } }
+        forgottenUrl?.let { url -> cancelPendingCapture { it == url.substringBefore('#') } }
     }
 
     /**
@@ -1195,29 +1195,36 @@ class BrowserCoordinator(
 
     // --- Capture ----------------------------------------------------------------------------------
 
-    /**
-     * (Re)starts the capture timer of [view] for [document]; a newer trigger replaces it. [url]
-     * is the page the timer targets, so a forget can cancel the timer of a page it erases.
-     */
+    /** Arms a page-bound timer; no known address means there is no safe capture target yet. */
     private fun scheduleCapture(view: LiveView, document: Long, url: String?, delayMs: Long) {
         if (capture == null) return
-        view.captureTimer?.cancel()
-        view.pendingCaptureUrl = url
+        cancelCaptureTimer(view)
+        val page = PageKey(document, url?.substringBefore('#') ?: return)
+        view.pendingCapturePage = page
         view.captureTimer = scope.launch {
             delay(delayMs)
-            submit { requestCapture(view, document) }
+            submit {
+                // Cancellation can arrive after this work was queued. A new timer for even the
+                // same page gets a distinct token; it must not be cleared by an older callback.
+                if (view.pendingCapturePage !== page) return@submit
+                view.captureTimer = null
+                view.pendingCapturePage = null
+                if (view.currentPage == page) requestCapture(view, document)
+            }
         }
+    }
+
+    private fun cancelCaptureTimer(view: LiveView) {
+        view.captureTimer?.cancel()
+        view.captureTimer = null
+        view.pendingCapturePage = null
     }
 
     /** Cancels the scheduled capture of a page [matches], so a timer cannot enqueue erased content. */
     private fun cancelPendingCapture(matches: (String) -> Boolean) {
         liveByTab.values.forEach { view ->
-            val url = view.pendingCaptureUrl
-            if (url != null && matches(url)) {
-                view.captureTimer?.cancel()
-                view.captureTimer = null
-                view.pendingCaptureUrl = null
-            }
+            val page = view.pendingCapturePage
+            if (page != null && matches(page.address)) cancelCaptureTimer(view)
         }
     }
 
@@ -1490,7 +1497,7 @@ class BrowserCoordinator(
 
     /** Drops the bookkeeping for a renderer the engine no longer has. */
     private fun forgetView(view: LiveView) {
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
         releaseKeyboard(view.nativeTab)
@@ -1733,8 +1740,8 @@ class BrowserCoordinator(
 
         var captureTimer: Job? = null
 
-        /** The address the pending [captureTimer] targets, or null when no capture is scheduled. */
-        var pendingCaptureUrl: String? = null
+        /** A distinct token for each schedule, including successive timers for the same page. */
+        var pendingCapturePage: PageKey? = null
 
         /** Documents that are Servo's error pages (network or certificate failure). */
         val errorDocuments = HashSet<Long>()
