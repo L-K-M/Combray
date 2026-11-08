@@ -305,8 +305,9 @@ class Integrations(
                     job != null && job.state == JobState.FAILED ->
                         if (saved != null && saves.hasCreationReceipt(job)) SaveStatus.SavedWithListFailure(job.error)
                         else SaveStatus.NeedsAttention(job.error)
-                    // A recorded bookmark is saved. A list step still retrying does not unsave it.
-                    saved != null -> SaveStatus.Saved
+                    // A list retry keeps its acknowledged bookmark saved. An older saved row
+                    // cannot acknowledge a new create, including one under a different credential.
+                    saved != null && (job == null || saves.hasCreationReceipt(job)) -> SaveStatus.Saved
                     job != null && Outbox.waitsForConnection(job) -> SaveStatus.Waiting
                     job != null -> SaveStatus.Pending
                     // Queued for an earlier address: Settings offers to send it here or discard it.

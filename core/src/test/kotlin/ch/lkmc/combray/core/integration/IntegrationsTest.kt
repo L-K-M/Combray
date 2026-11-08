@@ -876,6 +876,52 @@ class IntegrationsTest {
     }
 
     @Test
+    fun anEarlierSavedPageDoesNotHideANewUnacknowledgedCreate() = runBlocking {
+        configure()
+        save()
+        drain()
+        assertEquals(SaveStatus.Saved, status())
+        server.bookmarks.clear()
+        configure()
+        server.fault = FakeKarakeep.Fault.SERVER_ERROR
+        server.faultCount = Int.MAX_VALUE
+        val queued = integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) as Enqueued.Queued
+
+        drain()
+
+        assertEquals(JobState.RETRY_WAIT, job(queued.job.id).state)
+        assertTrue(server.bookmarks.isEmpty())
+        assertEquals(SaveStatus.Pending, status())
+        server.faultCount = 0
+        now = job(queued.job.id).nextAttemptAt
+        drain()
+        assertEquals(SaveStatus.Saved, status())
+        assertTrue(URL in server.bookmarks)
+    }
+
+    @Test
+    fun anEarlierSavedPageDoesNotHideAnUnsentCreateWaitingForConnection() = runBlocking {
+        configure()
+        save()
+        drain()
+        server.bookmarks.clear()
+        configure()
+        offline = true
+        val queued = integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) as Enqueued.Queued
+
+        drain()
+
+        assertEquals(JobState.RETRY_WAIT, job(queued.job.id).state)
+        assertTrue(Outbox.waitsForConnection(job(queued.job.id)))
+        assertEquals(SaveStatus.Waiting, status())
+        offline = false
+        now = job(queued.job.id).nextAttemptAt
+        drain()
+        assertEquals(SaveStatus.Saved, status())
+        assertTrue(URL in server.bookmarks)
+    }
+
+    @Test
     fun aFailedCreateForAnEarlierSavedPageIsNotCalledAListFailure() = runBlocking {
         configure()
         save()
