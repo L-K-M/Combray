@@ -88,6 +88,8 @@ jobs:
           # runs full, which is what the budget above is sized for. Override per
           # PR with a zai-review:full / zai-review:hybrid / zai-review:incremental
           # label, applied before the push that triggers the next review.
+          # During merge waves, refresh the PR's base and use zai-review:full:
+          # these action versions include merged-main files in the delta scope.
           ZAI_REVIEW_MODE: hybrid
           # Left at the action's own default. Raising it to cut the request
           # count backfires: at 25000, three of Seance PR #89's 17 chunks spent the
