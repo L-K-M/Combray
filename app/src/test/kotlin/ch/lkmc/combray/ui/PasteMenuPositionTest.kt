@@ -60,9 +60,10 @@ class PasteMenuPositionTest {
         val views = shadow.views
         val popup = views.last()
         val params = popup.layoutParams as WindowManager.LayoutParams
+        val height = context.resources.displayMetrics.heightPixels
         assertTrue(
-            "menu window at x=${params.x}, y=${params.y} must open in the bottom half of the 900dp screen",
-            params.y > 450,
+            "menu window at x=${params.x}, y=${params.y} must open in the bottom half of the ${height}px screen",
+            params.y > height / 2,
         )
     }
 }
