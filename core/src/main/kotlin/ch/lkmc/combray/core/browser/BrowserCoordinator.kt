@@ -1252,6 +1252,14 @@ class BrowserCoordinator(
         }
     }
 
+    /** A Room rollback does not roll back view bookkeeping: only committed identity may leave the process. */
+    private suspend fun visitForCapture(view: LiveView, document: Long, tab: TabEntity): VisitEntity? {
+        val url = tab.url ?: return null
+        if (view.currentPage != PageKey(document, url.substringBefore('#'))) return null
+        val visit = tab.currentVisitId?.let { dao.visit(it) } ?: return null
+        return visit.takeIf { it.tabId == tab.id && it.url == url && it.documentKey == documentKey(view, document) }
+    }
+
     private suspend fun requestCapture(view: LiveView, document: Long) {
         val sink = capture ?: return
         // Only the document still current in a live, healthy view: anything else is stale.
@@ -1261,10 +1269,11 @@ class BrowserCoordinator(
         val generation = view.generation ?: return
         // A forgotten page is not sent again while its tab shows it ([TabEntity.pageForgotten]).
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && !it.pageForgotten } ?: return
-        val url = tab.url ?: return
+        val visit = visitForCapture(view, document, tab) ?: return
+        val url = visit.url
         val policy = sink.wantsCapture(url) ?: return
         val id = nextRequest++
-        pendingCaptures[id] = PendingCapture(view.tabId, ViewRef(view.nativeTab, generation), document, url, tab.currentVisitId, policy)
+        pendingCaptures[id] = PendingCapture(view.tabId, ViewRef(view.nativeTab, generation), document, url, visit.id, policy)
         engine.capture(view.nativeTab, document, id, captureTiming.maxTextBytes, captureTiming.timeoutMs)
     }
 
@@ -1281,10 +1290,11 @@ class BrowserCoordinator(
         val view = view(event.view)?.takeIf { it.currentDocument == pending.document && pending.document !in it.errorDocuments } ?: return
         // A capture that was on its way when the site was forgotten is dropped with it.
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url && !it.pageForgotten } ?: return
+        val visit = visitForCapture(view, pending.document, tab)?.takeIf { it.id == pending.visitId } ?: return
         capture?.captured(
             CapturedPage(
                 tabId = tab.id,
-                visitId = pending.visitId,
+                visitId = visit.id,
                 url = pending.url,
                 title = content.title.takeIf { it.isNotBlank() },
                 text = content.text,
