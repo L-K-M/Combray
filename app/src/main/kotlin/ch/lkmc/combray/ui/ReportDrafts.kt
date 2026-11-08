@@ -1,5 +1,6 @@
 package ch.lkmc.combray.ui
 
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -112,6 +113,7 @@ internal class ReportDrafts(
     private val scope: CoroutineScope,
     private val submit: suspend (ReportDraft) -> ReportRequest,
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    private val encode: (Bitmap) -> EncodedScreenshot? = ::encodeScreenshot,
 ) {
     private val slot = MutableStateFlow<ReportDraftState?>(null)
 
@@ -170,7 +172,7 @@ internal class ReportDrafts(
             shot.value = ReportShot.Pending(preview)
             // A dismissed draft need not be encoded.
             currentCoroutineContext().ensureActive()
-            encodeScreenshot(frame.bitmap)?.let { ReportShot.Ready(preview, it) } ?: ReportShot.Omitted(ScreenshotOmission.TOO_LARGE)
+            encode(frame.bitmap)?.let { ReportShot.Ready(preview, it) } ?: ReportShot.Omitted(ScreenshotOmission.TOO_LARGE)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
