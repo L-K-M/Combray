@@ -194,6 +194,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
+  Guava pins together so CI tests the combined build dependency set.
 - Play stays within reach on pages whose own video player shows an error:
   the offer to open the page's audio or video in the player now stays
   until you play or close it, the address field shows Play while the page
@@ -288,6 +290,13 @@ All notable changes to this project are documented here. The format follows
   credential generation and claim: another account at the same address must
   recover its own bookmark id. A failed create is not called a list failure,
   and a corrupt payload no longer rolls back an acknowledged delivery.
+- Settings no longer decodes whole job payloads (up to 256 KiB of
+  captured page text) per row while composing the queue. Jobs record
+  their address at enqueue in a `url` column (schema 6, auto-migrated);
+  a row without one shows "Unknown page" instead of its raw dedupe key
+  or report id. A row written before the column existed is decoded once,
+  off the UI thread. Finished captures and reports drop the address with
+  their payload; failed and waiting rows keep it for their retry.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.

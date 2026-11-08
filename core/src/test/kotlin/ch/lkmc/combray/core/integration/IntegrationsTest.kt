@@ -109,6 +109,14 @@ class IntegrationsTest {
     private fun job(id: String = "job0") = runBlocking { database.integrations().job(id) }!!
 
     @Test
+    fun aQueuedSaveRecordsItsUrl() = runBlocking {
+        configure()
+        save()
+        assertEquals(URL, job().url)
+        assertEquals(URL, integrations.jobUrl(job()))
+    }
+
+    @Test
     fun oneTapSaveIsDurableAndRepeatedTapsMakeOneBookmark() {
         assertEquals(SaveStatus.NotConfigured, status())
         assertEquals(SaveRequest.NotConfigured, save())
