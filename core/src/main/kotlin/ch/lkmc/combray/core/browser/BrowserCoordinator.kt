@@ -581,8 +581,8 @@ class BrowserCoordinator(
     }
 
     /** The text size setting changed: every page, open or opened later, lays out at it. */
-    fun applyTextSize() = submit {
-        if (engineReady) engine.setPageZoom(textSize().zoom)
+    fun applyTextSize(size: TextSize = textSize()) = submit {
+        if (engineReady) engine.setPageZoom(size.zoom)
     }
 
     private fun onLoadingStopped(view: LiveView, event: EngineEvent.LoadingStopped) {

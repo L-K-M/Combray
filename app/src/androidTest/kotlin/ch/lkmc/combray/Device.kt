@@ -8,6 +8,9 @@ import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.TabCounter
+import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.core.browser.ThemeMode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -301,6 +304,17 @@ class Device(private val frame: () -> Unit = {}) {
 
     fun idle() = runBlocking { browser.awaitIdle() }
 
+    /** Settings writes are durable-first: await them before a check reads the value or its UI. */
+    fun setThemeMode(mode: ThemeMode) = runBlocking { settings.setThemeMode(mode).await() }
+
+    fun setTabCounter(counter: TabCounter) = runBlocking { settings.setTabCounter(counter).await() }
+
+    fun setHomeContinue(visibility: HomeSectionVisibility) = runBlocking { settings.setHomeContinue(visibility).await() }
+
+    fun setHomeFrequentSites(visibility: HomeSectionVisibility) = runBlocking { settings.setHomeFrequentSites(visibility).await() }
+
+    fun setTextSize(size: TextSize) = runBlocking { settings.setTextSize(size).await() }
+
     /** Closes every tab so each check starts from the internal home. */
     fun closeAllTabs() {
         idle()
@@ -311,8 +325,8 @@ class Device(private val frame: () -> Unit = {}) {
 
     /** Fixture isolation: a failed editor check must not hide another check's automatic links. */
     internal fun resetHome() = runBlocking {
-        settings.setHomeContinue(HomeSectionVisibility.SHOWN)
-        settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        settings.setHomeContinue(HomeSectionVisibility.SHOWN).await()
+        settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN).await()
         val home = app.graph.home
         val state = home.state(flowOf(emptyList())).first()
         state.pins.forEach { home.unpin(it.id) }

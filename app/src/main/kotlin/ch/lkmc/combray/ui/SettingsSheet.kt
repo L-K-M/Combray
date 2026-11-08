@@ -230,20 +230,26 @@ fun SettingsSheet(
 @Composable
 private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: () -> Unit) {
     val choice by settings.unusedTabs.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    var failure by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val closing = choice == UnusedTabs.CLOSE
     // One accessibility node per row: TalkBack reads the label with the switch state.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
             .toggleable(value = closing, role = Role.Switch) { enabled ->
-                settings.setUnusedTabs(if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP)
-                onChanged()
+                // Maintenance runs only after disk acknowledged the choice.
+                val target = if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP
+                failure = false
+                val result = settings.setUnusedTabs(target)
+                scope.launch { if (result.await()) onChanged() else failure = true }
             },
     ) {
         Text(pluralStringResource(R.plurals.settings_close_unused_tabs, days, days), modifier = Modifier.weight(1f))
         Switch(checked = closing, onCheckedChange = null)
     }
     Text(stringResource(R.string.settings_close_unused_tabs_body), style = MaterialTheme.typography.bodySmall)
+    if (failure) ChangeFailure()
 }
 
 /**
@@ -253,29 +259,52 @@ private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: (
 @Composable
 private fun ThemeSetting(settings: BrowserSettings) {
     val choice by settings.themeMode.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    var failure by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     Text(stringResource(R.string.settings_appearance), modifier = Modifier.semantics { heading() }.padding(top = 8.dp))
     Column(Modifier.selectableGroup()) {
         ThemeMode.entries.forEach { mode ->
-            ListOption(themeModeLabel(mode), selected = mode == choice) { settings.setThemeMode(mode) }
+            ListOption(themeModeLabel(mode), selected = mode == choice) {
+                failure = false
+                val result = settings.setThemeMode(mode)
+                scope.launch { if (!result.await()) failure = true }
+            }
         }
     }
+    if (failure) ChangeFailure()
 }
 
 /** One labeled switch controls the badge; the button still opens Recent either way. */
 @Composable
 private fun TabCounterSetting(settings: BrowserSettings) {
     val choice by settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    var failure by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val shown = choice == TabCounter.SHOWN
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
             .toggleable(value = shown, role = Role.Switch) { enabled ->
-                settings.setTabCounter(if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN)
+                val target = if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN
+                failure = false
+                val result = settings.setTabCounter(target)
+                scope.launch { if (!result.await()) failure = true }
             },
     ) {
         Text(stringResource(R.string.settings_tab_counter), modifier = Modifier.weight(1f))
         Switch(checked = shown, onCheckedChange = null)
     }
+    if (failure) ChangeFailure()
+}
+
+/** A failed preference write: the control snaps back and the user can try again. */
+@Composable
+private fun ChangeFailure() {
+    Text(
+        stringResource(R.string.home_change_failed),
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 @Composable
