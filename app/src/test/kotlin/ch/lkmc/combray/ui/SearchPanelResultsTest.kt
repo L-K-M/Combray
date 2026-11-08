@@ -59,6 +59,22 @@ class SearchPanelResultsTest {
     }
 
     @Test
+    fun aCapturePolicyChangeDoesNotRestartTheSearchOrDiscardItsCursor() {
+        showFirstSearch(next = "page-2")
+        compose.runOnIdle {
+            service.value = SERVICE.copy(captureEnabled = !SERVICE.captureEnabled, updatedAt = SERVICE.updatedAt + 1)
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        assertEquals("Capture policy does not change the remote search", 1, requests.size)
+        compose.onNodeWithText(MORE).assertIsEnabled().performClick()
+        assertEquals("page-2", request(1).page.cursor)
+        answer(1, results("Two", null))
+        compose.onNodeWithText("One").assertExists()
+        compose.onNodeWithText("Two").assertExists()
+    }
+
+    @Test
     fun aFailedSearchShowsTheError() {
         showFirstSearch()
         compose.onNode(hasSetTextAction()).performTextInput(" two")

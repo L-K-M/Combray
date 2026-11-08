@@ -91,7 +91,8 @@ internal fun HisterSearchPanelContent(
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service, typed, submit) {
+    // Capture policy and route bookkeeping do not change the remote search or its cursor.
+    LaunchedEffect(query, service?.fingerprint, service?.generation, typed, submit) {
         val mine = ++generation
         loadingMore = false
         // Hister has no default list: a blank query stays idle, as before. A seeded non-blank
