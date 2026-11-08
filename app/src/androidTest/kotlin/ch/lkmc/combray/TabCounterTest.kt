@@ -24,12 +24,12 @@ class TabCounterTest {
     @Before
     fun setUp() {
         device.awaitEngine()
-        device.settings.setTabCounter(TabCounter.HIDDEN)
+        device.setTabCounter(TabCounter.HIDDEN)
         device.closeAllTabs()
     }
 
     @After
-    fun tearDown() = device.settings.setTabCounter(TabCounter.HIDDEN)
+    fun tearDown() = device.setTabCounter(TabCounter.HIDDEN)
 
     @Test
     fun theCounterIsOptionalAndItsChoiceSurvivesRecreation() {
@@ -41,7 +41,7 @@ class TabCounterTest {
         compose.onNodeWithContentDescription("Recent, 1 open tab").assertIsDisplayed()
 
         // Settings uses this same preference. Sheets miss the software emulator's focus deadline.
-        device.settings.setTabCounter(TabCounter.SHOWN)
+        device.setTabCounter(TabCounter.SHOWN)
         compose.onNodeWithText("1", useUnmergedTree = true).assertIsDisplayed()
 
         device.browser.openUrl(url, Placement.NEW_TAB)
@@ -50,7 +50,7 @@ class TabCounterTest {
         compose.activityRule.scenario.recreate()
         compose.onNodeWithText("2", useUnmergedTree = true).assertIsDisplayed()
 
-        device.settings.setTabCounter(TabCounter.HIDDEN)
+        device.setTabCounter(TabCounter.HIDDEN)
         compose.onNodeWithText("2", useUnmergedTree = true).assertDoesNotExist()
         compose.activityRule.scenario.recreate()
         compose.onNodeWithText("2", useUnmergedTree = true).assertDoesNotExist()
