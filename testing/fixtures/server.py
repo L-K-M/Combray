@@ -1347,7 +1347,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Reader view keeps the article and drops the navigation, aside and footer around it.
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/scroll.html":
-            # Distinct endpoints and a live title prove root-page jumps, not just button state.
+            # Distinct endpoints and a live title prove root-page jumps, not just button state. The
+            # title also follows the viewport's height (innerHeight) as the bottom bar comes and goes.
             return self.send(200, page("SCROLL-TOP",
                 "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
                 "<section style='height:500vh;background:#8a5a2b'>MIDDLE</section>"
@@ -1358,7 +1359,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "s.scrollTop+innerHeight>=s.scrollHeight-1?'SCROLL-BOTTOM':'SCROLL-MIDDLE';"
                 "const title=edge+':'+s.scrollTop+','+innerHeight+','+s.scrollHeight;"
                 "if(document.title!==title)document.title=title;};"
-                "addEventListener('scroll',update);</script>"))
+                "addEventListener('scroll',update);addEventListener('resize',update);update();</script>"))
         if path == "/pull-blocked.html":
             return self.send(200, page("PULL-READY", "<p>Page-owned drag</p>",
                 "<style>html,body{margin:0;height:100vh}</style>"

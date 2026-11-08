@@ -716,3 +716,8 @@ All notable changes to this project are documented here. The format follows
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped
   only when a longer name follows it.
+- The page no longer flickers when the bottom bar hides or shows as you
+  scroll. For one frame, the page appeared stretched and shifted, with a
+  white band where the bar had been. The page area now keeps its size
+  under the bar, pages lay out above the bar, and a hiding bar leaves
+  only once the page under it is drawn.
