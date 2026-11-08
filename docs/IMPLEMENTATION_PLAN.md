@@ -759,12 +759,18 @@ keyboard Search action, the scope chips' wrapping at a narrow width, the
 Undo snackbar's row clearance, and Recent row Copy/Share are implemented in
 `app/src/main/kotlin/ch/lkmc/combray/ui/RecentSheet.kt`, with focused JVM
 tests (`RecentFilterFieldTest`, `RecentScopeChipsTest`, `RecentVisitMenuTest`).
-Local evidence: `testDebugUnitTest`, `lintDebug`, `assembleDebug` and
-`python3 scripts/check_docs.py` pass on the branch. No device or emulator
-run. The keyboard's focus dismissal is not JVM-observable: Robolectric's
-text-input session re-requests focus after `clearFocus()`, so the test
-asserts that the Search action runs and clears focus at least once and that
-the filter text is unchanged.
+`RecentActionsTest` adds two compiled real-Android regressions: prove the
+sheet's IME is visible before Search, then verify hidden IME, cleared focus
+and retained filter; Copy a real synthetic closed visit and check its exact
+address and sensitive clipboard hint. The temporary hardware-keyboard
+setting is captured before mutation and restored with acknowledgement.
+Local evidence: `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+`assembleDebugAndroidTest` and `python3 scripts/check_docs.py` pass on the
+branch. No device or emulator run of this candidate yet. The JVM test alone
+cannot establish final focus dismissal: Robolectric's text-input session
+re-requests focus after `clearFocus()`. Both new cases must pass the full
+current-head Engine workflow before merge; narrow-layout/snackbar and Share
+chooser behavior still need integrated runtime evidence.
 
 The owner-requested rich-editor engine continuation is merged in Servo PR #40. Combray PR #317 is merged with its paired Kotlin/JNI/Rust contract and downstream pin. Both native ABIs and all 214 API-30 x86_64 emulator checks passed at head `8805846d`, including process death and the three real InputConnection cases; the full review was assessed on the PR. The earlier 15 arm64 cases remain historical evidence, not a physical-phone or third-party IME claim. [Section 56](ENGINE_SPIKE.md#56-rich-editor-carets-composition-and-navigation-7-november-2026) records the revisions, red/green checks, three broader failures reproduced on main and the remaining input limits. The next bounded text-input slice is surrounding-text and selection synchronization. A bounded JVM-side consolidation now accompanies it: `EngineSurfaceView` now reports the page as editable only while a page field has focus (prepared before `restartInput`, cleared on hide, dismissal, detach and a `PageRef` change, which also retires the old connection), the IME Next action sends Tab while Previous/unknown actions are refused before composition or keys, deletion requests beyond `MAX_EDIT_CHARS` (1,000, from the #263/#312 donors) or negative ones are refused rather than clipped, and cursor positions, selection regions, code-point deletions and explicit replacement ranges the bridge cannot represent return false or null instead of being acknowledged. IME keys the native key map cannot handle are refused before side effects. Committed text keeps no local length cap: neither the donors nor the native bridge establishes a supported bound, so none was invented. Surrounding text, selection/extracted-text updates and `newCursorPosition` semantics remain unimplemented, as do UTF-16/surrounding-text synchronization for deletions; the native async stale-context rejection stays the second fence.
 

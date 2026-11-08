@@ -55,8 +55,11 @@ class RecentActionsTest {
         check(original.isEmpty() || original == "null" || original == "0" || original == "1") {
             "unexpected $SHOW_WITH_HARD_KEYBOARD value: '$original'"
         }
-        shell("settings put secure $SHOW_WITH_HARD_KEYBOARD 1")
         hardKeyboardSetting = original
+        shell("settings put secure $SHOW_WITH_HARD_KEYBOARD 1")
+        check(shell("settings get secure $SHOW_WITH_HARD_KEYBOARD").trim() == "1") {
+            "could not enable the fixture keyboard"
+        }
         device.awaitEngine()
         device.closeAllTabs()
     }
@@ -69,6 +72,10 @@ class RecentActionsTest {
                 shell("settings delete secure $SHOW_WITH_HARD_KEYBOARD")
             } else {
                 shell("settings put secure $SHOW_WITH_HARD_KEYBOARD $original")
+            }
+            val expected = original.ifEmpty { "null" }
+            check(shell("settings get secure $SHOW_WITH_HARD_KEYBOARD").trim() == expected) {
+                "could not restore the fixture keyboard setting"
             }
         }
     }
