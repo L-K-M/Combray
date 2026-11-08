@@ -282,6 +282,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Two services configured for the first time at the same time could race the
+  device's first Keystore key creation, and one could replace the key the
+  other's credential had just been sealed with, silently losing it. Key
+  creation is now serialized process-wide across store instances. The device
+  check uses its own Keystore alias and directory, so it never deletes or
+  overwrites the app's real credential.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
