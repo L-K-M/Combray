@@ -199,6 +199,8 @@ All notable changes to this project are documented here. The format follows
   choice is published. A failed write shows a generic failure and leaves
   the previous choice; text size's immediate preview rolls back, and rapid
   steps keep their order.
+- Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
+  Guava pins together so CI tests the combined build dependency set.
 - Play stays within reach on pages whose own video player shows an error:
   the offer to open the page's audio or video in the player now stays
   until you play or close it, the address field shows Play while the page
