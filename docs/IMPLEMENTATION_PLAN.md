@@ -729,6 +729,14 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+For the parallel-PR merge wave, refresh each PR's cached base with
+`gh api --method PATCH repos/L-K-M/Combray/pulls/NUMBER -f base=main`
+and apply `zai-review:full` before its next push. The current reviewer action's
+incremental comparison includes changes merged from main, not only the PR's
+files. On #189 it selected 120 files for a one-file patch; the refreshed base
+and full-PR scope keep the review on the intended change. Do not count the
+superseded broad review or cancelled duplicate CI as approval.
+
 The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. Engine-related PRs now pass native builds and full emulator fixtures through the Engine workflow. **Next task:** wire native compilation into the release workflow and supply the owner's signing key. Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
