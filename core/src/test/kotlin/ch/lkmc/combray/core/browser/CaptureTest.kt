@@ -10,6 +10,7 @@ import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.Attribution
+import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -161,6 +162,42 @@ class CaptureTest {
         browser.forgetSite("a.test", includeSubdomains = false); idle()
         result(1, 10, capture, "A text")
         assertTrue(sink.pages.isEmpty())
+    }
+
+    @Test
+    fun aCrashDropsOnlyTheCrashedTabsCapture() {
+        // Two tabs at the same address, each with a capture on the way.
+        browser.openUrl("https://same.test/", Placement.NEW_TAB); idle()
+        load(1, 10, "https://same.test/")
+        settle()
+        browser.openUrl("https://same.test/", Placement.NEW_TAB); idle()
+        load(2, 20, "https://same.test/")
+        settle()
+        assertEquals(2, engine.captures.size)
+        val first = engine.captures[0].second
+        val second = engine.captures[1].second
+
+        // Crash the second view: only its own capture is dropped.
+        engine.emit(EngineEvent.Crashed(engine.view(2), "test")); idle()
+        result(1, 10, first, "first")
+        assertEquals("first", sink.pages.single().text)
+
+        // The crashed view's late result is ignored.
+        result(2, 20, second, "second")
+        assertEquals(1, sink.pages.size)
+    }
+
+    @Test
+    fun aStaleCrashForAReplacedGenerationDropsNothing() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/")
+        settle()
+        val capture = engine.captures.single().second
+
+        // A crash carrying a generation this view never had is stale: the capture is still pending.
+        engine.emit(EngineEvent.Crashed(ViewRef(1, -1), "stale")); idle()
+        result(1, 10, capture, "A text")
+        assertEquals("A text", sink.pages.single().text)
     }
 
     @Test

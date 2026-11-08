@@ -382,6 +382,8 @@ All notable changes to this project are documented here. The format follows
   that already showed its notice. Media found while a page you asked for
   never arrives (a download, a 204 answer) is offered on the page you are
   still on.
+- Queue UI tests dispose Compose before closing Room, so live collectors
+  no longer query a closed database during fixture cleanup.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -550,6 +552,16 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- The browser starts once and keeps working after an internal error. A
+  second or concurrent start no longer starts a second work queue, and an
+  `Error` in one state update (for example running out of memory while
+  preparing an article) no longer silently stops every later navigation,
+  tab and history action until the app is restarted. Cancellation still
+  stops the queue.
+- A crashed renderer's pending capture, article, find and keyboard work is
+  dropped, and only its own: a stale crash from a replaced view no longer
+  clears a healthy tab's requests, and a ready Reader snapshot survives its
+  renderer's crash.
 - The durable queue: one broken job cycle (a storage error, a recorder
   bug) no longer strands the jobs behind it or skips their wakeup; a job
   whose worker died before finishing stops at the attempt limit instead
