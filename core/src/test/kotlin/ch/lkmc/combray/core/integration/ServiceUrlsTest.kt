@@ -45,7 +45,7 @@ class ServiceUrlsTest {
     @Test
     fun idnHostsArePunycodedAndTheirCredentialsStillRefused() {
         assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example"), root("https://bücher.example/"))
-        assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example:8443"), root("https://bücher.example:8443/"))
+        assertEquals(ServiceRoot.Valid("https://xn--bcher-kva.example:8443/k"), root("https://bücher.example:8443/k/api"))
         assertEquals(
             ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY),
             root("https://u:p@bücher.example/"),
@@ -56,6 +56,7 @@ class ServiceUrlsTest {
     fun defaultPortsAndTrailingDotsDoNotChangeTheDestination() {
         assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example:443/"))
         assertEquals(ServiceRoot.Valid("http://keep.example"), root("http://keep.example:80/"))
+        assertEquals(ServiceRoot.Valid("http://keep.example:8080"), root("http://keep.example:8080"))
         assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example./"))
         assertEquals(ServiceRoot.Valid("https://192.168.1.1:8443"), root("https://192.168.1.1.:8443/"))
         assertEquals(ServiceRoot.Valid("https://[::1]"), root("https://[::1]:443/"))
@@ -66,23 +67,38 @@ class ServiceUrlsTest {
     }
 
     @Test
-    fun malformedPortsAndAuthoritiesAreRefused() {
-        // IPv6: junk after "]" and invalid ports are not silently dropped.
+    fun explicitServicePortsMustBeUsableTcpPorts() {
+        for (host in listOf("keep.example", "[::1]")) {
+            for (port in listOf("0", "65536", "99999", "-1", "443x", "1:2", "")) {
+                val invalid = "https://$host:$port/sub/api/v1"
+                assertEquals(invalid, ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root(invalid))
+                assertEquals(
+                    invalid,
+                    ServiceAddresses.Invalid(AddressField.ALTERNATE, ServiceRootProblem.NOT_A_URL),
+                    addresses("https://keep.example", invalid),
+                )
+            }
+            for (port in listOf(1, 8443, 65535)) {
+                assertEquals(ServiceRoot.Valid("https://$host:$port/sub"), root("https://$host:$port/sub/api/v1"))
+            }
+        }
+        assertEquals(ServiceRoot.Valid("https://keep.example/sub"), root("https://keep.example/sub"))
+    }
+
+    @Test
+    fun zeroIsNotAUsableServicePort() {
+        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:0/"))
+        assertEquals(
+            ServiceAddresses.Invalid(AddressField.ALTERNATE, ServiceRootProblem.NOT_A_URL),
+            addresses("https://keep.example", "https://keep.example:0/"),
+        )
+    }
+
+    @Test
+    fun malformedAuthoritiesAreRefused() {
+        // IPv6: junk after "]" and a missing bracket are not silently dropped.
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1]evil:8080/"))
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1]:70000/"))
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1]:x/"))
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://[::1"))
-        assertEquals(ServiceRoot.Valid("https://[::1]"), root("https://[::1]:/"))
-        assertEquals(ServiceRoot.Valid("https://[::1]:8443"), root("https://[::1]:8443/"))
-
-        // A present but malformed or out-of-range port is refused, not read as the default.
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:443x/"))
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:1:2/"))
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:-1/"))
-        assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://keep.example:99999/"))
-        assertEquals(ServiceRoot.Valid("https://keep.example"), root("https://keep.example:/"))
-        assertEquals(ServiceRoot.Valid("https://keep.example:8443"), root("https://keep.example:8443/"))
-
         // A percent-encoded reg-name is not a host the app can resolve.
         assertEquals(ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL), root("https://%62%C3%BCcher.example/"))
     }

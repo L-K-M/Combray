@@ -52,7 +52,7 @@ object ServiceUrls {
         if (uri.rawUserInfo != null || '@' in authority || uri.rawQuery != null || uri.rawFragment != null) {
             return ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY)
         }
-        val parsed = hostAndPort(authority) ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
+        val parsed = parseAuthority(authority) ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         var path = (uri.rawPath ?: "").trimEnd('/')
         apiSuffixes.firstOrNull { path.endsWith(it) }?.let { path = path.removeSuffix(it).trimEnd('/') }
         // A default port and a trailing dot are the same server as without them, so they do not
@@ -62,22 +62,28 @@ object ServiceUrls {
     }
 
     /** The authority's ASCII host (IPv6 in brackets) and optional port, or null when unusable. */
-    private data class HostAndPort(val host: String, val port: Int?)
+    internal data class Authority(val host: String, val port: Int?)
 
-    private fun hostAndPort(authority: String): HostAndPort? {
+    /**
+     * Parses a URL authority strictly. An explicit port must be decimal digits in 1..65535;
+     * a colon with no digits after it, or any other malformed port text, is refused rather than
+     * read as the scheme default. The HTTP transport applies the same check before connecting.
+     */
+    internal fun parseAuthority(authority: String): Authority? {
+        if ('@' in authority) return null
         if (authority.startsWith("[")) {
             val end = authority.indexOf(']')
             if (end < 0) return null
             val host = authority.substring(0, end + 1).lowercase()
-            // Only nothing, ":" or ":" + a valid port may follow the literal; anything else is
-            // not an authority, not a silently dropped suffix.
+            // Only nothing or ":" + a valid port may follow the literal; anything else is not an
+            // authority, not a silently dropped suffix.
             val rest = authority.substring(end + 1)
             val port = when {
-                rest.isEmpty() || rest == ":" -> null
-                !rest.startsWith(":") -> return null
-                else -> rest.substring(1).toIntOrNull()?.takeIf { it in 0..65535 } ?: return null
+                rest.isEmpty() -> null
+                rest.startsWith(":") -> explicitPort(rest.substring(1)) ?: return null
+                else -> return null
             }
-            return HostAndPort(host, port)
+            return Authority(host, port)
         }
         val written = authority.substringBefore(':').trimEnd('.')
         // A percent-encoded reg-name is not a host the app can resolve; the old URI parse refused it.
@@ -88,10 +94,18 @@ object ServiceUrls {
             return null
         }
         // A present but malformed or out-of-range port is refused, never read as the default port.
-        val port = authority.substringAfter(':', "").takeIf { it.isNotEmpty() }
-            ?.let { it.toIntOrNull()?.takeIf { parsed -> parsed in 0..65535 } ?: return null }
-        return HostAndPort(host, port)
+        val port = if (authority.contains(':')) explicitPort(authority.substringAfter(':', "")) ?: return null else null
+        return Authority(host, port)
     }
+
+    /** The port text after ":", or null when it is empty or malformed. */
+    private fun explicitPort(text: String): Int? =
+        text.takeIf { it.isNotEmpty() && it.all { character -> character in '0'..'9' } }
+            ?.toIntOrNull()
+            ?.takeIf { port -> isValidPort(port) }
+
+    /** -1 means the scheme's default; an explicit port must be a usable TCP destination. */
+    internal fun isValidPort(port: Int): Boolean = port == -1 || port in 1..65535
 
     private fun defaultPort(scheme: String) = when (scheme) {
         "https" -> 443

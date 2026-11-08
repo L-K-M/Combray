@@ -735,6 +735,13 @@ M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 i
 
 Owner-requested and taken ahead of the next task above, neither finished yet: PDF viewing with PDFium-wasm ([PDF.md](PDF.md#phases) phase 1) and a fullscreen video player ([VIDEO.md](VIDEO.md#plan), option C). For the video player, C1 is merged and passes its emulator checks; on 29 October 2026 the owner confirmed its network rules (with home networks open to any page), Media3 with OkHttp and the wording. The `canPlayType`/`<source type>` claim mechanism of C2 is implemented for the progressive types the player reads, and C2 itself — the HLS claim rows, `media3-exoplayer-hls` and the player's HLS source branch — is implemented too ([VIDEO.md](VIDEO.md#phase-c2-x-posts-through-an-hls-claim)); the fixture check plays an X-shaped HLS playlist on the emulator. Next for video: an X-post check on the owner's phone, then option B's probe per [VIDEO.md](VIDEO.md#plan). For PDF, the owner made phase 1's choices on 29 October 2026. The viewer is in place on the engine change, pinned at its merge commit on `combray/0.7` (L-K-M/servo#18, merged 4 November 2026): a tapped PDF opens in a PDFium-wasm viewer document, with device checks in `PdfTest` that run in the Engine workflow. Next for PDF: CJK fonts (slice C2), then text for Find, reader view and Hister (slice D) ([PDF.md](PDF.md#phases)).
 
+Service-root audits #203, #208, #281 and #311 are consolidated: `ServiceUrls` accepts
+IDN hosts, normalizes a trailing dot and the scheme's default port, and refuses an
+explicit port outside 1–65535 (zero, negative, overflow, empty or malformed) before any
+request; `UrlConnectionTransport` applies the same authority check and reports malformed
+or unsupported addresses as failures instead of throwing. `ServiceUrlsTest` and
+`HttpTransportTest` cover it; no device or deployed-service check was run.
+
 1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
 2. When live acceptance is authorized, obtain the Karakeep and Hister addresses and versions, sites that must work and hosts never to capture. Configure credentials in the app, not in chat.
 3. With the owner's consent, do one deliberate save and one capture on their services, then clean up the test items (M2 step 5, M3 step 5); try Kagi login and search in Servo.

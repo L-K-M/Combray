@@ -282,6 +282,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Service setup accepts a Unicode (IDN) address, and a trailing dot or the
+  scheme's default port no longer changes a server's stored identity. An
+  explicit port must be 1–65535: zero, negative, overflowing, empty or
+  malformed ports are refused, and the HTTP client reports malformed or
+  unsupported addresses as failures instead of throwing.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
