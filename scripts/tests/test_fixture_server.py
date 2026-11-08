@@ -156,6 +156,91 @@ class PullFixtureTest(unittest.TestCase):
                 self.assertIn("{passive:false}", document)
 
 
+class EditorFixtureTest(unittest.TestCase):
+    """The rich-text editor fixtures: the plain page keeps its titles, and all three pages report
+    their exact event payload and DOM to /_admin/editor-report when the address carries k."""
+
+    TIMEOUT_SECONDS = 5
+
+    def setUp(self):
+        self.fixture = load_server()
+
+    def get(self, path):
+        request = Mock(path=path)
+        self.fixture.Handler.do_GET(request)
+        return request.send.call_args.args
+
+    def test_the_plain_editor_keeps_its_titles_and_reports_events(self):
+        status, document = self.get("/contenteditable.html")
+        self.assertEqual(http.HTTPStatus.OK, status)
+        self.assertIn("<title>EDITOR:ready</title>", document)
+        self.assertIn("<div class='c' id='editor' contenteditable></div>", document)
+        self.assertIn("document.title='EDITOR:input:'+e.textContent+':'+kind", document)
+        self.assertIn("e.onfocus=function(){document.title='EDITOR:focused'", document)
+        self.assertIn("/_admin/editor-report?k=" + "'+encodeURIComponent(k)", document)
+        self.assertIn("v.preventDefault();ev.defaultPrevented=true", document)
+
+    def test_the_nested_editor_exposes_its_outer_region_and_editable_states(self):
+        status, document = self.get("/nested-editable.html")
+        self.assertEqual(http.HTTPStatus.OK, status)
+        self.assertIn("<title>NESTED:ready</title>", document)
+        self.assertIn("<div class='c' id='outer' contenteditable='false'>", document)
+        self.assertIn("<div id='inner' contenteditable='true'", document)
+        self.assertIn("outerAttribute:outer.getAttribute('contenteditable')", document)
+        self.assertIn("outerEditable:outer.isContentEditable,innerEditable:e.isContentEditable", document)
+
+    def test_the_shadow_editor_builds_a_closed_shadow_root_and_reports_it(self):
+        status, document = self.get("/shadow-editor.html")
+        self.assertEqual(http.HTTPStatus.OK, status)
+        self.assertIn("<title>SHADOWEDITOR:ready</title>", document)
+        self.assertIn("<div class='c' id='host'></div>", document)
+        self.assertIn("host.attachShadow({mode:'closed'})", document)
+        self.assertIn("editorEl.setAttribute('contenteditable','true')", document)
+        self.assertIn("rootMode:e.getRootNode().mode", document)
+        self.assertIn("encapsulated:document.getElementById('editor')===null", document)
+
+    def test_editor_reports_are_stored_per_key_and_cleared_by_reset(self):
+        fixture = self.fixture
+        fixture.log_request_line = lambda method, target, now=None: None
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), fixture.Handler)
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
+        base = f"http://127.0.0.1:{httpd.server_port}"
+        try:
+            def post(key, body):
+                request = urllib.request.Request(
+                    f"{base}/_admin/editor-report?k={key}", data=body.encode("utf-8"),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                try:
+                    with urllib.request.urlopen(request, timeout=self.TIMEOUT_SECONDS) as response:
+                        return response.status, json.loads(response.read())
+                except urllib.error.HTTPError as error:
+                    with error:
+                        return error.code, json.loads(error.read())
+
+            event = {"phase": "input", "inputType": "insertText", "data": "b",
+                     "dom": {"html": "ét<div>b<br></div>", "text": "étb"}}
+            self.assertEqual((200, {"ok": True}), post("abc", json.dumps(event)))
+            self.assertEqual((200, {"ok": True}), post("xyz", json.dumps({"phase": "ready"})))
+            self.assertEqual((400, {"error": "editor report needs k"}), post("", json.dumps(event)))
+            self.assertEqual((400, {"error": "bad editor report"}), post("abc", "not json"))
+            self.assertEqual((400, {"error": "bad editor report"}), post("abc", json.dumps(["not", "an", "object"])))
+
+            state = json.loads(urllib.request.urlopen(base + "/_admin/state", timeout=self.TIMEOUT_SECONDS).read())
+            self.assertEqual([event], state["editor"]["abc"])
+            self.assertEqual([{"phase": "ready"}], state["editor"]["xyz"])
+
+            urllib.request.urlopen(
+                urllib.request.Request(base + "/_admin/reset", data=b"", method="POST"),
+                timeout=self.TIMEOUT_SECONDS).read()
+            state = json.loads(urllib.request.urlopen(base + "/_admin/state", timeout=self.TIMEOUT_SECONDS).read())
+            self.assertEqual({}, state["editor"])
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            worker.join()
+
+
 class StopFixtureTest(unittest.TestCase):
     REQUEST_TIMEOUT_SECONDS = 5
     POLL_SECONDS = 0.01
