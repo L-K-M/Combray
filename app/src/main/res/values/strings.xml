@@ -271,6 +271,7 @@
     <string name="queue_paused">Paused: the key was rejected or changed (%1$s)</string>
     <string name="queue_paused_hister">Paused: the token was rejected or changed (%1$s)</string>
     <string name="queue_failed">Stopped (%1$s)</string>
+    <string name="queue_unknown_page">Unknown page</string>
     <string name="action_retry">Retry</string>
     <string name="action_discard">Discard</string>
     <string name="action_resume_all">Send paused saves with the current key</string>
