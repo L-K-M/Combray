@@ -249,6 +249,22 @@ class OutboxTest {
     }
 
     @Test
+    fun aChangedReportPayloadCannotInheritOldAddressMetadata() {
+        val reports = reportsService()
+        val first = runBlocking {
+            outbox.enqueue(JobKind.SITE_REPORT, reports, Binding.CURRENT, "report-1", """{"url":"https://a.test/"}""", supersede = false, url = "https://a.test/")
+        } as Enqueued.Queued
+        claimAndFinish(DispatchResult.Rejected("bad_request"))
+        val again = runBlocking {
+            outbox.enqueue(JobKind.SITE_REPORT, reports, Binding.CURRENT, "report-1", """{"url":"https://b.test/"}""", supersede = false)
+        } as Enqueued.Queued
+        assertEquals(first.job.id, again.job.id)
+        // Without new metadata, use the off-thread legacy decoder, not the old payload's URL.
+        assertNull(job(again.job.id).url)
+        assertTrue(job(again.job.id).payload.contains("https://b.test/"))
+    }
+
+    @Test
     fun reSavingAFailedJobSendsTheFreshPayload() {
         val first = enqueue(payload = """{"url":"https://a.test/","title":"One"}""") as Enqueued.Queued
         claimAndFinish(DispatchResult.Rejected("bad_request"))

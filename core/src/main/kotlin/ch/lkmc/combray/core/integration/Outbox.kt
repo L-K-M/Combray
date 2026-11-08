@@ -99,7 +99,8 @@ class Outbox(
                 state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
                 // The user saved this page again: its current title travels, not the stale one.
                 payload = payload, payloadBytes = payloadBytes,
-                url = url ?: retrySource.url,
+                // Omitted metadata may be retained only for the identical payload.
+                url = url ?: retrySource.url.takeIf { payload == retrySource.payload },
                 leaseOwner = null, leaseUntil = null,
             ).restarted(now)
             dao.updateJob(retried)
