@@ -733,6 +733,15 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+Capture-timer consolidation (8 November 2026, PR #249 with #314's missing-visit
+case): timers carry their scheduled page identity and a distinct schedule token.
+Forget cancels matching fragments even after a timer has queued work; completion
+clears timer bookkeeping on the serialized coordinator queue. The fragment
+regression failed before the fix; all four focused timer tests and
+`testDebugUnitTest lintDebug assembleDebug` passed locally on macOS with JDK 21.
+This is JVM evidence, not a new native or device run. PR CI and review remain
+the merge gates.
+
 For the parallel-PR merge wave, refresh each PR's cached base with
 `gh api --method PATCH repos/L-K-M/Combray/pulls/NUMBER -f base=main`
 and apply `zai-review:full` before its next push. The current reviewer action's
