@@ -77,6 +77,8 @@ pub enum LocalDocumentCheck {
 pub struct KeyInput {
     pub unicode: u32,
     pub key_code: i32,
+    pub modifiers: crate::keyboard::KeyModifiers,
+    pub context: Option<u64>,
 }
 
 pub struct CaptureRequest {
@@ -178,6 +180,13 @@ pub enum Command {
         key: KeyInput,
     },
     ImeCommit {
+        context: Option<u64>,
+        text: String,
+    },
+    ImeComposition {
+        id: u64,
+        context: u64,
+        phase: crate::composition::Phase,
         text: String,
     },
     /// The user hid the keyboard while a page field had it.

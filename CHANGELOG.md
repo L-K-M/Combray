@@ -12,9 +12,6 @@ All notable changes to this project are documented here. The format follows
   on a phone is unconfirmed; see the [engine investigation](docs/ENGINE_SPIKE.md#40-verification-stall-and-automation-signals-2-november-2026).
 - The page Copy button and manual text selection are reported broken;
   tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
-- Rich text editors, such as many comment boxes, show no text cursor yet,
-  and a word you are typing appears when the keyboard commits it, as in
-  form fields.
 
 ### Added
 
@@ -23,6 +20,9 @@ All notable changes to this project are documented here. The format follows
   including after Combray closes. This uses a new request without the page’s
   cookies or referrer; protected images may fail. `data:` and `blob:` images
   are not supported yet.
+- Rich text editors show a caret, including empty fields. Words update as
+  you compose them, and multiline editors keep the keyboard's newline key.
+  Up/Down/Home/End and Shift+arrow selection work in focused editors.
 - Tap a PDF link and read it: a top-level PDF opens in Combray's own
   viewer inside Servo, drawn by PDFium, with its pages one under another
   at the screen's width. The tab takes the PDF's own title when it has one,
@@ -194,6 +194,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Browser preferences (appearance, tab count, closing unused tabs, Home
+  sections and text size) commit to disk off the main thread before the
+  choice is published. A failed write shows a generic failure and leaves
+  the previous choice; text size's immediate preview rolls back, and rapid
+  steps keep their order.
 - Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
   Guava pins together so CI tests the combined build dependency set.
 - Play stays within reach on pages whose own video player shows an error:
@@ -234,6 +239,9 @@ All notable changes to this project are documented here. The format follows
   stop running three database reads on the command queue, and the open
   tab count is a COUNT query instead of loading every open row; taps
   and page events share that queue, so it stays short.
+- The active tab is one joined query instead of a session read plus a tab
+  read, and releasing hidden renderers reads the open tabs once instead of
+  once per live view.
 - A complete pine and ivory palette in light and dark mode: sheets,
   dialogs, menus, snackbars and the tab count no longer show Material's
   default purple or red, and the bottom bar's color reaches the screen
@@ -281,6 +289,11 @@ All notable changes to this project are documented here. The format follows
 - The Hister field's hint reads "Words you remember, searched in Hister…".
 - Reader view sets the article in a serif reading face (the system's Noto
   Serif) with a larger title, and has a "Show the page" button at the top.
+
+### Changed
+
+- Engine events name the schema they are written for, and a native/Kotlin
+  schema mismatch fails loudly instead of misparsing events one by one.
 
 ### Fixed
 
@@ -372,6 +385,8 @@ All notable changes to this project are documented here. The format follows
   that already showed its notice. Media found while a page you asked for
   never arrives (a download, a 204 answer) is offered on the page you are
   still on.
+- Queue UI tests dispose Compose before closing Room, so live collectors
+  no longer query a closed database during fixture cleanup.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -440,6 +455,10 @@ All notable changes to this project are documented here. The format follows
   after the last page, or under "No results in Hister." While more results
   load, the button waits under a progress bar; if they fail, the reason
   shows above the results.
+- A service attempt now sends at most one request. A handler that sent
+  twice could have re-sent a request that may already have reached the
+  server after failover to the alternate address; the attempt fails loudly
+  instead, and the queue does not retry the violation.
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
@@ -473,6 +492,8 @@ All notable changes to this project are documented here. The format follows
   such as `pageToken` and `NextToken` are still allowed. In a fragment only
   `name=value` pairs count, so an anchor such as `#token-usage` is not
   mistaken for a credential.
+- Scrolling a long article in reader view does less work: each block's text
+  is built once, not again every time the screen around it recomposes.
 - Reader view showed numbered lists as bullets, and section headings
   smaller than the text under them. Numbered items now show the page's
   numbers, and no heading is smaller than the body text.
@@ -547,6 +568,16 @@ All notable changes to this project are documented here. The format follows
   thread; flow updates may repeat that work. Finished captures and reports
   drop the address with their payload; failed and waiting rows keep it
   for their retry.
+- The browser starts once and keeps working after an internal error. A
+  second or concurrent start no longer starts a second work queue, and an
+  `Error` in one state update (for example running out of memory while
+  preparing an article) no longer silently stops every later navigation,
+  tab and history action until the app is restarted. Cancellation still
+  stops the queue.
+- A crashed renderer's pending capture, article, find and keyboard work is
+  dropped, and only its own: a stale crash from a replaced view no longer
+  clears a healthy tab's requests, and a ready Reader snapshot survives its
+  renderer's crash.
 - The durable queue: one broken job cycle (a storage error, a recorder
   bug) no longer strands the jobs behind it or skips their wakeup; a job
   whose worker died before finishing stops at the attempt limit instead
@@ -561,6 +592,9 @@ All notable changes to this project are documented here. The format follows
   encrypted just because the URL starts with `https`. Cleartext HTTP is
   still called not encrypted. Page info no longer claims a verified
   connection the engine has not reported.
+- System Back and the bottom bar's Back now answer an open page question
+  (a script dialog, a `<select>`, sign-in, or the leave-page prompt, where
+  Back answers Stay) instead of navigating the page behind it.
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.
@@ -587,12 +621,16 @@ All notable changes to this project are documented here. The format follows
 - Abandoned Hister captures expire after seven days, including when a
   running queue crosses the age limit. Expiry clears page bodies and
   rejects late results without invalidating a live request's lease.
+- The Paste/Cancel menu of a page's text field opens above the keyboard
+  at the bottom of the screen instead of at its top-left corner.
 - A page's prompt dialog labels its text field, so TalkBack names it.
 - A device check whose fixture server could not start (another run holds
   the port) now stops and says so instead of testing against no page and
   reporting timeouts.
 - `scripts/check-app.sh` skipped the reader view checks: its default run
   now covers every device-check class, and `--list` prints them.
+- Forgetting a page or site cancels its scheduled capture, including other
+  fragments of the same page and timers already queued for execution.
 - Forgetting a page or site commits local deletion and queued Hister
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch
@@ -637,3 +675,17 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A page field's keyboard now reports the page as editable only while a
+  field has focus, so TalkBack no longer announces the whole page as an
+  editable field and the keyboard cannot come back with no field behind
+  it. The keyboard's Next action moves focus like Tab instead of
+  submitting the field, and a page change retires the old input
+  connection, so a delayed word cannot land in the page that replaced it.
+- A deletion request longer than the bridge's bounded edit length
+  (1,000 characters in either direction), or a negative one, is refused
+  instead of clipped: the keyboard is no longer told an edit succeeded
+  when only part of it was sent. A cursor position or selection region
+  the page cannot represent is refused too, rather than acknowledged
+  while ignored. Unmapped keyboard actions (including Previous) no longer
+  submit the form as Enter; unsupported replacement ranges and code-point
+  deletions do not pretend to edit the page through Android's private buffer.
