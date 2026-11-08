@@ -38,19 +38,20 @@
 
   for (var s = 0; s < roots.length; s++) {
     var media = roots[s].querySelectorAll("video, audio");
+    var top = media.length > 0 ? roots[s].elementFromPoint(x, y) : null;
     for (var m = 0; m < media.length && m < MAX_MEDIA; m++) {
-      if (tapped(roots[s], media[m])) return true;
+      if (top && tapped(media[m], top)) return true;
     }
   }
   return false;
 
-  function tapped(root, element) {
+  // The topmost hit is asked once per tree and shared by its media; it cannot change within
+  // one run of the script.
+  function tapped(element, top) {
     if (element.readyState !== HAVE_NOTHING || element.networkState === NETWORK_EMPTY) return false;
     var box = element.getBoundingClientRect();
     if (!(box.width > 0 && box.height > 0)) return false;
     if (!(x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) return false;
-    var top = root.elementFromPoint(x, y);
-    if (!top) return false;
     if (holds(top, element)) return true;
     var parent = element.parentNode;
     return !!parent && parent.contains(top) && within(top.getBoundingClientRect(), box);
