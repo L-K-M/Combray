@@ -553,6 +553,10 @@ All notable changes to this project are documented here. The format follows
   of being reclaimed forever; re-saving a failed page sends its current
   title; a resumed job restarts its attempt budget; a claim that keeps
   failing waits a minute between tries instead of retrying at once.
+- A site whose name begins with "www." and has no further dots, such as
+  `www.com`, no longer shows as its bare suffix (`com`) in the address
+  bar, tab switcher, Recent and the new-tab page: the label is dropped
+  only when a longer name follows it.
 - The address chip no longer draws a lock or says the connection is
   encrypted just because the URL starts with `https`. Cleartext HTTP is
   still called not encrypted. Page info no longer claims a verified
@@ -633,7 +637,3 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
-- A site whose name begins with "www." and has no further dots, such as
-  `www.com`, no longer shows as its bare suffix (`com`) in the address
-  bar, tab switcher, Recent and the new-tab page: the label is dropped
-  only when a longer name follows it.
