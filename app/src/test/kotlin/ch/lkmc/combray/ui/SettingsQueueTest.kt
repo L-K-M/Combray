@@ -2,6 +2,7 @@ package ch.lkmc.combray.ui
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -21,18 +22,24 @@ import ch.lkmc.combray.core.integration.SecretStore
 import ch.lkmc.combray.core.integration.UrlConnectionTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import org.junit.After
+import kotlinx.coroutines.withTimeout
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
+import org.junit.rules.TestRule
+import org.junit.runner.Description
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The Settings queue rows: a job's address comes from the row or, for one written before schema 6,
@@ -42,10 +49,20 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], application = Application::class, qualifiers = "w320dp-h640dp")
 class SettingsQueueTest {
-    @get:Rule val compose = createComposeRule()
-    @get:Rule val folder = TemporaryFolder()
+    private val compose = createComposeRule()
+    private val folder = TemporaryFolder()
+    private val resources = FixtureResources()
+
+    /**
+     * TemporaryFolder outermost, fixture resources next, Compose innermost: the Compose rule
+     * disposes its composition and lifecycle collectors before the fixture cancels its scope
+     * and closes Room. The old `@After` order closed Room while `collectAsStateWithLifecycle`
+     * was still querying it.
+     */
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(folder).around(resources).around(compose)
 
     private val context: Context get() = RuntimeEnvironment.getApplication()
+    private val events = CopyOnWriteArrayList<String>()
     private lateinit var database: CombrayDatabase
     private lateinit var integrations: Integrations
     private lateinit var scope: CoroutineScope
@@ -69,10 +86,29 @@ class SettingsQueueTest {
         )
     }
 
-    @After
-    fun tearDown() {
-        scope.cancel()
-        database.close()
+    /** Cancels and joins the fixture scope and closes Room, only after Compose has disposed. */
+    private inner class FixtureResources : TestRule {
+        override fun apply(base: Statement, description: Description): Statement =
+            object : Statement() {
+                override fun evaluate() {
+                    try {
+                        base.evaluate()
+                    } finally {
+                        // The Compose rule is innermost, so its statement has already disposed the
+                        // UI and run this marker before this cleanup starts.
+                        check(events.firstOrNull() == "compose disposed") {
+                            "Compose was not disposed before fixture cleanup; event order was $events"
+                        }
+                        events += "scope cancelled"
+                        scope.cancel()
+                        runBlocking {
+                            withTimeout(2_000) { scope.coroutineContext[Job]?.join() }
+                        }
+                        events += "database closed"
+                        database.close()
+                    }
+                }
+            }
     }
 
     private fun insertJob(dedupeKey: String, payload: String, url: String?) {
@@ -106,6 +142,9 @@ class SettingsQueueTest {
 
     private fun show() {
         compose.setContent {
+            DisposableEffect(Unit) {
+                onDispose { events += "compose disposed" }
+            }
             SettingsSheet(
                 integrations = integrations,
                 settings = BrowserSettings(context.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE)),
