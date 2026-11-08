@@ -26,6 +26,7 @@ import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ReloadPullPhase
 import ch.lkmc.combray.engine.ViewRef
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,6 +51,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -2021,6 +2023,79 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
         commit(1, 20, "https://after.test/")
         assertEquals("https://after.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCancelledDependencyDoesNotStopTheWorkQueue() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.forwardFailure = CancellationException("synthetic cancelled dependency")
+        browser.goForward()
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { browser.awaitIdle() } }
+        assertNotNull("Cancelling a dependency must not cancel the consumer", answered)
+        assertTrue(state().notice is Notice.Problem)
+
+        browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 20, "https://after.test/")
+        assertEquals("https://after.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCancelledDependencyDuringMaintenanceStillPublishesStoredTabs() {
+        runBlocking {
+            database.browser().insertTab(TabEntity("tab1", TabState.OPEN, null, "https://a.test/", "A", START, START, null))
+            database.browser().setSession(SessionEntity(activeTabId = "tab1"))
+        }
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now },
+            unusedTabs = { throw CancellationException("synthetic cancelled dependency") },
+        ).also { it.start() }
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { failing.awaitIdle() } }
+        assertNotNull("A cancelled dependency must not strand restoration", answered)
+        assertEquals("tab1", failing.browserState.value.activeTab?.id)
+        assertTrue(failing.browserState.value.notice is Notice.Problem)
+    }
+
+    @Test
+    fun workQueueFailuresDoNotLogTheirMessageOrCause() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        ShadowLog.clear()
+        engine.forwardFailure = AssertionError("synthetic page text", IllegalArgumentException("synthetic credential"))
+        browser.goForward(); idle()
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("browser state update failed") }
+        assertNull("A throwable can carry private messages and causes", record.throwable)
+        assertTrue(record.msg.contains(AssertionError::class.java.name))
+        assertFalse(record.msg.contains("synthetic"))
+    }
+
+    @Test
+    fun restoreFailuresDoNotLogTheirMessageOrCause() {
+        ShadowLog.clear()
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now },
+            unusedTabs = { throw AssertionError("synthetic page text", IllegalArgumentException("synthetic credential")) },
+        ).also { it.start() }
+        runBlocking { failing.awaitIdle() }
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("restoring the session failed") }
+        assertNull("A throwable can carry private messages and causes", record.throwable)
+        assertTrue(record.msg.contains(AssertionError::class.java.name))
+        assertFalse(record.msg.contains("synthetic"))
+    }
+
+    @Test
+    fun rendererCrashesDoNotLogTheNativeReason() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        ShadowLog.clear()
+        engine.emit(EngineEvent.Crashed(engine.view(1), "synthetic page text")); idle()
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("renderer crashed") }
+        assertFalse(record.msg.contains("synthetic"))
+        assertNull(record.throwable)
     }
 
     @Test

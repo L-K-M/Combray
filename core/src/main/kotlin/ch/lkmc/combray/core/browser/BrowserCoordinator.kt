@@ -30,6 +30,8 @@ import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -163,14 +165,15 @@ class BrowserCoordinator(
                 for (job in work) {
                     try {
                         job()
-                    } catch (cancelled: CancellationException) {
-                        // Shutdown, not a failure: the consumer stops with its scope.
-                        throw cancelled
                     } catch (failure: Throwable) {
+                        // A dependency can cancel independently; only our own cancellation
+                        // ends the consumer. An inner timeout must not strand later commands.
+                        if (failure is CancellationException && !currentCoroutineContext().isActive) throw failure
                         // A failed step must not stop the queue; it is a bug worth surfacing.
                         // An Error (article JSON parsing runs here) is caught too: losing the
                         // consumer would silently stop every later command.
-                        Log.e(LOG_TAG, "browser state update failed", failure)
+                        // Messages and causes can contain page text or native credentials.
+                        Log.e(LOG_TAG, "browser state update failed: ${failure.javaClass.name}")
                         // Restoring ends even if it was this step that failed: show what there is, not a blank page.
                         state.update {
                             // Before the session is restored the user has done nothing: it was the restore.
@@ -187,15 +190,14 @@ class BrowserCoordinator(
                 val failure = try {
                     maintain()
                     null
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
                 } catch (failed: Throwable) {
-                    // An Error must not skip publish(): the stored tabs are shown either way.
+                    if (failed is CancellationException && !currentCoroutineContext().isActive) throw failed
+                    // An Error or a cancelled dependency must not skip the stored tabs.
                     failed
                 }
                 publish()
                 if (failure != null) {
-                    Log.e(LOG_TAG, "restoring the session failed", failure)
+                    Log.e(LOG_TAG, "restoring the session failed: ${failure.javaClass.name}")
                     state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
                 }
             }
@@ -843,7 +845,7 @@ class BrowserCoordinator(
                 // A ready snapshot is immutable and stays.
                 val waiting = reader as? ReaderState.Loading
                 if (waiting?.tabId == crashed.tabId) reader = ReaderState.Unavailable(crashed.tabId)
-                Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
+                Log.w(LOG_TAG, "renderer crashed")
                 crashed.crashed = true
                 crashed.loading = false
                 crashed.awaitingCommit = false
