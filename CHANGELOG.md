@@ -180,6 +180,9 @@ All notable changes to this project are documented here. The format follows
   the page and listed in the third-party notices.
 - A Karakeep scope in Recent: the newest bookmarks, or Karakeep's search
   for what you type; a result opens in a new tab.
+- Recent rows offer Copy and Share for a past page, using the exact
+  address recorded for it. Android 13+ confirms the copy itself; older
+  versions show "Link copied".
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
 - Recent, Hister and Karakeep results mark the words you typed, ignoring
@@ -276,6 +279,10 @@ All notable changes to this project are documented here. The format follows
   current tab is highlighted. Day headers name the weekday for the past
   week. TalkBack announces the scope chips as tabs and says what tapping
   a row does.
+- Recent's scope chips wrap onto a second line at a narrow width or a
+  large font, so Hister and Karakeep stay visible instead of scrolling
+  off-screen. The local filter's keyboard Search key puts the keyboard
+  away; the filter still applies as you type.
 - The Hister field's hint reads "Words you remember, searched in Hister…".
 - Reader view sets the article in a serif reading face (the system's Noto
   Serif) with a larger title, and has a "Show the page" button at the top.
@@ -451,6 +458,8 @@ All notable changes to this project are documented here. The format follows
   stayed open; they now update every 30 seconds.
 - After scrolling Recent, a new filter or scope could leave its first
   matches out of view; the list now starts at the top.
+- The Recent list reserves the height of its Undo snackbar, so the last
+  row can scroll clear of it instead of sitting under the action.
 - Starting the app with open tabs no longer shows "New tab" for a moment
   before the restored page, as if the tabs were lost.
 - A save or capture made while its server cannot be reached no longer stops
