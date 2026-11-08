@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -87,6 +88,22 @@ class BrowserCoordinatorTest {
     }
 
     private fun idle() = runBlocking { browser.awaitIdle() }
+
+    /** Records the pages a scheduled capture asks about. */
+    private class RecordingSink : CaptureSink {
+        val requests = mutableListOf<String>()
+
+        override suspend fun wantsCapture(url: String): Long? {
+            requests += url
+            return 1L
+        }
+
+        override suspend fun captured(page: CapturedPage) = Unit
+
+        override suspend fun forgetHost(host: String, includeSubdomains: Boolean) = Unit
+
+        override suspend fun forgetUrl(url: String) = Unit
+    }
 
     private fun ready() {
         engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
@@ -147,6 +164,53 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ImeHidden(engine.view(1)))
         idle()
         assertTrue(reads.get() > 0)
+    }
+
+    @Test
+    fun forgettingASiteCancelsItsPendingCapture() {
+        val engine = FakeEngine()
+        val sink = RecordingSink()
+        val timing = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100)
+        val capturing = BrowserCoordinator(
+            database, engine, scope, clock = { now }, newId = { "id${ids++}" },
+            capture = sink, captureTiming = timing,
+        ).also { it.start() }
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { capturing.awaitIdle() }
+        capturing.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { capturing.awaitIdle() }
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 10, "https://a.test/", 0, 1))
+        runBlocking { capturing.awaitIdle() }
+        engine.emit(EngineEvent.LoadStatus(engine.view(1), 10, LoadPhase.COMPLETE, Attribution.CURRENT))
+        runBlocking { capturing.awaitIdle() }
+
+        capturing.forgetSite("a.test", includeSubdomains = false)
+        runBlocking { capturing.awaitIdle() }
+        // A surviving timer would ask the sink after its delay.
+        runBlocking { delay(400) }
+        runBlocking { capturing.awaitIdle() }
+        assertTrue(sink.requests.isEmpty())
+    }
+
+    @Test
+    fun aPendingCaptureStillRunsWithoutAForget() {
+        val engine = FakeEngine()
+        val sink = RecordingSink()
+        val timing = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100)
+        val capturing = BrowserCoordinator(
+            database, engine, scope, clock = { now }, newId = { "id${ids++}" },
+            capture = sink, captureTiming = timing,
+        ).also { it.start() }
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { capturing.awaitIdle() }
+        capturing.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { capturing.awaitIdle() }
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 10, "https://a.test/", 0, 1))
+        runBlocking { capturing.awaitIdle() }
+
+        runBlocking { delay(400) }
+        runBlocking { capturing.awaitIdle() }
+        assertEquals(listOf("https://a.test/"), sink.requests)
     }
 
     @Test
