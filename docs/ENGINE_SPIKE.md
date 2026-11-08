@@ -3624,3 +3624,33 @@ committed/composed text was invented; no supported bridge limit is established.
 Current-head Android native builds, full emulator fixtures and hosted review remain
 pending. The historical arm64 checks above do not validate these newer changes or a
 physical keyboard/IME.
+
+## Capture word boundaries (8 November 2026)
+
+PR #246 preserves a whitespace-only text node between inline elements while
+collapsing repeated spaces across text-node boundaries. Markup that splits a word
+without a rendered separator still adds none; block boundaries and the existing
+UTF-8, node and time budgets stay separate. This changes the embedded
+`native/src/capture.js`, not Servo upstream or the downstream engine pin.
+
+Against current main's script, four of the eight Node capture regressions failed;
+all eight pass with the candidate. The complete page-script suite has 25 passes,
+and its Python capture wrapper passes. On macOS with JDK 21 and Rust 1.97.1:
+
+```sh
+node --test native/src/test/*.test.mjs
+python3 -m unittest discover -s scripts/tests -p 'test_capture_script.py'
+(cd native && cargo fmt --check && cargo test --lib)
+./gradlew --max-workers=2 testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The paired source pin is `5813399954091a7efd7f736ea6fe14cb1ed523b9`.
+All 185 native host tests, Kotlin/unit/lint and APK/test-APK compilation pass.
+Host Rust does not compile Android-only engine code. The compiled
+`CaptureWhitespaceTest` opens a synthetic article in real Servo, then checks its
+captured phrase through the fixture Hister search. It must pass new both-ABI and
+full emulator gates before merge. Historical device evidence and compilation are
+not current-head runtime proof; no phone, live service or personal history was
+used.
