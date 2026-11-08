@@ -121,6 +121,13 @@ class BrowserCoordinator(
     private var visibility = AppVisibility.BACKGROUND
     /** The tab focused before the focused one, in this process: the quick switch returns there. */
     private var previousTabId: String? = null
+
+    /**
+     * The highest logical ordering stamp handed out in this process, seeded once from the
+     * persisted tabs. It only rises: a restart re-seeds from the rows, and a backwards clock
+     * cannot move it backwards. Not a database cache; the seed is the only read.
+     */
+    private var stamp: Long? = null
     private val pendingCaptures = HashMap<Long, PendingCapture>()
     private val pendingArticles = HashMap<Long, PendingArticle>()
 
@@ -465,15 +472,15 @@ class BrowserCoordinator(
      */
     fun reopenTab(tabId: String, focus: ReopenFocus) = submit {
         val tab = dao.tab(tabId)?.takeIf { it.state == TabState.CLOSED } ?: return@submit
-        val now = clock.now()
         database.withTransaction {
             if (focus == ReopenFocus.KEEP_CURRENT) {
                 // Closed in the background: back in its place among the open tabs, loaded once selected.
                 dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null))
                 return@withTransaction
             }
-            dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null, lastFocusedAt = now))
-            activate(tab.id, now)
+            val stamp = nextStamp()
+            dao.updateTab(tab.copy(state = TabState.OPEN, closedAt = null, lastFocusedAt = stamp))
+            activate(tab.id, stamp)
         }
         reconcile()
         publish()
@@ -1097,8 +1104,10 @@ class BrowserCoordinator(
 
             // Navigating in the focused tab is using it, so its Recent row stays above the pages it
             // left. A hidden tab loading pages is not in use: closing unused tabs still closes it.
+            // The stamp, not the raw wall time: a commit in the same millisecond as the last focus
+            // must not tie or fall below the tab it followed.
             val focused = dao.session()?.activeTabId == tab.id
-            val lastFocusedAt = if (focused) now else tab.lastFocusedAt
+            val lastFocusedAt = if (focused) nextStamp() else tab.lastFocusedAt
             // A forgotten page stays open without a visit, under its last title.
             val title = if (visit == null && (forgotten || event.kind == HistoryKind.LIST_UPDATED)) tab.title else visit?.title
             dao.updateTab(
@@ -1372,15 +1381,56 @@ class BrowserCoordinator(
 
     private suspend fun activeTab(): TabEntity? = dao.activeTab()
 
+    /**
+     * The next logical ordering stamp: at least two ticks above every stamp already handed out or
+     * persisted, or the wall clock when it is ahead. Two ticks leave room for the tab losing
+     * focus, whose stamp moves to just below the new one: that demotion must stay strictly above
+     * every existing row, including a different tab's persisted maximum.
+     *
+     * After a backwards clock the stamp stays ahead of the wall clock, so Recent rows can show a
+     * future relative time until the clock catches up. That is deliberate: the alternative is a
+     * new tab tying or falling below older ones, which the ordering cannot recover from.
+     *
+     * Throws when the counter cannot represent the next stamp, so the action fails through the
+     * coordinator's existing recovery instead of wrapping or silently tying at the limit.
+     */
+    private suspend fun nextStamp(): Long {
+        val seeded = stamp ?: seedStamp()
+        if (seeded > MAX_ORDER_STAMP) throw IllegalStateException("tab ordering stamp is exhausted")
+        val next = maxOf(seeded + 2, clock.now())
+        if (next > MAX_ORDER_STAMP) throw IllegalStateException("tab ordering stamp is exhausted")
+        stamp = next
+        return next
+    }
+
+    /**
+     * Seeds the logical stamp from the persisted tabs' maximum, including closed tabs: a closed
+     * tab's last use can be the newest stamp in the database. Runs once, on the owner queue,
+     * before the first allocation. A negative or unrepresentably large maximum is corrupt and
+     * fails the action rather than being clamped.
+     */
+    private suspend fun seedStamp(): Long {
+        val max = dao.maxTabStamp() ?: 0L
+        if (max < 0 || max > MAX_ORDER_STAMP) throw IllegalStateException("persisted tab ordering stamp is corrupt")
+        stamp = max
+        return max
+    }
+
     private suspend fun createTab(url: String?, openerTabId: String? = null): String {
-        val now = clock.now()
-        val tab = newOpenTab(url, createdAt = now, lastFocusedAt = now)
+        // A foreground tab's focus stamp sits immediately above its creation stamp, so it is
+        // used. The tab it replaces is demoted to just below the creation stamp, which the
+        // two-tick reservation keeps above every existing row; the new focus is above both.
+        val createdAt = nextStamp()
+        val focusedAt = createdAt + 1
+        // The focus tick is the highest stamp handed out, so the private maximum tracks it.
+        stamp = focusedAt
+        val tab = newOpenTab(url, createdAt = createdAt, lastFocusedAt = focusedAt)
         // Recorded before focus moves to the new tab, so that keeps the opener's own way back;
         // only for an opener still open (a page window can race its opener's close).
         openerTabId?.takeIf { dao.tab(it)?.state == TabState.OPEN }?.let { openers[tab.id] = it }
         database.withTransaction {
             dao.insertTab(tab)
-            activate(tab.id, now)
+            activate(tab.id, createdAt)
         }
         return tab.id
     }
@@ -1392,10 +1442,12 @@ class BrowserCoordinator(
      * only): the page loads when the user switches to the tab.
      */
     private suspend fun createBackgroundTab(url: String, active: TabEntity) {
-        val now = clock.now()
-        val tab = newOpenTab(url, createdAt = now, lastFocusedAt = now - 1)
+        // The background tab's focus stamp sits exactly below its creation stamp, so it stays
+        // unused; the active tab moves to the creation stamp, immediately above it.
+        val createdAt = nextStamp()
+        val tab = newOpenTab(url, createdAt = createdAt, lastFocusedAt = createdAt - 1)
         database.withTransaction {
-            dao.updateTab(active.copy(lastFocusedAt = now))
+            dao.updateTab(active.copy(lastFocusedAt = createdAt))
             dao.insertTab(tab)
         }
         state.update { it.copy(notice = Notice.OpenedInBackground(tab.id)) }
@@ -1413,22 +1465,22 @@ class BrowserCoordinator(
     )
 
     private suspend fun focus(tab: TabEntity) {
-        val now = clock.now()
+        val stamp = nextStamp()
         database.withTransaction {
-            dao.updateTab(tab.copy(lastFocusedAt = now))
-            activate(tab.id, now)
+            dao.updateTab(tab.copy(lastFocusedAt = stamp))
+            activate(tab.id, stamp)
         }
     }
 
     /**
-     * Makes [tabId] the focused tab. The tab losing focus was in use until now: its
-     * [TabEntity.lastFocusedAt] moves to just before [now], so a tab read for days is not
+     * Makes [tabId] the focused tab. The tab losing focus was in use until [stamp]: its
+     * [TabEntity.lastFocusedAt] moves to just below it, so a tab read for days is not
      * "unused" the moment the user switches away, and keeps its place right after the new one.
      */
-    private suspend fun activate(tabId: String, now: Long) {
+    private suspend fun activate(tabId: String, stamp: Long) {
         val previous = dao.session()?.activeTabId
         if (previous != null && previous != tabId) {
-            dao.tab(previous)?.takeIf { it.state == TabState.OPEN }?.let { dao.updateTab(it.copy(lastFocusedAt = now - 1)) }
+            dao.tab(previous)?.takeIf { it.state == TabState.OPEN }?.let { dao.updateTab(it.copy(lastFocusedAt = stamp - 1)) }
             previousTabId = previous
         }
         dao.setSession(SessionEntity(activeTabId = tabId))
@@ -1457,7 +1509,7 @@ class BrowserCoordinator(
      * place in history by when the tab was last used, not by when it closed: closing a tab left
      * long ago does not move it to the top of Recent, and retention counts from that last use.
      * The focused tab was in use until now, like a tab focus leaves ([activate]); the successor
-     * is in use from now. Returns whether [tab] was the focused tab.
+     * is in use from a fresh logical stamp. Returns whether [tab] was the focused tab.
      */
     private suspend fun closeLogically(tab: TabEntity): Boolean {
         val now = clock.now()
@@ -1469,7 +1521,7 @@ class BrowserCoordinator(
                 // An unused Home tab must not hide the next page in Recent.
                 val remaining = dao.openTabs()
                 val successor = remaining.firstOrNull { it.url != null } ?: remaining.firstOrNull()
-                successor?.let { dao.updateTab(it.copy(lastFocusedAt = now)) }
+                successor?.let { dao.updateTab(it.copy(lastFocusedAt = nextStamp())) }
                 dao.setSession(SessionEntity(activeTabId = successor?.id))
                 keepOpenersFor(successor?.id)
             }
@@ -1885,6 +1937,13 @@ class BrowserCoordinator(
 
         /** How often an open Recent or new-tab page applies the retention cutoff when nothing else changes. */
         const val RECENT_CUTOFF_TICK_MS = 60_000L
+
+        /**
+         * The highest base stamp this process hands out. Allocation stops at this bound so the
+         * two-tick reservation and the foreground tab's +1 focus tick stay representable; a
+         * persisted or wall-clock value at or beyond it is exhausted, not clamped or wrapped.
+         */
+        const val MAX_ORDER_STAMP = Long.MAX_VALUE - 2
 
         /**
          * Visits a search (Recent, the address sheet) reads at most, newest first. Far more than a

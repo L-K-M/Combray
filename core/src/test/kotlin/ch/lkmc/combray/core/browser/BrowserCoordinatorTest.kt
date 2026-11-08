@@ -96,6 +96,17 @@ class BrowserCoordinatorTest {
 
     private fun idle() = runBlocking { browser.awaitIdle() }
 
+    /**
+     * Stops the current coordinator's queue and starts a fresh one over the same database, as a
+     * process restart would. The old scope is joined, so its consumer cannot run later blocks;
+     * the join is bounded so a stuck block fails the test instead of hanging it.
+     */
+    private fun restartBrowser() {
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        browser = newCoordinator()
+    }
+
     private fun ready() {
         engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
         idle()
@@ -897,6 +908,286 @@ class BrowserCoordinatorTest {
         assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
         browser.stepTab(TabStep.NEWER); idle()
         assertEquals("tab-a", state().activeTab?.id)
+    }
+
+    /**
+     * Focusing tabs in the same millisecond must still give every tab a distinct, strictly
+     * increasing stamp, including when each tab commits a page (a commit also marks it used).
+     */
+    @Test
+    fun sameMillisecondFocusesAndCommitsKeepStrictRecencyOrder() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.openUrl("https://c.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://c.test/")
+
+        val tabs = runBlocking { database.browser().openTabs() }
+        assertEquals(listOf("https://c.test/", "https://b.test/", "https://a.test/"), tabs.map { it.url })
+        // No two rows share a stamp, and recency follows the focus order.
+        assertEquals(3, tabs.map { it.lastFocusedAt }.toSet().size)
+        assertTrue(tabs[0].lastFocusedAt > tabs[1].lastFocusedAt)
+        assertTrue(tabs[1].lastFocusedAt > tabs[2].lastFocusedAt)
+        // Every tab was used: its focus stamp is at or above its creation stamp.
+        tabs.forEach { assertTrue(it.lastFocusedAt >= it.createdAt) }
+    }
+
+    /**
+     * A background tab created after same-millisecond focus changes stays unused: its focus stamp
+     * is below its creation stamp, so Continue and the prior-tab fallback skip it.
+     */
+    @Test
+    fun aBackgroundTabAfterSameMillisecondFocusesStaysUnused() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.openUrl("https://later.test/", Placement.BACKGROUND_TAB); idle()
+
+        val later = runBlocking { database.browser().openTabs() }.single { it.url == "https://later.test/" }
+        assertTrue(later.lastFocusedAt < later.createdAt)
+
+        // Continue prefers the genuinely used a.test over the unseen background tab.
+        assertEquals("https://a.test/", continueTab()?.url)
+
+        // After a restart the prior-tab fallback also skips it (process memory is gone).
+        restartBrowser()
+        ready()
+        browser.focusPreviousTab(); idle()
+        assertEquals("https://a.test/", state().activeTab?.url)
+    }
+
+    /**
+     * A restart at a wall clock equal to or earlier than the persisted stamps must not tie or
+     * reorder: the seed is the persisted maximum, and the next stamp is above it.
+     */
+    @Test
+    fun aRestartAtAnEqualOrEarlierClockKeepsNewFocusesAbovePersistedStamps() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val persisted = runBlocking { database.browser().openTabs() }.single().lastFocusedAt
+
+        // Equal wall time.
+        now = persisted
+        restartBrowser()
+        ready()
+        browser.selectTab(runBlocking { database.browser().openTabs() }.single().id); idle()
+        assertTrue(runBlocking { database.browser().openTabs() }.single().lastFocusedAt > persisted)
+
+        // Earlier wall time.
+        now = persisted - 1
+        restartBrowser()
+        ready()
+        browser.selectTab(runBlocking { database.browser().openTabs() }.single().id); idle()
+        assertTrue(runBlocking { database.browser().openTabs() }.single().lastFocusedAt > persisted)
+    }
+
+    /**
+     * The seed runs lazily on the owner queue; the first allocation after a restart can be a
+     * commit, whose stamp is taken inside its own transaction. The seed must still read the
+     * persisted maximum there.
+     */
+    @Test
+    fun aRestartSeedsTheStampOnTheFirstCommit() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val persisted = runBlocking { database.browser().openTabs() }.single().lastFocusedAt
+
+        restartBrowser()
+        ready()
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+
+        val tab = runBlocking { database.browser().openTabs() }.single()
+        assertTrue(tab.lastFocusedAt > persisted)
+        assertEquals("https://a.test/next", tab.url)
+    }
+
+    /**
+     * The two-tick reservation: when the previous tab is demoted to just below the new stamp, its
+     * new stamp must stay strictly above a different tab's persisted maximum.
+     */
+    @Test
+    fun twoTickReservationKeepsThePreviousTabAboveAnotherTabsMaximum() {
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                dao.insertTab(TabEntity("hidden", TabState.OPEN, null, "https://hidden.test/", null, 100, 1_000, null))
+                dao.insertTab(TabEntity("previous", TabState.OPEN, null, "https://previous.test/", null, 50, 500, null))
+                dao.insertTab(TabEntity("current", TabState.OPEN, null, "https://current.test/", null, 60, 600, null))
+                dao.setSession(SessionEntity(activeTabId = "previous"))
+            }
+        }
+        now = 900 // Behind the persisted stamps, as a backwards clock would be.
+        restartBrowser()
+        ready()
+
+        browser.selectTab("current"); idle()
+
+        val tabs = runBlocking { database.browser().openTabs() }
+        assertEquals(listOf("current", "previous", "hidden"), tabs.map { it.id })
+        assertEquals(1_000, tabs.single { it.id == "hidden" }.lastFocusedAt)
+        // Demoted to current - 1, strictly above hidden's persisted maximum.
+        assertEquals(1_001, tabs.single { it.id == "previous" }.lastFocusedAt)
+        assertEquals(1_002, tabs.single { it.id == "current" }.lastFocusedAt)
+    }
+
+    /**
+     * Legacy rows with equal stamps keep a stable id order in the recency queries, so the close
+     * successor does not depend on rowid.
+     */
+    @Test
+    fun tiedLegacyRowsKeepStableIdOrderForTheCloseSuccessor() {
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                dao.insertTab(TabEntity("active", TabState.OPEN, null, "https://active.test/", null, 10, 200, null))
+                // Equal stamps, inserted in an order that is not id order.
+                dao.insertTab(TabEntity("tab-b", TabState.OPEN, null, "https://b.test/", null, 10, 100, null))
+                dao.insertTab(TabEntity("tab-a", TabState.OPEN, null, "https://a.test/", null, 10, 100, null))
+                dao.setSession(SessionEntity(activeTabId = "active"))
+            }
+        }
+        restartBrowser()
+        ready()
+
+        assertEquals(listOf("active", "tab-a", "tab-b"), runBlocking { database.browser().openTabs() }.map { it.id })
+        browser.closeTab("active"); idle()
+        // The tied rows are ordered by id, not by insertion rowid.
+        assertEquals("tab-a", state().activeTab?.id)
+    }
+
+    /**
+     * A backwards clock must not move a new creation or focus below existing rows: the logical
+     * stamp stays ahead of the persisted maximum.
+     */
+    @Test
+    fun aBackwardsClockDoesNotReorderNewCreationsOrFocuses() {
+        ready()
+        browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://old.test/")
+        val old = runBlocking { database.browser().openTabs() }.single()
+
+        now = old.createdAt - 1_000
+        browser.openUrl("https://new.test/", Placement.NEW_TAB); idle()
+
+        val tabs = runBlocking { database.browser().openTabsInCreationOrder() }
+        assertEquals(listOf("https://new.test/", "https://old.test/"), tabs.map { it.url })
+        assertTrue(tabs[0].createdAt > tabs[1].createdAt)
+        assertTrue(tabs[0].lastFocusedAt > old.lastFocusedAt)
+    }
+
+    /**
+     * The successor chosen when the active tab closes gets a fresh stamp above the closed tab's,
+     * so Recent keeps the closed page below the newly focused one.
+     */
+    @Test
+    fun theCloseSuccessorGetsAFreshStampAboveTheClosedTab() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val closed = runBlocking { database.browser().openTabs() }.single { it.url == "https://b.test/" }
+
+        browser.closeTab(closed.id); idle()
+
+        val successor = runBlocking { database.browser().openTabs() }.single { it.url == "https://a.test/" }
+        assertTrue(successor.lastFocusedAt > closed.lastFocusedAt)
+    }
+
+    /**
+     * Undo of an active close gives the reopened tab a fresh stamp above every open tab, so it
+     * leads Recent again.
+     */
+    @Test
+    fun reopeningTheActiveTabGivesItAFreshStampAboveEveryOpenTab() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        val closed = runBlocking { database.browser().openTabs() }.single { it.url == "https://b.test/" }
+        browser.closeTab(closed.id); idle()
+        val maxStamp = runBlocking { database.browser().openTabs() }.maxOf { it.lastFocusedAt }
+
+        browser.reopenTab(closed.id, ReopenFocus.FOCUS); idle()
+
+        val reopened = runBlocking { database.browser().openTabs() }.single { it.id == closed.id }
+        assertTrue(reopened.lastFocusedAt > maxStamp)
+    }
+
+    /**
+     * Unused-tab closing still uses the logical stamp: a tab focused in the same millisecond as
+     * another is not "unused" when the user switches away, and an old one still closes.
+     */
+    @Test
+    fun unusedTabClosingStillUsesTheLogicalStamp() {
+        unusedTabs = UnusedTabs.CLOSE
+        ready()
+        browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://old.test/")
+        browser.openUrl("https://new.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://new.test/")
+        now += 8 * DAY
+
+        browser.runMaintenance(); idle()
+        // new.test was focused when the clock jumped; old.test was demoted then left unused.
+        assertEquals(listOf("https://new.test/"), runBlocking { database.browser().openTabs() }.map { it.url })
+    }
+
+    /**
+     * A stamp at the representable bound leaves no room for the two-tick reservation: the
+     * allocation fails before writing, rather than wrapping or tying at the limit.
+     */
+    @Test
+    fun anExhaustedOrderingStampFailsBeforeWriting() {
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                dao.insertTab(TabEntity("exhausted", TabState.OPEN, null, "https://exhausted.test/", null, 1, Long.MAX_VALUE - 2, null))
+                dao.setSession(SessionEntity(activeTabId = "exhausted"))
+            }
+        }
+        restartBrowser()
+        ready()
+        val before = runBlocking { database.browser().openTabs() }
+
+        browser.selectTab("exhausted"); idle()
+
+        assertTrue(state().notice is Notice.Problem)
+        assertEquals(before, runBlocking { database.browser().openTabs() })
+    }
+
+    /**
+     * An unrepresentable persisted stamp fails the action through the coordinator's recovery: no
+     * overflow, no data change, and the work queue keeps serving later commands.
+     */
+    @Test
+    fun aCorruptOrderingStampFailsTheActionWithoutLosingDataOrStoppingTheQueue() {
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                dao.insertTab(TabEntity("corrupt", TabState.OPEN, null, "https://corrupt.test/", null, 1, Long.MAX_VALUE, null))
+                dao.setSession(SessionEntity(activeTabId = "corrupt"))
+            }
+        }
+        restartBrowser()
+        ready()
+        val before = runBlocking { database.browser().openTabs() }
+
+        browser.selectTab("corrupt"); idle()
+
+        assertTrue(state().notice is Notice.Problem)
+        assertEquals(before, runBlocking { database.browser().openTabs() })
+        // The queue survives: a command that does not allocate a stamp still runs.
+        browser.noticeShown(state().notice!!)
+        idle()
+        assertNull(state().notice)
     }
 
     @Test

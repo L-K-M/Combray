@@ -383,6 +383,11 @@ All notable changes to this project are documented here. The format follows
   Live verification remains under investigation.
 - Selecting or swiping tabs no longer reorders them. Open tabs keep creation
   order across pauses and restarts; history stays recent-first.
+- Tabs focused in the same millisecond, after a restart at an earlier clock, or
+  after the clock jumps backwards keep a strict recency order: tab stamps come
+  from a monotonic logical clock seeded from the newest persisted tab, with a
+  stable id tiebreaker for older tied rows. A background tab still counts as
+  unused, and an unrepresentable stamp fails the action instead of wrapping.
 - Show the keyboard for fields inside shadow roots, and offer Paste when
   you long-press an editable page field.
 - Pages retain their scroll position when embedded frames load or close,

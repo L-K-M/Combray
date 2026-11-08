@@ -3,6 +3,7 @@ package ch.lkmc.combray.core.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -73,5 +74,35 @@ class BrowserDaoTest {
         database.browser().insertTab(open)
         database.browser().setSession(SessionEntity(activeTabId = "open"))
         assertEquals(open, database.browser().activeTab())
+    }
+
+    /** Legacy rows with equal stamps keep a stable id order, not rowid order. */
+    @Test
+    fun openTabsBreaksStampTiesById() = runBlocking {
+        val dao = database.browser()
+        dao.insertTab(tab("tab-b", TabState.OPEN).copy(lastFocusedAt = 100))
+        dao.insertTab(tab("tab-a", TabState.OPEN).copy(lastFocusedAt = 100))
+        dao.insertTab(tab("tab-c", TabState.OPEN).copy(lastFocusedAt = 200))
+        assertEquals(listOf("tab-c", "tab-a", "tab-b"), dao.openTabs().map { it.id })
+    }
+
+    /** The observed recency queries break ties the same way, for Recent and Continue. */
+    @Test
+    fun observedOpenTabsBreakStampTiesById() = runBlocking {
+        val dao = database.browser()
+        dao.insertTab(tab("tab-b", TabState.OPEN).copy(lastFocusedAt = 100))
+        dao.insertTab(tab("tab-a", TabState.OPEN).copy(lastFocusedAt = 100))
+        assertEquals(listOf("tab-a", "tab-b"), dao.observeOpenTabs().first().map { it.id })
+        assertEquals(listOf("tab-a", "tab-b"), dao.observeOpenTabsForContinue().first().map { it.tab.id })
+    }
+
+    /** The seed covers closed tabs too, and is null when there are no tabs. */
+    @Test
+    fun maxTabStampIncludesClosedTabsAndIsNullWhenEmpty() = runBlocking {
+        val dao = database.browser()
+        assertNull(dao.maxTabStamp())
+        dao.insertTab(tab("open", TabState.OPEN).copy(lastFocusedAt = 50))
+        dao.insertTab(tab("closed", TabState.CLOSED).copy(lastFocusedAt = 500))
+        assertEquals(500L, dao.maxTabStamp())
     }
 }

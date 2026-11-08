@@ -18,7 +18,11 @@ interface BrowserDao {
     @Query("SELECT * FROM tabs WHERE id = :id")
     suspend fun tab(id: String): TabEntity?
 
-    @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC")
+    /**
+     * Open tabs in recency order. The id tiebreaker makes legacy rows with equal stamps (written
+     * before the logical ordering stamp) deterministic instead of rowid-dependent.
+     */
+    @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC, id ASC")
     suspend fun openTabs(): List<TabEntity>
 
     /** Fixed tab order, independent of focus; IDs keep equal creation times deterministic. */
@@ -29,7 +33,11 @@ interface BrowserDao {
     @Query("SELECT COUNT(*) FROM tabs WHERE state = 'OPEN'")
     suspend fun openTabCount(): Int
 
-    @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC")
+    /** The newest persisted tab stamp, including closed tabs; null when there are no tabs. */
+    @Query("SELECT MAX(lastFocusedAt) FROM tabs")
+    suspend fun maxTabStamp(): Long?
+
+    @Query("SELECT * FROM tabs WHERE state = 'OPEN' ORDER BY lastFocusedAt DESC, id ASC")
     fun observeOpenTabs(): Flow<List<TabEntity>>
 
     /**
@@ -41,7 +49,7 @@ interface BrowserDao {
         SELECT t.*, COALESCE(v.failed, 0) AS failed FROM tabs t
         LEFT JOIN visits v ON v.id = t.currentVisitId
         WHERE t.state = 'OPEN'
-        ORDER BY t.lastFocusedAt DESC
+        ORDER BY t.lastFocusedAt DESC, t.id ASC
         """,
     )
     fun observeOpenTabsForContinue(): Flow<List<TabWithFailure>>
