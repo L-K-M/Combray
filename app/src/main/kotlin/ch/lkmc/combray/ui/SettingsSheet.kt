@@ -5,6 +5,7 @@ import android.text.format.Formatter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -312,6 +313,22 @@ private data class ServiceLabels(
 )
 
 /**
+ * Save and Check connection for one service; each keeps a 48dp target. The row wraps instead of
+ * overflowing: at large font scales two wide labels must not push a button off the screen.
+ */
+@Composable
+internal fun ServiceActions(saveEnabled: Boolean, checkEnabled: Boolean, onSave: () -> Unit, onCheck: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+        Button(onClick = onSave, enabled = saveEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_save_settings))
+        }
+        OutlinedButton(onClick = onCheck, enabled = checkEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_check_connection))
+        }
+    }
+}
+
+/**
  * One service form's configuration actions. A tap admits exactly one operation synchronously and
  * captures the edit generation at that moment; the caller captures the payload. A second tap
  * while it runs is ignored. A completion applies only while both generations are unchanged, so a
@@ -443,49 +460,43 @@ private fun ServiceSettings(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        Button(
-            onClick = {
-                // A field edit can precede this tap without a recomposition in between.
-                // Read the live drafts, then keep this payload even if the user edits again.
-                val addressAtTap = editedAddress ?: address
-                val alternateAtTap = editedAlternate ?: alternate
-                val credentialAtTap = credential
-                val admission = actions.admit() ?: return@Button
-                scope.launch {
-                    actions.perform(
-                        admission,
-                        action = { configure(addressAtTap, credentialAtTap.ifBlank { null }, alternateAtTap) },
-                        apply = { result ->
-                            message = describe(resources, labels, result)
-                            if (result == Configured.Saved) {
-                                editedAddress = null
-                                editedAlternate = null
-                                credential = ""
-                            }
-                        },
-                    )
-                }.invokeOnCompletion { actions.release(admission) }
-            },
-            enabled = !actions.isBusy,
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_save_settings)) }
-        OutlinedButton(
-            onClick = {
-                val admission = actions.admit() ?: return@OutlinedButton
-                message = resources.getString(R.string.check_running)
-                scope.launch {
-                    actions.perform(
-                        admission,
-                        action = { check() },
-                        apply = { result -> message = result?.let { describe(resources, labels, it) } },
-                    )
-                }.invokeOnCompletion { actions.release(admission) }
-            },
-            enabled = current != null && !actions.isBusy,
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_check_connection)) }
-    }
+    ServiceActions(
+        saveEnabled = !actions.isBusy,
+        checkEnabled = current != null && !actions.isBusy,
+        onSave = {
+            // A field edit can precede this tap without a recomposition in between.
+            // Read the live drafts, then keep this payload even if the user edits again.
+            val addressAtTap = editedAddress ?: address
+            val alternateAtTap = editedAlternate ?: alternate
+            val credentialAtTap = credential
+            val admission = actions.admit() ?: return@ServiceActions
+            scope.launch {
+                actions.perform(
+                    admission,
+                    action = { configure(addressAtTap, credentialAtTap.ifBlank { null }, alternateAtTap) },
+                    apply = { result ->
+                        message = describe(resources, labels, result)
+                        if (result == Configured.Saved) {
+                            editedAddress = null
+                            editedAlternate = null
+                            credential = ""
+                        }
+                    },
+                )
+            }.invokeOnCompletion { actions.release(admission) }
+        },
+        onCheck = {
+            val admission = actions.admit() ?: return@ServiceActions
+            message = resources.getString(R.string.check_running)
+            scope.launch {
+                actions.perform(
+                    admission,
+                    action = { check() },
+                    apply = { result -> message = result?.let { describe(resources, labels, it) } },
+                )
+            }.invokeOnCompletion { actions.release(admission) }
+        },
+    )
     if (current != null) {
         TextButton(onClick = { confirmRemove = true }, enabled = !actions.isBusy) {
             Text(stringResource(R.string.action_remove))

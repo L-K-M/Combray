@@ -282,6 +282,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Save settings and Check connection in Settings wrap to two lines
+  instead of running off the screen when large font settings make them
+  too wide for one row.
 - Settings service forms admit one configuration action at a time. A second
   tap while a save or check runs is ignored, and a delayed result no longer
   clears or describes a newer edit: the address and key tapped are the ones
