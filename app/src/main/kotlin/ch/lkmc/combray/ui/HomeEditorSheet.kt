@@ -153,8 +153,16 @@ internal fun HomeEditorSheet(
                 error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
                 when (page) {
                     HomeEditPage.OVERVIEW -> {
-                        HomeVisibilityRow(R.string.home_show_continue, continuation, settings::setHomeContinue)
-                        HomeVisibilityRow(R.string.home_show_frequent, frequent, settings::setHomeFrequentSites)
+                        HomeVisibilityRow(R.string.home_show_continue, continuation) { choice ->
+                            change {
+                                if (!settings.setHomeContinue(choice).await()) error = R.string.home_change_failed
+                            }
+                        }
+                        HomeVisibilityRow(R.string.home_show_frequent, frequent) { choice ->
+                            change {
+                                if (!settings.setHomeFrequentSites(choice).await()) error = R.string.home_change_failed
+                            }
+                        }
                         HorizontalDivider()
                         HomeSectionTitle(R.string.home_pinned)
                         TextButton(onClick = { edit(null) }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) { Text(stringResource(R.string.home_add_link)) }

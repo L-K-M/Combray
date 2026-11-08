@@ -159,6 +159,17 @@ fun BrowserScreen(
         keyboard?.hide()
     }
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    // Text size's preview is provisional: rapid steps read the latest pending choice, and a
+    // failed write rolls the engine back to the durable value.
+    val textSizeDraft = remember {
+        TextSizeDraft(
+            scope = scope,
+            durable = { graph.settings.textSize.value },
+            apply = { size -> browser.applyTextSize(size) },
+            persist = graph.settings::setTextSize,
+            onFailure = { notify(resources.getString(R.string.home_change_failed)) },
+        )
+    }
     LaunchedEffect(tab?.id, tab?.url) {
         if (!home) homeMode = AddressEditorMode.IDLE
     }
@@ -789,12 +800,12 @@ fun BrowserScreen(
         }
         Sheet.TEXT_SIZE -> {
             TextSizeDialog(
-                size = textSize,
-                onChange = { size ->
-                    graph.settings.setTextSize(size)
-                    browser.applyTextSize()
+                current = { textSizeDraft.displayed },
+                onChange = { size -> textSizeDraft.choose(size) },
+                onDismiss = {
+                    textSizeDraft.reset()
+                    dismiss()
                 },
-                onDismiss = dismiss,
             )
         }
     }

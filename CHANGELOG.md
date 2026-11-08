@@ -194,6 +194,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Browser preferences (appearance, tab count, closing unused tabs, Home
+  sections and text size) commit to disk off the main thread before the
+  choice is published. A failed write shows a generic failure and leaves
+  the previous choice; text size's immediate preview rolls back, and rapid
+  steps keep their order.
 - Play stays within reach on pages whose own video player shows an error:
   the offer to open the page's audio or video in the player now stays
   until you play or close it, the address field shows Play while the page
