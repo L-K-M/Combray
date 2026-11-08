@@ -53,10 +53,13 @@ class OutboxTest {
 
     private val service get() = runBlocking { database.integrations().service(ServiceKind.KARAKEEP) }!!
 
-    private fun enqueue(payload: String = """{"url":"https://a.test/","title":"One"}""", dedupeKey: String = "https://a.test/") =
-        runBlocking {
-            outbox.enqueue(JobKind.KARAKEEP_SAVE, service, Binding.CURRENT, dedupeKey, payload, supersede = false)
-        }
+    private fun enqueue(
+        payload: String = """{"url":"https://a.test/","title":"One"}""",
+        dedupeKey: String = "https://a.test/",
+        url: String? = null,
+    ) = runBlocking {
+        outbox.enqueue(JobKind.KARAKEEP_SAVE, service, Binding.CURRENT, dedupeKey, payload, supersede = false, url = url)
+    }
 
     private fun job(id: String) = runBlocking { database.integrations().job(id) }!!
 
@@ -240,6 +243,49 @@ class OutboxTest {
         assertEquals(JobState.FAILED, job(queued.job.id).state)
     }
 
+    /** The row carries the address its caller recorded, so status lists never decode the payload for it. */
+    @Test
+    fun enqueueStoresTheUrlTheCallerRecords() {
+        val queued = enqueue(url = "https://a.test/") as Enqueued.Queued
+        assertEquals("https://a.test/", queued.job.url)
+        assertEquals("https://a.test/", job(queued.job.id).url)
+
+        // No caller-recorded address: none is invented from the payload.
+        val undecoded = enqueue(payload = """{"url":"https://b.test/"}""", dedupeKey = "https://b.test/", url = null) as Enqueued.Queued
+        assertNull(undecoded.job.url)
+    }
+
+    @Test
+    fun retryingAFailedJobKeepsTheRecordedUrlUnlessTheCallerRecordsAnother() {
+        val first = enqueue(url = "https://a.test/") as Enqueued.Queued
+        claimAndFinish(DispatchResult.Rejected("bad_request"))
+
+        val again = enqueue(url = "https://a.test/") as Enqueued.Queued
+        assertEquals(first.job.id, again.job.id)
+        assertEquals("https://a.test/", job(again.job.id).url)
+
+        // A caller that records no address leaves the original in place.
+        claimAndFinish(DispatchResult.Rejected("bad_request"))
+        val silent = enqueue(url = null) as Enqueued.Queued
+        assertEquals("https://a.test/", job(silent.job.id).url)
+    }
+
+    @Test
+    fun aChangedReportPayloadCannotInheritOldAddressMetadata() {
+        val reports = reportsService()
+        val first = runBlocking {
+            outbox.enqueue(JobKind.SITE_REPORT, reports, Binding.CURRENT, "report-1", """{"url":"https://a.test/"}""", supersede = false, url = "https://a.test/")
+        } as Enqueued.Queued
+        claimAndFinish(DispatchResult.Rejected("bad_request"))
+        val again = runBlocking {
+            outbox.enqueue(JobKind.SITE_REPORT, reports, Binding.CURRENT, "report-1", """{"url":"https://b.test/"}""", supersede = false)
+        } as Enqueued.Queued
+        assertEquals(first.job.id, again.job.id)
+        // Without new metadata, use the off-thread legacy decoder, not the old payload's URL.
+        assertNull(job(again.job.id).url)
+        assertTrue(job(again.job.id).payload.contains("https://b.test/"))
+    }
+
     @Test
     fun reSavingAFailedJobSendsTheFreshPayload() {
         val first = enqueue(payload = """{"url":"https://a.test/","title":"One"}""") as Enqueued.Queued
@@ -277,12 +323,12 @@ class OutboxTest {
         dao.service(ServiceKind.HISTER)!!
     }
 
-    private fun enqueueReport(id: String, service: ServiceEntity = reportsService()) = runBlocking {
-        outbox.enqueue(JobKind.SITE_REPORT, service, Binding.CURRENT, id, """{"reportId":"$id"}""", supersede = false)
+    private fun enqueueReport(id: String, url: String? = null, service: ServiceEntity = reportsService()) = runBlocking {
+        outbox.enqueue(JobKind.SITE_REPORT, service, Binding.CURRENT, id, """{"reportId":"$id"}""", supersede = false, url = url)
     } as Enqueued.Queued
 
-    private fun enqueueCapture(key: String = "https://c.test/") = runBlocking {
-        outbox.enqueue(JobKind.HISTER_ADD, histerService(), Binding.SAME_DESTINATION, key, """{"url":"$key","text":"page text"}""", supersede = true)
+    private fun enqueueCapture(key: String = "https://c.test/", url: String? = key) = runBlocking {
+        outbox.enqueue(JobKind.HISTER_ADD, histerService(), Binding.SAME_DESTINATION, key, """{"url":"$key","text":"page text"}""", supersede = true, url = url)
     } as Enqueued.Queued
 
     @Test
@@ -322,24 +368,69 @@ class OutboxTest {
     }
 
     @Test
-    fun finishedReportsAndCapturesDropTheirContentButSavesKeepTheirs() {
-        val save = enqueue() as Enqueued.Queued
-        val capture = enqueueCapture()
-        val report = enqueueReport("report-a")
+    fun finishedReportsAndCapturesDropTheirContentAndUrlButSavesKeepTheirs() {
+        val save = enqueue(url = "https://a.test/") as Enqueued.Queued
+        val capture = enqueueCapture(url = "https://c.test/")
+        val report = enqueueReport("report-a", url = "https://r.test/")
 
         repeat(3) { claimAndFinish(DispatchResult.Done(remoteId = null)) }
 
         assertEquals(listOf(JobState.SUCCEEDED), listOf(save, capture, report).map { job(it.job.id).state }.distinct())
         assertEquals("", job(report.job.id).payload)
         assertEquals(0, job(report.job.id).payloadBytes)
+        assertNull(job(report.job.id).url)
         assertEquals("", job(capture.job.id).payload)
+        assertNull(job(capture.job.id).url)
         assertNotEquals("", job(save.job.id).payload)
+        assertEquals("https://a.test/", job(save.job.id).url)
+    }
+
+    @Test
+    fun failedAndWaitingJobsKeepTheirUrlForTheirRetry() {
+        val save = enqueue(url = "https://a.test/") as Enqueued.Queued
+        claimAndFinish(DispatchResult.Rejected("http_400"))
+        assertEquals(JobState.FAILED, job(save.job.id).state)
+        assertEquals("https://a.test/", job(save.job.id).url)
+
+        val waiting = enqueue(dedupeKey = "https://w.test/", url = "https://w.test/") as Enqueued.Queued
+        claimAndFinish(DispatchResult.Retry("network", delivery = Delivery.NOT_SENT))
+        assertEquals(JobState.RETRY_WAIT, job(waiting.job.id).state)
+        assertEquals("https://w.test/", job(waiting.job.id).url)
+
+        val paused = enqueue(dedupeKey = "https://p.test/", url = "https://p.test/") as Enqueued.Queued
+        claimAndFinish(DispatchResult.AuthRequired("http_401"))
+        assertEquals(JobState.AUTH_REQUIRED, job(paused.job.id).state)
+        assertEquals("https://p.test/", job(paused.job.id).url)
+    }
+
+    @Test
+    fun expiredCapturesDropTheirContentAndUrl() {
+        val capture = enqueueCapture(url = "https://c.test/")
+
+        now += Outbox.CAPTURE_MAX_AGE_MS + 1
+        assertNull(runBlocking { outbox.claim("owner", LEASE_MS) })
+
+        assertEquals(JobState.EXPIRED, job(capture.job.id).state)
+        assertEquals("", job(capture.job.id).payload)
+        assertNull(job(capture.job.id).url)
+    }
+
+    @Test
+    fun supersededCapturesDropTheirContentAndUrl() {
+        val first = enqueueCapture(key = "https://c.test/", url = "https://c.test/")
+        val second = enqueueCapture(key = "https://c.test/", url = "https://c.test/")
+
+        assertEquals(JobState.SUPERSEDED, job(first.job.id).state)
+        assertEquals("", job(first.job.id).payload)
+        assertNull(job(first.job.id).url)
+        assertEquals(JobState.PENDING, job(second.job.id).state)
+        assertEquals("https://c.test/", job(second.job.id).url)
     }
 
     @Test
     fun discardedOrReplacedParkedReportsDropTheirContentAtOnce() {
         val previous = reportsService()
-        val replaced = enqueueReport("report-replaced", previous)
+        val replaced = enqueueReport("report-replaced", url = "https://r.test/", service = previous)
         val current = reportsService("fp-new")
         runBlocking {
             database.withTransaction { outbox.onServiceChanged(previous, current) }
@@ -349,8 +440,9 @@ class OutboxTest {
         }
         assertEquals(JobState.SUPERSEDED, job(replaced.job.id).state)
         assertEquals("", job(replaced.job.id).payload)
+        assertNull(job(replaced.job.id).url)
 
-        val discarded = enqueueReport("report-discarded", current)
+        val discarded = enqueueReport("report-discarded", url = "https://d.test/", service = current)
         val next = reportsService("fp-next")
         runBlocking {
             database.withTransaction { outbox.onServiceChanged(current, next) }
@@ -358,6 +450,7 @@ class OutboxTest {
         }
         assertEquals(JobState.CANCELLED, job(discarded.job.id).state)
         assertEquals("", job(discarded.job.id).payload)
+        assertNull(job(discarded.job.id).url)
     }
 
     @Test
@@ -366,7 +459,7 @@ class OutboxTest {
         val service = reportsService()
         // One report in every state, plus a save and a capture that are not reports.
         for (state in JobState.entries) {
-            val queued = enqueueReport("report-${state.name}", service)
+            val queued = enqueueReport("report-${state.name}", service = service)
             runBlocking { dao.updateJob(queued.job.copy(state = state)) }
         }
         enqueue()

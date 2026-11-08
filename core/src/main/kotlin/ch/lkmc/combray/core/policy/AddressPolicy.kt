@@ -524,10 +524,24 @@ object HostNames {
      * both spellings of one site count as it. Only that spelling merges: "www.sub.example.com"
      * keys to "sub.example.com", and "example.net" stays itself.
      */
-    fun mergedSite(host: String): String = host.removePrefix(WWW_PREFIX)
+    fun mergedSite(host: String): String = withoutWwwLabel(host)
 
-    /** The spellings stored visits of [site] may carry: the merged key and its "www." form. */
-    fun siteSpellings(site: String): List<String> = listOf(site, "$WWW_PREFIX$site")
+    /**
+     * [host] without a leading "www." label, but only when "www." is a spelling variant of a
+     * longer name: "www.example.com" becomes "example.com". "www.com" keeps its label — there
+     * "www" names the site itself, and stripping it would leave the bare suffix "com".
+     */
+    fun withoutWwwLabel(host: String): String {
+        val stripped = host.removePrefix(WWW_PREFIX)
+        return if (stripped != host && '.' in stripped) stripped else host
+    }
+
+    /**
+     * The spellings stored visits of [site] may carry: the merged key and its "www." form —
+     * but only when that form really merges back ("www.com" is its own site, not "com"'s).
+     */
+    fun siteSpellings(site: String): List<String> =
+        if (mergedSite("$WWW_PREFIX$site") == site) listOf(site, "$WWW_PREFIX$site") else listOf(site)
 
     fun isWeb(url: String): Boolean {
         val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase()

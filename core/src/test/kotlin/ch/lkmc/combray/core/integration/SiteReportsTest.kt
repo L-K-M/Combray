@@ -156,6 +156,7 @@ class SiteReportsTest {
         assertArrayEquals(FakeReports.PNG, file(first).readBytes())
         assertEquals(listOf(first.id, second.id, withoutScreenshot.id), jobs().map { it.dedupeKey })
         assertTrue(jobs().all { it.kind == JobKind.SITE_REPORT && it.service == ServiceKind.SITE_REPORTS && it.state.isActive })
+        assertEquals(URL, job(first).url)
         assertEquals(URL, integrations.jobUrl(job(first)))
 
         // A repeated tap on Send does not queue the same report again.

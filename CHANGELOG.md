@@ -284,19 +284,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- The browser starts once and keeps working after an internal error. A
-  second or concurrent start no longer starts a second work queue, and an
-  `Error` in one state update (for example running out of memory while
-  preparing an article) no longer silently stops every later navigation,
-  tab and history action until the app is restarted. Cancellation still
-  stops the queue.
-- A crashed renderer's pending capture, article, find and keyboard work is
-  dropped, and only its own: a stale crash from a replaced view no longer
-  clears a healthy tab's requests, and a ready Reader snapshot survives its
-  renderer's crash.
+- Settings no longer decodes whole job payloads (up to 256 KiB of
+  captured page text) per row while composing the queue. Jobs record
+  their address at enqueue in a `url` column (schema 6, auto-migrated);
+  a row without one shows "Unknown page" instead of its raw dedupe key
+  or report id. A row written before the column existed is decoded once,
+  off the UI thread. Finished captures and reports drop the address with
+  their payload; failed and waiting rows keep it for their retry.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- Karakeep's connection check verifies a bookmarks-list response before
+  reporting a working connection. A proxy login page or unrelated HTTP 200
+  response now reports the wrong address instead of a false success.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -546,6 +546,16 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- The browser starts once and keeps working after an internal error. A
+  second or concurrent start no longer starts a second work queue, and an
+  `Error` in one state update (for example running out of memory while
+  preparing an article) no longer silently stops every later navigation,
+  tab and history action until the app is restarted. Cancellation still
+  stops the queue.
+- A crashed renderer's pending capture, article, find and keyboard work is
+  dropped, and only its own: a stale crash from a replaced view no longer
+  clears a healthy tab's requests, and a ready Reader snapshot survives its
+  renderer's crash.
 - The durable queue: one broken job cycle (a storage error, a recorder
   bug) no longer strands the jobs behind it or skips their wakeup; a job
   whose worker died before finishing stops at the attempt limit instead
@@ -632,3 +642,7 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A site whose name begins with "www." and has no further dots, such as
+  `www.com`, no longer shows as its bare suffix (`com`) in the address
+  bar, tab switcher, Recent and the new-tab page: the label is dropped
+  only when a longer name follows it.
