@@ -489,6 +489,8 @@ All notable changes to this project are documented here. The format follows
   such as `pageToken` and `NextToken` are still allowed. In a fragment only
   `name=value` pairs count, so an anchor such as `#token-usage` is not
   mistaken for a credential.
+- Scrolling a long article in reader view does less work: each block's text
+  is built once, not again every time the screen around it recomposes.
 - Reader view showed numbered lists as bullets, and section headings
   smaller than the text under them. Numbered items now show the page's
   numbers, and no heading is smaller than the body text.
