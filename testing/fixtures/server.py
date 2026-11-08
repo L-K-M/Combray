@@ -17,8 +17,8 @@ Pages
                              sets the browser cookie; title IMAGE-DOWNLOAD
   /download-image.png?k=<key>[&fail=1]
                              original 1x1 green PNG; fail=1 refuses the separate downloader
-  /download-image-redirect.png?k=<key>
-                             redirects to the original PNG
+  /download-image-redirect.png?k=<key>[&fail=1]
+                             redirects to the original PNG, forwarding fail
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /once.html?k=<alnum>       title ONCE on the first request per key; later ones close unanswered
                              (a reload that fails like a lost connection)

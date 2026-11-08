@@ -20,7 +20,7 @@ import java.time.ZoneId
 fun displayHost(url: String): String {
     val address = url.trim()
     val host = HostNames.of(address) ?: return HostlessPage.of(address).label(address)
-    return HostNames.forDisplay(host).removePrefix("www.")
+    return HostNames.withoutWwwLabel(HostNames.forDisplay(host))
 }
 
 /** What a page without a host shows instead. Only the scheme picks it; the rest is never shown. */

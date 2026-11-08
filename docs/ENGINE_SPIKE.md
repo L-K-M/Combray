@@ -3077,7 +3077,7 @@ Checks:
 ## 51. Typing into rich text editors (7 November 2026)
 
 This records the first typing change. The caret, composition, selection and keyboard-action
-limits below are continued in [§54](#54-rich-editor-carets-composition-and-navigation-7-november-2026).
+limits below are continued in [§57](#57-rich-editor-carets-composition-and-navigation-7-november-2026).
 
 Validated source: `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a` on `combray/0.7`, which merges
 downstream [PR #35](https://github.com/L-K-M/servo/pull/35) onto the merge of
@@ -3411,7 +3411,8 @@ The video was playable; Play was out of reach. The owner chose all three remedie
   and comes back after a tap on the player's error text, its play button or its mute button
   (which the site also handles). Once, a tap on the site's cookie sheet where it covered the
   video brought the offer back as well; the sheet did not show again on a cleared profile, so
-  whether that tap reached the player in Servo's hit test is open.
+  whether that tap reached the player in Servo's hit test was left open. Section 55 answers it:
+  a covering layer that takes no hits leaves the tap on the player, by design.
 - The x86_64 emulator suite runs in this PR's Engine workflow.
 
 
@@ -3440,7 +3441,40 @@ all 18 `MediaPlayerTest` plus `ImageDownloadTest` checks on the arm64 API 36 emu
 The native build is unchanged and passes again; the hit-test script is unchanged.
 
 
-## 54. Rich-editor carets, composition and navigation (7 November 2026)
+## 55. Hit testing per tree and sheets over the video (7 November 2026)
+
+Two follow-ups to section 54's review, after its merge. Neither changes the tap
+verdicts; the second answers the question section 54 left open.
+
+- `native/src/media_tap.js` asks `elementFromPoint` once per tree instead of once
+  per candidate media element. The topmost hit cannot change within one run of the
+  script, so every verdict is what it was; the sixteen Node checks in
+  `native/src/test/media_tap.test.mjs` pin them. One new check counts the hit tests
+  (one for the document's two overlapping videos, one for the player's tree) and
+  fails against the previous script, which asked the document twice.
+
+- What a tap on a covering layer does does not depend on what is drawn over the
+  video but on whether that layer takes part in hit testing at the point. Desktop
+  servoshell (Servo checkout `825ef1f0356f`, headless, fresh profile), synthetic
+  pages with a `<video>` whose load was cancelled (`readyState` 0, `networkState`
+  3) under a custom element's open shadow root sheet, the script filled in with the
+  tap point: the hittable sheet is the topmost hit (`elementFromPoint` returns the
+  sheet's host) and the script answers no; the same sheet with `pointer-events:
+  none` leaves the video as the topmost hit and it answers yes. Two new Node checks
+  pin both verdicts. So section 54's one-off cookie-sheet tap is consistent with
+  the sheet taking no hits at that point: the tap reached only the page's own
+  player, and the offer came back by design. A sheet that takes hits refuses the
+  tap; what remains untested is the real page's sheet, which did not show again on
+  a cleared profile.
+
+Also in this change: the fixture listing in `testing/fixtures/server.py` names the
+`fail` parameter that `/download-image-redirect.png` forwards with its redirect.
+
+Evidence on macOS arm64: `node --test native/src/test/media_tap.test.mjs` (16),
+the fixture-server tests (28), `cargo fmt --check` and `cargo test --lib` in
+`native/`, `python3 scripts/check_docs.py`, and the Gradle unit tests.
+
+## 57. Rich-editor carets, composition and navigation (7 November 2026)
 
 Pinned source: `5813399954091a7efd7f736ea6fe14cb1ed523b9`, the merge of downstream
 [Servo PR #40](https://github.com/L-K-M/servo/pull/40), based on `80788879d1b`.
