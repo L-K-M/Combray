@@ -29,6 +29,8 @@ import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -79,7 +81,7 @@ class BrowserCoordinatorTest {
 
     @After
     fun tearDown() {
-        scope.cancel()
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
         database.close()
     }
 
@@ -138,12 +140,7 @@ class BrowserCoordinatorTest {
      */
     @Test
     fun heartbeatsAndEchoesSkipThePublishReads() {
-        val reads = AtomicInteger()
-        database.close()
-        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
-            .setQueryCallback({ sql, _ -> if (sql.trimStart().startsWith("SELECT", ignoreCase = true)) reads.incrementAndGet() }, Runnable::run)
-            .build()
-        browser = newCoordinator()
+        val reads = countReads()
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
@@ -159,6 +156,85 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ImeHidden(engine.view(1)))
         idle()
         assertTrue(reads.get() > 0)
+    }
+
+    /**
+     * Rebuilds the database counting the coordinator's data reads. Room's invalidation tracker
+     * (`changes()` and `room_table_modification_log`) runs after writes and is not a read the
+     * coordinator chooses, so it stays out of the count.
+     */
+    private fun countReads(): AtomicInteger {
+        val reads = AtomicInteger()
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
+        database.close()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ ->
+                val query = sql.trimStart()
+                if (query.startsWith("SELECT", ignoreCase = true) &&
+                    !query.startsWith("SELECT changes()", ignoreCase = true) &&
+                    !query.contains("room_table_modification_log")
+                ) {
+                    reads.incrementAndGet()
+                }
+            }, Runnable::run)
+            .build()
+        browser = newCoordinator()
+        return reads
+    }
+
+    @Test
+    fun aTitleEventPublishesWithTwoQueries() {
+        val reads = countReads()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        idle() // the view's creation events are queued from inside the work queue
+        reads.set(0)
+
+        // A title for a document that never committed changes nothing, so only publish() reads.
+        engine.emit(EngineEvent.TitleChanged(engine.view(1), 10, "A title", Attribution.CURRENT))
+        idle()
+        // One joined active-tab query and one open-tab count.
+        assertEquals(2, reads.get())
+    }
+
+    @Test
+    fun aTitleEventForACommittedPagePublishesWithFourQueries() {
+        val reads = countReads()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        reads.set(0)
+
+        engine.emit(EngineEvent.TitleChanged(engine.view(1), 10, "A title", Attribution.CURRENT))
+        idle()
+        // onTitle reads the visit and the tab; publish() adds the joined active-tab query and
+        // the open-tab count. The live view's document answers the failure check without a read.
+        assertEquals(4, reads.get())
+    }
+
+    @Test
+    fun releasingHiddenViewsReadsTheOpenTabsOnce() {
+        val reads = countReads()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        now += 1_000
+        browser.openUrl("https://c.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://c.test/")
+        reads.set(0)
+
+        browser.releaseHiddenViews()
+        idle()
+        // One open-tab snapshot serves the recency order and the URL check; the per-view
+        // primary-key lookups are gone.
+        assertEquals(1, reads.get())
+        assertEquals(listOf(1L, 2L), engine.closed)
     }
 
     @Test
@@ -2366,6 +2442,39 @@ class BrowserCoordinatorTest {
         browser.releaseHiddenViews(); idle()
         assertEquals(listOf(1L), engine.closed)
         assertEquals("https://b.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aLogicallyClosedViewCanBeReleasedAfterItsFirstCloseFails() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val firstTab = state().activeTab!!.id
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        engine.closeFailure = IllegalStateException("synthetic close failure")
+        browser.closeTab(firstTab); idle()
+        assertEquals(TabState.CLOSED, runBlocking { database.browser().tab(firstTab) }!!.state)
+        assertTrue(engine.closed.isEmpty())
+
+        browser.releaseHiddenViews(); idle()
+        assertEquals(listOf(1L), engine.closed)
+        assertEquals("https://b.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aPageOpenedWindowWithoutAnAddressKeepsItsRenderer() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        // A window a page opened has a renderer before its first commit, so its tab has no
+        // recovery address yet: releasing it would leave nothing to restore.
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        browser.releaseHiddenViews(); idle()
+        assertEquals(listOf(1L), engine.closed)
+        assertTrue(PAGE_TAB !in engine.closed)
     }
 
     @Test

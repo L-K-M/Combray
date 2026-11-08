@@ -1374,8 +1374,7 @@ class BrowserCoordinator(
         state.update { it.copy(engine = status) }
     }
 
-    private suspend fun activeTab(): TabEntity? =
-        dao.session()?.activeTabId?.let { dao.tab(it) }?.takeIf { it.state == TabState.OPEN }
+    private suspend fun activeTab(): TabEntity? = dao.activeTab()
 
     private suspend fun createTab(url: String?, openerTabId: String? = null): String {
         val now = clock.now()
@@ -1616,10 +1615,18 @@ class BrowserCoordinator(
      */
     private suspend fun releaseViewsBeyond(keep: Int) {
         if (liveByTab.size <= keep) return
-        val recency = dao.openTabs().mapIndexed { index, tab -> tab.id to index }.toMap()
+        // One open-tab snapshot serves recency and protects windows without a recovery URL.
+        // A logical close can commit before engine.closeView throws: a view absent from this
+        // snapshot is orphaned and remains eligible for a later close attempt.
+        val open = dao.openTabs()
+        val recency = open.mapIndexed { index, tab -> tab.id to index }.toMap()
+        val urls = open.associate { it.id to it.url }
         liveByTab.values
             // A page waiting for an answer would lose it: keep its renderer.
-            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && dao.tab(it.tabId)?.url != null }
+            .filter {
+                it.nativeTab != selectedNative && it.controls.isEmpty() &&
+                    (urls[it.tabId] != null || it.tabId !in recency)
+            }
             .sortedByDescending { recency[it.tabId] ?: Int.MAX_VALUE }
             .take(liveByTab.size - keep)
             .forEach { closeView(it) }
