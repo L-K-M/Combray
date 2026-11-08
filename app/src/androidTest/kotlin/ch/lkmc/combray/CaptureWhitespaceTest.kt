@@ -6,6 +6,7 @@ import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.integration.Configured
 import ch.lkmc.combray.core.integration.HisterSearch
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -17,6 +18,11 @@ import org.junit.runner.RunWith
 class CaptureWhitespaceTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     private val device = Device { compose.mainClock.advanceTimeByFrame() }
+
+    @After
+    fun stopCapture() {
+        runBlocking { device.integrations.hister.setCaptureEnabled(false) }
+    }
 
     @Test
     fun separatedInlineWordsRemainSearchableAfterRealEngineCapture() {
@@ -41,7 +47,7 @@ class CaptureWhitespaceTest {
     private fun awaitCapturedText(): String {
         val deadline = System.currentTimeMillis() + Device.LOAD_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
-            Fixtures.state().getJSONObject("hister").optJSONObject(Fixtures.ARTICLE)?.let { return it.getString("text") }
+            Fixtures.state().optJSONObject("hister")?.optJSONObject(Fixtures.ARTICLE)?.let { return it.getString("text") }
             Thread.sleep(200)
         }
         throw AssertionError("The synthetic article was never captured")
