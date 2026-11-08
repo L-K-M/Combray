@@ -94,6 +94,7 @@
 
     <!-- Address -->
     <string name="address_placeholder">Search or enter address</string>
+    <string name="address_title">Address or search</string>
     <string name="address_edit">Edit address</string>
     <string name="address_insecure">Not encrypted (HTTP)</string>
     <string name="address_go">Go to %1$s</string>
