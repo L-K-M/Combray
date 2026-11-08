@@ -284,19 +284,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- Settings no longer decodes whole job payloads (up to 256 KiB of
-  captured page text) per row while composing the queue. Jobs record
-  their address at enqueue in a `url` column (schema 6, auto-migrated);
-  a row without one shows "Unknown page" instead of its raw dedupe key
-  or report id. A row written before the column existed is decoded once,
-  off the UI thread. Finished captures and reports drop the address with
-  their payload; failed and waiting rows keep it for their retry.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
-- Karakeep's connection check verifies a bookmarks-list response before
-  reporting a working connection. A proxy login page or unrelated HTTP 200
-  response now reports the wrong address instead of a false success.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -450,6 +440,9 @@ All notable changes to this project are documented here. The format follows
   after the last page, or under "No results in Hister." While more results
   load, the button waits under a progress bar; if they fail, the reason
   shows above the results.
+- Karakeep's connection check verifies a bookmarks-list response before
+  reporting a working connection. A proxy login page or unrelated HTTP 200
+  response now reports the wrong address instead of a false success.
 - Changing Karakeep's server address cancelled every unsent save without
   a word. Those saves now wait in Settings, which offers to send them to
   the current address or discard them.
@@ -546,6 +539,14 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- Settings no longer decodes whole job payloads (up to 256 KiB of
+  captured page text) per row while composing the queue. Jobs record
+  their address at enqueue in a `url` column (schema 6, auto-migrated).
+  If no address can be recovered, a row shows "Unknown page", never its
+  raw dedupe key or report id. Legacy payloads are decoded off the UI
+  thread; flow updates may repeat that work. Finished captures and reports
+  drop the address with their payload; failed and waiting rows keep it
+  for their retry.
 - The durable queue: one broken job cycle (a storage error, a recorder
   bug) no longer strands the jobs behind it or skips their wakeup; a job
   whose worker died before finishing stops at the attempt limit instead
