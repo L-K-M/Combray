@@ -494,7 +494,7 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 
 **Status (19 October 2026): implemented; checked with a fake Karakeep.** No real Karakeep or Kagi was contacted (fixtures only, by the task's rules).
 
-**Receipt checkpoint (8 November 2026):** creation is recorded under the claim fence before the optional list step, and a retry resumes membership only for the same destination and credential generation under the current claim fence. Host checks: `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `scripts/check_docs.py`, `git diff --check`. No device or live-service check.
+**Receipt checkpoint (8 November 2026):** creation is recorded under the claim fence before the optional list step, and a retry resumes membership only for the same destination and credential generation under the current claim fence. A historical saved row does not acknowledge a new pending or connection-waiting create. Host checks: `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `scripts/check_docs.py`, `git diff --check`. No device or live-service check.
 
 | Gate check | Result | Evidence |
 | --- | --- | --- |

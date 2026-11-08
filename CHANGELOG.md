@@ -633,6 +633,8 @@ All notable changes to this project are documented here. The format follows
   credential generation and claim: another account at the same address must
   recover its own bookmark id. A failed create is not called a list failure,
   and a corrupt payload no longer rolls back an acknowledged delivery.
+  An older saved record no longer masks a new save still pending or waiting
+  for a connection.
 - A Karakeep save with a chosen list stays pending if its acknowledgment
   has no usable bookmark ID. Duplicate-safe retries recover the ID and
   finish list membership, or stop with a visible failure.
