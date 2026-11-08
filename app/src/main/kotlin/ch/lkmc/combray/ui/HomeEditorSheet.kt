@@ -92,6 +92,9 @@ internal fun HomeEditorSheet(
         var name by rememberSaveable { mutableStateOf(initialLink?.let { it.title ?: displayHost(it.url) }.orEmpty()) }
         var error by remember { mutableStateOf<Int?>(null) }
         var saving by remember { mutableStateOf(false) }
+        // The visibility switches fence their feedback to the click-time request generation;
+        // pin operations keep the shared error and are out of scope here.
+        var preferenceGeneration by remember { mutableStateOf(0) }
         val scope = rememberCoroutineScope()
 
         val change: (suspend () -> Unit) -> Unit = { action ->
@@ -154,13 +157,23 @@ internal fun HomeEditorSheet(
                 when (page) {
                     HomeEditPage.OVERVIEW -> {
                         HomeVisibilityRow(R.string.home_show_continue, continuation) { choice ->
+                            preferenceGeneration += 1
+                            val admitted = preferenceGeneration
                             change {
-                                if (!settings.setHomeContinue(choice).await()) error = R.string.home_change_failed
+                                val acknowledged = settings.setHomeContinue(choice).await()
+                                if (admitted == preferenceGeneration) {
+                                    error = if (acknowledged) null else R.string.home_change_failed
+                                }
                             }
                         }
                         HomeVisibilityRow(R.string.home_show_frequent, frequent) { choice ->
+                            preferenceGeneration += 1
+                            val admitted = preferenceGeneration
                             change {
-                                if (!settings.setHomeFrequentSites(choice).await()) error = R.string.home_change_failed
+                                val acknowledged = settings.setHomeFrequentSites(choice).await()
+                                if (admitted == preferenceGeneration) {
+                                    error = if (acknowledged) null else R.string.home_change_failed
+                                }
                             }
                         }
                         HorizontalDivider()
