@@ -302,6 +302,8 @@ pub enum EngineEvent {
         /// The field's document: Servo's pipeline ID of its frame (the top-level document's ID
         /// unless the field is in a frame).
         document: u64,
+        /// Unique native editing context, including moves between equal-typed fields.
+        context: u64,
         multiline: bool,
         /// Field type: "text", "password", "email", "url", "number", "tel" or "search".
         kind: &'static str,
@@ -550,6 +552,7 @@ impl EngineEvent {
             EngineEvent::ImeShown {
                 view,
                 document,
+                context,
                 multiline,
                 kind,
                 show_keyboard,
@@ -558,6 +561,7 @@ impl EngineEvent {
                 json!({
                     "type": "ime_shown",
                     "document": document,
+                    "context": context,
                     "multiline": multiline,
                     "kind": kind,
                     "show_keyboard": show_keyboard,
@@ -873,6 +877,7 @@ mod tests {
                 generation: 9,
             },
             document: 42,
+            context: 17,
             multiline: false,
             kind: "search",
             show_keyboard: false,
@@ -885,6 +890,7 @@ mod tests {
                 "schema": 1,
                 "type": "ime_shown",
                 "document": 42,
+                "context": 17,
                 "multiline": false,
                 "kind": "search",
                 "show_keyboard": false,

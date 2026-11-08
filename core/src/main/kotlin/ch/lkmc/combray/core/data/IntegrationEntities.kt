@@ -92,6 +92,11 @@ data class OutboxJobEntity(
     val generation: Long,
     /** Jobs with the same key go out one at a time and newer content supersedes older. */
     val dedupeKey: String,
+    /**
+     * The address the job acts on, recorded at enqueue. Status lists show it without decoding
+     * the payload; null only for a row written before this column existed.
+     */
+    val url: String? = null,
     /** Creation order from the coordinator (not wall-clock time). */
     val sequence: Long,
     val payload: String,

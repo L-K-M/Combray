@@ -147,6 +147,9 @@ class FormattingTest {
         assertEquals("data:", displayHost("  data:text/html,x"))
         assertEquals("…", displayHost("accounts.example.com:x"))
         assertEquals("example.org", displayHost("https://www.example.org/a"))
+        // "www.com" is the site's own name, not a spelling of "com": it must not collapse.
+        assertEquals("www.com", displayHost("https://www.com/"))
+        assertEquals("www.dev", displayHost("https://www.dev/path"))
         // A blob: page shows the site that made it.
         assertEquals("a.test", displayHost("blob:https://www.a.test/0f1e"))
         assertEquals("…", displayHost("a.b://accounts.example.com/"))
