@@ -3714,3 +3714,13 @@ can show the clear color until the next frame.
 Same AVD, recording and page as the reproduction: with the fix, six bar transitions produced no
 frame with white rows or non-uniform shifts. A page with a `position: fixed; bottom: 0` banner
 reported `innerHeight` 726 with the bar and 838 without, and the banner sat above the bar.
+
+The full device suite (`scripts/check-app.sh`, every class plus process death) on the same AVD,
+with this change rebased onto `ab855bfe` (Servo pin `5813399`): 212 checks pass. Two fail on main
+on these arm64 API 36 AVDs too: `ReaderScrollTest.readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles`
+(reproduced with `ab855bfe` itself) and `AccessibilityTest.theBottomBarOnANewTabIsAccessible`
+("New tab" and "Recent" share a touch area at 200% font). `ScrollTest` now asserts that the surface
+keeps its height while the bar hides and returns, and that the page's `innerHeight` and the
+engine's `viewport_painted` follow the bar. Host checks: `cargo fmt --check`, `cargo test --lib`
+(204), the Gradle unit tests, lint, both APK assemblies, `scripts/tests` (121) and
+`check_docs.py`. A physical phone, including the foldable from the report, is unverified.
