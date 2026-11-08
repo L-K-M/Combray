@@ -248,8 +248,15 @@ class _HourlyLimit:
     def record(self, key: str) -> None:
         window = int(self._clock().timestamp() // _RATE_WINDOW_SECONDS)
         with self._lock:
+            self._prune(window)
             counted_window, count = self._counts.get(key, (window, 0))
             self._counts[key] = (window, count + 1 if counted_window == window else 1)
+
+    def _prune(self, window: int) -> None:
+        """Drop entries from earlier hours: the limit is hourly, so an old window is never read."""
+        stale = [key for key, (counted_window, _) in self._counts.items() if counted_window < window]
+        for key in stale:
+            del self._counts[key]
 
 
 class Handler(BaseHTTPRequestHandler):
