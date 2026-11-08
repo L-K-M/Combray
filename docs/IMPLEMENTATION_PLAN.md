@@ -494,14 +494,14 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 
 **Status (19 October 2026): implemented; checked with a fake Karakeep.** No real Karakeep or Kagi was contacted (fixtures only, by the task's rules).
 
-**Receipt checkpoint (8 November 2026):** creation is recorded under the claim fence before the optional list step, and a retry resumes membership only for the same destination and claim. Host checks: `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `scripts/check_docs.py`, `git diff --check`. No device or live-service check.
+**Receipt checkpoint (8 November 2026):** creation is recorded under the claim fence before the optional list step, and a retry resumes membership only for the same destination and credential generation under the current claim fence. Host checks: `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `scripts/check_docs.py`, `git diff --check`. No device or live-service check.
 
 | Gate check | Result | Evidence |
 | --- | --- | --- |
 | One tap saves the page with its title | Passed on the device (`run9`) | `SaveTest#oneTapSavesThePageWithItsTitle` |
 | A list-bound save cannot finish without a usable bookmark ID | Passed against fake Karakeep (21 October 2026): malformed and missing-ID 200/201 responses retry, recover the same bookmark, or need attention after ten attempts; standalone acknowledgment is preserved | `IntegrationsTest` |
 | Lost answer after the server stored the link: retried, one bookmark | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
-| A failed list step keeps the acknowledged bookmark and retries only membership | Passed in unit tests (8 November 2026): the bookmark is recorded under the claim fence before the list step; a restart, re-save or new credential repeats the idempotent list step without a second create; a parked save rebound to another server is created there | `IntegrationsTest`, `PartialSaveTest` |
+| A failed list step keeps the acknowledged bookmark and retries only membership | Passed in unit tests (8 November 2026): the bookmark is recorded under the claim fence before the list step; a restart or re-save under the same credential generation retries membership without another create. A new credential recovers that account's ID through a duplicate-safe create; a parked save rebound to another server is created there | `IntegrationsTest`, `PartialSaveTest` |
 | Rejected key pauses saves until resumed with a working key | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | A new main address parks unsent saves until the user sends them there or discards them | Passed in unit tests | `IntegrationsTest` |
 | Save targets the tapped page when the tab changes right after | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
