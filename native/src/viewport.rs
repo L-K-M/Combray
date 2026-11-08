@@ -119,12 +119,13 @@ impl ViewportAck {
 
     /// The page now has this size. A smaller page shows a crop of rows already shown.
     pub(crate) fn page_resized(&mut self, page: Size) {
-        if page.height > self.page.height {
-            self.frames_since_growth = 0;
-        }
         if page.width != self.page.width {
-            // Every row lays out anew at another width.
-            self.shown = 0;
+            // Every row lays out anew at another width (a rotation or a fold), so no shown row is
+            // left to compare new ones with; reading the whole page back would only cost time.
+            self.surface_bound(page);
+            return;
+        }
+        if page.height > self.page.height {
             self.frames_since_growth = 0;
         }
         self.page = page;
@@ -425,20 +426,17 @@ mod tests {
     }
 
     #[test]
-    fn another_width_rechecks_every_row() {
+    fn another_width_reads_nothing_back() {
         let mut ack = shown_page(2000);
+        ack.requested(10, 0);
         ack.page_resized(size(2000, 1080));
+        assert_eq!(ack.check(), None);
         assert_eq!(
-            ack.check().map(|check| (check.strip, check.above)),
-            Some((
-                GlRect {
-                    x: 0,
-                    y: 0,
-                    width: 2000,
-                    height: 1080
-                },
-                None
-            ))
+            ack.presented(Strip::Unknown),
+            Some(Request {
+                request: 10,
+                inset: 0
+            })
         );
     }
 
