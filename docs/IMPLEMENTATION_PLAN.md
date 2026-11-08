@@ -659,7 +659,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Credentials bound to their server | Decided (M2 review) | Stored as Keystore AES-GCM ciphertext together with the server fingerprint; a credential is never sent to another server, even after a crash between two configuration writes. A new alternate address also needs the credential entered again |
 | Plain HTTP service addresses | Confirmed (owner request, 20 October 2026) | Home servers often have no certificate. Settings warns that the credential and what Combray sends can be read on the network. Only Combray's own service clients are affected |
 | Alternate service address | Confirmed (owner choice, 20 October 2026) | One optional second address per service (for example Tailscale away from home). The address that last answered goes first; the other is tried only when no connection could be made, never after a request may have arrived. The main address remains the server's identity, so queued work survives adding one |
-| Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Tune on the owner's device (M4) |
+| Live native views | Proposed (M1) | At most six renderers; logical tabs beyond that and, under memory pressure, all hidden ones are released and recreated from their last URL on selection. Eviction reads the open tabs once per reconcile instead of once per live view. Tune on the owner's device (M4) |
 | Profile persistence | Decided (M1) | Servo patch 0004 writes cookies and other profile state on request: when the app leaves the foreground and every five minutes while it is used |
 | Kagi pages excluded from Hister capture | Proposed (M3) | Search result pages are queries, not reading; the owner can change it in code until a setting is wanted |
 | IDN display | Proposed (M1 review) | Hosts show in Unicode only when every label is readable in one script without Latin look-alikes; otherwise punycode. A host is read only right after a leading `http://` or `https://` (or inside a `blob:` address); other pages (`data:`, `about:blank`, local files, other schemes) show a fixed label chosen by their scheme alone (`data:`, `about:blank`, `file:`, or a plain scheme name), never text from their address |
@@ -732,6 +732,15 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+Capture-timer consolidation (8 November 2026, PR #249 with #314's missing-visit
+case): timers carry their scheduled page identity and a distinct schedule token.
+Forget cancels matching fragments even after a timer has queued work; completion
+clears timer bookkeeping on the serialized coordinator queue. The fragment
+regression failed before the fix; all four focused timer tests and
+`testDebugUnitTest lintDebug assembleDebug` passed locally on macOS with JDK 21.
+This is JVM evidence, not a new native or device run. PR CI and review remain
+the merge gates.
 
 For the parallel-PR merge wave, refresh each PR's cached base with
 `gh api --method PATCH repos/L-K-M/Combray/pulls/NUMBER -f base=main`
