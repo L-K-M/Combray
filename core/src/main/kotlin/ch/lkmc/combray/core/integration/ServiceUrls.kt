@@ -130,7 +130,18 @@ object ServiceUrls {
     /** `root` + `/path`, preserving the root's own path prefix. */
     fun endpoint(root: String, path: String): String = root.trimEnd('/') + "/" + path.trimStart('/')
 
-    /** Non-secret destination identity (the normalized root), safe to store next to jobs. */
+    /** Compares roots without changing any persisted credential or job fingerprint. */
+    internal fun sameDestination(left: String?, right: String?): Boolean {
+        if (left == null || right == null) return left == right
+        val first = normalizeRoot(left, emptyList()) as? ServiceRoot.Valid ?: return false
+        val second = normalizeRoot(right, emptyList()) as? ServiceRoot.Valid ?: return false
+        return first.root == second.root
+    }
+
+    /**
+     * Identity for a new, normalized root. Existing equivalent destinations keep their stored
+     * fingerprint: changing normalization must not orphan credentials, jobs or saved receipts.
+     */
     fun fingerprint(root: String): String =
         MessageDigest.getInstance("SHA-256").digest(root.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
