@@ -20,6 +20,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -51,6 +52,10 @@ class IntegrationsTest {
 
     /** Like a connection lost between requests: adding to a list connects nowhere. */
     @Volatile private var listsOffline = false
+
+    /** Runs once after a successful create, before the optional list step: a stand-in for a
+     *  concurrent settings change, a lost lease or a process death at that boundary. */
+    @Volatile private var afterCreate: (() -> Unit)? = null
     private val secrets = MemorySecrets()
     private var now = 1_760_000_000_000L
     private var ids = 0
@@ -68,7 +73,11 @@ class IntegrationsTest {
                     if (offline) return@HttpTransport HttpOutcome.NotConnected("network")
                     if (listsOffline && request.method == "PUT") return@HttpTransport HttpOutcome.NotConnected("network")
                     sent += request.url
-                    http.execute(request)
+                    val response = http.execute(request)
+                    if (request.method == "POST" && response is HttpOutcome.Response && response.status in 200..299) {
+                        afterCreate?.also { afterCreate = null }?.invoke()
+                    }
+                    response
                 }
             },
             clock = { now },
@@ -149,6 +158,29 @@ class IntegrationsTest {
         now = job().nextAttemptAt
         drain()
         assertEquals(JobState.SUCCEEDED, job().state)
+    }
+
+    @Test
+    fun anUnreadableSavePayloadDoesNotRollBackTheAcknowledgedDelivery() {
+        configure()
+        // A payload the recorder cannot decode must not undo a delivery the server acknowledged:
+        // recordDone runs inside Outbox.finish's transaction.
+        runBlocking {
+            integrations.outbox.enqueue(
+                JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL,
+                payload = "not json", supersede = false,
+            )
+        }
+        val claim = runBlocking { integrations.outbox.claim("owner", 60_000) }!!
+        val finished = runBlocking {
+            integrations.outbox.finish(claim, DispatchResult.Done("bm1")) { job, done ->
+                integrations.recordDone(job, done)
+            }
+        }
+
+        assertTrue(finished)
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals("bm1", job().remoteId)
     }
 
     @Test
@@ -714,7 +746,8 @@ class IntegrationsTest {
                 val remoteId = server.bookmarks.getValue(url)
                 assertEquals(JobState.RETRY_WAIT, pending.state)
                 assertEquals("bookmark_id_missing", pending.error)
-                assertEquals(SaveStatus.Pending, status(url))
+                // The create was acknowledged, so the page is saved even while the list step waits.
+                assertEquals(SaveStatus.Saved, status(url))
                 assertTrue(remoteId !in server.lists.getValue("reading"))
 
                 now = pending.nextAttemptAt
@@ -745,8 +778,97 @@ class IntegrationsTest {
         assertEquals(1, server.bookmarks.size)
     }
 
+    /** The link is recorded as soon as Karakeep acknowledges it, even when the list step fails. */
     @Test
-    fun aPermanentlyMissingIdNeedsAttentionAfterTenAttempts() = runBlocking {
+    fun aListStepFailureStillRecordsTheAcknowledgedBookmark() {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        server.lists.remove("reading")
+        save()
+        drain()
+        assertEquals(JobState.FAILED, job().state)
+        assertEquals("list_not_found", job().error)
+        // The job still needs attention, but the bookmark itself is already recorded.
+        assertNotNull(runBlocking { database.integrations().observeSaved(service().fingerprint, URL).first() })
+
+        // Giving up on the list step must not hide a save Karakeep already stored.
+        integrations.discard(job().id)
+        assertEquals(SaveStatus.Saved, status())
+        assertEquals(1, server.bookmarks.size)
+    }
+
+    /** A create whose answer was lost is ambiguous: nothing is recorded until a retry acknowledges it. */
+    @Test
+    fun aLostCreateAnswerWithAListRetriesWithoutADuplicate() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        server.fault = FakeKarakeep.Fault.STORE_THEN_HANG
+        server.faultCount = 1
+        integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false)
+
+        drain()
+        assertEquals(JobState.RETRY_WAIT, job().state)
+        assertNull(database.integrations().observeSaved(service().fingerprint, URL).first())
+
+        now = job().nextAttemptAt
+        drain()
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals(setOf("bm1"), server.lists["reading"])
+        assertEquals(1, server.bookmarks.size)
+        assertEquals(2, server.requests.count { it.startsWith("POST") })
+    }
+
+    /** A new key for the same server resumes the list step without creating the link again. */
+    @Test
+    fun aChangedCredentialRetriesOnlyTheListStep() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        afterCreate = { server.acceptedKey = "rotated" }
+        save()
+        drain()
+        assertEquals(JobState.AUTH_REQUIRED, job().state)
+        assertEquals("http_401", job().error)
+        // The bookmark was created and recorded before the list step was refused.
+        assertNotNull(database.integrations().observeSaved(service().fingerprint, URL).first())
+
+        configure(key = "rotated")
+        runBlocking { integrations.resume(ServiceKind.KARAKEEP).join() }
+        drain()
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals(1, server.requests.count { it.startsWith("POST") })
+        assertEquals(setOf("bm1"), server.lists["reading"])
+    }
+
+    /** A claim that lost its lease cannot leave a receipt a later claim would trust. */
+    @Test
+    fun aReceiptFromAStaleClaimIsNeverAcceptedAndTheRetryCreatesAgain() = runBlocking {
+        server.lists["reading"] = mutableSetOf()
+        configure()
+        chooseList("reading")
+        afterCreate = {
+            now += 60_001
+            runBlocking { integrations.outbox.claim("another-worker", 60_000) }
+        }
+        save()
+        drain()
+        assertNull(database.integrations().observeSaved(service().fingerprint, URL).first())
+        assertTrue(server.requests.none { it.startsWith("PUT") })
+        assertEquals(1, server.requests.count { it.startsWith("POST") })
+
+        // The new claim resumes without a receipt: it creates again (the server dedupes), then lists.
+        now += 60_001
+        drain()
+        assertEquals(JobState.SUCCEEDED, job().state)
+        assertEquals(setOf("bm1"), server.lists["reading"])
+        assertEquals(2, server.requests.count { it.startsWith("POST") })
+        assertEquals(1, server.bookmarks.size)
+    }
+
+    @Test
+    fun aPermanentlyMissingIdStillRecordsTheAcknowledgedBookmark() = runBlocking {
         server.lists["reading"] = mutableSetOf()
         configure()
         chooseList("reading")
@@ -762,13 +884,16 @@ class IntegrationsTest {
         val error = "bookmark_id_missing_after_10_attempts"
         assertEquals(JobState.FAILED, job().state)
         assertEquals(error, job().error)
-        assertEquals(SaveStatus.NeedsAttention(error), status())
+        // The bookmark exists, so the page is saved; the failed list step stays in Settings.
+        assertEquals(SaveStatus.SavedWithListFailure(error), status())
         assertTrue(server.lists.getValue("reading").isEmpty())
         assertEquals(1, server.bookmarks.size)
+        // Every attempt acknowledged the link, so the page is recorded as saved without an id.
+        assertNull(runBlocking { database.integrations().observeSaved(service().fingerprint, URL).first() }?.remoteId)
     }
 
     @Test
-    fun aDeletedListNeedsTheUserAndARetryUsesTheListChosenThen() {
+    fun aDeletedListKeepsTheStoredBookmarkAndRetryUsesTheListChosenThen() {
         server.lists["reading"] = mutableSetOf()
         configure()
         chooseList("reading")
@@ -777,15 +902,20 @@ class IntegrationsTest {
         drain()
         assertEquals(JobState.FAILED, job().state)
         assertEquals("list_not_found", job().error)
-        assertEquals(SaveStatus.NeedsAttention("list_not_found"), status())
+        // The bookmark was acknowledged, so the save is not reported as missing; the list step is.
+        assertEquals(SaveStatus.SavedWithListFailure("list_not_found"), status())
+        assertEquals("bm1", runBlocking { database.integrations().observeSaved(service().fingerprint, URL).first() }?.remoteId)
 
         server.lists["later"] = mutableSetOf()
         chooseList("later")
+        val postsBeforeRetry = server.requests.count { it.startsWith("POST") }
         runBlocking { integrations.outbox.retryNow("job0") }
         drain()
         assertEquals(SaveStatus.Saved, status())
         assertEquals(setOf("bm1"), server.lists["later"])
         assertEquals(1, server.bookmarks.size)
+        // The retry resumed the list step with the acknowledged bookmark, not a second link.
+        assertEquals(postsBeforeRetry, server.requests.count { it.startsWith("POST") })
     }
 
     /** The bookmark exists, so this attempt reached the server: it counts, and the save is not "waiting". */
@@ -800,7 +930,8 @@ class IntegrationsTest {
         assertEquals(1, server.bookmarks.size)
         assertEquals(JobState.RETRY_WAIT, job().state)
         assertEquals(1, job().attempts)
-        assertEquals(SaveStatus.Pending, status())
+        // The bookmark exists, so the page is saved while the list step waits.
+        assertEquals(SaveStatus.Saved, status())
 
         listsOffline = false
         now = job().nextAttemptAt
