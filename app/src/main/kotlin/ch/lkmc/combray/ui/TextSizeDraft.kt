@@ -44,6 +44,7 @@ internal class TextSizeDraft(
         private set
 
     private var writeId = 0
+    private var pendingWrite: Deferred<Boolean>? = null
 
     val displayed: TextSize get() = pending ?: durable()
 
@@ -54,9 +55,11 @@ internal class TextSizeDraft(
         val id = ++writeId
         // Admit the write at the click boundary, not when a UI observer happens to run.
         val write = persist(size)
+        pendingWrite = write
         scope.launch {
             val acknowledged = write.await()
             if (id != writeId) return@launch
+            pendingWrite = null
             pending = null
             if (!acknowledged) {
                 apply(durable())
@@ -65,8 +68,8 @@ internal class TextSizeDraft(
         }
     }
 
-    /** The dialog closed: the preview is gone, but an in-flight write still finishes. */
+    /** Closing is not cancellation: keep an admitted choice visible until its result arrives. */
     fun reset() {
-        pending = null
+        if (pendingWrite == null) pending = null
     }
 }

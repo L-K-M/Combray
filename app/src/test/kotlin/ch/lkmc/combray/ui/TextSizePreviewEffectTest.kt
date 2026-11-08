@@ -94,6 +94,29 @@ class TextSizePreviewEffectTest {
     }
 
     @Test
+    fun closingTheDialogKeepsItsPendingChoiceUntilAcknowledgement() {
+        val write = CompletableDeferred<Boolean>()
+        val observer = TextSizeDraft(
+            scope = newScope(),
+            durable = { durable.value },
+            apply = ::apply,
+            persist = { write },
+            onFailure = {},
+        )
+        compose.setContent { TextSizePreviewEffect(observer, durable.value, ready.value, ::apply) }
+        compose.runOnIdle { observer.choose(TextSize.PERCENT_150) }
+        compose.runOnIdle { observer.reset() }
+        compose.waitForIdle()
+        assertEquals("Closing is not cancellation of an admitted choice", TextSize.PERCENT_150, applied.last())
+        compose.runOnIdle {
+            durable.value = TextSize.PERCENT_150
+            write.complete(true)
+        }
+        compose.waitForIdle()
+        assertEquals(TextSize.PERCENT_150, applied.last())
+    }
+
+    @Test
     fun aPendingPreviewAppliesWhenTheEngineBecomesReady() {
         ready.value = false
         val observer = draft(newScope())

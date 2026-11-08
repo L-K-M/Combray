@@ -195,6 +195,7 @@ class BrowserSettingsTest {
             "commit() must not run on the main thread",
             scripted.commitThreads.contains(Looper.getMainLooper().thread),
         )
+        assertFalse("A successful write must have entered commit()", scripted.commitThreads.isEmpty())
         assertNotEquals(Looper.getMainLooper().thread, scripted.commitThreads.peek())
     }
 
@@ -385,8 +386,11 @@ class BrowserSettingsTest {
     private fun newSettings(preferences: SharedPreferences): BrowserSettings =
         BrowserSettings(preferences, scope())
 
-    private fun scripted(): ScriptedPreferences =
-        ScriptedPreferences(context.getSharedPreferences("settings-test-scripted", Context.MODE_PRIVATE))
+    private fun scripted(): ScriptedPreferences {
+        val backing = context.getSharedPreferences("settings-test-scripted", Context.MODE_PRIVATE)
+        check(backing.edit().clear().commit())
+        return ScriptedPreferences(backing)
+    }
 
     private fun Deferred<Boolean>.awaitBlocking(): Boolean = runBlocking { withTimeout(5_000) { await() } }
 }

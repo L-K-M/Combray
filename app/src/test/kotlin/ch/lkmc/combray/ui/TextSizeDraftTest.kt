@@ -101,7 +101,7 @@ class TextSizeDraftTest {
     }
 
     @Test
-    fun closingTheDialogClearsThePreviewButKeepsAnInFlightFailureRollback() {
+    fun closingTheDialogKeepsItsPendingPreviewAndStillRollsBackFailure() {
         val durable = mutableStateOf(TextSize.PERCENT_100)
         val applied = mutableListOf<TextSize>()
         val failures = mutableListOf<Boolean>()
@@ -110,7 +110,7 @@ class TextSizeDraftTest {
 
         draft.choose(TextSize.PERCENT_150)
         draft.reset()
-        assertEquals(TextSize.PERCENT_100, draft.displayed)
+        assertEquals(TextSize.PERCENT_150, draft.displayed)
 
         writes[0].complete(false)
 
