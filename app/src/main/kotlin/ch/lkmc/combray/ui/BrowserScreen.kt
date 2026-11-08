@@ -88,7 +88,10 @@ import ch.lkmc.combray.core.integration.SensitiveUrls
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.Appearance
+import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineSurfaceView
+import ch.lkmc.combray.engine.LeavePageChoice
+import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -389,6 +392,13 @@ fun BrowserScreen(
         }
     }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && backInPage != null) { backInPage?.invoke() }
+    // An open page question outranks going back in the page: Back answers it with the dialog's
+    // default (Stay on a leave-page question), as PageControlDialog documents. Registered after
+    // the page-back handler, so it wins while a control is shown.
+    BackHandler(enabled = sheet == Sheet.NONE && state.pageControl != null) {
+        val control = state.pageControl ?: return@BackHandler
+        browser.answerPageControl(control.id, backResponse(control.content))
+    }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
     // Find and Home editing take precedence over going back in the page.
     BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
@@ -613,9 +623,17 @@ fun BrowserScreen(
                 tabCounter = tabCounter,
                 saveStatus = saveStatus,
                 histerStored = histerStored && tab?.loading != true,
-                backEnabled = state.reader != null || backInPage != null,
-                // Like system Back: Reader view closes first, then Back moves through the page.
-                onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
+                backEnabled = state.reader != null || state.pageControl != null || backInPage != null,
+                // Like system Back: Reader view closes first, an open page question is answered,
+                // then Back moves through the page.
+                onBack = {
+                    val control = state.pageControl
+                    when {
+                        state.reader != null -> browser.closeReader()
+                        control != null -> browser.answerPageControl(control.id, backResponse(control.content))
+                        else -> backInPage?.invoke()
+                    }
+                },
                 onAddress = editAddress,
                 onCloseTab = { tab?.let { browser.closeTab(it.id) } },
                 readerDisplay = readerDisplay,
@@ -990,6 +1008,13 @@ internal fun copyAddressToClipboard(context: Context, label: String, url: String
     }
     clipboard.setPrimaryClip(clip)
 }
+
+/**
+ * Back's answer to an open page question: Stay on a leave-page question (leaving is the choice
+ * that loses the page's text), the dialog's default Dismiss otherwise.
+ */
+internal fun backResponse(content: PageControlContent): ControlResponse =
+    if (content is PageControlContent.LeavePage) LeavePageChoice.STAY.response else ControlResponse.Dismiss
 
 /** Space between a snackbar and the bottom bar under it. */
 private val SNACKBAR_GAP = 8.dp
