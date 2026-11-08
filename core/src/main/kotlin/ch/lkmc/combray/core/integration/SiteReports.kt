@@ -181,17 +181,20 @@ class SiteReports internal constructor(
         }
         val secret = token?.trim()?.takeIf { it.isNotEmpty() }
         if (secret != null && !isHeaderSafe(secret)) return Configured.InvalidCredential
-        val fingerprint = addresses.fingerprint
         // Not cancellable: leaving the screen must not stop between the token and the configuration.
         return withContext(NonCancellable) {
             config.withLock {
                 val previous = dao.service(ServiceKind.SITE_REPORTS)
+                // The stored identity is opaque: an equivalent re-spelling of the same destination
+                // keeps the fingerprint, token generation and queued reports bound to it.
+                val keepsServer = previous != null && ServiceUrls.sameDestination(previous.baseUrl, addresses.root)
+                val fingerprint = if (previous != null && keepsServer) previous.fingerprint else addresses.fingerprint
                 // A stored token belongs to the addresses it was entered for, never to a new one.
-                val keepsServer = previous != null && previous.fingerprint == fingerprint
-                val knownAddresses = keepsServer && (addresses.alternate == null || addresses.alternate == previous?.alternateUrl)
+                val knownAddresses = keepsServer &&
+                    (addresses.alternate == null || ServiceUrls.sameDestination(addresses.alternate, previous?.alternateUrl))
                 val stored = credentials.read(SecretName.SITE_REPORTS_TOKEN, fingerprint) != null
                 if (secret == null && !(knownAddresses && stored)) return@withLock Configured.MissingCredential
-                // Same server, stored token kept: queued reports keep going. At most the alternate was dropped.
+                // Same server, stored token kept: queued reports keep going. At most the alternate was dropped or re-spelled.
                 if (secret == null) {
                     if (previous != null && previous.alternateUrl != addresses.alternate) {
                         dao.setService(previous.copy(alternateUrl = addresses.alternate, updatedAt = clock.now()))
@@ -277,7 +280,15 @@ class SiteReports internal constructor(
 
         val enqueued = try {
             png?.let { withContext(Dispatchers.IO) { files.write(id, it) } }
-            outbox.enqueue(JobKind.SITE_REPORT, service, Binding.CURRENT, dedupeKey = id, payload = json.encodeToString(ReportPayload.serializer(), payload), supersede = false)
+            outbox.enqueue(
+                JobKind.SITE_REPORT,
+                service,
+                Binding.CURRENT,
+                dedupeKey = id,
+                payload = json.encodeToString(ReportPayload.serializer(), payload),
+                supersede = false,
+                url = payload.url,
+            )
         } catch (failure: Exception) {
             // No job references the file: the insert was not committed.
             withContext(Dispatchers.IO) { files.delete(id) }

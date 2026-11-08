@@ -284,15 +284,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- Two services configured for the first time at the same time could race the
-  device's first Keystore key creation, and one could replace the key the
-  other's credential had just been sealed with, silently losing it. Key
-  creation is now serialized process-wide across store instances. The device
-  check uses its own Keystore alias and directory, so it never deletes or
-  overwrites the app's real credential.
+- Settings no longer decodes whole job payloads (up to 256 KiB of
+  captured page text) per row while composing the queue. Jobs record
+  their address at enqueue in a `url` column (schema 6, auto-migrated);
+  a row without one shows "Unknown page" instead of its raw dedupe key
+  or report id. A row written before the column existed is decoded once,
+  off the UI thread. Finished captures and reports drop the address with
+  their payload; failed and waiting rows keep it for their retry.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- Karakeep's connection check verifies a bookmarks-list response before
+  reporting a working connection. A proxy login page or unrelated HTTP 200
+  response now reports the wrong address instead of a false success.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -468,6 +472,12 @@ All notable changes to this project are documented here. The format follows
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Two services configured for the first time at the same time could race the
+  device's first Keystore key creation, and one could replace the key the
+  other's credential had just been sealed with, silently losing it. Key
+  creation is now serialized process-wide across store instances. The device
+  check uses its own Keystore alias and directory, so it never deletes or
+  overwrites the app's real credential.
 - Addresses with common credential parameters (`auth_token`, `accessToken`,
   `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
   `code` with its `state`, session IDs) could be saved to Karakeep or captured
@@ -625,6 +635,15 @@ All notable changes to this project are documented here. The format follows
   credentials, also as one word of a longer text, so a search such as
   `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
   image digest (`nginx:1.25@sha256:…`) is still searched.
+- Service setup accepts Unicode (IDN) names without mapping deviation
+  characters to a different server. A trailing dot or default port keeps
+  existing credential, queue and saved-page bindings. Explicit ports must
+  be 1–65535: zero, negative, overflowing, empty or malformed ports are
+  refused before a connection, and unsupported addresses report failure.
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A site whose name begins with "www." and has no further dots, such as
+  `www.com`, no longer shows as its bare suffix (`com`) in the address
+  bar, tab switcher, Recent and the new-tab page: the label is dropped
+  only when a longer name follows it.

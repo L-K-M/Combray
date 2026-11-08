@@ -91,17 +91,20 @@ class HisterIntegration(
         }
         val secret = token?.trim()?.takeIf { it.isNotEmpty() }
         if (secret != null && !isHeaderSafe(secret)) return Configured.InvalidCredential
-        val fingerprint = addresses.fingerprint
         // Not cancellable: leaving the screen must not stop between the token and the configuration.
         val result = withContext(NonCancellable) {
             config.withLock {
                 val previous = dao.service(ServiceKind.HISTER)
+                // The stored identity is opaque: an equivalent re-spelling of the same destination
+                // keeps the fingerprint, token generation and queued captures bound to it.
+                val keepsServer = previous != null && ServiceUrls.sameDestination(previous.baseUrl, addresses.root)
+                val fingerprint = if (previous != null && keepsServer) previous.fingerprint else addresses.fingerprint
                 // A stored token belongs to the addresses it was entered for, never to a new one.
-                val keepsServer = previous != null && previous.fingerprint == fingerprint
-                val knownAddresses = keepsServer && (addresses.alternate == null || addresses.alternate == previous?.alternateUrl)
+                val knownAddresses = keepsServer &&
+                    (addresses.alternate == null || ServiceUrls.sameDestination(addresses.alternate, previous?.alternateUrl))
                 val stored = credentials.read(SecretName.HISTER_TOKEN, fingerprint) != null
                 if (secret == null && !(knownAddresses && stored)) return@withLock Configured.MissingCredential
-                // Same server, stored token kept: queued captures keep going. At most the alternate was dropped.
+                // Same server, stored token kept: queued captures keep going. At most the alternate was dropped or re-spelled.
                 if (secret == null) {
                     if (previous != null && previous.alternateUrl != addresses.alternate) {
                         dao.setService(previous.copy(alternateUrl = addresses.alternate, updatedAt = clock.now()))
@@ -241,7 +244,7 @@ class HisterIntegration(
             if (bytes <= MAX_QUEUED_CAPTURE_BYTES) largestRefused.update { maxOf(it, bytes) }
             return
         }
-        val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true)
+        val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true, url = page.url)
         if (enqueued !is Enqueued.Queued) return
         // Remembered only under the policy it was captured with: a policy change since then
         // cleared the memory, and this hash must not survive that.
@@ -320,8 +323,13 @@ class HisterIntegration(
         return Site(host, wildcard)
     }
 
-    private fun jobHost(job: OutboxJobEntity): String? =
-        runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()?.let(HostNames::of)
+    private fun jobHost(job: OutboxJobEntity): String? {
+        // The row's url column first; only a pre-schema-6 row decodes its payload here, inside
+        // the forget transaction, never in composition.
+        val url = job.url
+            ?: runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
+        return url?.let(HostNames::of)
+    }
 
     companion object {
         val HISTER_SUFFIXES = listOf("/api")
