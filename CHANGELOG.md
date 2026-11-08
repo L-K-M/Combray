@@ -234,6 +234,9 @@ All notable changes to this project are documented here. The format follows
   stop running three database reads on the command queue, and the open
   tab count is a COUNT query instead of loading every open row; taps
   and page events share that queue, so it stays short.
+- The active tab is one joined query instead of a session read plus a tab
+  read, and releasing hidden renderers reads the open tabs once instead of
+  once per live view.
 - A complete pine and ivory palette in light and dark mode: sheets,
   dialogs, menus, snackbars and the tab count no longer show Material's
   default purple or red, and the bottom bar's color reaches the screen
@@ -291,6 +294,16 @@ All notable changes to this project are documented here. The format follows
   or report id. A row written before the column existed is decoded once,
   off the UI thread. Finished captures and reports drop the address with
   their payload; failed and waiting rows keep it for their retry.
+- The browser starts once and keeps working after an internal error. A
+  second or concurrent start no longer starts a second work queue, and an
+  `Error` in one state update (for example running out of memory while
+  preparing an article) no longer silently stops every later navigation,
+  tab and history action until the app is restarted. Cancellation still
+  stops the queue.
+- A crashed renderer's pending capture, article, find and keyboard work is
+  dropped, and only its own: a stale crash from a replaced view no longer
+  clears a healthy tab's requests, and a ready Reader snapshot survives its
+  renderer's crash.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
