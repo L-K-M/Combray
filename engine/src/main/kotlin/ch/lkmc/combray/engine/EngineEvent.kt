@@ -189,6 +189,8 @@ sealed interface EngineEvent {
         val multiline: Boolean,
         val kind: String,
         val showKeyboard: Boolean,
+        /** Native editing-context identity, not an address or an Android view identity. */
+        val context: Long = 0,
     ) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
@@ -241,14 +243,21 @@ sealed interface EngineEvent {
     data class Other(val type: String) : EngineEvent
 
     companion object {
+        /** The event format this parser speaks; every event carries it (native/src/events.rs). */
+        private const val SCHEMA = 1
+
         private val json = Json { ignoreUnknownKeys = true }
 
         /**
-         * Parses one event. Throws [IllegalArgumentException] for malformed JSON or a known
-         * event type with missing fields: the native side and this parser must agree.
+         * Parses one event. Throws [IllegalArgumentException] for malformed JSON, an unknown
+         * schema, or a known event type with missing fields: the native side and this parser
+         * must agree.
          */
         fun parse(text: String): EngineEvent {
             val event = json.parseToJsonElement(text).jsonObject
+            // A schema bump must fail here, loudly, rather than misparse events one by one.
+            val schema = event.int("schema")
+            require(schema == SCHEMA) { "engine event schema $schema, expected $SCHEMA" }
             return when (val type = event.string("type")) {
                 "engine_ready" -> EngineReady(event.int("width"), event.int("height"), event.string("user_agent"))
                 "surface_bound" -> SurfaceBound(event.int("width"), event.int("height"))
@@ -309,6 +318,7 @@ sealed interface EngineEvent {
                     event.boolean("multiline"),
                     event.optionalString("kind") ?: "text",
                     event.boolean("show_keyboard"),
+                    event.long("context"),
                 )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))

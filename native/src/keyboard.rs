@@ -10,6 +10,44 @@
 
 use std::collections::HashSet;
 
+/// Modifier state attached to an Android key event. Directional and aggregate flags both count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyModifiers {
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl KeyModifiers {
+    pub fn from_android(meta_state: i32) -> Self {
+        // android.view.KeyEvent META_*_ON values, including the left/right variants.
+        Self {
+            shift: meta_state & (0x1 | 0x40 | 0x80) != 0,
+            alt: meta_state & (0x2 | 0x10 | 0x20) != 0,
+            control: meta_state & (0x1000 | 0x2000 | 0x4000) != 0,
+            meta: meta_state & (0x10000 | 0x20000 | 0x40000) != 0,
+        }
+    }
+}
+
+/// A field may be reported before its document commits. The application retires its old
+/// connection on commit, so a retained field needs its preparation replayed afterward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommittedField {
+    None,
+    Hide,
+    Replay,
+}
+
+pub fn committed_field<D: PartialEq>(document: D, field_document: Option<D>) -> CommittedField {
+    match field_document {
+        Some(field) if field != document => CommittedField::Hide,
+        Some(_) => CommittedField::Replay,
+        None => CommittedField::None,
+    }
+}
+
 /// Servo's tap/pan threshold (`TOUCH_PAN_MIN_SCREEN_PX` in `components/paint/touch.rs`) at 100%
 /// page zoom: a finger that moves further than this on either axis pans, and Servo sends no
 /// click. Servo scales it by the density and the page zoom.
@@ -108,7 +146,31 @@ pub fn tap_hits_focus_script(x: f32, y: f32) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_field_reported_before_its_commit_is_replayed_not_forgotten() {
+        assert_eq!(committed_field(20, Some(20)), CommittedField::Replay);
+        assert_eq!(committed_field(20, Some(10)), CommittedField::Hide);
+        assert_eq!(committed_field(20, None), CommittedField::None);
+    }
+
     const DENSITY: f32 = 2.0;
+
+    #[test]
+    fn modifiers_include_directional_flags_but_not_lock_or_function_keys() {
+        assert_eq!(KeyModifiers::from_android(0), KeyModifiers::default());
+        let all = KeyModifiers {
+            shift: true,
+            control: true,
+            alt: true,
+            meta: true,
+        };
+        assert_eq!(KeyModifiers::from_android(0x11003), all);
+        assert_eq!(KeyModifiers::from_android(0x24050), all);
+        assert_eq!(
+            KeyModifiers::from_android(0x700108),
+            KeyModifiers::default()
+        );
+    }
 
     #[test]
     fn a_lift_near_the_press_is_a_tap_at_the_lift() {

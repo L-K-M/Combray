@@ -492,13 +492,29 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_touch<'local>(
     });
 }
 
+/// Compatibility entry point for the M0 harness, which has no modifier/context channel.
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_key<'local>(
+    env: EnvUnowned<'local>,
+    class: JClass<'local>,
+    action: jint,
+    key_code: jint,
+    unicode: jint,
+) {
+    Java_ch_lkmc_combray_engine_NativeEngine_keyInContext(
+        env, class, action, key_code, unicode, 0, 0,
+    );
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_keyInContext<'local>(
     _env: EnvUnowned<'local>,
     _class: JClass<'local>,
     action: jint,
     key_code: jint,
     unicode: jint,
+    meta_state: jint,
+    context: jlong,
 ) {
     let action = match action {
         KEY_PRESS => KeyAction::Press,
@@ -511,6 +527,8 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_key<'local>(
     let key = KeyInput {
         unicode: unicode as u32,
         key_code,
+        modifiers: crate::keyboard::KeyModifiers::from_android(meta_state),
+        context: (context != 0).then_some(context as u64),
     };
     send(Command::Key { action, key });
 }
@@ -523,7 +541,59 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommit<'local>(
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         let text = java_string(env, text)?;
-        send(Command::ImeCommit { text });
+        send(Command::ImeCommit {
+            context: None,
+            text,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// A commit from a particular InputConnection cannot be retargeted to the next page field.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommitInContext<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    context: jlong,
+    text: JString<'local>,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let text = java_string(env, text)?;
+        send(Command::ImeCommit {
+            context: Some(context as u64),
+            text,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeComposition<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: jlong,
+    context: jlong,
+    phase: jint,
+    text: JString<'local>,
+) {
+    let Some(phase) = crate::composition::Phase::from_android(phase) else {
+        error!("unknown composition phase");
+        return;
+    };
+    if id <= 0 {
+        error!("invalid composition identity");
+        return;
+    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let text = java_string(env, text)?;
+        send(Command::ImeComposition {
+            id: id as u64,
+            context: context as u64,
+            phase,
+            text,
+        });
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>()
