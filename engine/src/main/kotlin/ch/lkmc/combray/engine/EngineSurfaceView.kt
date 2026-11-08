@@ -88,6 +88,7 @@ class EngineSurfaceView(
 
     override fun onDetachedFromWindow() {
         retireInputConnection()
+        pageFieldActive = false
         removeCallbacks(longPressCheck)
         scrollGesture.release()
         onScroll = {}
@@ -100,7 +101,15 @@ class EngineSurfaceView(
 
     /** Rebinding a document cancels an old gesture, so it cannot reveal the new page's button. */
     fun observeScroll(page: PageRef?, onScroll: (ScrollEdge) -> Unit) {
-        if (page != scrollPage) scrollGesture.release()
+        if (page != scrollPage) {
+            scrollGesture.release()
+            // The old page's field is gone with it. Retire the connection so a delayed word or
+            // key cannot reach a context the page no longer owns; the engine still rejects a
+            // stale native context, but the IME gets no connection to call. A replacement field
+            // prepares its own connection and context, so edits are never retargeted.
+            retireInputConnection()
+            pageFieldActive = false
+        }
         scrollPage = page
         this.onScroll = onScroll
     }
@@ -174,6 +183,14 @@ class EngineSurfaceView(
     private var fieldContext = 0L
     private var inputConnection: EngineInputConnection? = null
 
+    /**
+     * Whether a page field has focus, so [onCheckIsTextEditor] and the offered connection are
+     * true only for a real field. Set before [useFieldKind] restarts input (restartInput
+     * consults the flag), cleared when the field loses the keyboard, the window goes, or the
+     * page changes.
+     */
+    private var pageFieldActive = false
+
     /** Whether the keyboard is a page field's, so that its closing can be told apart. */
     private val pageKeyboard = PageKeyboardTracker()
 
@@ -198,10 +215,11 @@ class EngineSurfaceView(
         if (change == PageKeyboardTracker.KeyboardChange.DISMISSED) reportDismissal(Dismissal.CLOSED_BY_USER)
     }
 
-    override fun onCheckIsTextEditor(): Boolean = engineRunning()
+    override fun onCheckIsTextEditor(): Boolean = engineRunning() && pageFieldActive
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
-        if (!engineRunning()) return null
+        // Without a prepared page field there is nothing to edit, so no connection is offered.
+        if (!engineRunning() || !pageFieldActive) return null
         retireInputConnection()
         configurePageEditor(outAttrs, fieldKind, fieldMultiline)
         return EngineInputConnection(this, engineRunning, fieldContext).also { inputConnection = it }
@@ -211,6 +229,8 @@ class EngineSurfaceView(
     fun showKeyboard(kind: String = TEXT, multiline: Boolean = false, contextId: Long = 0) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
+        // Before restartInput: it consults onCheckIsTextEditor, which is false without a field.
+        pageFieldActive = true
         useFieldKind(kind, multiline, contextId, keyboard)
         pageKeyboard.showRequested()
         val shown = keyboard.showSoftInput(this, 0)
@@ -226,10 +246,12 @@ class EngineSurfaceView(
      * Focus is not taken: a sheet the user is typing in keeps it.
      */
     fun prepareKeyboard(kind: String, multiline: Boolean = false, contextId: Long = 0) {
+        pageFieldActive = true
         useFieldKind(kind, multiline, contextId, context.getSystemService(InputMethodManager::class.java))
     }
 
     fun hideKeyboard() {
+        pageFieldActive = false
         retireInputConnection()
         pageKeyboard.hideRequested()
         context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
@@ -242,6 +264,7 @@ class EngineSurfaceView(
      * a tap on it then opens the keyboard again.
      */
     private fun reportDismissal(cause: Dismissal) {
+        pageFieldActive = false
         retireInputConnection()
         Log.i(LOG_TAG, "keyboard dismissal sent to the page: $cause")
         if (engineRunning()) NativeEngine.imeDismissed()
@@ -288,13 +311,20 @@ class EngineInputConnection(
         commit = { if (engineRunning() && fieldContext > 0) NativeEngine.imeCommitInContext(fieldContext, it) },
     )
 
-    override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean =
-        canEdit() && composition.update(text.toString())
+    override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
+        if (!canEdit() || !isRepresentableCursorPosition(newCursorPosition)) return false
+        return composition.update(text.toString())
+    }
 
     override fun finishComposingText(): Boolean = canEdit() && composition.finish()
 
-    override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean =
-        canEdit() && composition.commit(text.toString())
+    override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
+        // No local length cap on committed or composed text: neither the input donors nor the
+        // native bridge establishes a supported bound, and inventing one would misrepresent the
+        // engine. Only deletions are bounded, because each one becomes per-character key events.
+        if (!canEdit() || !isRepresentableCursorPosition(newCursorPosition)) return false
+        return composition.commit(text.toString())
+    }
 
     override fun closeConnection() {
         composition.close()
@@ -302,10 +332,12 @@ class EngineInputConnection(
     }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-        if (!canEdit() || beforeLength < 0 || afterLength < 0) return false
+        if (!canEdit()) return false
+        // Refused before the composition ends or a key is sent: a failed deletion must leave the
+        // IME's composition and the page's text as they were.
+        val keys = editDeletion(beforeLength, afterLength) ?: return false
         composition.finish()
-        repeat(beforeLength) { tapKey(KeyEvent.KEYCODE_DEL) }
-        repeat(afterLength) { tapKey(KeyEvent.KEYCODE_FORWARD_DEL) }
+        keys.forEach { tapKey(it) }
         return true
     }
 
@@ -324,9 +356,22 @@ class EngineInputConnection(
     override fun performEditorAction(actionCode: Int): Boolean {
         if (!canEdit()) return false
         composition.finish()
-        tapKey(KeyEvent.KEYCODE_ENTER)
+        tapKey(editorActionKey(actionCode))
         return true
     }
+
+    // The bridge has no page selection or surrounding-text channel, so these requests cannot be
+    // represented. BaseInputConnection would answer from its own private editable and report a
+    // selection the page never made, so each is refused or returns null instead.
+    override fun setSelection(start: Int, end: Int): Boolean = false
+
+    override fun setComposingRegion(start: Int, end: Int): Boolean = false
+
+    override fun getSelectedText(flags: Int): CharSequence? = null
+
+    override fun getTextBeforeCursor(length: Int, flags: Int): CharSequence? = null
+
+    override fun getTextAfterCursor(length: Int, flags: Int): CharSequence? = null
 
     // Zero selects the legacy unbound hardware-key path. An InputConnection must never use it.
     private fun canEdit(): Boolean = engineRunning() && fieldContext > 0 && !composition.closed
@@ -336,3 +381,28 @@ class EngineInputConnection(
         NativeEngine.keyInContext(NativeEngine.KEY_RELEASE, keyCode, 0, 0, fieldContext)
     }
 }
+
+/** Longest deletion one IME request may turn into key events, in each direction. */
+internal const val MAX_EDIT_CHARS = 1_000
+
+/**
+ * The key events a deletion request turns into: [beforeLength] backspaces, then [afterLength]
+ * forward-deletes. Null when the request is negative or longer than [MAX_EDIT_CHARS] in either
+ * direction; refusing it, rather than clipping it, keeps the IME's acknowledgment honest, since
+ * only part of a clipped request could be sent.
+ */
+internal fun editDeletion(beforeLength: Int, afterLength: Int): List<Int>? {
+    if (beforeLength !in 0..MAX_EDIT_CHARS || afterLength !in 0..MAX_EDIT_CHARS) return null
+    return buildList {
+        repeat(beforeLength) { add(KeyEvent.KEYCODE_DEL) }
+        repeat(afterLength) { add(KeyEvent.KEYCODE_FORWARD_DEL) }
+    }
+}
+
+/**
+ * Whether a requested cursor position can be represented. The bridge has no cursor-placement
+ * channel: the page puts the caret where its own editing does, which is after the text for the
+ * default request (1). Any other requested position is refused rather than acknowledged while
+ * ignored.
+ */
+internal fun isRepresentableCursorPosition(newCursorPosition: Int): Boolean = newCursorPosition == 1

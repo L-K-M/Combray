@@ -625,3 +625,15 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A page field's keyboard now reports the page as editable only while a
+  field has focus, so TalkBack no longer announces the whole page as an
+  editable field and the keyboard cannot come back with no field behind
+  it. The keyboard's Next action moves focus like Tab instead of
+  submitting the field, and a page change retires the old input
+  connection, so a delayed word cannot land in the page that replaced it.
+- A deletion request longer than the bridge's bounded edit length
+  (1,000 characters in either direction), or a negative one, is refused
+  instead of clipped: the keyboard is no longer told an edit succeeded
+  when only part of it was sent. A cursor position or selection region
+  the page cannot represent is refused too, rather than acknowledged
+  while ignored.
