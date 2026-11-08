@@ -729,6 +729,12 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+Overlay consolidation (8 November 2026, #284 with #315): status messages
+scroll at large font sizes; the address sheet has a pane title and status
+messages expose polite live-region semantics. The full Kotlin tests, lint,
+debug assembly and device-test compilation pass locally. The reachability
+and semantics tests are JVM checks, not a new TalkBack or device run.
+
 For the parallel-PR merge wave, refresh each PR's cached base with
 `gh api --method PATCH repos/L-K-M/Combray/pulls/NUMBER -f base=main`
 and apply `zai-review:full` before its next push. The current reviewer action's
