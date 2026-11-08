@@ -194,6 +194,14 @@ test("a sheet that takes no hits leaves the tap on the player", () => {
   assert.equal(tapped(document, 200, 250), true, "the sheet takes no hits, so the tap lands on the player");
 });
 
+test("a tap that misses the media still asks the tree once", () => {
+  const { document, body } = page();
+  document.add(new Element("video", [0, 0, 400, 225], { parent: body }));
+
+  assert.equal(tapped(document, 10, 700), false);
+  assert.equal(document.fromPointCalls, 1, "one, eagerly, even though no box holds the tap");
+});
+
 test("the topmost hit is asked once per tree", () => {
   const { document, body } = page();
   document.add(new Element("video", [0, 0, 400, 225], { parent: body }));
