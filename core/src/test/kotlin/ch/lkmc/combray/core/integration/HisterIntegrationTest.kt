@@ -98,6 +98,55 @@ class HisterIntegrationTest {
     private fun jobs(): List<OutboxJobEntity> = (0 until ids).mapNotNull { runBlocking { database.integrations().job("job$it") } }
 
     @Test
+    fun aQueuedCaptureRecordsItsUrl() {
+        enable()
+        capture("https://a.example/", "text")
+        assertEquals("https://a.example/", jobs().single().url)
+    }
+
+    /**
+     * A row written before schema 6 has its address only in the payload. The decoder reads the
+     * top-level member, so a page's own text or a nested object cannot pose as it.
+     */
+    @Test
+    fun theQueueRowUrlIgnoresAnUrlKeyInsideTheCapturedText() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text with \"url\":\"https://fake.example/\" inside")
+        val legacy = jobs().single().copy(url = null)
+        assertEquals("https://real.example/article", integrations.jobUrl(legacy))
+    }
+
+    @Test
+    fun theQueueRowUrlReadsTheTopLevelMemberOverANestedOne() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text")
+        val legacy = jobs().single()
+        val nested = """{"meta":{"url":"https://fake.example/"},"url":"https://real.example/article","text":"x"}"""
+        assertEquals("https://real.example/article", integrations.jobUrl(legacy.copy(url = null, payload = nested)))
+    }
+
+    @Test
+    fun theQueueRowUrlIsNullForAMalformedOrWronglyTypedPayload() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text")
+        val legacy = jobs().single()
+        assertNull(integrations.jobUrl(legacy.copy(url = null, payload = "not json")))
+        assertNull(integrations.jobUrl(legacy.copy(url = null, payload = """{"url":{"nested":"https://fake.example/"}}""")))
+    }
+
+    /** Forgetting and exclusions run in a transaction, where decoding a legacy row is acceptable. */
+    @Test
+    fun anExclusionCancelsALegacyCaptureWhoseUrlIsOnlyInThePayload() = runBlocking {
+        enable()
+        capture("https://bank.example/account", "balance")
+        database.integrations().updateJob(jobs().single().copy(url = null))
+
+        hister.addExclusion("bank.example", includeSubdomains = true)
+
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+    }
+
+    @Test
     fun captureIsOptInAndSendsRenderedText() {
         assertNull(wants("https://a.example/"))
         enable()
@@ -400,6 +449,7 @@ class HisterIntegrationTest {
             assertEquals(JobState.CANCELLED, job.state)
             assertEquals(category, job.error)
             assertEquals("", job.payload)
+            assertNull(job.url)
         }
         // Nothing left to retry, in the budget or in Settings' list of unfinished captures.
         assertEquals(0L, runBlocking { database.integrations().queuedCaptureBytes() })
