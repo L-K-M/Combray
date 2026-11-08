@@ -88,7 +88,10 @@ import ch.lkmc.combray.core.integration.SensitiveUrls
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.engine.Appearance
+import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineSurfaceView
+import ch.lkmc.combray.engine.LeavePageChoice
+import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -159,6 +162,23 @@ fun BrowserScreen(
         keyboard?.hide()
     }
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    // Text size's preview is provisional: rapid steps read the latest pending choice, and a
+    // failed write rolls the engine back to the durable value.
+    val textSizeDraft = remember {
+        TextSizeDraft(
+            scope = scope,
+            durable = { graph.settings.textSize.value },
+            apply = { size -> browser.applyTextSize(size) },
+            persist = graph.settings::setTextSize,
+            onFailure = { notify(resources.getString(R.string.home_change_failed)) },
+        )
+    }
+    TextSizePreviewEffect(
+        textSizeDraft,
+        textSize,
+        state.engine == EngineStatus.READY,
+        apply = { browser.applyTextSize(it) },
+    )
     LaunchedEffect(tab?.id, tab?.url) {
         if (!home) homeMode = AddressEditorMode.IDLE
     }
@@ -257,8 +277,8 @@ fun BrowserScreen(
         val request = state.keyboard ?: return@LaunchedEffect
         val view = surfaceView ?: return@LaunchedEffect
         when (request) {
-            is KeyboardRequest.Show -> view.showKeyboard(request.kind)
-            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind)
+            is KeyboardRequest.Show -> view.showKeyboard(request.kind, request.multiline, request.context)
+            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind, request.multiline, request.context)
             // A page's blur must not hide the keyboard now owned by Find or Home's search field.
             KeyboardRequest.Hide -> if (state.find == null && !(home && homeMode == AddressEditorMode.EDITING)) view.hideKeyboard()
         }
@@ -372,6 +392,13 @@ fun BrowserScreen(
         }
     }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader == null && backInPage != null) { backInPage?.invoke() }
+    // An open page question outranks going back in the page: Back answers it with the dialog's
+    // default (Stay on a leave-page question), as PageControlDialog documents. Registered after
+    // the page-back handler, so it wins while a control is shown.
+    BackHandler(enabled = sheet == Sheet.NONE && state.pageControl != null) {
+        val control = state.pageControl ?: return@BackHandler
+        browser.answerPageControl(control.id, backResponse(control.content))
+    }
     BackHandler(enabled = sheet == Sheet.NONE && state.reader != null) { browser.closeReader() }
     // Find and Home editing take precedence over going back in the page.
     BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
@@ -596,9 +623,17 @@ fun BrowserScreen(
                 tabCounter = tabCounter,
                 saveStatus = saveStatus,
                 histerStored = histerStored && tab?.loading != true,
-                backEnabled = state.reader != null || backInPage != null,
-                // Like system Back: Reader view closes first, then Back moves through the page.
-                onBack = { if (state.reader != null) browser.closeReader() else backInPage?.invoke() },
+                backEnabled = state.reader != null || state.pageControl != null || backInPage != null,
+                // Like system Back: Reader view closes first, an open page question is answered,
+                // then Back moves through the page.
+                onBack = {
+                    val control = state.pageControl
+                    when {
+                        state.reader != null -> browser.closeReader()
+                        control != null -> browser.answerPageControl(control.id, backResponse(control.content))
+                        else -> backInPage?.invoke()
+                    }
+                },
                 onAddress = editAddress,
                 onCloseTab = { tab?.let { browser.closeTab(it.id) } },
                 readerDisplay = readerDisplay,
@@ -789,12 +824,12 @@ fun BrowserScreen(
         }
         Sheet.TEXT_SIZE -> {
             TextSizeDialog(
-                size = textSize,
-                onChange = { size ->
-                    graph.settings.setTextSize(size)
-                    browser.applyTextSize()
+                current = { textSizeDraft.displayed },
+                onChange = { size -> textSizeDraft.choose(size) },
+                onDismiss = {
+                    textSizeDraft.reset()
+                    dismiss()
                 },
-                onDismiss = dismiss,
             )
         }
     }
@@ -973,6 +1008,13 @@ internal fun copyAddressToClipboard(context: Context, label: String, url: String
     }
     clipboard.setPrimaryClip(clip)
 }
+
+/**
+ * Back's answer to an open page question: Stay on a leave-page question (leaving is the choice
+ * that loses the page's text), the dialog's default Dismiss otherwise.
+ */
+internal fun backResponse(content: PageControlContent): ControlResponse =
+    if (content is PageControlContent.LeavePage) LeavePageChoice.STAY.response else ControlResponse.Dismiss
 
 /** Space between a snackbar and the bottom bar under it. */
 private val SNACKBAR_GAP = 8.dp
