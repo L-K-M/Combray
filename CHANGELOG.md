@@ -289,6 +289,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Settings no longer decodes whole job payloads (up to 256 KiB of
+  captured page text) per row while composing the queue. Jobs record
+  their address at enqueue in a `url` column (schema 6, auto-migrated);
+  a row without one shows "Unknown page" instead of its raw dedupe key
+  or report id. A row written before the column existed is decoded once,
+  off the UI thread. Finished captures and reports drop the address with
+  their payload; failed and waiting rows keep it for their retry.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
@@ -630,3 +637,7 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A site whose name begins with "www." and has no further dots, such as
+  `www.com`, no longer shows as its bare suffix (`com`) in the address
+  bar, tab switcher, Recent and the new-tab page: the label is dropped
+  only when a longer name follows it.
