@@ -282,6 +282,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Large Hister requests retain the longest text prefix that fits the JSON
+  byte limit, without splitting Unicode characters or over-trimming escaped
+  text. Multibyte titles and Karakeep search queries stay bounded too.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.

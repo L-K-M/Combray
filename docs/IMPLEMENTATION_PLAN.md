@@ -729,6 +729,15 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+Integration request bounds (8 November 2026, #256 with #291): Hister trimming
+counts escaped UTF-8 bytes in a suffix scan, then rebuilds the retained prefix
+once. A byte excess is not treated as a code-point count. Titles keep their
+UTF-8 byte cap; Karakeep queries do not split supplementary characters at the
+length cap. Requests whose address alone cannot fit are refused before HTTP.
+The longest-prefix and query-boundary regressions failed before correction and
+pass afterward. These are JVM/HTTP-fixture checks, not device or live-service
+acceptance; current-head CI and review gate the consolidation.
+
 The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. Engine-related PRs now pass native builds and full emulator fixtures through the Engine workflow. **Next task:** wire native compilation into the release workflow and supply the owner's signing key. Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.

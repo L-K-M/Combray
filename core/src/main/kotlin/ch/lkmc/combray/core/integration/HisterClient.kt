@@ -33,12 +33,14 @@ sealed interface HisterSearch {
  */
 class HisterClient(private val transport: HttpTransport) {
     fun add(root: String, token: String, url: String, title: String?, text: String): DispatchResult {
+        val body = boundedBody(url, title, text)
+        if (body.size > MAX_REQUEST_BYTES) return DispatchResult.Rejected("payload_too_large")
         val outcome = transport.execute(
             HttpRequest(
                 method = "POST",
                 url = ServiceUrls.endpoint(root, "api/add"),
                 headers = headers(token) + ("Content-Type" to "application/json"),
-                body = boundedBody(url, title, text),
+                body = body,
             ),
         )
         return when (outcome) {
@@ -89,24 +91,38 @@ class HisterClient(private val transport: HttpTransport) {
      * The request stays under [MAX_REQUEST_BYTES] after JSON escaping: when it would not, the text
      * is cut on a character boundary.
      *
-     * One rebuild, not one per truncation step: every code point costs at least one UTF-8 byte
-     * (escaping only adds), so dropping the excess in code points always lands at or under the
-     * limit. The old loop rebuilt the whole ~1 MiB JSON string about twenty times.
+     * Count the escaped UTF-8 bytes removed from the tail, not a byte excess as code points.
+     * Only the final prefix is rebuilt, preserving all text that fits, including supplementary
+     * characters and control characters that expand to six-byte JSON escapes.
      */
     private fun boundedBody(url: String, title: String?, text: String): ByteArray {
         val full = body(url, title, text)
         if (full.size <= MAX_REQUEST_BYTES) return full
-        val excess = full.size - MAX_REQUEST_BYTES
-        val kept = if (text.length <= excess) "" else text.dropLastCodePoints(excess)
-        return body(url, title, kept)
+        var excess = full.size - MAX_REQUEST_BYTES
+        var end = text.length
+        while (excess > 0 && end > 0) {
+            val point = text.codePointBefore(end)
+            excess -= escapedUtf8Width(point)
+            end -= Character.charCount(point)
+        }
+        return body(url, title, text.substring(0, end))
     }
 
     private fun body(url: String, title: String?, text: String): ByteArray =
         buildJsonObject {
             put("url", url)
-            title?.let { put("title", it.take(MAX_TITLE_CHARS)) }
+            title?.let { put("title", it.takeUtf8Bytes(MAX_TITLE_CHARS)) }
             put("text", text)
         }.toString().toByteArray(Charsets.UTF_8)
+
+    /** At most [maxBytes] of UTF-8, without splitting a character. */
+    private fun String.takeUtf8Bytes(maxBytes: Int): String {
+        val bytes = toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) return this
+        var end = maxBytes
+        while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
+        return String(bytes, 0, end, Charsets.UTF_8)
+    }
 
     private fun parseResults(body: ByteArray): HisterSearch {
         val root = try {
@@ -154,9 +170,16 @@ class HisterClient(private val transport: HttpTransport) {
 
     private fun encode(value: String) = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
-    private fun String.dropLastCodePoints(count: Int): String {
-        val keep = codePointCount(0, length) - count
-        return if (keep <= 0) "" else substring(0, offsetByCodePoints(0, keep))
+    /** Matches JSON string escaping followed by the JVM's UTF-8 encoding. */
+    private fun escapedUtf8Width(point: Int): Int = when (point) {
+        '"'.code, '\\'.code, '\b'.code, '\u000C'.code, '\n'.code, '\r'.code, '\t'.code -> 2
+        in 0..0x1F -> 6
+        in 0..0x7F -> 1
+        in 0..0x7FF -> 2
+        // A lone UTF-16 surrogate is encoded as the single-byte replacement '?'.
+        in 0xD800..0xDFFF -> 1
+        in 0..0xFFFF -> 3
+        else -> 4
     }
 
     companion object {
