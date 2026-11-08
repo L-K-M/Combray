@@ -180,6 +180,7 @@ internal class ReportDrafts(
             // StackOverflowError from the encoder. A report without a screenshot is better than a
             // crashed browser.
             Log.w(LOG_TAG, "preparing the screenshot failed: ${failure.javaClass.name}")
+            currentCoroutineContext().ensureActive()
             ReportShot.Omitted(ScreenshotOmission.COPY_FAILED)
         }
     }

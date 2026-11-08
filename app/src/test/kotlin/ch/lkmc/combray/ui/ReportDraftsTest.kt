@@ -76,6 +76,18 @@ class ReportDraftsTest {
     }
 
     @Test
+    fun anEncoderErrorAfterCancellationDoesNotPublishACopyFailure() = runBlocking {
+        val cancelling = ReportDrafts(scope, { ReportRequest.Queued }, encode = {
+            scope.cancel()
+            throw AssertionError("synthetic encoder failure after cancellation")
+        })
+        val draft = cancelling.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Copied(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)))
+        withTimeout(TIMEOUT_MS) { draft.preparation!!.join() }
+        assertTrue(draft.preparation!!.isCancelled)
+        assertTrue("Cancelled preparation must not publish a copy failure", draft.shot.value is ReportShot.Pending)
+    }
+
+    @Test
     fun cancellingPreparationIsNotReportedAsACopyFailure() = runBlocking {
         val cancelling = ReportDrafts(scope, { ReportRequest.Queued }, encode = { throw CancellationException("synthetic") })
         val draft = cancelling.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Copied(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)))
