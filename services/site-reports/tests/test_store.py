@@ -110,13 +110,13 @@ class SchemaTest(StoreTestCase):
         data = self.root / "durable"
         with mock.patch.object(store_module, "_fsync_directory", wraps=store_module._fsync_directory) as sync:
             support.open_store(self, data, self.clock)
-        sync.assert_called_once_with(data)
+        sync.assert_called_once_with(data.resolve())
 
     def test_unsupported_directory_sync_keeps_the_store_usable(self) -> None:
         data = self.root / "unsupported"
         with mock.patch.object(store_module, "_fsync_directory", side_effect=OSError(errno.EINVAL, "synthetic")) as sync:
             store = support.open_store(self, data, self.clock)
-        sync.assert_called_once_with(data)
+        sync.assert_called_once_with(data.resolve())
         row, created = store.add(support.parse(support.without_screenshot(support.request())))
         self.assertTrue(created)
         self.assertEqual(store.get(row.id).id, row.id)

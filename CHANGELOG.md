@@ -282,6 +282,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The report service drops old hourly rate-limit windows without scanning
+  them on every report. It also syncs a new database's directory entry
+  where supported, reducing the risk of losing that entry after power loss.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
