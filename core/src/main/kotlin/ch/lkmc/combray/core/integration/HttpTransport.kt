@@ -44,7 +44,8 @@ class UrlConnectionTransport(
             val url = URL(request.url)
             // The settings field already refuses these, but a caller-built URL must not reach a
             // connection attempt: check the authority and the parsed port before opening it.
-            if (ServiceUrls.parseAuthority(url.authority) == null || !ServiceUrls.isValidPort(url.port)) {
+            val authority = url.authority ?: return HttpOutcome.Failure("bad_url")
+            if (ServiceUrls.parseAuthority(authority) == null || !ServiceUrls.isValidPort(url.port)) {
                 return HttpOutcome.Failure("bad_url")
             }
             url.openConnection() as? HttpURLConnection ?: return HttpOutcome.Failure("bad_url")

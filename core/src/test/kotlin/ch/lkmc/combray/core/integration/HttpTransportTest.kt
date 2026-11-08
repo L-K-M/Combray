@@ -27,5 +27,12 @@ class HttpTransportTest {
         }
     }
 
+    @Test
+    fun aMissingAuthorityIsRejectedBeforeOpeningAConnection() {
+        for (url in listOf("http:/relative", "https:relative", "ftp:/relative")) {
+            assertEquals(url, HttpOutcome.Failure("bad_url"), transport.execute(request(url)))
+        }
+    }
+
     private fun request(url: String) = HttpRequest("GET", url, emptyMap())
 }
