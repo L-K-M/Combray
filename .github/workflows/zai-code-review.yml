@@ -59,9 +59,9 @@ jobs:
         # job at 360 min, so the job backstop above stays below that.
         timeout-minutes: 330
         # Pin privileged third-party actions to an immutable commit.
-        # b44215f = v0.0.16. Verify before bumping:
-        #   git ls-remote https://github.com/L-K-M/zai-code-review 'refs/tags/v0.0.16*'
-        uses: L-K-M/zai-code-review@b44215f6c1b4fb7eeacad0756449d45b66f3c4ff
+        # 7e2222d = v0.0.17. Verify before bumping:
+        #   git ls-remote https://github.com/L-K-M/zai-code-review 'refs/tags/v0.0.17*'
+        uses: L-K-M/zai-code-review@7e2222dd5ea9f0c36f9c3683118752ab424d2b35
         with:
           ZAI_API_KEY: ${{ env.ZAI_API_KEY }}
           # Xiaomi MiMo reviews the chunks Z.ai still fails on (rate limits,
@@ -88,6 +88,8 @@ jobs:
           # runs full, which is what the budget above is sized for. Override per
           # PR with a zai-review:full / zai-review:hybrid / zai-review:incremental
           # label, applied before the push that triggers the next review.
+          # During merge waves, refresh the PR's base and use zai-review:full:
+          # these action versions include merged-main files in the delta scope.
           ZAI_REVIEW_MODE: hybrid
           # Left at the action's own default. Raising it to cut the request
           # count backfires: at 25000, three of Seance PR #89's 17 chunks spent the
