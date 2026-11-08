@@ -453,6 +453,10 @@ All notable changes to this project are documented here. The format follows
   after the last page, or under "No results in Hister." While more results
   load, the button waits under a progress bar; if they fail, the reason
   shows above the results.
+- A service attempt now sends at most one request. A handler that sent
+  twice could have re-sent a request that may already have reached the
+  server after failover to the alternate address; the attempt fails loudly
+  instead, and the queue does not retry the violation.
 - Changing Karakeep's server address cancelled every unsent save without
   a word. Those saves now wait in Settings, which offers to send them to
   the current address or discard them.
