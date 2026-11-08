@@ -11,6 +11,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.KeyStore
+import java.util.UUID
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -24,7 +25,7 @@ class SecretStoreDeviceTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     /** Not [KeystoreSecretStore]'s production alias, which the test must never touch. */
-    private val testAlias = "combray-integration-secrets-device-test"
+    private val testAlias = "combray-integration-secrets-device-test-${UUID.randomUUID()}"
     private val store = KeystoreSecretStore(context, testAlias)
 
     @Before
