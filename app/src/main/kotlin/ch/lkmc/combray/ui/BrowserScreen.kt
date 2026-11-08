@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -924,11 +926,14 @@ private fun PageOverlay(
     }
 }
 
+/** Internal for OverlayMessageTest's large-font reachability check. */
 @Composable
-private fun OverlayMessage(message: String, action: @Composable () -> Unit = {}) {
+internal fun OverlayMessage(message: String, action: @Composable () -> Unit = {}) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        // Scrolls at 200% font on a small screen: the message and its action must stay
+        // reachable however little room is left (Phase 1 finding).
         Column(
-            Modifier.fillMaxSize().padding(24.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
