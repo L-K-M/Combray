@@ -729,6 +729,12 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+Report screenshot fallback (8 November 2026, #292): injected encoder
+`AssertionError`, `LinkageError` and `OutOfMemoryError` regressions exercise
+terminal screenshot omission, with cancellation kept separate. The non-OOM
+case failed before the fix. This does not establish late PixelCopy callback or
+physical-GPU bitmap lifetime safety; #259's recycling change remains separate.
+
 The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. Engine-related PRs now pass native builds and full emulator fixtures through the Engine workflow. **Next task:** wire native compilation into the release workflow and supply the owner's signing key. Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
