@@ -29,15 +29,18 @@ import ch.lkmc.combray.core.integration.SecretName
 import ch.lkmc.combray.core.integration.SecretStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
-import org.junit.After
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -51,7 +54,18 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], application = Application::class, qualifiers = "w320dp-h640dp")
 class SearchPanelConsentTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    private val resources = object : ExternalResource() {
+        override fun after() {
+            try {
+                runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
+            } finally {
+                if (::database.isInitialized) database.close()
+            }
+        }
+    }
+    // Compose disposes its lifecycle collectors before their Room database closes.
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val requests = CopyOnWriteArrayList<HttpRequest>()
@@ -83,12 +97,6 @@ class SearchPanelConsentTest {
             integrations.configureKarakeep("http://127.0.0.1:1/keep", "key")
             integrations.hister.configure("http://127.0.0.1:1/h", "token")
         }
-    }
-
-    @After
-    fun tearDown() {
-        scope.cancel()
-        database.close()
     }
 
     private fun sent(): List<HttpRequest> = requests.toList()
