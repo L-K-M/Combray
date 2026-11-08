@@ -175,12 +175,11 @@ internal class ReportDrafts(
             encode(frame.bitmap)?.let { ReportShot.Ready(preview, it) } ?: ReportShot.Omitted(ScreenshotOmission.TOO_LARGE)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
+            // An Error is not a report either: an OutOfMemoryError from the scale, a
+            // StackOverflowError from the encoder. A report without a screenshot is better than a
+            // crashed browser.
             Log.w(LOG_TAG, "preparing the screenshot failed: ${failure.javaClass.name}")
-            ReportShot.Omitted(ScreenshotOmission.COPY_FAILED)
-        } catch (tooLarge: OutOfMemoryError) {
-            Log.w(LOG_TAG, "preparing the screenshot ran out of memory")
-            // A report without a screenshot is better than a crashed browser.
             ReportShot.Omitted(ScreenshotOmission.COPY_FAILED)
         }
     }
