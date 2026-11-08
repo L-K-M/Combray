@@ -2,7 +2,6 @@ package ch.lkmc.combray.engine
 
 import android.util.Log
 import java.io.File
-import kotlinx.serialization.SerializationException
 
 /**
  * [EnginePort] backed by `libcombray_engine.so`. Servo keeps process-wide state, so there is one
@@ -36,10 +35,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
             EngineEvent.parse(json)
         } catch (malformed: IllegalArgumentException) {
             // A schema mismatch between native and Kotlin is a bug; never guess at the event.
-            // Our own messages say what is wrong; kotlinx' parse failures quote the input, which
-            // can be page content, so only their class name is logged.
-            val detail = if (malformed is SerializationException) malformed.javaClass.name else malformed.message
-            Log.e(LOG_TAG, "unparseable engine event (${json.length} chars): $detail")
+            // Syntax and semantic failures can both quote input-derived fields or page content.
+            // Keep only the class and size, never the message, cause or stack trace.
+            Log.e(LOG_TAG, "unparseable engine event (${json.length} chars): ${malformed.javaClass.name}")
             return
         }
         listener(event)

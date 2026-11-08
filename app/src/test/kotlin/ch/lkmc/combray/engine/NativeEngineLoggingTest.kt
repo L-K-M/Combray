@@ -19,7 +19,7 @@ import org.robolectric.shadows.ShadowLog
 /**
  * A malformed native event must be dropped, and its log must carry only the parser's exception
  * class and the event's length: native event text can be page content, so neither a message nor
- * a throwable derived from it may reach the log (parent security decision, 8 November 2026).
+ * a throwable derived from it may reach the log.
  *
  * The host is instantiated without [NativeEngineHost.start], so the JNI library is never loaded;
  * the private [NativeEngineHost.deliver] is invoked reflectively to keep the production API
