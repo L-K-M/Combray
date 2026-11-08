@@ -382,6 +382,8 @@ All notable changes to this project are documented here. The format follows
   that already showed its notice. Media found while a page you asked for
   never arrives (a download, a 204 answer) is offered on the page you are
   still on.
+- Queue UI tests dispose Compose before closing Room, so live collectors
+  no longer query a closed database during fixture cleanup.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.

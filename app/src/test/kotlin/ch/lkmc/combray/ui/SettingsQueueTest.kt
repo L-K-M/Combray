@@ -24,7 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Before
@@ -39,7 +39,7 @@ import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The Settings queue rows: a job's address comes from the row or, for one written before schema 6,
@@ -62,7 +62,7 @@ class SettingsQueueTest {
     @get:Rule val rules: RuleChain = RuleChain.outerRule(folder).around(resources).around(compose)
 
     private val context: Context get() = RuntimeEnvironment.getApplication()
-    private val events = CopyOnWriteArrayList<String>()
+    private val compositionActive = AtomicBoolean(false)
     private lateinit var database: CombrayDatabase
     private lateinit var integrations: Integrations
     private lateinit var scope: CoroutineScope
@@ -94,18 +94,16 @@ class SettingsQueueTest {
                     try {
                         base.evaluate()
                     } finally {
-                        // The Compose rule is innermost, so its statement has already disposed the
-                        // UI and run this marker before this cleanup starts.
-                        check(events.firstOrNull() == "compose disposed") {
-                            "Compose was not disposed before fixture cleanup; event order was $events"
+                        // Check the ordering without preventing cleanup if setup or the test failed.
+                        val disposed = !compositionActive.get()
+                        try {
+                            if (::scope.isInitialized) {
+                                runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
+                            }
+                        } finally {
+                            if (::database.isInitialized) database.close()
                         }
-                        events += "scope cancelled"
-                        scope.cancel()
-                        runBlocking {
-                            withTimeout(2_000) { scope.coroutineContext[Job]?.join() }
-                        }
-                        events += "database closed"
-                        database.close()
+                        check(disposed) { "Compose was not disposed before fixture cleanup" }
                     }
                 }
             }
@@ -143,7 +141,8 @@ class SettingsQueueTest {
     private fun show() {
         compose.setContent {
             DisposableEffect(Unit) {
-                onDispose { events += "compose disposed" }
+                compositionActive.set(true)
+                onDispose { compositionActive.set(false) }
             }
             SettingsSheet(
                 integrations = integrations,
