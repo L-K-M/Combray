@@ -939,6 +939,28 @@ class BrowserCoordinatorTest {
      * is below its creation stamp, so Continue and the prior-tab fallback skip it.
      */
     @Test
+    fun aTabOrderingStampDoesNotExtendAClosedVisitsRetention() {
+        runBlocking {
+            database.browser().insertTab(
+                TabEntity("future-order", TabState.CLOSED, null, null, null, START, START + 30 * DAY, START),
+            )
+        }
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val old = runBlocking { database.browser().openTabs() }.single()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        browser.closeTab(old.id); idle()
+
+        now += 8 * DAY
+        browser.runMaintenance(); idle()
+
+        // Tab ordering may survive a backwards clock; visit retention must still use wall time.
+        assertNull(runBlocking { database.browser().visit(old.currentVisitId!!) })
+    }
+
+    @Test
     fun aBackgroundTabAfterSameMillisecondFocusesStaysUnused() {
         ready()
         browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
