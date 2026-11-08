@@ -280,7 +280,15 @@ class SiteReports internal constructor(
 
         val enqueued = try {
             png?.let { withContext(Dispatchers.IO) { files.write(id, it) } }
-            outbox.enqueue(JobKind.SITE_REPORT, service, Binding.CURRENT, dedupeKey = id, payload = json.encodeToString(ReportPayload.serializer(), payload), supersede = false)
+            outbox.enqueue(
+                JobKind.SITE_REPORT,
+                service,
+                Binding.CURRENT,
+                dedupeKey = id,
+                payload = json.encodeToString(ReportPayload.serializer(), payload),
+                supersede = false,
+                url = payload.url,
+            )
         } catch (failure: Exception) {
             // No job references the file: the insert was not committed.
             withContext(Dispatchers.IO) { files.delete(id) }

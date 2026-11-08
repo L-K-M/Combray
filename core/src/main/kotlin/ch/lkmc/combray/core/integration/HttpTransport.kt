@@ -1,5 +1,6 @@
 package ch.lkmc.combray.core.integration
 
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -105,15 +106,19 @@ class UrlConnectionTransport(
     }
 
     private fun readBounded(stream: InputStream): ByteArray {
-        val buffer = ByteArray(maxResponseBytes + 1)
+        // A small buffer, not the whole cap: most answers are a few KiB, and a 256 KiB array per
+        // request is garbage during a capture burst.
+        val buffer = ByteArray(minOf(maxResponseBytes, BUFFER_BYTES))
+        val contents = ByteArrayOutputStream(minOf(maxResponseBytes, BUFFER_BYTES))
         var read = 0
-        while (read < buffer.size) {
-            val count = stream.read(buffer, read, buffer.size - read)
+        while (read < maxResponseBytes) {
+            val count = stream.read(buffer, 0, minOf(buffer.size, maxResponseBytes - read))
             if (count < 0) break
+            contents.write(buffer, 0, count)
             read += count
         }
         // Over the cap: keep the prefix; parsers then see a truncated, invalid body.
-        return buffer.copyOf(minOf(read, maxResponseBytes))
+        return contents.toByteArray()
     }
 
     companion object {
@@ -123,5 +128,8 @@ class UrlConnectionTransport(
         /** Shorter: an address unreachable from this network (home server, outside) fails fast. */
         const val CONNECT_TIMEOUT_MS = 8_000
         const val MAX_RESPONSE_BYTES = 256 * 1024
+
+        /** The read chunk, and the initial output buffer, for a bounded response. */
+        const val BUFFER_BYTES = 8 * 1024
     }
 }
