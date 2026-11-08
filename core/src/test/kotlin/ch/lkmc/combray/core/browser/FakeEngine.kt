@@ -87,7 +87,13 @@ class FakeEngine : EnginePort {
         emit(EngineEvent.TabOpened(view(tab), view(opener)))
     }
 
+    var closeFailure: Throwable? = null
+
     override fun closeView(tab: Long) {
+        closeFailure?.let { failure ->
+            closeFailure = null
+            throw failure
+        }
         closed += tab
     }
 
