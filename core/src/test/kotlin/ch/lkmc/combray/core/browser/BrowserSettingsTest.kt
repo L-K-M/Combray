@@ -7,6 +7,8 @@ import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -24,6 +26,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** The user's own preferences survive a restart and never block one (docs/IMPLEMENTATION_PLAN.md section 2). */
 @RunWith(RobolectricTestRunner::class)
@@ -311,6 +314,46 @@ class BrowserSettingsTest {
     }
 
     @Test
+    fun cancellingTheOwnerScopeDoesNotLoseAnAcknowledgedWrite() {
+        val scripted = scripted()
+        val latch = CountDownLatch(1)
+        scripted.latch = latch
+        val owner = scope()
+        val settings = BrowserSettings(scripted, owner)
+        val result = settings.setTextSize(TextSize.PERCENT_150)
+        try {
+            assertTrue(scripted.commitEntered.await(5, TimeUnit.SECONDS))
+            owner.cancel()
+        } finally {
+            latch.countDown()
+        }
+        assertTrue("An admitted write must retain its actual disk acknowledgement", result.awaitBlocking())
+        assertEquals(TextSize.PERCENT_150, settings.textSize.value)
+        assertEquals("PERCENT_150", scripted.getString("text_size", null))
+    }
+
+    @Test
+    fun cancellingTheOwnerScopeCancelsAQueuedResult() {
+        val scripted = scripted()
+        val latch = CountDownLatch(1)
+        scripted.latch = latch
+        val owner = scope()
+        val settings = BrowserSettings(scripted, owner)
+        val first = settings.setTextSize(TextSize.PERCENT_150)
+        assertTrue(scripted.commitEntered.await(5, TimeUnit.SECONDS))
+        val queued = settings.setTextSize(TextSize.PERCENT_80)
+        try {
+            owner.cancel()
+        } finally {
+            latch.countDown()
+        }
+        runBlocking { withTimeout(5_000) { owner.coroutineContext[Job]!!.join() } }
+        assertTrue("A queued result must cancel, not hang forever", queued.isCancelled)
+        assertTrue(first.awaitBlocking())
+        assertEquals(TextSize.PERCENT_150, settings.textSize.value)
+    }
+
+    @Test
     fun unknownKeysAndUnknownStringsSurviveALaterWrite() {
         val scripted = scripted()
         scripted.edit().putString("future_key", "keep").putString("theme_mode", "MIDNIGHT").commit()
@@ -345,7 +388,7 @@ class BrowserSettingsTest {
     private fun scripted(): ScriptedPreferences =
         ScriptedPreferences(context.getSharedPreferences("settings-test-scripted", Context.MODE_PRIVATE))
 
-    private fun Deferred<Boolean>.awaitBlocking(): Boolean = runBlocking { await() }
+    private fun Deferred<Boolean>.awaitBlocking(): Boolean = runBlocking { withTimeout(5_000) { await() } }
 }
 
 /**
@@ -362,6 +405,7 @@ private class ScriptedPreferences(
     var watchedKey: String? = null
     val watchedValues = mutableListOf<String?>()
     val commitThreads = ConcurrentLinkedQueue<Thread>()
+    val commitEntered = CountDownLatch(1)
 
     override fun edit(): SharedPreferences.Editor {
         val editor = delegate.edit()
@@ -385,6 +429,7 @@ private class ScriptedPreferences(
 
             override fun commit(): Boolean {
                 commitThreads += Thread.currentThread()
+                commitEntered.countDown()
                 latch?.await()
                 editor.commit()
                 return when (mode) {

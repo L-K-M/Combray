@@ -7,6 +7,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,31 +104,39 @@ class BrowserSettings(
      */
     private fun <T : Enum<T>> write(key: String, state: MutableStateFlow<T>, choice: T): Deferred<Boolean> {
         val result = CompletableDeferred<Boolean>()
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val operation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 writes.withLock {
+                    currentCoroutineContext().ensureActive()
                     if (result.isCancelled) return@withLock
-                    val previous = acknowledged.getValue(key)
-                    val stored = try {
-                        withContext(Dispatchers.IO) { commit(key, choice) }
-                    } catch (_: Exception) {
-                        false
+                    // Once admitted, keep the actual disk acknowledgement and reconciliation
+                    // together even if the process scope is cancelled during blocking commit.
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        val previous = acknowledged.getValue(key)
+                        val stored = try {
+                            commit(key, choice)
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (stored) {
+                            acknowledged[key] = choice.name
+                            state.value = choice
+                        } else {
+                            restore(key, previous)
+                        }
+                        result.complete(stored)
                     }
-                    if (stored) {
-                        acknowledged[key] = choice.name
-                        state.value = choice
-                    } else {
-                        // commit() may already have mutated the in-memory map; put the last
-                        // acknowledged raw value back so a recreated wrapper does not read it.
-                        restore(key, previous)
-                    }
-                    result.complete(stored)
                 }
             } catch (cancelled: CancellationException) {
+                result.cancel(cancelled)
                 throw cancelled
             } catch (_: Exception) {
                 result.complete(false)
             }
+        }
+        operation.invokeOnCompletion { failure ->
+            if (failure is CancellationException) result.cancel(failure)
+            else if (failure != null) result.complete(false)
         }
         return result
     }
@@ -148,9 +159,9 @@ class BrowserSettings(
     }
 
     /**
-     * Best-effort in-memory reconciliation after a failed write. The disk already holds the
-     * previous value (or does not hold this one); this is not acknowledged persistence, which is
-     * why the setter still reports false.
+     * Best-effort reconciliation of the process-local map after a failed or ambiguous write.
+     * This does not prove disk rollback: the setter still reports false, and a later successful
+     * full-snapshot write reconciles the known keys.
      */
     private fun restore(key: String, raw: String?) {
         val editor = preferences.edit()
