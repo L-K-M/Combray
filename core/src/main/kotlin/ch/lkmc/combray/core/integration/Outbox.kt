@@ -73,6 +73,8 @@ class Outbox(
         dedupeKey: String,
         payload: String,
         supersede: Boolean,
+        /** The address the job acts on, shown in status lists without decoding the payload. */
+        url: String? = null,
     ): Enqueued = database.withTransaction {
         val service = dao.service(read.kind) ?: return@withTransaction Enqueued.DestinationChanged
         if (binding == Binding.SAME_DESTINATION && service.fingerprint != read.fingerprint) {
@@ -92,10 +94,12 @@ class Outbox(
         val failed = dao.failedJobs(kind, service.fingerprint, dedupeKey)
         if (!supersede && failed.isNotEmpty()) {
             // Asking again after a failure retries that job, so no stale failure outlives a save.
-            val retried = failed.maxBy { it.sequence }.copy(
+            val retrySource = failed.maxBy { it.sequence }
+            val retried = retrySource.copy(
                 state = JobState.PENDING, generation = service.generation, attempts = 0, nextAttemptAt = now, error = null, updatedAt = now,
                 // The user saved this page again: its current title travels, not the stale one.
                 payload = payload, payloadBytes = payloadBytes,
+                url = url ?: retrySource.url,
                 leaseOwner = null, leaseUntil = null,
             ).restarted(now)
             dao.updateJob(retried)
@@ -115,6 +119,7 @@ class Outbox(
             fingerprint = service.fingerprint,
             generation = service.generation,
             dedupeKey = dedupeKey,
+            url = url,
             sequence = dao.lastSequence() + 1,
             payload = payload,
             payloadBytes = payloadBytes,
