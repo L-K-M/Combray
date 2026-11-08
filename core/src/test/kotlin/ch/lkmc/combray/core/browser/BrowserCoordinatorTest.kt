@@ -934,10 +934,7 @@ class BrowserCoordinatorTest {
         tabs.forEach { assertTrue(it.lastFocusedAt >= it.createdAt) }
     }
 
-    /**
-     * A background tab created after same-millisecond focus changes stays unused: its focus stamp
-     * is below its creation stamp, so Continue and the prior-tab fallback skip it.
-     */
+    /** Logical ordering must not extend the wall-clock retention of a closed visit. */
     @Test
     fun aTabOrderingStampDoesNotExtendAClosedVisitsRetention() {
         runBlocking {
@@ -960,6 +957,10 @@ class BrowserCoordinatorTest {
         assertNull(runBlocking { database.browser().visit(old.currentVisitId!!) })
     }
 
+    /**
+     * A background tab created after same-millisecond focus changes stays unused: its focus stamp
+     * is below its creation stamp, so Continue and the prior-tab fallback skip it.
+     */
     @Test
     fun aBackgroundTabAfterSameMillisecondFocusesStaysUnused() {
         ready()
