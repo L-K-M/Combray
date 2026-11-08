@@ -284,11 +284,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- Hister capture admission is transactional: a replacement capture is
-  charged only for the room it takes, and a capture paused after claim is
-  held without spending an attempt. Unchanged text is sent again after a
-  failed or discarded capture, but not after Hister accepted it or refused
-  it on purpose (406/422).
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
   their address at enqueue in a `url` column (schema 6, auto-migrated);
@@ -474,6 +469,11 @@ All notable changes to this project are documented here. The format follows
   after ten tries: attempts that could not connect sent nothing and do not
   count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
   and asks for attention once its server has not answered for a week.
+- Hister capture admission is transactional: a replacement capture is
+  charged only for the room it takes, and a capture paused after claim is
+  held without spending an attempt. Unchanged text is sent again after a
+  failed or discarded capture, but not after Hister accepted it or refused
+  it on purpose (406/422).
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
