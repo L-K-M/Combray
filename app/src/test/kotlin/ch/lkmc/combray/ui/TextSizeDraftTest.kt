@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import ch.lkmc.combray.core.browser.TextSize
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.junit.Assert.assertEquals
@@ -18,6 +21,29 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class TextSizeDraftTest {
+    @Test
+    fun aChoiceStartsPersistenceBeforeItsObserverIsDispatched() {
+        val queued = mutableListOf<Runnable>()
+        val dispatcher = object : CoroutineDispatcher() {
+            override fun dispatch(context: CoroutineContext, block: Runnable) { queued += block }
+        }
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val writes = mutableListOf<TextSize>()
+        val draft = TextSizeDraft(
+            scope = scope,
+            durable = { TextSize.DEFAULT },
+            apply = {},
+            persist = { size -> writes += size; CompletableDeferred() },
+            onFailure = {},
+        )
+        try {
+            draft.choose(TextSize.PERCENT_150)
+            assertEquals(listOf(TextSize.PERCENT_150), writes)
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test
     fun rapidChoicesKeepTheirProvisionalSteps() {
         val durable = mutableStateOf(TextSize.PERCENT_100)

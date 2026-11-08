@@ -170,6 +170,12 @@ fun BrowserScreen(
             onFailure = { notify(resources.getString(R.string.home_change_failed)) },
         )
     }
+    TextSizePreviewEffect(
+        textSizeDraft,
+        textSize,
+        state.engine == EngineStatus.READY,
+        apply = { browser.applyTextSize(it) },
+    )
     LaunchedEffect(tab?.id, tab?.url) {
         if (!home) homeMode = AddressEditorMode.IDLE
     }
