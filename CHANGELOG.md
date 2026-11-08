@@ -282,6 +282,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Files picked for a page's upload survive a delayed startup cleanup: the
+  one-time cleanup finishes before the first pick is copied and removes
+  only copies from earlier processes. A provider's failure message, which
+  can name a private attachment, no longer reaches logcat.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
