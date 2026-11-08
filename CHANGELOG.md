@@ -406,6 +406,9 @@ All notable changes to this project are documented here. The format follows
   `local.properties`.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
+- A failed history commit no longer lets a capture label the new page's
+  text with the old address. Capture requests and replies check the
+  persisted visit and document identity, including same-address reloads.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
   the sentence "Unknown content type (application/pdf).", and reader view
   no longer offers that sentence as an article. Servo shows such a file as
