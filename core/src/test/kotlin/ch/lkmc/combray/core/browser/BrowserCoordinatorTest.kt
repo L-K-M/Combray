@@ -17,6 +17,7 @@ import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LeavePageChoice
@@ -24,6 +25,8 @@ import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ReloadPullPhase
+import ch.lkmc.combray.engine.ViewRef
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,10 +38,12 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -46,6 +51,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -94,6 +100,12 @@ class BrowserCoordinatorTest {
     }
 
     private fun state() = browser.browserState.value
+
+    private fun keyboardContent(): KeyboardRequest? = when (val request = state().keyboard) {
+        is KeyboardRequest.Show -> request.copy(requestId = 0)
+        is KeyboardRequest.Prepare -> request.copy(requestId = 0)
+        else -> request
+    }
 
     /** What RecentSheet shows for [query]: the depth it subscribes to, filtered and capped. */
     private fun recent(query: String? = null) = runBlocking {
@@ -1921,6 +1933,178 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun startingTwiceStartsTheEngineAndConsumerOnce() {
+        val counting = FakeEngine()
+        val twice = BrowserCoordinator(database, counting, scope, clock = { now }, newId = { "id${ids++}" })
+        twice.start()
+        twice.start()
+        assertEquals(1, counting.startCount)
+
+        // The ignored second start leaves a working browser.
+        counting.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { twice.awaitIdle() }
+        twice.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { twice.awaitIdle() }
+        assertEquals("https://a.test/", twice.browserState.value.activeTab?.url)
+    }
+
+    @Test
+    fun concurrentStartsStartTheEngineOnce() {
+        val counting = FakeEngine()
+        val coordinator = BrowserCoordinator(database, counting, scope, clock = { now }, newId = { "id${ids++}" })
+        val gate = CountDownLatch(1)
+        val callers = (1..4).map {
+            Thread {
+                gate.await()
+                coordinator.start()
+            }
+        }
+        callers.forEach(Thread::start)
+        gate.countDown()
+        callers.forEach { it.join(TEST_WAIT_MS) }
+        assertEquals(1, counting.startCount)
+    }
+
+    @Test
+    fun anErrorInMaintenanceStillPublishesTheStoredTabs() {
+        runBlocking {
+            database.browser().insertTab(TabEntity("tab1", TabState.OPEN, null, "https://a.test/", "A", START, START, null))
+            database.browser().setSession(SessionEntity(activeTabId = "tab1"))
+        }
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now }, newId = { "id${ids++}" },
+            unusedTabs = { throw AssertionError("boom") },
+        ).also { it.start() }
+        // Bounded: an Error that kills the consumer leaves awaitIdle unanswered.
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { failing.awaitIdle() } }
+        assertNotNull("the stored tabs must be published even when maintenance fails with an Error", answered)
+
+        assertEquals("tab1", failing.browserState.value.activeTab?.id)
+        assertTrue(failing.browserState.value.notice is Notice.Problem)
+    }
+
+    @Test
+    fun aThrowingJobDoesNotKillTheConsumer() {
+        val base = FakeEngine()
+        val failing = object : EnginePort by base {
+            var fail = true
+            override fun createView(tab: Long, url: String) {
+                if (fail) {
+                    fail = false
+                    throw AssertionError("boom")
+                }
+                base.createView(tab, url)
+            }
+        }
+        val resilient = BrowserCoordinator(database, failing, scope, clock = { now }, newId = { "id${ids++}" })
+            .also { it.start() }
+        base.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { resilient.awaitIdle() }
+
+        resilient.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        val first = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { resilient.awaitIdle() } }
+        assertNotNull("the consumer must survive an Error in one job", first)
+        // The failed command is reported; the consumer goes on.
+        assertTrue(resilient.browserState.value.notice is Notice.Problem)
+
+        resilient.newTab()
+        runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { resilient.awaitIdle() } }
+        assertEquals(2, resilient.browserState.value.openTabCount)
+    }
+
+    @Test
+    fun aCommandFailingWithAnErrorDoesNotStopTheWorkQueue() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.forwardFailure = OutOfMemoryError("simulated")
+        browser.goForward()
+        // Bounded: a consumer killed by the Error would never answer again.
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { browser.awaitIdle() } }
+        assertNotNull("the work queue must survive an Error in one job", answered)
+
+        // The failing step is reported, and the queue keeps moving.
+        assertTrue(state().notice is Notice.Problem)
+        browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 20, "https://after.test/")
+        assertEquals("https://after.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCancelledDependencyDoesNotStopTheWorkQueue() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.forwardFailure = CancellationException("synthetic cancelled dependency")
+        browser.goForward()
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { browser.awaitIdle() } }
+        assertNotNull("Cancelling a dependency must not cancel the consumer", answered)
+        assertTrue(state().notice is Notice.Problem)
+
+        browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 20, "https://after.test/")
+        assertEquals("https://after.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCancelledDependencyDuringMaintenanceStillPublishesStoredTabs() {
+        runBlocking {
+            database.browser().insertTab(TabEntity("tab1", TabState.OPEN, null, "https://a.test/", "A", START, START, null))
+            database.browser().setSession(SessionEntity(activeTabId = "tab1"))
+        }
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now },
+            unusedTabs = { throw CancellationException("synthetic cancelled dependency") },
+        ).also { it.start() }
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { failing.awaitIdle() } }
+        assertNotNull("A cancelled dependency must not strand restoration", answered)
+        assertEquals("tab1", failing.browserState.value.activeTab?.id)
+        assertTrue(failing.browserState.value.notice is Notice.Problem)
+    }
+
+    @Test
+    fun workQueueFailuresDoNotLogTheirMessageOrCause() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        ShadowLog.clear()
+        engine.forwardFailure = AssertionError("synthetic page text", IllegalArgumentException("synthetic credential"))
+        browser.goForward(); idle()
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("browser state update failed") }
+        assertNull("A throwable can carry private messages and causes", record.throwable)
+        assertTrue(record.msg.contains(AssertionError::class.java.name))
+        assertFalse(record.msg.contains("synthetic"))
+    }
+
+    @Test
+    fun restoreFailuresDoNotLogTheirMessageOrCause() {
+        ShadowLog.clear()
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now },
+            unusedTabs = { throw AssertionError("synthetic page text", IllegalArgumentException("synthetic credential")) },
+        ).also { it.start() }
+        runBlocking { failing.awaitIdle() }
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("restoring the session failed") }
+        assertNull("A throwable can carry private messages and causes", record.throwable)
+        assertTrue(record.msg.contains(AssertionError::class.java.name))
+        assertFalse(record.msg.contains("synthetic"))
+    }
+
+    @Test
+    fun rendererCrashesDoNotLogTheNativeReason() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        ShadowLog.clear()
+        engine.emit(EngineEvent.Crashed(engine.view(1), "synthetic page text")); idle()
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("renderer crashed") }
+        assertFalse(record.msg.contains("synthetic"))
+        assertNull(record.throwable)
+    }
+
+    @Test
     fun aCrashedViewIsReplacedOnReloadAndItsLateEventsAreIgnored() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
@@ -1934,6 +2118,52 @@ class BrowserCoordinatorTest {
         assertEquals(2L to "https://a.test/", engine.created.last())
         commit(1, 11, "https://ghost.test/")
         assertEquals("https://a.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCrashHidesTheCrashedViewsKeyboard() {
+        keyboardOnFirstPage()
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun aCrashLeavesAnotherTabsFindAlone() {
+        ready()
+        // Two tabs at the same address: a crash in one must not touch the other's pending work.
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://a.test/")
+        val firstTab = recent().filterIsInstance<RecentItem.OpenTab>().first { it.url == "https://a.test/" && it.tabId != state().activeTab!!.id }.tabId
+        browser.selectTab(firstTab); idle()
+        browser.openFind(); idle()
+        browser.find("needle", FindStep.NEXT); idle()
+        val finds = engine.finds.size
+
+        engine.emit(EngineEvent.Crashed(engine.view(2), "test")); idle()
+        assertNotNull(state().find)
+        browser.find("other", FindStep.NEXT); idle()
+        assertEquals(finds + 1, engine.finds.size)
+    }
+
+    @Test
+    fun aStaleCrashForAReplacedGenerationDropsNothing() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openFind(); idle()
+        browser.find("needle", FindStep.NEXT); idle()
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = true)); idle()
+        browser.keyboardHandled(state().keyboard!!)
+        val finds = engine.finds.size
+
+        // A crash carrying a generation this view never had is stale: nothing is dropped.
+        engine.emit(EngineEvent.Crashed(ViewRef(1, -1), "stale")); idle()
+        assertNotNull(state().find)
+        assertNull(state().keyboard)
+        browser.find("other", FindStep.NEXT); idle()
+        assertEquals(finds + 1, engine.finds.size)
     }
 
     @Test
@@ -2902,7 +3132,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
 
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
-        assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("password"), keyboardContent())
         browser.keyboardHandled(state().keyboard!!)
         assertNull(state().keyboard)
         engine.emit(EngineEvent.ImeHidden(engine.view(1))); idle()
@@ -2920,7 +3150,36 @@ class BrowserCoordinatorTest {
         val handling = state().keyboard!!
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         browser.keyboardHandled(handling)
-        assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("password"), keyboardContent())
+    }
+
+    @Test
+    fun handlingAPrecommitKeyboardRequestCannotClearItsReplayForTheSameField() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 20, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val beforeCommit = state().keyboard!!
+        browser.keyboardHandled(beforeCommit)
+        commit(1, 20, "https://b.test/", index = 1, length = 2)
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 20, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val replay = state().keyboard!!
+        browser.keyboardHandled(beforeCommit)
+        assertEquals("A late UI acknowledgement must not consume the post-commit delivery", replay, state().keyboard)
+    }
+
+    @Test
+    fun multilineAndEditingContextIdentityReachTheKeyboardWithoutRetargetingAnOldRequest() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = false, context = 7)); idle()
+        assertEquals(KeyboardRequest.Prepare("text", multiline = true, context = 7), keyboardContent())
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val oldRequest = state().keyboard!!
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 8)); idle()
+        browser.keyboardHandled(oldRequest)
+        assertEquals(KeyboardRequest.Show("text", multiline = true, context = 8), keyboardContent())
     }
 
     /** Opens a page in tab 1 and gives one of its fields the keyboard; the UI has shown it. */
@@ -2939,7 +3198,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
 
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false)); idle()
-        assertEquals(KeyboardRequest.Prepare("search"), state().keyboard)
+        assertEquals(KeyboardRequest.Prepare("search"), keyboardContent())
     }
 
     @Test
@@ -2960,7 +3219,7 @@ class BrowserCoordinatorTest {
         // Servo can report the new document's focused field before the document's commit.
         engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "text", showKeyboard = true)); idle()
         commit(1, 11, "https://a.test/next", index = 1, length = 2)
-        assertEquals(KeyboardRequest.Show("text"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("text"), keyboardContent())
     }
 
     @Test
