@@ -589,6 +589,7 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Bot-check device verification | Fixed in the engine; phone confirmation pending. A bot check's device check blocked Combray outright: Servo lacked SVG `getBBox()`, `isPointInFill()` and `createSVGPoint()`, which the check draws its fingerprint with. Once the check passed, Servo's reload sent the page's own URL as the referrer and was challenged again. Downstream [PR #36](https://github.com/L-K-M/servo/pull/36) and [PR #37](https://github.com/L-K-M/servo/pull/37) fix both; desktop servoshell then loads the page. On the arm64 emulator, the old and the new app both stop at the check's interactive challenge, as real Firefox with an Android user agent on the Mac does, so only the phone can confirm ([ENGINE_SPIKE.md section 52](ENGINE_SPIKE.md#52-bot-check-device-verification-6-november-2026)) |
 | Report this site | Implemented with the report service (section 6, [Site reports](#site-reports)). JVM tests pass: in `core`, the client's status mapping, a request body equal to the service's golden request, the screenshot files, and the durable queue through a lost answer, an address change, a new token, removal, a week without a connection and a second process; in `app`, the menu rows, address trimming, capture guards, the same-document check on a copied frame (`PageRef`, not the address), drafts and the sheet at 320dp and twice the font size. Ending the draft on Cancel, Back or a swipe, and keeping it while Settings is open over the sheet, are wired in `BrowserScreen`, which no JVM test hosts; no device check covers them either. The service's Python tests pass, and so do the fixture server's tests of its fake report service, which checks each report with the service's own validation. Device checks `ReportTest` (the screenshot, address, title, comment and versions arrive; a trimmed address without a screenshot; no service; a lost answer) and the report checks in `ProcessDeathTest`, `AccessibilityTest` and `ToolbarMenuTest` passed on the x86_64 emulator in Engine run [41984043535](https://github.com/L-K-M/Combray/actions/runs/41984043535) (head `976d5fe`: all 180 checks, no report-only failures; the screenshot's centre pixel matched the page). Not run on a physical phone, so PixelCopy on an arm64 GPU is unverified, and not tried against a deployed report service |
 | Page Copy and text selection | Open: the owner reports the diagnostic's Copy button and manual text selection do not work. Deferred to a separate follow-up, [#168](https://github.com/L-K-M/Combray/issues/168), as requested (31 October 2026) |
+| Queue address metadata | Outbox jobs record their address at enqueue in a nullable `url` column (schema 6, auto-migrated from 5; one new schema, earlier hashes unchanged). Settings queue rows show the host without decoding payloads, and a pre-schema-6 row is decoded once off the UI thread; a row with no usable address shows "Unknown page", never its dedupe key or report id. Finished captures and reports drop the address with their payload (success, cancel, supersede, expiry); failed and waiting rows keep it. Migration, outbox, integration and Settings-sheet JVM tests pass; no device run | `MigrationTest`, `OutboxTest`, `IntegrationsTest`, `HisterIntegrationTest`, `SiteReportsTest`, `SettingsQueueTest` |
 
 Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). Latest whole-suite device evidence: `full11` and `about4` (M1 status above).
 
@@ -730,6 +731,14 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+For the parallel-PR merge wave, refresh each PR's cached base with
+`gh api --method PATCH repos/L-K-M/Combray/pulls/NUMBER -f base=main`
+and apply `zai-review:full` before its next push. The current reviewer action's
+incremental comparison includes changes merged from main, not only the PR's
+files. On #189 it selected 120 files for a one-file patch; the refreshed base
+and full-PR scope keep the review on the intended change. Do not count the
+superseded broad review or cancelled duplicate CI as approval.
 
 The open PRs from 22 October are triaged and landing in waves; what each remaining one needs is in [ANALYSIS.md](../ANALYSIS.md#still-open). Finish those before starting new work.
 

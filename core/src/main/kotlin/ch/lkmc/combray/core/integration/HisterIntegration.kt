@@ -260,7 +260,7 @@ class HisterIntegration(
                 if (bytes <= MAX_QUEUED_CAPTURE_BYTES) largestRefused.update { maxOf(it, bytes) }
                 return@withTransaction false
             }
-            val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true)
+            val enqueued = outbox.enqueue(JobKind.HISTER_ADD, service, Binding.SAME_DESTINATION, key, payload, supersede = true, url = page.url)
             if (enqueued !is Enqueued.Queued) return@withTransaction false
             synchronized(lastQueuedHash) { lastQueuedHash[key] = QueuedCapture(page.sha256, enqueued.job.id) }
             true
@@ -363,8 +363,13 @@ class HisterIntegration(
         return Site(host, wildcard)
     }
 
-    private fun jobHost(job: OutboxJobEntity): String? =
-        runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()?.let(HostNames::of)
+    private fun jobHost(job: OutboxJobEntity): String? {
+        // The row's url column first; only a pre-schema-6 row decodes its payload here, inside
+        // the forget transaction, never in composition.
+        val url = job.url
+            ?: runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
+        return url?.let(HostNames::of)
+    }
 
     companion object {
         val HISTER_SUFFIXES = listOf("/api")

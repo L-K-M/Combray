@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         ServiceEntity::class, OutboxJobEntity::class, SavedItemEntity::class, ExclusionEntity::class,
         HomePinEntity::class, HomeHiddenSiteEntity::class,
     ],
-    version = 5,
+    version = 6,
     autoMigrations = [
         // Services gained an optional alternate address.
         AutoMigration(from = 1, to = 2),
@@ -26,6 +26,8 @@ import androidx.room.RoomDatabase
         AutoMigration(from = 3, to = 4),
         // The new-tab page gained durable pins and hidden sites.
         AutoMigration(from = 4, to = 5),
+        // Outbox jobs record the address they act on, for status lists.
+        AutoMigration(from = 5, to = 6),
     ],
 )
 abstract class CombrayDatabase : RoomDatabase() {
