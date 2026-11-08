@@ -23,6 +23,7 @@
 pub mod activation;
 mod animations;
 pub mod capture;
+pub mod composition;
 pub mod controls;
 pub mod events;
 pub mod find;

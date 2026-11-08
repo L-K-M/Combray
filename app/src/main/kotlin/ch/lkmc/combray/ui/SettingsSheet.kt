@@ -83,6 +83,8 @@ import ch.lkmc.combray.core.integration.ServiceUrls
 import ch.lkmc.combray.core.policy.HostNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -228,20 +230,23 @@ fun SettingsSheet(
 @Composable
 private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: () -> Unit) {
     val choice by settings.unusedTabs.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
     val closing = choice == UnusedTabs.CLOSE
     // One accessibility node per row: TalkBack reads the label with the switch state.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
             .toggleable(value = closing, role = Role.Switch) { enabled ->
-                settings.setUnusedTabs(if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP)
-                onChanged()
+                // Maintenance runs only after disk acknowledged the choice.
+                feedback.choose({ settings.setUnusedTabs(if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP) }) { onChanged() }
             },
     ) {
         Text(pluralStringResource(R.plurals.settings_close_unused_tabs, days, days), modifier = Modifier.weight(1f))
         Switch(checked = closing, onCheckedChange = null)
     }
     Text(stringResource(R.string.settings_close_unused_tabs_body), style = MaterialTheme.typography.bodySmall)
+    if (feedback.failure) ChangeFailure()
 }
 
 /**
@@ -251,29 +256,47 @@ private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: (
 @Composable
 private fun ThemeSetting(settings: BrowserSettings) {
     val choice by settings.themeMode.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
     Text(stringResource(R.string.settings_appearance), modifier = Modifier.semantics { heading() }.padding(top = 8.dp))
     Column(Modifier.selectableGroup()) {
         ThemeMode.entries.forEach { mode ->
-            ListOption(themeModeLabel(mode), selected = mode == choice) { settings.setThemeMode(mode) }
+            ListOption(themeModeLabel(mode), selected = mode == choice) {
+                feedback.choose(write = { settings.setThemeMode(mode) })
+            }
         }
     }
+    if (feedback.failure) ChangeFailure()
 }
 
 /** One labeled switch controls the badge; the button still opens Recent either way. */
 @Composable
 private fun TabCounterSetting(settings: BrowserSettings) {
     val choice by settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
     val shown = choice == TabCounter.SHOWN
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
             .toggleable(value = shown, role = Role.Switch) { enabled ->
-                settings.setTabCounter(if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN)
+                feedback.choose(write = { settings.setTabCounter(if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN) })
             },
     ) {
         Text(stringResource(R.string.settings_tab_counter), modifier = Modifier.weight(1f))
         Switch(checked = shown, onCheckedChange = null)
     }
+    if (feedback.failure) ChangeFailure()
+}
+
+/** A failed preference write: the control snaps back and the user can try again. */
+@Composable
+private fun ChangeFailure() {
+    Text(
+        stringResource(R.string.home_change_failed),
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 @Composable
@@ -329,7 +352,13 @@ private fun ServiceSettings(
     extra: @Composable (ServiceEntity) -> Unit = {},
 ) {
     val current by service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
-    val jobs by remember(kind) { integrations.openJobs(kind) }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
+    val jobs by remember(kind) {
+        integrations.openJobs(kind)
+            .map { open -> open.map { job -> QueueEntry(job, integrations.jobUrl(job)?.let(::displayHost)) } }
+            // A capture payload can hold hundreds of kilobytes of page text: decode a pre-schema-6
+            // row's address off the UI thread, once per job, never during composition.
+            .flowOn(Dispatchers.Default)
+    }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
     val parked by remember(kind) { integrations.parkedJobs(kind) }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
     // Null until edited: the field shows the stored address, and an edit survives rotation.
     var editedAddress by rememberSaveable { mutableStateOf<String?>(null) }
@@ -428,8 +457,8 @@ private fun ServiceSettings(
 
     Text(stringResource(labels.queue), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
     if (jobs.isEmpty() && parked.isEmpty()) Text(stringResource(R.string.queue_empty))
-    jobs.forEach { job -> QueueRow(integrations, labels, job) }
-    if (jobs.any { it.state == JobState.AUTH_REQUIRED }) {
+    jobs.forEach { entry -> QueueRow(integrations, labels, entry) }
+    if (jobs.any { it.job.state == JobState.AUTH_REQUIRED }) {
         OutlinedButton(onClick = { integrations.resume(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(labels.resume))
         }
@@ -607,8 +636,12 @@ private fun HisterCaptureSettings(integrations: Integrations, service: ServiceEn
     }
 }
 
+/** One queued job and the address shown for it; a legacy row's payload is decoded with the flow, off the UI thread. */
+private data class QueueEntry(val job: OutboxJobEntity, val address: String?)
+
 @Composable
-private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: OutboxJobEntity) {
+private fun QueueRow(integrations: Integrations, labels: ServiceLabels, entry: QueueEntry) {
+    val job = entry.job
     val error = job.error.orEmpty()
     val state = when (job.state) {
         JobState.PENDING, JobState.RUNNING -> stringResource(R.string.queue_pending)
@@ -617,7 +650,9 @@ private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: Out
         else -> stringResource(R.string.queue_failed, error)
     }
     Column(Modifier.padding(vertical = 4.dp)) {
-        Text(integrations.jobUrl(job)?.let(::displayHost) ?: job.dedupeKey, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // The row's url column, never a payload decode in composition; a row with no usable
+        // address is named explicitly rather than by its raw dedupe key or report id.
+        Text(entry.address ?: stringResource(R.string.queue_unknown_page), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(state, style = MaterialTheme.typography.bodySmall)
         // A paused item can be dropped on its own: "Resume all" is not the only way out.
         if (job.state in ACTIONABLE_STATES) {
