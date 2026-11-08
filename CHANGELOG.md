@@ -401,6 +401,9 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Preference feedback tests dispose Compose before closing their fixture scope
+  and Room, and release a failed test's scripted commit latch before the
+  bounded cancel-and-join, so cleanup cannot hang on an admitted write.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
