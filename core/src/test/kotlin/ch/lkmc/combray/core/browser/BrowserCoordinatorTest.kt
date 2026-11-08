@@ -2923,6 +2923,20 @@ class BrowserCoordinatorTest {
         assertEquals(KeyboardRequest.Show("password"), state().keyboard)
     }
 
+    @Test
+    fun multilineAndEditingContextIdentityReachTheKeyboardWithoutRetargetingAnOldRequest() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = false, context = 7)); idle()
+        assertEquals(KeyboardRequest.Prepare("text", multiline = true, context = 7), state().keyboard)
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val oldRequest = state().keyboard!!
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 8)); idle()
+        browser.keyboardHandled(oldRequest)
+        assertEquals(KeyboardRequest.Show("text", multiline = true, context = 8), state().keyboard)
+    }
+
     /** Opens a page in tab 1 and gives one of its fields the keyboard; the UI has shown it. */
     private fun keyboardOnFirstPage() {
         ready()

@@ -352,6 +352,7 @@ enum Keyboard {
 #[derive(Clone, Copy)]
 struct ImeField {
     control: EmbedderControlId,
+    context: u64,
     multiline: bool,
     kind: &'static str,
     keyboard: Keyboard,
@@ -362,6 +363,7 @@ impl ImeField {
         EngineEvent::ImeShown {
             view,
             document: u64::from(self.control.pipeline_id),
+            context: self.context,
             multiline: self.multiline,
             kind: self.kind,
             show_keyboard: self.keyboard == Keyboard::Open,
@@ -467,6 +469,8 @@ struct Engine {
     next_sequence: u64,
     needs_paint: bool,
     field_taps: TapTracker,
+    composition:
+        crate::composition::CompositionSession<(i64, Option<PipelineId>, EmbedderControlId)>,
     reload_pull: ReloadPull,
     reload_pull_page: Option<(ViewKey, PipelineId)>,
     reload_pull_inputs: PullInputGate<InputEventId>,
@@ -481,6 +485,8 @@ struct Engine {
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// Process-global editing context IDs, so a recreated engine never reuses one.
+    editor_contexts: crate::composition::EditorContexts,
     /// Page zoom of every view (`SetPageZoom`); kept here so views created later start at it.
     page_zoom: f32,
     /// The user's last tap or key press: in which tab, on which of its documents, and when.
@@ -517,6 +523,7 @@ impl Engine {
             next_sequence: 1,
             needs_paint: false,
             field_taps: TapTracker::new(density),
+            composition: Default::default(),
             reload_pull: ReloadPull::new(density),
             reload_pull_page: None,
             reload_pull_inputs: Default::default(),
@@ -531,6 +538,7 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            editor_contexts: Default::default(),
             page_zoom: page_zoom::DEFAULT_ZOOM,
             last_activation: None,
             taps,
@@ -671,7 +679,21 @@ impl Engine {
                 y,
             } => self.touch(phase, pointer, x, y),
             Command::Key { action, key } => self.key(action, key),
-            Command::ImeCommit { text } => self.ime_commit(text),
+            Command::ImeCommit { context, text } => {
+                if context.is_none_or(|context| self.ime_context_is_current(context)) {
+                    self.ime_commit(text);
+                }
+            },
+            Command::ImeComposition {
+                id,
+                context,
+                phase,
+                text,
+            } => {
+                if self.ime_context_is_current(context) {
+                    self.ime_composition(id, phase, text);
+                }
+            },
             Command::ImeDismissed => self.ime_dismissed(),
             Command::ContextClick { x, y } => self.context_click(x, y),
             Command::RespondToControl { control, response } => {
@@ -1659,12 +1681,19 @@ impl Engine {
     }
 
     fn key(&mut self, action: KeyAction, key: KeyInput) {
+        if key
+            .context
+            .is_some_and(|context| !self.ime_context_is_current(context))
+        {
+            return;
+        }
         if action == KeyAction::Press {
             self.note_interaction();
         }
         let Some(webview) = self.active_webview() else {
             return;
         };
+        let modifiers = key.modifiers;
         let Some(key) = servo_key(key) else {
             return;
         };
@@ -1672,9 +1701,24 @@ impl Engine {
             KeyAction::Press => KeyState::Down,
             KeyAction::Release => KeyState::Up,
         };
-        webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
-            state, key,
-        )));
+        let mut event = KeyboardEvent::from_state_and_key(state, key);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::SHIFT, modifiers.shift);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::CONTROL, modifiers.control);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::ALT, modifiers.alt);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::META, modifiers.meta);
+        webview.notify_input_event(InputEvent::Keyboard(event));
         if action == KeyAction::Press {
             self.note_activation();
         }
@@ -1723,6 +1767,37 @@ impl Engine {
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             KeyState::Up,
             Key::Named(NamedKey::Process),
+        )));
+    }
+
+    fn ime_context_is_current(&self, context: u64) -> bool {
+        self.active
+            .and_then(|id| self.tabs.get(&id))
+            .and_then(|tab| tab.ime_field)
+            .is_some_and(|field| field.context == context)
+    }
+
+    fn ime_composition(&mut self, id: u64, phase: crate::composition::Phase, text: String) {
+        let owner = self.active.and_then(|id| {
+            self.tabs.get(&id).and_then(|tab| {
+                tab.ime_field
+                    .map(|field| (id, tab.current_document, field.control))
+            })
+        });
+        if !self.composition.accept(id, phase, owner) {
+            return;
+        }
+        self.note_interaction();
+        let Some(webview) = self.active_webview() else {
+            return;
+        };
+        let state = match phase {
+            crate::composition::Phase::Start => servo::CompositionState::Start,
+            crate::composition::Phase::Update => servo::CompositionState::Update,
+            crate::composition::Phase::End => servo::CompositionState::End,
+        };
+        webview.notify_input_event(InputEvent::Ime(ImeEvent::Composition(
+            servo::CompositionEvent { state, data: text },
         )));
     }
 
@@ -2159,8 +2234,19 @@ impl Engine {
                 } else {
                     Keyboard::Withheld
                 };
+                // The ID must be new for this process: the application may still hold an older
+                // field's ID. When the positive Java `long` space is spent, fail closed rather
+                // than hand out zero or a reused ID.
+                let Some(context) = self.editor_contexts.allocate() else {
+                    if let Some(tab) = self.live_tab(view) {
+                        tab.ime_field = None;
+                    }
+                    self.error("the process has run out of editor focus context IDs");
+                    return;
+                };
                 let field = ImeField {
                     control,
+                    context,
                     multiline,
                     kind,
                     keyboard,

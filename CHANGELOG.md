@@ -12,9 +12,6 @@ All notable changes to this project are documented here. The format follows
   on a phone is unconfirmed; see the [engine investigation](docs/ENGINE_SPIKE.md#40-verification-stall-and-automation-signals-2-november-2026).
 - The page Copy button and manual text selection are reported broken;
   tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
-- Rich text editors, such as many comment boxes, show no text cursor yet,
-  and a word you are typing appears when the keyboard commits it, as in
-  form fields.
 
 ### Added
 
@@ -23,6 +20,9 @@ All notable changes to this project are documented here. The format follows
   including after Combray closes. This uses a new request without the page’s
   cookies or referrer; protected images may fail. `data:` and `blob:` images
   are not supported yet.
+- Rich text editors show a caret, including empty fields. Words update as
+  you compose them, and multiline editors keep the keyboard's newline key.
+  Up/Down/Home/End and Shift+arrow selection work in focused editors.
 - Tap a PDF link and read it: a top-level PDF opens in Combray's own
   viewer inside Servo, drawn by PDFium, with its pages one under another
   at the screen's width. The tab takes the PDF's own title when it has one,
