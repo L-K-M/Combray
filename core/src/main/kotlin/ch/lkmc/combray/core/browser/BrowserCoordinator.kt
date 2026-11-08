@@ -30,6 +30,8 @@ import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -97,6 +99,10 @@ class BrowserCoordinator(
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val state = MutableStateFlow(BrowserState())
 
+    /** Guards the one-time setup in [start]; [started] is safe to read without the lock. */
+    private val setupLock = Any()
+    @Volatile private var started = false
+
     // Runtime state, touched only by the consumer.
     private val liveByTab = HashMap<String, LiveView>()
     private val liveByNative = HashMap<Long, LiveView>()
@@ -146,43 +152,56 @@ class BrowserCoordinator(
 
     /**
      * Starts the engine (synchronously, so a surface created right after this can bind) and the
-     * work queue, then restores the session. Call once per process.
+     * work queue, then restores the session. Call once per process: a second or concurrent call
+     * is a no-op, because a second work-queue consumer would break the one-consumer ordering
+     * invariant.
      */
     fun start() {
-        startEngine()
-        scope.launch {
-            for (job in work) {
-                try {
-                    job()
-                } catch (failure: Exception) {
-                    // A failed step must not stop the queue; it is a bug worth surfacing.
-                    Log.e(LOG_TAG, "browser state update failed", failure)
-                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
-                    state.update {
-                        // Before the session is restored the user has done nothing: it was the restore.
-                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
-                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+        if (started) return
+        synchronized(setupLock) {
+            if (started) return
+            startEngine()
+            scope.launch {
+                for (job in work) {
+                    try {
+                        job()
+                    } catch (failure: Throwable) {
+                        // A dependency can cancel independently; only our own cancellation
+                        // ends the consumer. An inner timeout must not strand later commands.
+                        if (failure is CancellationException && !currentCoroutineContext().isActive) throw failure
+                        // A failed step must not stop the queue; it is a bug worth surfacing.
+                        // An Error (article JSON parsing runs here) is caught too: losing the
+                        // consumer would silently stop every later command.
+                        // Messages and causes can contain page text or native credentials.
+                        Log.e(LOG_TAG, "browser state update failed: ${failure.javaClass.name}")
+                        // Restoring ends even if it was this step that failed: show what there is, not a blank page.
+                        state.update {
+                            // Before the session is restored the user has done nothing: it was the restore.
+                            val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+                            it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+                        }
                     }
                 }
             }
-        }
-        submit {
-            // The stored tabs are shown even if maintenance fails, and the problem is named as
-            // the restore: publishing first ends RESTORING, so the queue's handler would call it
-            // "the last action".
-            val failure = try {
-                maintain()
-                null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failed: Exception) {
-                failed
+            submit {
+                // The stored tabs are shown even if maintenance fails, and the problem is named as
+                // the restore: publishing first ends RESTORING, so the queue's handler would call it
+                // "the last action".
+                val failure = try {
+                    maintain()
+                    null
+                } catch (failed: Throwable) {
+                    if (failed is CancellationException && !currentCoroutineContext().isActive) throw failed
+                    // An Error or a cancelled dependency must not skip the stored tabs.
+                    failed
+                }
+                publish()
+                if (failure != null) {
+                    Log.e(LOG_TAG, "restoring the session failed: ${failure.javaClass.name}")
+                    state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
+                }
             }
-            publish()
-            if (failure != null) {
-                Log.e(LOG_TAG, "restoring the session failed", failure)
-                state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
-            }
+            started = true
         }
     }
 
@@ -528,14 +547,17 @@ class BrowserCoordinator(
 
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
+        var forgottenUrl: String? = null
         database.withTransaction {
             val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
             if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
+            forgottenUrl = visit.url
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
             capture?.forgetUrl(visit.url)
         }
+        forgottenUrl?.let { url -> cancelPendingCapture { it == url.substringBefore('#') } }
     }
 
     /**
@@ -562,6 +584,10 @@ class BrowserCoordinator(
                 }
             }
             spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
+        }
+        cancelPendingCapture { url ->
+            val candidate = HostNames.of(url) ?: return@cancelPendingCapture false
+            spellings.any { HostNames.matches(candidate, it, includeSubdomains) }
         }
     }
 
@@ -606,7 +632,7 @@ class BrowserCoordinator(
         stopAwaitingCommit(view)
         view.awaitedRequest = null
         view.awaitedUrl = null
-        if (view.currentDocument == event.document) scheduleCapture(view, event.document, captureTiming.debounceMs)
+        if (view.currentDocument == event.document) scheduleCapture(view, event.document, view.currentPage?.address, captureTiming.debounceMs)
     }
 
     /**
@@ -729,7 +755,7 @@ class BrowserCoordinator(
     /** The user played or closed [offer]; a later offer of the same page shows again. */
     fun dismissMediaOffer(offer: MediaPageRef) = state.update { if (it.mediaOffer == offer) it.copy(mediaOffer = null) else it }
 
-    /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
+    /** Clears only this delivery; a commit replay or a different field may have posted a newer one. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
     /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
@@ -779,7 +805,7 @@ class BrowserCoordinator(
                 if (event.document == it.currentDocument && event.document != it.stoppedDocument && event.attribution != Attribution.STALE) {
                     it.loading = event.phase != LoadPhase.COMPLETE
                     if (event.phase == LoadPhase.COMPLETE) {
-                        scheduleCapture(it, event.document, captureTiming.settleMs)
+                        scheduleCapture(it, event.document, it.currentPage?.address, captureTiming.settleMs)
                         showPendingMediaNotice(it, event.document)
                     }
                 }
@@ -804,23 +830,41 @@ class BrowserCoordinator(
                 // Only a field that opens the keyboard owns it: one the next document focuses on
                 // load must not keep the previous document's keyboard through the navigation.
                 if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
-                val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
+                val request = if (event.showKeyboard) {
+                    KeyboardRequest.Show(event.kind, event.multiline, event.context, requestId = nextRequest++)
+                } else {
+                    KeyboardRequest.Prepare(event.kind, event.multiline, event.context, requestId = nextRequest++)
+                }
                 state.update { it.copy(keyboard = request) }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 keyboardOwner = null
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
-            is EngineEvent.Crashed -> view(event.view)?.let {
-                Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
-                it.crashed = true
-                it.loading = false
-                it.awaitingCommit = false
-                it.pendingStop = null
-                it.controls.clear()
-                it.dialogDocument = null
-                it.dialogCount = 0
-                it.dialogsBlocked = false
+            is EngineEvent.Crashed -> {
+                // A crash for a view that was already replaced is stale: that tab is alive. The
+                // full identity (native tab and generation) is checked before anything is dropped.
+                val crashed = view(event.view) ?: return@submit
+                // A crashed view's requests can never be answered. Drop them here, not only when
+                // a result arrives, so they cannot outlive the view or match a recreated one.
+                pendingCaptures.entries.removeAll { it.value.view == event.view }
+                pendingArticles.entries.removeAll { it.value.view == event.view }
+                // Find searched the crashed document, and the keyboard belonged to its field.
+                if (findSession?.nativeTab == event.view.tab) findSession = null
+                releaseKeyboard(event.view.tab)
+                // Reader view was waiting on that page: say so now, not when a result never comes.
+                // A ready snapshot is immutable and stays.
+                val waiting = reader as? ReaderState.Loading
+                if (waiting?.tabId == crashed.tabId) reader = ReaderState.Unavailable(crashed.tabId)
+                Log.w(LOG_TAG, "renderer crashed")
+                crashed.crashed = true
+                crashed.loading = false
+                crashed.awaitingCommit = false
+                crashed.pendingStop = null
+                crashed.controls.clear()
+                crashed.dialogDocument = null
+                crashed.dialogCount = 0
+                crashed.dialogsBlocked = false
             }
             is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
             is EngineEvent.MediaTapped -> view(event.view)?.let { onMediaTapped(it, event) }
@@ -1045,14 +1089,14 @@ class BrowserCoordinator(
                     if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document != view.stoppedDocument && event.document !in view.documentVisits
-                    scheduleCapture(view, event.document, captureTiming.fallbackMs)
+                    scheduleCapture(view, event.document, event.url, captureTiming.fallbackMs)
                     if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
                     // Only an awaited address within this page (a typed "#part") commits this way:
                     // the old page rewriting its own address does not answer the request.
                     if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) stopAwaitingCommit(view)
-                    scheduleCapture(view, event.document, captureTiming.debounceMs)
+                    scheduleCapture(view, event.document, event.url, captureTiming.debounceMs)
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
@@ -1188,13 +1232,36 @@ class BrowserCoordinator(
 
     // --- Capture ----------------------------------------------------------------------------------
 
-    /** (Re)starts the capture timer of [view] for [document]; a newer trigger replaces it. */
-    private fun scheduleCapture(view: LiveView, document: Long, delayMs: Long) {
+    /** Arms a page-bound timer; no known address means there is no safe capture target yet. */
+    private fun scheduleCapture(view: LiveView, document: Long, url: String?, delayMs: Long) {
         if (capture == null) return
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
+        val page = PageKey(document, url?.substringBefore('#') ?: return)
+        view.pendingCapturePage = page
         view.captureTimer = scope.launch {
             delay(delayMs)
-            submit { requestCapture(view, document) }
+            submit {
+                // Cancellation can arrive after this work was queued. A new timer for even the
+                // same page gets a distinct token; it must not be cleared by an older callback.
+                if (view.pendingCapturePage !== page) return@submit
+                view.captureTimer = null
+                view.pendingCapturePage = null
+                if (view.currentPage == page) requestCapture(view, document)
+            }
+        }
+    }
+
+    private fun cancelCaptureTimer(view: LiveView) {
+        view.captureTimer?.cancel()
+        view.captureTimer = null
+        view.pendingCapturePage = null
+    }
+
+    /** Cancels the scheduled capture of a page [matches], so a timer cannot enqueue erased content. */
+    private fun cancelPendingCapture(matches: (String) -> Boolean) {
+        liveByTab.values.forEach { view ->
+            val page = view.pendingCapturePage
+            if (page != null && matches(page.address)) cancelCaptureTimer(view)
         }
     }
 
@@ -1337,8 +1404,7 @@ class BrowserCoordinator(
         state.update { it.copy(engine = status) }
     }
 
-    private suspend fun activeTab(): TabEntity? =
-        dao.session()?.activeTabId?.let { dao.tab(it) }?.takeIf { it.state == TabState.OPEN }
+    private suspend fun activeTab(): TabEntity? = dao.activeTab()
 
     private suspend fun createTab(url: String?, openerTabId: String? = null): String {
         val now = clock.now()
@@ -1467,7 +1533,7 @@ class BrowserCoordinator(
 
     /** Drops the bookkeeping for a renderer the engine no longer has. */
     private fun forgetView(view: LiveView) {
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
         releaseKeyboard(view.nativeTab)
@@ -1579,10 +1645,18 @@ class BrowserCoordinator(
      */
     private suspend fun releaseViewsBeyond(keep: Int) {
         if (liveByTab.size <= keep) return
-        val recency = dao.openTabs().mapIndexed { index, tab -> tab.id to index }.toMap()
+        // One open-tab snapshot serves recency and protects windows without a recovery URL.
+        // A logical close can commit before engine.closeView throws: a view absent from this
+        // snapshot is orphaned and remains eligible for a later close attempt.
+        val open = dao.openTabs()
+        val recency = open.mapIndexed { index, tab -> tab.id to index }.toMap()
+        val urls = open.associate { it.id to it.url }
         liveByTab.values
             // A page waiting for an answer would lose it: keep its renderer.
-            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && dao.tab(it.tabId)?.url != null }
+            .filter {
+                it.nativeTab != selectedNative && it.controls.isEmpty() &&
+                    (urls[it.tabId] != null || it.tabId !in recency)
+            }
             .sortedByDescending { recency[it.tabId] ?: Int.MAX_VALUE }
             .take(liveByTab.size - keep)
             .forEach { closeView(it) }
@@ -1709,6 +1783,9 @@ class BrowserCoordinator(
         val documentVisits = HashMap<Long, String>()
 
         var captureTimer: Job? = null
+
+        /** A distinct token for each schedule, including successive timers for the same page. */
+        var pendingCapturePage: PageKey? = null
 
         /** Documents that are Servo's error pages (network or certificate failure). */
         val errorDocuments = HashSet<Long>()

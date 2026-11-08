@@ -87,6 +87,15 @@ interface BrowserDao {
     @Query("SELECT * FROM session WHERE id = 0")
     suspend fun session(): SessionEntity?
 
+    /** The session's open tab in one query; null when there is none or it is closed. */
+    @Query(
+        """
+        SELECT tabs.* FROM session JOIN tabs ON tabs.id = session.activeTabId
+        WHERE session.id = 0 AND tabs.state = 'OPEN'
+        """,
+    )
+    suspend fun activeTab(): TabEntity?
+
     @Query("SELECT * FROM session WHERE id = 0")
     fun observeSession(): Flow<SessionEntity?>
 
