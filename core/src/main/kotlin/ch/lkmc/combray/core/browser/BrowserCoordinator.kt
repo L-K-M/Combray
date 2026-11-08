@@ -1370,8 +1370,7 @@ class BrowserCoordinator(
         state.update { it.copy(engine = status) }
     }
 
-    private suspend fun activeTab(): TabEntity? =
-        dao.session()?.activeTabId?.let { dao.tab(it) }?.takeIf { it.state == TabState.OPEN }
+    private suspend fun activeTab(): TabEntity? = dao.activeTab()
 
     private suspend fun createTab(url: String?, openerTabId: String? = null): String {
         val now = clock.now()
@@ -1612,10 +1611,14 @@ class BrowserCoordinator(
      */
     private suspend fun releaseViewsBeyond(keep: Int) {
         if (liveByTab.size <= keep) return
-        val recency = dao.openTabs().mapIndexed { index, tab -> tab.id to index }.toMap()
+        // One read of the open tabs serves both the recency order and the URL check: a live
+        // view's tab is open, so the snapshot answers exactly as the per-view lookups did.
+        val open = dao.openTabs()
+        val recency = open.mapIndexed { index, tab -> tab.id to index }.toMap()
+        val urls = open.associate { it.id to it.url }
         liveByTab.values
             // A page waiting for an answer would lose it: keep its renderer.
-            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && dao.tab(it.tabId)?.url != null }
+            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && urls[it.tabId] != null }
             .sortedByDescending { recency[it.tabId] ?: Int.MAX_VALUE }
             .take(liveByTab.size - keep)
             .forEach { closeView(it) }
