@@ -97,6 +97,10 @@ class BrowserCoordinator(
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val state = MutableStateFlow(BrowserState())
 
+    /** Guards the one-time setup in [start]; [started] is safe to read without the lock. */
+    private val setupLock = Any()
+    @Volatile private var started = false
+
     // Runtime state, touched only by the consumer.
     private val liveByTab = HashMap<String, LiveView>()
     private val liveByNative = HashMap<Long, LiveView>()
@@ -146,43 +150,56 @@ class BrowserCoordinator(
 
     /**
      * Starts the engine (synchronously, so a surface created right after this can bind) and the
-     * work queue, then restores the session. Call once per process.
+     * work queue, then restores the session. Call once per process: a second or concurrent call
+     * is a no-op, because a second work-queue consumer would break the one-consumer ordering
+     * invariant.
      */
     fun start() {
-        startEngine()
-        scope.launch {
-            for (job in work) {
-                try {
-                    job()
-                } catch (failure: Exception) {
-                    // A failed step must not stop the queue; it is a bug worth surfacing.
-                    Log.e(LOG_TAG, "browser state update failed", failure)
-                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
-                    state.update {
-                        // Before the session is restored the user has done nothing: it was the restore.
-                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
-                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+        if (started) return
+        synchronized(setupLock) {
+            if (started) return
+            startEngine()
+            scope.launch {
+                for (job in work) {
+                    try {
+                        job()
+                    } catch (cancelled: CancellationException) {
+                        // Shutdown, not a failure: the consumer stops with its scope.
+                        throw cancelled
+                    } catch (failure: Throwable) {
+                        // A failed step must not stop the queue; it is a bug worth surfacing.
+                        // An Error (article JSON parsing runs here) is caught too: losing the
+                        // consumer would silently stop every later command.
+                        Log.e(LOG_TAG, "browser state update failed", failure)
+                        // Restoring ends even if it was this step that failed: show what there is, not a blank page.
+                        state.update {
+                            // Before the session is restored the user has done nothing: it was the restore.
+                            val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+                            it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+                        }
                     }
                 }
             }
-        }
-        submit {
-            // The stored tabs are shown even if maintenance fails, and the problem is named as
-            // the restore: publishing first ends RESTORING, so the queue's handler would call it
-            // "the last action".
-            val failure = try {
-                maintain()
-                null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failed: Exception) {
-                failed
+            submit {
+                // The stored tabs are shown even if maintenance fails, and the problem is named as
+                // the restore: publishing first ends RESTORING, so the queue's handler would call it
+                // "the last action".
+                val failure = try {
+                    maintain()
+                    null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failed: Throwable) {
+                    // An Error must not skip publish(): the stored tabs are shown either way.
+                    failed
+                }
+                publish()
+                if (failure != null) {
+                    Log.e(LOG_TAG, "restoring the session failed", failure)
+                    state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
+                }
             }
-            publish()
-            if (failure != null) {
-                Log.e(LOG_TAG, "restoring the session failed", failure)
-                state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
-            }
+            started = true
         }
     }
 
@@ -811,16 +828,30 @@ class BrowserCoordinator(
                 keyboardOwner = null
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
-            is EngineEvent.Crashed -> view(event.view)?.let {
+            is EngineEvent.Crashed -> {
+                // A crash for a view that was already replaced is stale: that tab is alive. The
+                // full identity (native tab and generation) is checked before anything is dropped.
+                val crashed = view(event.view) ?: return@submit
+                // A crashed view's requests can never be answered. Drop them here, not only when
+                // a result arrives, so they cannot outlive the view or match a recreated one.
+                pendingCaptures.entries.removeAll { it.value.view == event.view }
+                pendingArticles.entries.removeAll { it.value.view == event.view }
+                // Find searched the crashed document, and the keyboard belonged to its field.
+                if (findSession?.nativeTab == event.view.tab) findSession = null
+                releaseKeyboard(event.view.tab)
+                // Reader view was waiting on that page: say so now, not when a result never comes.
+                // A ready snapshot is immutable and stays.
+                val waiting = reader as? ReaderState.Loading
+                if (waiting?.tabId == crashed.tabId) reader = ReaderState.Unavailable(crashed.tabId)
                 Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
-                it.crashed = true
-                it.loading = false
-                it.awaitingCommit = false
-                it.pendingStop = null
-                it.controls.clear()
-                it.dialogDocument = null
-                it.dialogCount = 0
-                it.dialogsBlocked = false
+                crashed.crashed = true
+                crashed.loading = false
+                crashed.awaitingCommit = false
+                crashed.pendingStop = null
+                crashed.controls.clear()
+                crashed.dialogDocument = null
+                crashed.dialogCount = 0
+                crashed.dialogsBlocked = false
             }
             is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
             is EngineEvent.MediaTapped -> view(event.view)?.let { onMediaTapped(it, event) }

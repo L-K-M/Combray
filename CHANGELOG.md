@@ -282,6 +282,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The browser starts once and keeps working after an internal error. A
+  second or concurrent start no longer starts a second work queue, and an
+  `Error` in one state update (for example running out of memory while
+  preparing an article) no longer silently stops every later navigation,
+  tab and history action until the app is restarted. Cancellation still
+  stops the queue.
+- A crashed renderer's pending capture, article, find and keyboard work is
+  dropped, and only its own: a stale crash from a replaced view no longer
+  clears a healthy tab's requests, and a ready Reader snapshot survives its
+  renderer's crash.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.

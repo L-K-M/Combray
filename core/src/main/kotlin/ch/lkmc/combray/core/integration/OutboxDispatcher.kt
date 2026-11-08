@@ -105,7 +105,8 @@ class OutboxDispatcher(
         if (!currentCoroutineContext().isActive) throw cancelled
         Log.e(LOG_TAG, "outbox step failed: ${cancelled.javaClass.name}")
         null
-    } catch (failure: Exception) {
+    } catch (failure: Throwable) {
+        // An Error from a handler or storage must not strand the queue behind the drain mutex.
         Log.e(LOG_TAG, "outbox step failed: ${failure.javaClass.name}")
         null
     }
@@ -117,7 +118,7 @@ class OutboxDispatcher(
             withContext(Dispatchers.IO) { handler.dispatch(claim.job) }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
             // The class only: an exception message can quote a request header or page content.
             Log.e(LOG_TAG, "dispatching job ${claim.job.id} failed: ${failure.javaClass.name}")
             DispatchResult.Rejected("internal_error")

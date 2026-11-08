@@ -124,6 +124,28 @@ class OutboxTest {
     }
 
     @Test
+    fun anErrorFromAHandlerStopsItsJobButNotTheDrain() {
+        val first = enqueue(dedupeKey = "https://a.test/") as Enqueued.Queued
+        val second = enqueue(dedupeKey = "https://b.test/") as Enqueued.Queued
+        val handler = JobHandler { job ->
+            if (job.id == first.job.id) throw AssertionError("handler error") else DispatchResult.Done(remoteId = "kept")
+        }
+        val dispatcher = OutboxDispatcher(
+            outbox = outbox,
+            handlers = mapOf(JobKind.KARAKEEP_SAVE to handler),
+            onDone = { _, _ -> },
+            scheduler = { scheduled += it },
+        )
+
+        val sent = runBlocking { dispatcher.drain() }
+
+        // An Error is a failure too: it stops its own job, never the queue behind it.
+        assertEquals(2, sent)
+        assertEquals(JobState.FAILED, job(first.job.id).state)
+        assertEquals(JobState.SUCCEEDED, job(second.job.id).state)
+    }
+
+    @Test
     fun maxJobsBoundsEvenARoundOfBrokenCycles() {
         val first = enqueue(dedupeKey = "https://a.test/") as Enqueued.Queued
         val second = enqueue(dedupeKey = "https://b.test/") as Enqueued.Queued
