@@ -547,14 +547,17 @@ class BrowserCoordinator(
 
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
+        var forgottenUrl: String? = null
         database.withTransaction {
             val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
             if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
+            forgottenUrl = visit.url
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
             capture?.forgetUrl(visit.url)
         }
+        forgottenUrl?.let { url -> cancelPendingCapture { it == url.substringBefore('#') } }
     }
 
     /**
@@ -582,6 +585,10 @@ class BrowserCoordinator(
             }
             spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
         }
+        cancelPendingCapture { url ->
+            val candidate = HostNames.of(url) ?: return@cancelPendingCapture false
+            spellings.any { HostNames.matches(candidate, it, includeSubdomains) }
+        }
     }
 
     /**
@@ -600,8 +607,8 @@ class BrowserCoordinator(
     }
 
     /** The text size setting changed: every page, open or opened later, lays out at it. */
-    fun applyTextSize() = submit {
-        if (engineReady) engine.setPageZoom(textSize().zoom)
+    fun applyTextSize(size: TextSize = textSize()) = submit {
+        if (engineReady) engine.setPageZoom(size.zoom)
     }
 
     private fun onLoadingStopped(view: LiveView, event: EngineEvent.LoadingStopped) {
@@ -625,7 +632,7 @@ class BrowserCoordinator(
         stopAwaitingCommit(view)
         view.awaitedRequest = null
         view.awaitedUrl = null
-        if (view.currentDocument == event.document) scheduleCapture(view, event.document, captureTiming.debounceMs)
+        if (view.currentDocument == event.document) scheduleCapture(view, event.document, view.currentPage?.address, captureTiming.debounceMs)
     }
 
     /**
@@ -798,7 +805,7 @@ class BrowserCoordinator(
                 if (event.document == it.currentDocument && event.document != it.stoppedDocument && event.attribution != Attribution.STALE) {
                     it.loading = event.phase != LoadPhase.COMPLETE
                     if (event.phase == LoadPhase.COMPLETE) {
-                        scheduleCapture(it, event.document, captureTiming.settleMs)
+                        scheduleCapture(it, event.document, it.currentPage?.address, captureTiming.settleMs)
                         showPendingMediaNotice(it, event.document)
                     }
                 }
@@ -1082,14 +1089,14 @@ class BrowserCoordinator(
                     if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document != view.stoppedDocument && event.document !in view.documentVisits
-                    scheduleCapture(view, event.document, captureTiming.fallbackMs)
+                    scheduleCapture(view, event.document, event.url, captureTiming.fallbackMs)
                     if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
                     // Only an awaited address within this page (a typed "#part") commits this way:
                     // the old page rewriting its own address does not answer the request.
                     if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) stopAwaitingCommit(view)
-                    scheduleCapture(view, event.document, captureTiming.debounceMs)
+                    scheduleCapture(view, event.document, event.url, captureTiming.debounceMs)
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
@@ -1225,13 +1232,36 @@ class BrowserCoordinator(
 
     // --- Capture ----------------------------------------------------------------------------------
 
-    /** (Re)starts the capture timer of [view] for [document]; a newer trigger replaces it. */
-    private fun scheduleCapture(view: LiveView, document: Long, delayMs: Long) {
+    /** Arms a page-bound timer; no known address means there is no safe capture target yet. */
+    private fun scheduleCapture(view: LiveView, document: Long, url: String?, delayMs: Long) {
         if (capture == null) return
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
+        val page = PageKey(document, url?.substringBefore('#') ?: return)
+        view.pendingCapturePage = page
         view.captureTimer = scope.launch {
             delay(delayMs)
-            submit { requestCapture(view, document) }
+            submit {
+                // Cancellation can arrive after this work was queued. A new timer for even the
+                // same page gets a distinct token; it must not be cleared by an older callback.
+                if (view.pendingCapturePage !== page) return@submit
+                view.captureTimer = null
+                view.pendingCapturePage = null
+                if (view.currentPage == page) requestCapture(view, document)
+            }
+        }
+    }
+
+    private fun cancelCaptureTimer(view: LiveView) {
+        view.captureTimer?.cancel()
+        view.captureTimer = null
+        view.pendingCapturePage = null
+    }
+
+    /** Cancels the scheduled capture of a page [matches], so a timer cannot enqueue erased content. */
+    private fun cancelPendingCapture(matches: (String) -> Boolean) {
+        liveByTab.values.forEach { view ->
+            val page = view.pendingCapturePage
+            if (page != null && matches(page.address)) cancelCaptureTimer(view)
         }
     }
 
@@ -1503,7 +1533,7 @@ class BrowserCoordinator(
 
     /** Drops the bookkeeping for a renderer the engine no longer has. */
     private fun forgetView(view: LiveView) {
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
         releaseKeyboard(view.nativeTab)
@@ -1753,6 +1783,9 @@ class BrowserCoordinator(
         val documentVisits = HashMap<Long, String>()
 
         var captureTimer: Job? = null
+
+        /** A distinct token for each schedule, including successive timers for the same page. */
+        var pendingCapturePage: PageKey? = null
 
         /** Documents that are Servo's error pages (network or certificate failure). */
         val errorDocuments = HashSet<Long>()

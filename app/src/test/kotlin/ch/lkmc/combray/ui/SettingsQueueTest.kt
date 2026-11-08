@@ -146,7 +146,7 @@ class SettingsQueueTest {
             }
             SettingsSheet(
                 integrations = integrations,
-                settings = BrowserSettings(context.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE)),
+                settings = BrowserSettings(context.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE), scope),
                 retention = Retention(),
                 onUnusedTabsChanged = {},
                 notices = ThirdPartyNotices(context.assets),

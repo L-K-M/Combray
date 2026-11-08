@@ -37,7 +37,7 @@ class NoticeThemeTest {
 
     @After
     fun restoreTheme() {
-        device.settings.setThemeMode(originalTheme)
+        device.setThemeMode(originalTheme)
     }
 
     @Test
@@ -47,7 +47,7 @@ class NoticeThemeTest {
     fun aCloseNoticeAndItsHomeBackdropStayLight() = checkCloseNotice(ThemeMode.LIGHT)
 
     private fun checkCloseNotice(theme: ThemeMode) {
-        device.settings.setThemeMode(theme)
+        device.setThemeMode(theme)
         val url = Fixtures.solid(Device.GREEN)
         device.browser.openUrl(url, Placement.NEW_TAB)
         val tab = device.awaitPage(url).activeTab!!.id

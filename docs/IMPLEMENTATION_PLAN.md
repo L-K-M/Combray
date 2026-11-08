@@ -362,6 +362,14 @@ Idempotency: the phone generates a UUIDv4 report id when the sheet opens. The se
 
 Durability: a report is an outbox job kind (`SITE_REPORT`) bound to the report service's fingerprint and generation, like a Karakeep save, with no Room schema change. Its payload holds the metadata and the screenshot's size and SHA-256, never a path or the token; the PNG is `noBackupFilesDir/reports/<report id>.png`, written and synced before the job row, and Send says the report is queued only once both are stored. The dispatcher sends only that file after checking its size and digest; a missing or changed file fails the report rather than sending anything else. At most 20 reports wait unsent. A main-address change parks unsent reports, as for saves, rather than cancelling them; a new token for the same address pauses them until resumed; removing the service cancels them. Retry restarts the seven-day limit for a service that cannot be reached. A delivered report's address, title and comment leave the phone's database right away, and a sweep at the start and end of every queue run deletes each screenshot file no unsent report refers to. The report service's own pages are never captured for Hister. Service-side retention (proposed default, section 11): open and claimed reports stay until resolved, resolved reports lose their contents and screenshot after 30 days, id records stay a year, and no backups are made by default.
 
+Report-service maintenance (8 November 2026, #289 with #301): old rate-limit
+windows are pruned once per changed clock hour, and database creation attempts
+to sync the containing directory, with an explicit best-effort fallback where
+directory sync is unsupported. The scan-count and directory-sync regressions
+failed before correction; all 213 service tests pass on macOS/Python 3.15.2.
+This is host fixture evidence, not a deployment or the exact container smoke
+check. Require the current-head image/CI checks after the Python image update.
+
 ### Durable queue and failure policy
 
 Store a user action and its initial outbox record in one transaction. Use job states such as `pending`, `running` with expiring lease, `retry_wait`, `auth_required`, `failed`, `succeeded`, `cancelled`, `expired`. A crashed worker's lease must become recoverable. WorkManager is a wakeup mechanism; the database is the source of truth. Foreground retry and background dispatch share the same claim mechanism. Do not require a continuously running Android service or promise exact execution times under Doze.
@@ -667,7 +675,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Download image from the long-press menu | Confirmed (owner, 7 November 2026) | Offer an image download action. Implementation default: Android-managed HTTP(S) downloads to Downloads without browser cookies or referrer; no general file-download or authenticated-export promise |
 | Back from a page-opened tab | Confirmed (owner, 22 October 2026) | Back on the first page of a tab a page or the link menu opened closes it and focuses its opener, as in Chrome, instead of leaving the app (section 2) |
 | Closing unused tabs | Confirmed (owner choice, 20 October 2026) | A Settings switch, off by default; uses the history retention period; the focused tab stays |
-| Browser preferences in SharedPreferences | Decided | Plain display and tab choices, with nothing bound to them transactionally |
+| Browser preferences in SharedPreferences | Decided | Plain display and tab choices, with nothing bound to them transactionally. Each write commits off the main thread before its public flow publishes; a false or throwing commit reports failure, reconciles the in-memory map and never publishes the failed choice. Every candidate write is built from the last acknowledged snapshot plus its own change, so a later write cannot persist an earlier failure |
 | Opt-in automatic Hister capture | Proposed | Owner controls content transfer and exclusions |
 | Find in page through a script in the page | Confirmed (owner, 22 October 2026) | Servo 0.6.0 has neither an embedder find API nor `window.find`; `find.js` uses DOM ranges and the selection Servo paints, in the document shown. A page can only see the query and misreport its own matches |
 | Reader view through Readability.js in the page | Decided (20 October 2026) | Firefox's article detection, run in the document shown (no second fetch, no cookies leave Servo); rendered natively as text, never as page markup. A page can only misreport its own article |
@@ -733,13 +741,14 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
-Report-service maintenance (8 November 2026, #289 with #301): old rate-limit
-windows are pruned once per changed clock hour, and database creation attempts
-to sync the containing directory, with an explicit best-effort fallback where
-directory sync is unsupported. The scan-count and directory-sync regressions
-failed before correction; all 213 service tests pass on macOS/Python 3.15.2.
-This is host fixture evidence, not a deployment or the exact container smoke
-check. Require the current-head image/CI checks after the Python image update.
+Capture-timer consolidation (8 November 2026, PR #249 with #314's missing-visit
+case): timers carry their scheduled page identity and a distinct schedule token.
+Forget cancels matching fragments even after a timer has queued work; completion
+clears timer bookkeeping on the serialized coordinator queue. The fragment
+regression failed before the fix; all four focused timer tests and
+`testDebugUnitTest lintDebug assembleDebug` passed locally on macOS with JDK 21.
+This is JVM evidence, not a new native or device run. PR CI and review remain
+the merge gates.
 
 For the parallel-PR merge wave, refresh each PR's cached base with
 `gh api --method PATCH repos/L-K-M/Combray/pulls/NUMBER -f base=main`
