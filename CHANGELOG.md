@@ -282,6 +282,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Recent's Hister and Karakeep scopes no longer send the local filter
+  to the server on their own: the panels prefill the field, and the first
+  request needs a keystroke or the keyboard's Search key inside the
+  panel. A blank Karakeep field still lists the newest bookmarks, and an
+  unchanged query is resent by an explicit submit.
+- The Hister and Karakeep scopes keep the last results on screen while a
+  new search is in flight, show a progress line, and a failed page keeps
+  its rows and cursor for a retry. Karakeep's Load more waits for the
+  current page, so repeated taps no longer start duplicate requests or let
+  an older page append rows or release a newer request's gate.
+- A Hister search whose answer names one address twice, as when its
+  index and its history both match, no longer crashes Recent's Hister
+  list with duplicate row keys. Rows are deduplicated by the exact
+  address, preserving promoted-history order.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.

@@ -530,6 +530,7 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Newer content supersedes unsent older content per document key | Passed in unit tests | `IntegrationsTest` |
 | Captured-body expiry after worker death and during a long drain | Passed in Room/fake-Hister tests (21 October 2026): abandoned claims and bodies crossing seven days expire before dispatch; live leases and fenced completion stay intact | `HisterIntegrationTest` |
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
+| Seeded filter consent, retained results, serialized pagination | Passed in JVM tests (8 November 2026): a seeded local filter is not sent until the user types or submits; a blank Karakeep field still lists the newest bookmarks and an unchanged query is resent by an explicit submit; the last results stay while a new search runs; a page request is bound to its original query, cursor and destination, waits for the current page, and keeps rows and cursor on failure; Hister rows dedupe by exact address | `SearchPanelConsentTest`, `SearchPanelPaginationTest`, `SearchPanelResultsTest`, `SearchDestinationBindingTest` |
 | Test against a deployed Hister; cleanup of the test document | **Not run** | — |
 
 ### M4 — Personal-use hardening and handoff
