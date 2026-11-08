@@ -648,7 +648,9 @@ All notable changes to this project are documented here. The format follows
   instead of clipped: the keyboard is no longer told an edit succeeded
   when only part of it was sent. A cursor position or selection region
   the page cannot represent is refused too, rather than acknowledged
-  while ignored.
+  while ignored. Unmapped keyboard actions (including Previous) no longer
+  submit the form as Enter; unsupported replacement ranges and code-point
+  deletions do not pretend to edit the page through Android's private buffer.
 - A site whose name begins with "www." and has no further dots, such as
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped

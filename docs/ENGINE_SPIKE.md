@@ -3482,7 +3482,8 @@ Its tree equals the locally built and independently reviewed head `3125271cf085b
 Three local GLM 5.3 engine review rounds finished; the final round has no actionable findings.
 The paired [Combray PR #317](https://github.com/L-K-M/Combray/pull/317) has local code review and
 validation, but hosted CI remains queued. No personal history or reports were read, and no
-reported signed-in editor was checked.
+reported signed-in editor was checked. The 7 November checks below are inherited
+from that original candidate, not evidence for the later consolidated head.
 
 ### Changes
 
@@ -3591,3 +3592,23 @@ this slice validates committed LF paragraph insertion, not every editing command
 reported editor has not been inspected, and no live-service or physical-phone acceptance is
 claimed. Combray PR #317 remains open until hosted checks run and pass; local review is not a
 claim that its queued CI or hosted reviewer ran.
+
+### JVM consolidation follow-up (8 November 2026)
+
+The paired consolidation also retires connections on page changes, reports editor
+status only after a page field prepares it, maps Next to Tab and refuses negative
+or greater-than-1,000 per-direction deletion requests before ending composition.
+The bound is a refusal, not clipping or a guarantee of UTF-16 deletion fidelity.
+
+Four further JVM regressions failed before the parent fixes: code-point deletion
+and explicit range replacement inherited false success from the framework's
+private editable; Previous/unknown actions reached Enter; unhandled IME keys
+reached JNI. Those requests now return false before side effects. Supported Go,
+Done, Search, Send and default/newline actions retain Enter. API-30 and API-35
+Robolectric checks also pin null surrounding-text/snapshot results.
+
+The complete `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`
+gate passes locally after those changes. No local cap on committed/composed text
+was invented; no supported bridge limit is established. Current-head native builds,
+full emulator fixtures and hosted review remain pending. The historical arm64
+checks above do not validate these newer changes or a physical keyboard/IME.

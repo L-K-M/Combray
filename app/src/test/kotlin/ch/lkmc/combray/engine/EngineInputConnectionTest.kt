@@ -2,6 +2,7 @@ package ch.lkmc.combray.engine
 
 import android.app.Application
 import android.content.Context
+import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertFalse
@@ -40,6 +41,41 @@ class EngineInputConnectionTest {
         assertFalse(connection.setComposingText("x", 0))
         assertFalse(connection.commitText("x", -1))
         assertFalse(connection.setComposingText("x", 2))
+    }
+
+    @Test
+    fun codePointDeletionsDoNotUseTheFrameworksUnrelatedEditable() {
+        val connection = connection()
+        assertFalse(connection.deleteSurroundingTextInCodePoints(1, 0))
+        assertFalse(connection.deleteSurroundingTextInCodePoints(0, 1))
+    }
+
+    @Test
+    fun anUnsupportedEditorActionCannotSubmitTheForm() {
+        val connection = connection()
+        assertFalse(connection.performEditorAction(EditorInfo.IME_ACTION_PREVIOUS))
+        assertFalse(connection.performEditorAction(Int.MAX_VALUE))
+    }
+
+    @Test
+    fun anUnhandledImeKeyIsRefusedBeforeCompositionOrJni() {
+        val connection = connection()
+        assertFalse(connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP)))
+        assertFalse(connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_VOLUME_UP)))
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun anExplicitReplacementRangeCannotCommitAtTheCurrentCaretInstead() {
+        assertFalse(connection().replaceText(0, 1, "replacement", 1, null))
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun contextSnapshotsAreNotFabricatedFromTheFrameworksEditable() {
+        val connection = connection()
+        assertNull(connection.getSurroundingText(10, 10, 0))
+        assertNull(connection.takeSnapshot())
     }
 
     @Test

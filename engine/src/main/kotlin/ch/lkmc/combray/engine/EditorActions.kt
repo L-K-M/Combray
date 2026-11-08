@@ -4,9 +4,14 @@ import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 
 /**
- * The key an IME action button sends to the page. Next moves focus like Tab; every other action
- * submits like Enter, which is what a page's Go, Done, Search or Send button expects. Previous
- * cannot be told from Next without a modifier channel, so it stays with Enter.
+ * The key a supported IME action sends to the page. Next moves focus like Tab; ordinary
+ * submit/newline actions use Enter. Previous is not mapped here, and must not submit a form
+ * instead of moving backwards. Unknown actions are refused as well.
  */
-internal fun editorActionKey(actionCode: Int): Int =
-    if (actionCode == EditorInfo.IME_ACTION_NEXT) KeyEvent.KEYCODE_TAB else KeyEvent.KEYCODE_ENTER
+internal fun editorActionKey(actionCode: Int): Int? = when (actionCode) {
+    EditorInfo.IME_ACTION_NEXT -> KeyEvent.KEYCODE_TAB
+    EditorInfo.IME_ACTION_UNSPECIFIED, EditorInfo.IME_ACTION_NONE,
+    EditorInfo.IME_ACTION_GO, EditorInfo.IME_ACTION_DONE,
+    EditorInfo.IME_ACTION_SEARCH, EditorInfo.IME_ACTION_SEND -> KeyEvent.KEYCODE_ENTER
+    else -> null
+}

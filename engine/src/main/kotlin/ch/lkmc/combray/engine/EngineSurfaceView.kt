@@ -1,6 +1,8 @@
 package ch.lkmc.combray.engine
 
+import android.annotation.TargetApi
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import android.view.HapticFeedbackConstants
@@ -15,6 +17,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.TextAttribute
 
 /**
  * The one visible rendering surface. All tabs render into it; the engine shows only the
@@ -342,7 +345,7 @@ class EngineInputConnection(
     }
 
     override fun sendKeyEvent(event: KeyEvent): Boolean {
-        if (!canEdit()) return false
+        if (!canEdit() || !EngineKeys.handles(event.keyCode, event.unicodeChar)) return false
         if (event.action == KeyEvent.ACTION_DOWN) composition.finish()
         val action = when (event.action) {
             KeyEvent.ACTION_DOWN -> NativeEngine.KEY_PRESS
@@ -355,8 +358,9 @@ class EngineInputConnection(
 
     override fun performEditorAction(actionCode: Int): Boolean {
         if (!canEdit()) return false
+        val key = editorActionKey(actionCode) ?: return false
         composition.finish()
-        tapKey(editorActionKey(actionCode))
+        tapKey(key)
         return true
     }
 
@@ -364,6 +368,17 @@ class EngineInputConnection(
     // represented. BaseInputConnection would answer from its own private editable and report a
     // selection the page never made, so each is refused or returns null instead.
     override fun setSelection(start: Int, end: Int): Boolean = false
+
+    override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean = false
+
+    @TargetApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    override fun replaceText(
+        start: Int,
+        end: Int,
+        text: CharSequence,
+        newCursorPosition: Int,
+        textAttribute: TextAttribute?,
+    ): Boolean = false
 
     override fun setComposingRegion(start: Int, end: Int): Boolean = false
 
