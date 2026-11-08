@@ -216,6 +216,12 @@ class Outbox(
                     nextAttemptAt = now + retry.delayMs(current.attempts, result.retryAfterMs),
                 )
             }
+            DispatchResult.Paused -> released.copy(
+                state = JobState.PENDING,
+                attempts = (current.attempts - 1).coerceAtLeast(0),
+                nextAttemptAt = now,
+                error = null,
+            )
             is DispatchResult.AuthRequired -> released.copy(state = JobState.AUTH_REQUIRED, error = result.category)
             is DispatchResult.Rejected -> released.copy(state = JobState.FAILED, error = result.category)
             // Refused on purpose: retrying cannot help, and captured text is not kept for it.

@@ -49,10 +49,10 @@ class HisterClient(private val transport: HttpTransport) {
             is HttpOutcome.Response -> when (outcome.status) {
                 in 200..299 -> DispatchResult.Done(null)
                 // Hister's rules skip the page: skip rules, an allow list it misses, Hister's own host.
-                406 -> DispatchResult.Declined("skipped_by_server")
+                406 -> DispatchResult.Declined(SKIPPED_BY_SERVER)
                 // Sensitive content. The pinned revision checks only submitted HTML and Combray sends
                 // none, so this is defensive: such a refusal must not fail the capture.
-                422 -> DispatchResult.Declined("sensitive_content")
+                422 -> DispatchResult.Declined(SENSITIVE_CONTENT)
                 else -> HttpStatus.classifyFailure(outcome)
             }
         }
@@ -160,6 +160,12 @@ class HisterClient(private val transport: HttpTransport) {
         const val MAX_TITLE_CHARS = 4 * 1024
         const val MAX_EXCERPT_CHARS = 300
         const val CHECK_QUERY = "combray connection check"
+
+        private const val SKIPPED_BY_SERVER = "skipped_by_server"
+        private const val SENSITIVE_CONTENT = "sensitive_content"
+
+        /** Error categories for a deliberate refusal: the server saw the content and said no. */
+        internal val DECLINE_CATEGORIES = setOf(SKIPPED_BY_SERVER, SENSITIVE_CONTENT)
 
         private val json = Json { ignoreUnknownKeys = true }
     }

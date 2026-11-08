@@ -282,6 +282,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Hister capture admission is transactional: a replacement capture is
+  charged only for the room it takes, and a capture paused after claim is
+  held without spending an attempt. Unchanged text is sent again after a
+  failed or discarded capture, but not after Hister accepted it or refused
+  it on purpose (406/422).
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
