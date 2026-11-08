@@ -45,17 +45,14 @@ class ServiceRoutesTest {
     }
 
     @Test
-    fun anEmptyHandlerIsRefusedWithoutARequest() {
+    fun aPreflightRejectionDoesNotSendOrFailOver() {
         val requests = mutableListOf<String>()
         val routes = ServiceRoutes(
             HttpTransport { requests += it.url; HttpOutcome.Response(200, emptyMap(), ByteArray(0)) },
         )
 
-        val failure = assertThrows(IllegalStateException::class.java) {
-            routes.call(service()) { _, _ -> HttpOutcome.Response(200, emptyMap(), ByteArray(0)) }
-        }
-
-        assertEquals("an attempt makes exactly one request", failure.message)
+        val rejected = DispatchResult.Rejected("payload_too_large")
+        assertEquals(rejected, routes.call(service()) { _, _ -> rejected })
         assertTrue(requests.isEmpty())
     }
 

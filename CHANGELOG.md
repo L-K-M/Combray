@@ -282,7 +282,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- A service attempt now sends exactly one request. A handler that sent
+- A service attempt now sends at most one request. A handler that sent
   twice could have re-sent a request that may already have reached the
   server after failover to the alternate address; the attempt fails loudly
   instead, and the queue does not retry the violation.

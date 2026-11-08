@@ -21,18 +21,18 @@ internal class ServiceRoutes(private val transport: HttpTransport) {
 
     /**
      * Runs [request] with a root of [service] and a transport for it; returns the last attempt's
-     * result. [request] must make exactly one HTTP request: a failure to connect anywhere in it
-     * runs all of it again on the next root. A handler that sends twice, or returns without
-     * sending, is a programming bug: the attempt fails instead of returning a retryable result.
+     * result. [request] must make at most one HTTP request: a failure to connect anywhere in it
+     * runs all of it again on the next root. Sending twice is a programming bug, not a retryable
+     * result. Preflight validation may return without sending; that is not an answered root.
      */
     fun <T> call(service: ServiceEntity, request: (HttpTransport, String) -> T): T {
         val roots = ordered(service)
         for ((index, root) in roots.withIndex()) {
             val attempt = AttemptTransport(transport)
             val result = request(attempt, root)
-            // A callback that returns without sending would otherwise look like an answered
-            // attempt and would remember this root as the one that works.
-            check(attempt.consumed) { "an attempt makes exactly one request" }
+            val calls = attempt.requestCount
+            check(calls <= 1) { "an attempt makes exactly one request" }
+            if (calls == 0) return result
             if (!attempt.notConnected) {
                 lastAnswered[service.fingerprint] = root
                 return result
@@ -56,7 +56,7 @@ internal class ServiceRoutes(private val transport: HttpTransport) {
         private val calls = AtomicInteger()
 
         /** A caught second-call violation must still invalidate the handler's final result. */
-        val consumed: Boolean get() = calls.get() == 1
+        val requestCount: Int get() = calls.get()
 
         override fun execute(request: HttpRequest): HttpOutcome {
             // Claim the attempt before sending: every outcome, including a thrown failure,
