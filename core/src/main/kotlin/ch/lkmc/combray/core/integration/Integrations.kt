@@ -142,8 +142,11 @@ class Integrations(
     /** Keystore work stays off the main thread. */
     suspend fun hasCredential(name: SecretName, service: ServiceEntity): Boolean = credentials.read(name, service.fingerprint) != null
 
-    /** The address a queued save is for, for status lists. */
-    fun jobUrl(job: OutboxJobEntity): String? = when (job.kind) {
+    /**
+     * The address a queued job is for, for status lists. Recorded at enqueue; the payload is
+     * decoded only for a row written before the column existed.
+     */
+    fun jobUrl(job: OutboxJobEntity): String? = job.url ?: when (job.kind) {
         JobKind.KARAKEEP_SAVE -> runCatching { json.decodeFromString(SavePayload.serializer(), job.payload).url }.getOrNull()
         JobKind.HISTER_ADD -> runCatching { json.decodeFromString(CapturePayload.serializer(), job.payload).url }.getOrNull()
         JobKind.SITE_REPORT -> runCatching { json.decodeFromString(ReportPayload.serializer(), job.payload).url }.getOrNull()
@@ -277,7 +280,7 @@ class Integrations(
         val service = dao.service(ServiceKind.KARAKEEP) ?: return SaveRequest.NotConfigured
         if (SensitiveUrls.looksSensitive(url)) return SaveRequest.Sensitive
         val payload = json.encodeToString(SavePayload.serializer(), SavePayload(url, title))
-        val enqueued = outbox.enqueue(JobKind.KARAKEEP_SAVE, service, Binding.CURRENT, dedupeKey = url, payload = payload, supersede = false)
+        val enqueued = outbox.enqueue(JobKind.KARAKEEP_SAVE, service, Binding.CURRENT, dedupeKey = url, payload = payload, supersede = false, url = url)
         kick()
         return when (enqueued) {
             is Enqueued.Queued -> SaveRequest.Queued

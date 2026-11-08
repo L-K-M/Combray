@@ -257,8 +257,8 @@ fun BrowserScreen(
         val request = state.keyboard ?: return@LaunchedEffect
         val view = surfaceView ?: return@LaunchedEffect
         when (request) {
-            is KeyboardRequest.Show -> view.showKeyboard(request.kind)
-            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind)
+            is KeyboardRequest.Show -> view.showKeyboard(request.kind, request.multiline, request.context)
+            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind, request.multiline, request.context)
             // A page's blur must not hide the keyboard now owned by Find or Home's search field.
             KeyboardRequest.Hide -> if (state.find == null && !(home && homeMode == AddressEditorMode.EDITING)) view.hideKeyboard()
         }

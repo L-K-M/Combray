@@ -143,7 +143,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
-    // The search-panel checks build a real in-memory Room database over a fake transport.
+    // Queue and search-panel checks compose real in-memory Room data over fixture transports.
     testImplementation(libs.androidx.room.runtime)
     testImplementation(libs.androidx.room.ktx)
     testImplementation(libs.androidx.test.core)
