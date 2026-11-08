@@ -19,10 +19,12 @@ internal fun TextSizePreviewEffect(
     engineReady: Boolean,
     apply: (TextSize) -> Unit,
 ) {
-    val effective = draft.pending ?: durable
+    val effective = draft.displayed
     val latestApply by rememberUpdatedState(apply)
-    LaunchedEffect(effective, engineReady) {
-        if (engineReady) latestApply(effective)
+    LaunchedEffect(effective, durable, engineReady) {
+        // A completed write may outrun the lifecycle collector. Read the live acknowledged
+        // value (or newer preview), not its previous collected snapshot, at dispatch as well.
+        if (engineReady) latestApply(draft.displayed)
     }
 }
 

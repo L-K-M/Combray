@@ -72,6 +72,28 @@ class TextSizePreviewEffectTest {
     }
 
     @Test
+    fun anAcknowledgedSizeIsNotOverwrittenByALaggingCollectedSnapshot() {
+        val writes = mutableListOf<CompletableDeferred<Boolean>>()
+        val observer = TextSizeDraft(
+            scope = newScope(),
+            durable = { durable.value },
+            apply = ::apply,
+            persist = { CompletableDeferred<Boolean>().also { writes += it } },
+            onFailure = {},
+        )
+        // A stopped/lagging lifecycle collector still has the previous snapshot when the
+        // independent process-owned write acknowledges and clears this observer's preview.
+        compose.setContent { TextSizePreviewEffect(observer, TextSize.DEFAULT, ready.value, ::apply) }
+        compose.runOnIdle { observer.choose(TextSize.PERCENT_125) }
+        compose.runOnIdle {
+            durable.value = TextSize.PERCENT_125
+            writes.single().complete(true)
+        }
+        compose.waitForIdle()
+        assertEquals(TextSize.PERCENT_125, applied.last())
+    }
+
+    @Test
     fun aPendingPreviewAppliesWhenTheEngineBecomesReady() {
         ready.value = false
         val observer = draft(newScope())
