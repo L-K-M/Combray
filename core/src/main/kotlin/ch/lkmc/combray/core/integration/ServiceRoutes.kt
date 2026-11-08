@@ -2,7 +2,7 @@ package ch.lkmc.combray.core.integration
 
 import ch.lkmc.combray.core.data.ServiceEntity
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Chooses which of a service's addresses a request goes to. The address that last answered
@@ -53,15 +53,15 @@ internal class ServiceRoutes(private val transport: HttpTransport) {
      */
     private class AttemptTransport(private val transport: HttpTransport) : HttpTransport {
         @Volatile var notConnected = false
-        private val used = AtomicBoolean(false)
+        private val calls = AtomicInteger()
 
-        /** Whether the attempt's single request has run. */
-        val consumed: Boolean get() = used.get()
+        /** A caught second-call violation must still invalidate the handler's final result. */
+        val consumed: Boolean get() = calls.get() == 1
 
         override fun execute(request: HttpRequest): HttpOutcome {
             // Claim the attempt before sending: every outcome, including a thrown failure,
             // leaves it used, so a second request cannot slip through a route fallback.
-            check(used.compareAndSet(false, true)) { "an attempt makes exactly one request" }
+            check(calls.incrementAndGet() == 1) { "an attempt makes exactly one request" }
             return transport.execute(request).also { if (it is HttpOutcome.NotConnected) notConnected = true }
         }
     }

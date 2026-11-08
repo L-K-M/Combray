@@ -60,6 +60,22 @@ class ServiceRoutesTest {
     }
 
     @Test
+    fun aCaughtSecondCallStillInvalidatesTheAttempt() {
+        for (outcome in listOf(HttpOutcome.NotConnected("network"), HttpOutcome.Response(200, emptyMap(), ByteArray(0)))) {
+            var calls = 0
+            val routes = ServiceRoutes(HttpTransport { calls++; outcome })
+            assertThrows(IllegalStateException::class.java) {
+                routes.call(service()) { attempt, root ->
+                    attempt.execute(request(root))
+                    runCatching { attempt.execute(request(root)) }
+                    "ignored violation"
+                }
+            }
+            assertEquals("A caught violation must not permit failover", 1, calls)
+        }
+    }
+
+    @Test
     fun aHandlerThatConsumesTheAttemptReturnsItsFinalResult() {
         val requests = mutableListOf<String>()
         val routes = ServiceRoutes(
