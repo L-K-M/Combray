@@ -12,9 +12,6 @@ All notable changes to this project are documented here. The format follows
   on a phone is unconfirmed; see the [engine investigation](docs/ENGINE_SPIKE.md#40-verification-stall-and-automation-signals-2-november-2026).
 - The page Copy button and manual text selection are reported broken;
   tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
-- Rich text editors, such as many comment boxes, show no text cursor yet,
-  and a word you are typing appears when the keyboard commits it, as in
-  form fields.
 
 ### Added
 
@@ -23,6 +20,9 @@ All notable changes to this project are documented here. The format follows
   including after Combray closes. This uses a new request without the page’s
   cookies or referrer; protected images may fail. `data:` and `blob:` images
   are not supported yet.
+- Rich text editors show a caret, including empty fields. Words update as
+  you compose them, and multiline editors keep the keyboard's newline key.
+  Up/Down/Home/End and Shift+arrow selection work in focused editors.
 - Tap a PDF link and read it: a top-level PDF opens in Combray's own
   viewer inside Servo, drawn by PDFium, with its pages one under another
   at the screen's width. The tab takes the PDF's own title when it has one,
@@ -281,6 +281,11 @@ All notable changes to this project are documented here. The format follows
 - The Hister field's hint reads "Words you remember, searched in Hister…".
 - Reader view sets the article in a serif reading face (the system's Noto
   Serif) with a larger title, and has a "Show the page" button at the top.
+
+### Changed
+
+- Engine events name the schema they are written for, and a native/Kotlin
+  schema mismatch fails loudly instead of misparsing events one by one.
 
 ### Fixed
 
@@ -646,6 +651,20 @@ All notable changes to this project are documented here. The format follows
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A page field's keyboard now reports the page as editable only while a
+  field has focus, so TalkBack no longer announces the whole page as an
+  editable field and the keyboard cannot come back with no field behind
+  it. The keyboard's Next action moves focus like Tab instead of
+  submitting the field, and a page change retires the old input
+  connection, so a delayed word cannot land in the page that replaced it.
+- A deletion request longer than the bridge's bounded edit length
+  (1,000 characters in either direction), or a negative one, is refused
+  instead of clipped: the keyboard is no longer told an edit succeeded
+  when only part of it was sent. A cursor position or selection region
+  the page cannot represent is refused too, rather than acknowledged
+  while ignored. Unmapped keyboard actions (including Previous) no longer
+  submit the form as Enter; unsupported replacement ranges and code-point
+  deletions do not pretend to edit the page through Android's private buffer.
 - A site whose name begins with "www." and has no further dots, such as
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped
