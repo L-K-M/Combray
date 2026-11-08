@@ -79,6 +79,7 @@ class PageControlDialogTest {
                     onOpenInNewTab = {},
                     onOpenInBackground = {},
                     onSaveLink = {},
+                    onDownloadImage = { error("A select dialog must not download an image") },
                     onShare = {},
                     onNotify = {},
                 )
