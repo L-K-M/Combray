@@ -282,6 +282,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Settings service forms admit one configuration action at a time. A second
+  tap while a save or check runs is ignored, and a delayed result no longer
+  clears or describes a newer edit: the address and key tapped are the ones
+  saved, and the draft stays.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
