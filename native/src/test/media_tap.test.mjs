@@ -25,6 +25,7 @@ class Tree {
   constructor(host = null) {
     this.host = host;
     this.elements = [];
+    this.fromPointCalls = 0;
     // Every element of the page, in paint order; shared by the document and its shadow roots.
     this.painted = host ? host.tree.painted : [];
   }
@@ -64,6 +65,7 @@ class Tree {
   }
 
   elementFromPoint(x, y) {
+    this.fromPointCalls++;
     return this.elementsFromPoint(x, y)[0] ?? null;
   }
 
@@ -170,6 +172,45 @@ test("a banner beside the video in the same parent does not count over it", () =
 
   assert.equal(tapped(document, 200, 200), false, "on the banner, over the video");
   assert.equal(tapped(document, 200, 100), true, "on the video, above the banner");
+});
+
+test("a sheet in its own shadow root over the video takes the tap", () => {
+  const { document, body } = page();
+  player(document, body);
+  const host = document.add(new Element("x-sheet", [0, 0, 400, 800], { parent: body }));
+  const root = host.attachShadow();
+  root.add(new Element("div", [0, 0, 400, 800], { parent: inRoot(root) }));
+
+  assert.equal(tapped(document, 200, 250), false, "on the sheet over the player");
+});
+
+test("a sheet that takes no hits leaves the tap on the player", () => {
+  const { document, body } = page();
+  player(document, body);
+  const host = document.add(new Element("x-sheet", [0, 0, 400, 800], { parent: body, hittable: false }));
+  const root = host.attachShadow();
+  root.add(new Element("div", [0, 0, 400, 800], { parent: inRoot(root), hittable: false }));
+
+  assert.equal(tapped(document, 200, 250), true, "the sheet takes no hits, so the tap lands on the player");
+});
+
+test("a tap that misses the media still asks the tree once", () => {
+  const { document, body } = page();
+  document.add(new Element("video", [0, 0, 400, 225], { parent: body }));
+
+  assert.equal(tapped(document, 10, 700), false);
+  assert.equal(document.fromPointCalls, 1, "one, eagerly, even though no box holds the tap");
+});
+
+test("the topmost hit is asked once per tree", () => {
+  const { document, body } = page();
+  document.add(new Element("video", [0, 0, 400, 225], { parent: body }));
+  document.add(new Element("video", [0, 0, 400, 225], { parent: body }));
+  const { root } = player(document, body);
+
+  assert.equal(tapped(document, 200, 100), true);
+  assert.equal(document.fromPointCalls, 1, "the document tree, once for its two videos");
+  assert.equal(root.fromPointCalls, 1, "the player's tree");
 });
 
 test("an overlay that reaches past the video does not count", () => {

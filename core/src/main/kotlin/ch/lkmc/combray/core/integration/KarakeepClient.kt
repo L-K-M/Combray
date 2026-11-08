@@ -128,7 +128,12 @@ class KarakeepClient(private val transport: HttpTransport) {
             is HttpOutcome.Failure -> ConnectionCheck.Unreachable(outcome.category)
             is HttpOutcome.NotConnected -> ConnectionCheck.Unreachable(outcome.category)
             is HttpOutcome.Response -> when (outcome.status) {
-                200 -> ConnectionCheck.Connected(null)
+                // A proxy's login page can also answer 200: prove this is the list API.
+                200 -> if (parseObject(outcome.body)?.get("bookmarks") is JsonArray) {
+                    ConnectionCheck.Connected(null)
+                } else {
+                    ConnectionCheck.WrongAddress(outcome.status)
+                }
                 401, 403 -> ConnectionCheck.Unauthorized
                 else -> ConnectionCheck.WrongAddress(outcome.status)
             }
