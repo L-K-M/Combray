@@ -29,6 +29,8 @@ import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -79,7 +81,7 @@ class BrowserCoordinatorTest {
 
     @After
     fun tearDown() {
-        scope.cancel()
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
         database.close()
     }
 
@@ -132,12 +134,7 @@ class BrowserCoordinatorTest {
      */
     @Test
     fun heartbeatsAndEchoesSkipThePublishReads() {
-        val reads = AtomicInteger()
-        database.close()
-        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
-            .setQueryCallback({ sql, _ -> if (sql.trimStart().startsWith("SELECT", ignoreCase = true)) reads.incrementAndGet() }, Runnable::run)
-            .build()
-        browser = newCoordinator()
+        val reads = countReads()
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
@@ -162,7 +159,9 @@ class BrowserCoordinatorTest {
      */
     private fun countReads(): AtomicInteger {
         val reads = AtomicInteger()
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
         database.close()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
             .setQueryCallback({ sql, _ ->
                 val query = sql.trimStart()
@@ -2434,6 +2433,25 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
         browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
         commit(2, 20, "https://b.test/")
+        browser.releaseHiddenViews(); idle()
+        assertEquals(listOf(1L), engine.closed)
+        assertEquals("https://b.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aLogicallyClosedViewCanBeReleasedAfterItsFirstCloseFails() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val firstTab = state().activeTab!!.id
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        engine.closeFailure = IllegalStateException("synthetic close failure")
+        browser.closeTab(firstTab); idle()
+        assertEquals(TabState.CLOSED, runBlocking { database.browser().tab(firstTab) }!!.state)
+        assertTrue(engine.closed.isEmpty())
+
         browser.releaseHiddenViews(); idle()
         assertEquals(listOf(1L), engine.closed)
         assertEquals("https://b.test/", state().activeTab?.url)
