@@ -179,10 +179,10 @@ object IncomingIntents {
     /**
      * [text] as one line of at most [MAX_TEXT_LENGTH] characters, or null when it is blank, and
      * whether the limit dropped the rest of it. Whitespace runs collapse to one space and the
-     * ends are trimmed, but in one bounded pass: any app can share without a tap, this runs on
-     * the main thread, and a multi-megabyte share must not be copied or scanned whole. The line
-     * keeps Kotlin's `trim()` rule (Unicode whitespace at the ends) and Java's `\s` rule (ASCII
-     * whitespace runs inside), so a huge run of either kind cannot grow the line or the scan.
+     * ends are trimmed in one streaming pass without allocating a full normalized copy. The
+     * scan stops once retained content exceeds the cap. Leading or trailing whitespace can
+     * still require a linear scan to preserve Kotlin's `trim()` semantics; extra memory stays
+     * bounded. Interior whitespace keeps Java's ASCII-only `\s` behavior.
      */
     internal fun oneLine(text: CharSequence): OneLine? {
         val line = StringBuilder()
