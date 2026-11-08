@@ -194,6 +194,32 @@ class SettingsSheetTest {
     }
 
     @Test
+    fun editsBeforeTheTapAreCapturedWithoutWaitingForRecomposition() {
+        show()
+        field("API key").performTextInput("new-key")
+        blockWrites = true
+        compose.mainClock.autoAdvance = false
+        try {
+            field("Server address").performSemanticsAction(SemanticsActions.SetText) {
+                it.invoke(AnnotatedString("http://127.0.0.1:1/keep2"))
+            }
+            field("Other address (optional)").performSemanticsAction(SemanticsActions.SetText) {
+                it.invoke(AnnotatedString("http://127.0.0.1:2/keep"))
+            }
+            saveButton().performSemanticsAction(SemanticsActions.OnClick) { it.invoke() }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.waitForIdle()
+        assertTrue(writeEntered.await(5, TimeUnit.SECONDS))
+        writeRelease.countDown()
+        compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
+        val saved = runBlocking { integrations.karakeepService.first() }!!
+        assertEquals("http://127.0.0.1:1/keep2", saved.baseUrl)
+        assertEquals("http://127.0.0.1:2/keep", saved.alternateUrl)
+    }
+
+    @Test
     fun aCheckAndARemoveWhileASaveIsPendingAdmitOnlyTheSave() {
         show()
         field("API key").performTextInput("new-key")

@@ -446,9 +446,10 @@ private fun ServiceSettings(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
         Button(
             onClick = {
-                // The tapped address, key and alternate are the ones this save configures.
-                val addressAtTap = address
-                val alternateAtTap = alternate
+                // A field edit can precede this tap without a recomposition in between.
+                // Read the live drafts, then keep this payload even if the user edits again.
+                val addressAtTap = editedAddress ?: address
+                val alternateAtTap = editedAlternate ?: alternate
                 val credentialAtTap = credential
                 val admission = actions.admit() ?: return@Button
                 scope.launch {
