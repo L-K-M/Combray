@@ -92,6 +92,9 @@ internal fun HomeEditorSheet(
         var name by rememberSaveable { mutableStateOf(initialLink?.let { it.title ?: displayHost(it.url) }.orEmpty()) }
         var error by remember { mutableStateOf<Int?>(null) }
         var saving by remember { mutableStateOf(false) }
+        // The visibility switches fence their feedback to the click-time request generation;
+        // pin operations keep the shared error and are out of scope here.
+        var preferenceGeneration by remember { mutableStateOf(0) }
         val scope = rememberCoroutineScope()
 
         val change: (suspend () -> Unit) -> Unit = { action ->
@@ -153,8 +156,26 @@ internal fun HomeEditorSheet(
                 error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
                 when (page) {
                     HomeEditPage.OVERVIEW -> {
-                        HomeVisibilityRow(R.string.home_show_continue, continuation, settings::setHomeContinue)
-                        HomeVisibilityRow(R.string.home_show_frequent, frequent, settings::setHomeFrequentSites)
+                        HomeVisibilityRow(R.string.home_show_continue, continuation) { choice ->
+                            preferenceGeneration += 1
+                            val admitted = preferenceGeneration
+                            change {
+                                val acknowledged = settings.setHomeContinue(choice).await()
+                                if (admitted == preferenceGeneration) {
+                                    error = if (acknowledged) null else R.string.home_change_failed
+                                }
+                            }
+                        }
+                        HomeVisibilityRow(R.string.home_show_frequent, frequent) { choice ->
+                            preferenceGeneration += 1
+                            val admitted = preferenceGeneration
+                            change {
+                                val acknowledged = settings.setHomeFrequentSites(choice).await()
+                                if (admitted == preferenceGeneration) {
+                                    error = if (acknowledged) null else R.string.home_change_failed
+                                }
+                            }
+                        }
                         HorizontalDivider()
                         HomeSectionTitle(R.string.home_pinned)
                         TextButton(onClick = { edit(null) }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) { Text(stringResource(R.string.home_add_link)) }

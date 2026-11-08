@@ -29,10 +29,12 @@ import ch.lkmc.combray.core.browser.TextSize
 
 /**
  * More › Text size: steps the size of every page with − and +. Each step applies at once, so the
- * page behind the dialog shows the result; Reset returns to the pages' own size.
+ * page behind the dialog shows the result; Reset returns to the pages' own size. [current] is
+ * read at click time, so rapid steps in one frame still take their steps from the latest choice.
  */
 @Composable
-fun TextSizeDialog(size: TextSize, onChange: (TextSize) -> Unit, onDismiss: () -> Unit) {
+fun TextSizeDialog(current: () -> TextSize, onChange: (TextSize) -> Unit, onDismiss: () -> Unit) {
+    val size = current()
     val smaller = size.smaller()
     val larger = size.larger()
     AlertDialog(
@@ -51,7 +53,7 @@ fun TextSizeDialog(size: TextSize, onChange: (TextSize) -> Unit, onDismiss: () -
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FilledTonalIconButton(onClick = { smaller?.let(onChange) }, enabled = smaller != null) {
+                    FilledTonalIconButton(onClick = { current().smaller()?.let(onChange) }, enabled = smaller != null) {
                         Icon(MinusIcon, contentDescription = stringResource(R.string.text_size_smaller))
                     }
                     // TalkBack reads the new size after each step.
@@ -60,7 +62,7 @@ fun TextSizeDialog(size: TextSize, onChange: (TextSize) -> Unit, onDismiss: () -
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     )
-                    FilledTonalIconButton(onClick = { larger?.let(onChange) }, enabled = larger != null) {
+                    FilledTonalIconButton(onClick = { current().larger()?.let(onChange) }, enabled = larger != null) {
                         Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.text_size_larger))
                     }
                 }

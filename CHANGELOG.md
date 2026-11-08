@@ -194,6 +194,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Browser preferences (appearance, tab count, closing unused tabs, Home
+  sections and text size) commit to disk off the main thread before the
+  choice is published. A failed write shows a generic failure and leaves
+  the previous choice; text size's immediate preview rolls back, and rapid
+  steps keep their order.
 - Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
   Guava pins together so CI tests the combined build dependency set.
 - Play stays within reach on pages whose own video player shows an error:
@@ -586,6 +591,9 @@ All notable changes to this project are documented here. The format follows
   encrypted just because the URL starts with `https`. Cleartext HTTP is
   still called not encrypted. Page info no longer claims a verified
   connection the engine has not reported.
+- System Back and the bottom bar's Back now answer an open page question
+  (a script dialog, a `<select>`, sign-in, or the leave-page prompt, where
+  Back answers Stay) instead of navigating the page behind it.
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.

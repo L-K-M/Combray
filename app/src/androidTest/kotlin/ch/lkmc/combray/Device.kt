@@ -8,6 +8,9 @@ import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.TabCounter
+import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.core.browser.ThemeMode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -301,6 +304,22 @@ class Device(private val frame: () -> Unit = {}) {
 
     fun idle() = runBlocking { browser.awaitIdle() }
 
+    /** Settings writes are durable-first: assert acknowledgement before reading the value/UI. */
+    fun setThemeMode(mode: ThemeMode) = awaitPreference(settings.setThemeMode(mode))
+
+    fun setTabCounter(counter: TabCounter) = awaitPreference(settings.setTabCounter(counter))
+
+    fun setHomeContinue(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeContinue(visibility))
+
+    fun setHomeFrequentSites(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeFrequentSites(visibility))
+
+    fun setTextSize(size: TextSize) = awaitPreference(settings.setTextSize(size))
+
+    // Keep the helpers' JVM return type void: expression-bodied JUnit hooks call them.
+    private fun awaitPreference(write: kotlinx.coroutines.Deferred<Boolean>) {
+        check(runBlocking { write.await() }) { "Fixture preference write was not acknowledged" }
+    }
+
     /** Closes every tab so each check starts from the internal home. */
     fun closeAllTabs() {
         idle()
@@ -311,8 +330,8 @@ class Device(private val frame: () -> Unit = {}) {
 
     /** Fixture isolation: a failed editor check must not hide another check's automatic links. */
     internal fun resetHome() = runBlocking {
-        settings.setHomeContinue(HomeSectionVisibility.SHOWN)
-        settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        check(settings.setHomeContinue(HomeSectionVisibility.SHOWN).await())
+        check(settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN).await())
         val home = app.graph.home
         val state = home.state(flowOf(emptyList())).first()
         state.pins.forEach { home.unpin(it.id) }
