@@ -272,10 +272,35 @@ jobs:
           ANDROID_USER_HOME: ${{ runner.temp }}/combray-android
           ANDROID_EMULATOR_HOME: ${{ runner.temp }}/combray-android
           ANDROID_AVD_HOME: ${{ runner.temp }}/combray-android/avd
+          COMBRAY_EMULATOR_DIAGNOSTICS: "1"
         run: |
-          mkdir -p "$ANDROID_AVD_HOME"
+          mkdir -p "$ANDROID_AVD_HOME" servo-checkout/logs
+          python3 -I scripts/m0/host_diagnostics.py \
+            --output servo-checkout/logs/host-memory.jsonl \
+            --interval-seconds 2 --duration-seconds 9000 &
+          monitor=$!
+          stop_diagnostics() {
+            result=$?
+            trap - EXIT
+            kill -TERM "$monitor" 2>/dev/null || true
+            if ! wait "$monitor"; then
+              echo "::warning::host diagnostics did not finish successfully"
+            fi
+            exit "$result"
+          }
+          trap stop_diagnostics EXIT
           scripts/m0/emulator.sh
           scripts/check-app.sh emulator-5560
+
+      - name: Capture host kernel diagnostics
+        if: always()
+        run: |
+          mkdir -p servo-checkout/logs
+          if ! sudo -n dmesg --time-format iso \
+              > servo-checkout/logs/host-kernel.log \
+              2> servo-checkout/logs/host-kernel-error.log; then
+            echo "::warning::host kernel diagnostics unavailable"
+          fi
 
       - name: Upload device-check evidence
         if: always()

@@ -18,6 +18,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.TextAttribute
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The one visible rendering surface. All tabs render into it; the engine shows only the
@@ -100,6 +101,22 @@ class EngineSurfaceView(
         // keep a field that thinks it has one, or a tap on that field could not reopen it.
         if (pageKeyboard.reset()) reportDismissal(Dismissal.WINDOW_GONE)
         super.onDetachedFromWindow()
+    }
+
+    /**
+     * The app's controls now cover this view's bottom [inset] pixels, and pages lay out above
+     * them. The view itself keeps its size: resizing a SurfaceView from the app's own layout
+     * shows its last frame scaled into the new size until the engine draws one. Returns the
+     * request that [EngineEvent.ViewportPainted] answers once a frame shows that page, or null
+     * when no engine runs to answer.
+     */
+    fun coverBottom(inset: Int): Long? {
+        if (!engineRunning()) return null
+        // One sequence for every view: an answer to an earlier view's request must not pass
+        // for an answer to this one's after the Activity is recreated.
+        val request = viewportRequests.incrementAndGet()
+        NativeEngine.setViewportInset(inset.coerceAtLeast(0), request)
+        return request
     }
 
     /** Rebinding a document cancels an old gesture, so it cannot reveal the new page's button. */
@@ -298,6 +315,8 @@ class EngineSurfaceView(
     private companion object {
         const val LOG_TAG = "CombrayEngine"
         const val TEXT = "text"
+
+        val viewportRequests = AtomicLong()
     }
 }
 
