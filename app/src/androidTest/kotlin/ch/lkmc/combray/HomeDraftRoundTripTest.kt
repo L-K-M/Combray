@@ -129,7 +129,7 @@ class HomeDraftRoundTripTest {
             compose.onNodeWithContentDescription("New tab").performClick()
             device.awaitState { it.activeTab?.isHome == true && it.activeTab?.id == home }
             compose.waitUntil(Device.LOAD_TIMEOUT_MS) { fieldTextOrNull() != null }
-            compose.onNode(hasSetTextAction()).assertIsDisplayed().assertTextEquals("")
+            compose.onNode(hasSetTextAction()).assertIsDisplayed()
             assertEquals("", fieldTextOrNull())
             assertEquals(home, device.browser.browserState.value.activeTab?.id)
             assertEquals(2, device.browser.browserState.value.openTabCount)
