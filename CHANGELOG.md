@@ -297,6 +297,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A PDF page that failed to draw at the current size can recover: a resize
+  draws it again, and tapping its error note asks for the page again. A
+  problem that clears the viewer now releases every page's bitmap before
+  the elements leave the page, so Servo frees them at once instead of at
+  garbage collection.
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
   their address at enqueue in a `url` column (schema 6, auto-migrated);
