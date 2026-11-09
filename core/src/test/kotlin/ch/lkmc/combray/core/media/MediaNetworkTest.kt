@@ -149,12 +149,12 @@ class MediaNetworkTest {
     @Test
     fun aNameWithAClosedAndAnOpenAddressReachesTheOpenOne() {
         val open = MockWebServer().also { it.start(SECOND_LOOPBACK, 0); servers += it }
-        val closed = MockWebServer().also { it.start(loopback, open.port); servers += it }
         open.enqueue(MockResponse().setBody("media"))
         val network = network(zoneOf = { if (it == loopback) AddressZone.DEVICE else AddressZone.ELSEWHERE })
         assertEquals(200, network.fetch(request(open.at(MULTI_HOST))))
         assertEquals(1, open.requestCount)
-        assertEquals(0, closed.requestCount)
+        // Check connection attempts: even a failed attempt at the refused address is a leak.
+        // No listener is needed there; this port may already be in use on that address.
         assertEquals(listOf(SECOND_LOOPBACK), connects.map { it.address })
     }
 

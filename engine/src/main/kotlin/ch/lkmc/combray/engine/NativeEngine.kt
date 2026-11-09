@@ -45,6 +45,13 @@ object NativeEngine {
 
     @JvmStatic external fun surfaceChanged(width: Int, height: Int)
 
+    /**
+     * The app's bottom controls cover the surface's bottom [inset] pixels, and pages lay out
+     * above them. The engine reports `viewport_painted` with [request] once a frame shows that
+     * page, so the controls can stay until then.
+     */
+    @JvmStatic external fun setViewportInset(inset: Int, request: Long)
+
     /** Stops rendering into the surface at once and waits (bounded) for the engine to unbind it. */
     @JvmStatic external fun surfaceDestroyed(): Boolean
 
@@ -89,9 +96,16 @@ object NativeEngine {
     /** Touch input for the selected tab, in surface pixels. */
     @JvmStatic external fun touch(phase: Int, pointer: Int, x: Float, y: Float)
 
-    @JvmStatic external fun key(action: Int, keyCode: Int, unicode: Int)
+    @JvmStatic fun key(action: Int, keyCode: Int, unicode: Int) = keyWithModifiers(action, keyCode, unicode, 0)
+    @JvmStatic fun keyWithModifiers(action: Int, keyCode: Int, unicode: Int, metaState: Int) =
+        keyInContext(action, keyCode, unicode, metaState, 0)
+    @JvmStatic external fun keyInContext(action: Int, keyCode: Int, unicode: Int, metaState: Int, context: Long)
 
     @JvmStatic external fun imeCommit(text: String)
+
+    /** A live composition bound to one InputConnection. Phase: start=0, update=1, end=2. */
+    @JvmStatic external fun imeComposition(id: Long, context: Long, phase: Int, text: String)
+    @JvmStatic external fun imeCommitInContext(context: Long, text: String)
 
     /** The user hid the keyboard a page field had: the field gives up focus, so a tap on it reopens it. */
     @JvmStatic external fun imeDismissed()

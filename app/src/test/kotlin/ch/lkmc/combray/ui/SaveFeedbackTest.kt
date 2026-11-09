@@ -30,6 +30,12 @@ class SaveFeedbackTest {
     }
 
     @Test
+    fun aStoredBookmarkWithAFailedListStillConfirms() {
+        // The link was acknowledged; only the list step failed, so the save itself succeeded.
+        assertEquals(SaveFeedback.CONFIRM, feedback(SaveStatus.Pending, SaveStatus.SavedWithListFailure("list_not_found")))
+    }
+
+    @Test
     fun anAlreadySavedPageIsSilent() {
         // Opening a saved page: the first status read for it, or a reload of the same address.
         assertNull(feedback(SaveStatus.Unsaved, SaveStatus.Saved))

@@ -77,6 +77,8 @@ pub enum LocalDocumentCheck {
 pub struct KeyInput {
     pub unicode: u32,
     pub key_code: i32,
+    pub modifiers: crate::keyboard::KeyModifiers,
+    pub context: Option<u64>,
 }
 
 pub struct CaptureRequest {
@@ -104,6 +106,12 @@ pub enum Command {
     SurfaceChanged {
         width: u32,
         height: u32,
+    },
+    /// The app's bottom controls cover this many bottom rows of the surface; pages lay out
+    /// above them. Outcome: `viewport_painted` with `request` once a frame shows that page.
+    SetViewportInset {
+        inset: u32,
+        request: u64,
     },
     /// Must complete before `SurfaceHolder.Callback.surfaceDestroyed` returns.
     SurfaceDestroyed {
@@ -178,6 +186,13 @@ pub enum Command {
         key: KeyInput,
     },
     ImeCommit {
+        context: Option<u64>,
+        text: String,
+    },
+    ImeComposition {
+        id: u64,
+        context: u64,
+        phase: crate::composition::Phase,
         text: String,
     },
     /// The user hid the keyboard while a page field had it.

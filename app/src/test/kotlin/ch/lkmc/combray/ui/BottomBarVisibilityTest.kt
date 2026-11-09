@@ -39,6 +39,33 @@ class BottomBarVisibilityTest {
     }
 
     @Test
+    fun aHiddenBarStaysUntilTheEngineAnswersTheUncoveringRequest() {
+        // The hide has not reached the engine: the latest request still covers the bar.
+        assertTrue(bottomBarHeld(ViewportRequest(id = 4, inset = 290), painted = 4, expired = false))
+        // Sent, unanswered: the engine has not drawn the uncovered pixels yet.
+        assertTrue(bottomBarHeld(ViewportRequest(id = 5, inset = 0), painted = 4, expired = false))
+        assertTrue(bottomBarHeld(ViewportRequest(id = 5, inset = 0), painted = null, expired = false))
+        // Answered.
+        assertFalse(bottomBarHeld(ViewportRequest(id = 5, inset = 0), painted = 5, expired = false))
+    }
+
+    @Test
+    fun anAnswerToAnEarlierUncoveringDoesNotReleaseALaterOne() {
+        // Hide (5), show (6), hide (7): the engine's late answer to 5 is not one to 7.
+        assertTrue(bottomBarHeld(ViewportRequest(id = 7, inset = 0), painted = 5, expired = false))
+        assertTrue(bottomBarHeld(ViewportRequest(id = 7, inset = 0), painted = 6, expired = false))
+        assertFalse(bottomBarHeld(ViewportRequest(id = 7, inset = 0), painted = 8, expired = false))
+    }
+
+    @Test
+    fun theHoldEndsWithoutAnEngineToAnswerOrAfterItsTimeout() {
+        assertFalse(bottomBarHeld(ViewportRequest(id = null, inset = 0), painted = null, expired = false))
+        assertFalse(bottomBarHeld(null, painted = null, expired = false))
+        assertFalse(bottomBarHeld(ViewportRequest(id = 9, inset = 0), painted = 3, expired = true))
+        assertFalse(bottomBarHeld(ViewportRequest(id = 9, inset = 290), painted = 3, expired = true))
+    }
+
+    @Test
     fun enabledServicesPinControlsAndDisablingThemRestoresScrolling() {
         val manager = accessibility()
         val shadow = shadowOf(manager)

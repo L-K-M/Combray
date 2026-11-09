@@ -187,6 +187,23 @@ class SiteReportsClientTest {
     }
 
     @Test
+    fun aBusyOrFailingServiceIsNotAWrongAddress() {
+        // Under load the service answers 503 "busy" with Retry-After, on whoami too.
+        val busy = SiteReportsClient(
+            HttpTransport { HttpOutcome.Response(503, mapOf("Retry-After" to "5"), """{"error":"busy"}""".toByteArray()) },
+        )
+        assertEquals(ConnectionCheck.ServerError(503), busy.checkConnection(server.root, FakeReports.TOKEN))
+        for (status in listOf(408, 429, 500, 502, 504, 507)) {
+            val checked = SiteReportsClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.ServerError(status), checked.checkConnection(server.root, FakeReports.TOKEN))
+        }
+        for (status in listOf(302, 400, 404, 405)) {
+            val checked = SiteReportsClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.WrongAddress(status), checked.checkConnection(server.root, FakeReports.TOKEN))
+        }
+    }
+
+    @Test
     fun aBodyWithoutItsScreenshotBytesIsAProgrammingError() {
         val failure = runCatching { SiteReportsClient.body(payload(), null) }.exceptionOrNull()
         assertTrue(failure is IllegalArgumentException)

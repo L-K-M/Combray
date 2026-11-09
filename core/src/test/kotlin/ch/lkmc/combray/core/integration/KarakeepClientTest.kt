@@ -65,6 +65,34 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun connectionCheckRejectsA200ThatIsNotABookmarksResponse() {
+        for (body in listOf("", "<html>Sign in</html>", "{}", "[]", "{\"bookmarks\":null}", "{\"bookmarks\":{}}", "{\"bookmarks\":\"none\"}")) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(200, emptyMap(), body.toByteArray()) })
+            assertEquals(body, ConnectionCheck.WrongAddress(200), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+    }
+
+    @Test
+    fun connectionCheckTellsAFailingOrBusyServerFromAWrongAddress() {
+        for (status in listOf(408, 429, 500, 502, 503, 504)) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.ServerError(status), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+        for (status in listOf(302, 400, 404, 405)) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.WrongAddress(status), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+    }
+
+    @Test
+    fun connectionCheckAcceptsEmptyAndPopulatedListsWithUnknownFields() {
+        for (body in listOf("{\"bookmarks\":[]}", "{\"bookmarks\":[{\"id\":\"bm1\"}],\"nextCursor\":null,\"extra\":true}")) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(200, emptyMap(), body.toByteArray()) })
+            assertEquals(body, ConnectionCheck.Connected(null), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+    }
+
+    @Test
     fun aBookmarkIsAddedToAnExistingListOnly() {
         server.lists["reading"] = mutableSetOf()
         assertEquals(DispatchResult.Rejected("list_not_found"), client.addToList(server.root, FakeKarakeep.KEY, "reading", "bm1"))
@@ -102,5 +130,29 @@ class KarakeepClientTest {
         server.close()
         val result = create()
         assertTrue(result is DispatchResult.Retry)
+    }
+
+    @Test
+    fun aQueryBoundaryDoesNotSplitASupplementaryCharacter() {
+        var sent = ""
+        val bounded = KarakeepClient(HttpTransport {
+            sent = it.url
+            HttpOutcome.Response(200, emptyMap(), "{\"bookmarks\":[]}".toByteArray())
+        })
+        val prefix = "a".repeat(1_999)
+        bounded.bookmarks(server.root, FakeKarakeep.KEY, "$prefix😀tail")
+        val query = java.net.URLDecoder.decode(sent.substringAfter("q=").substringBefore('&'), "UTF-8")
+        assertEquals(prefix, query)
+    }
+
+    @Test
+    fun aLongSearchQueryIsCapped() {
+        create("https://a.example/", "Alpha")
+
+        client.bookmarks(server.root, FakeKarakeep.KEY, query = "a".repeat(5_000))
+
+        val uri = server.uris.last()
+        val query = uri.substringAfter("q=", "").substringBefore('&')
+        assertEquals(2_000, query.length)
     }
 }

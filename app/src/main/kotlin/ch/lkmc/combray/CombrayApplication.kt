@@ -145,7 +145,10 @@ class AppGraph(application: Application) {
         reportDirectory = File(application.noBackupFilesDir, "reports"),
         reportEnvironment = reportEnvironment,
     )
-    val settings = BrowserSettings(application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE))
+    val settings = BrowserSettings(
+        application.getSharedPreferences(BrowserSettings.FILE_NAME, Context.MODE_PRIVATE),
+        scope,
+    )
     val home = HomeLinks(database)
     /** One retention policy for maintenance and the Settings label, so the two cannot diverge. */
     val retention = Retention()
@@ -159,6 +162,7 @@ class AppGraph(application: Application) {
         textSize = { settings.textSize.value },
     )
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
+    val imageDownloads = ImageDownloads(application)
     val notices = ThirdPartyNotices(application.assets)
 
     /** Requests on their way to the media player: an Intent carries only an id. */

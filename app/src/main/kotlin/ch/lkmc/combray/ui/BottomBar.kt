@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Badge
@@ -59,6 +60,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,7 +95,8 @@ enum class ReaderDisplay { PAGE, ARTICLE }
  * labeled Hister, Karakeep, +, Recent and Menu actions ([onHister] and [onKarakeep] open the
  * Recent sheet on those scopes). A sideways swipe along the bar steps through open tabs
  * ([onSwipeTab]); the Recent sheet stays the visible way to switch, so nothing depends on the
- * gesture.
+ * gesture. [editor] is the address editor: Home's search field, and on a page the whole bar
+ * while [editorMode] is editing, so the address opens where it is instead of in a sheet.
  */
 @Composable
 fun BottomBar(
@@ -111,6 +114,8 @@ fun BottomBar(
     readerDisplay: ReaderDisplay,
     onStop: () -> Unit,
     onReader: () -> Unit,
+    /** Plays the page's media, as More › Play audio or video does; null while the page has none. */
+    onPlayMedia: (() -> Unit)?,
     /** Recent on its Hister scope; used by the home dock. */
     onHister: () -> Unit,
     /** Recent on its Karakeep scope; used by the home dock. */
@@ -123,13 +128,13 @@ fun BottomBar(
     menuButton: @Composable () -> Unit,
     onCopyAddress: () -> Unit,
     onSwipeTab: (TabStep) -> Unit,
-    homeSearch: (@Composable () -> Unit)? = null,
-    homeMode: AddressEditorMode = AddressEditorMode.IDLE,
+    editor: (@Composable () -> Unit)? = null,
+    editorMode: AddressEditorMode = AddressEditorMode.IDLE,
     modifier: Modifier = Modifier,
 ) {
     val swipeDistance = with(LocalDensity.current) { TAB_SWIPE_DISTANCE.toPx() }
     // Editing keeps horizontal drags for the cursor. Otherwise the whole bar shares one gesture.
-    val swipeEnabled = tab?.url != null || homeMode == AddressEditorMode.IDLE
+    val swipeEnabled = editorMode == AddressEditorMode.IDLE
     val swipeTab by rememberUpdatedState(onSwipeTab)
     var swipeProgress by remember(tab?.id, swipeEnabled) { mutableFloatStateOf(0f) }
     val previewDistance = with(LocalDensity.current) { TAB_SWIPE_PREVIEW_DISTANCE.toPx() }
@@ -201,22 +206,32 @@ fun BottomBar(
                 // affordance; labeled actions for the two services, +, Recent and More. The
                 // browsing bar's disabled Back/Save/Share have no place here.
                 val home = tab?.url == null
+                // Home's search editor shares the address editor, which leaves composition with
+                // the bar's home slot on a tab switch: its draft would be dropped with it. The
+                // holder keeps the editor's saveable state for when home returns.
+                val homeSearchState = rememberSaveableStateHolder()
                 // Six 48dp actions leave a narrow phone's chip too little room for a site name, so
                 // the address takes a row of its own above them (owner decision, 22 October 2026).
                 val stacked = maxWidth < STACKED_BAR_BELOW
                 Column(Modifier.graphicsLayer { translationX = swipeOffset }) {
-                    if (home && homeSearch != null) {
-                        homeSearch()
+                    // A page's address opens in place: the editor takes the whole bar until you
+                    // leave it, and the page's actions come back with the address.
+                    if (!home && editor != null && editorMode == AddressEditorMode.EDITING) {
+                        editor()
+                        return@Column
+                    }
+                    if (home && editor != null) {
+                        homeSearchState.SaveableStateProvider("home_search") { editor() }
                     } else if (stacked || home) {
                         AddressChip(
-                             tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader,
+                             tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia,
                             hint = if (home) R.string.home_search_hint else R.string.address_placeholder,
                             // The chip supplies its gutter; do not inset it past the actions.
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         )
                     }
                     if (home) {
-                        if (homeMode == AddressEditorMode.IDLE) {
+                        if (editorMode == AddressEditorMode.IDLE) {
                             HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, menuButton)
                         }
                         return@Column
@@ -232,7 +247,9 @@ fun BottomBar(
                         IconButton(onClick = onBack, enabled = backEnabled) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
-                        if (!stacked) AddressChip(tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, Modifier.weight(1f))
+                        if (!stacked) {
+                            AddressChip(tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia, Modifier.weight(1f))
+                        }
                         SaveButton(saveStatus, enabled = tab?.url != null, onSave)
                         IconButton(onClick = onCloseTab) {
                             Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_tab))
@@ -287,7 +304,7 @@ fun BottomBar(
                         modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.TopCenter).semantics { contentDescription = label },
                     )
                 }
-            } else if (tab?.loading == true) {
+            } else if (tab?.loading == true && editorMode == AddressEditorMode.IDLE) {
                 val loading = stringResource(R.string.loading)
                 LinearProgressIndicator(
                     Modifier.fillMaxWidth().height(2.dp).align(Alignment.TopCenter).semantics { contentDescription = loading },
@@ -385,6 +402,8 @@ private fun SaveButton(save: PageSaveStatus, enabled: Boolean, onSave: () -> Uni
     val status = save.status
     val (icon, label) = when (status) {
         SaveStatus.Saved -> BookmarkAddedIcon to stringResource(R.string.save_state_saved)
+        // The link is stored; only the chosen list failed, and Settings can retry that step.
+        is SaveStatus.SavedWithListFailure -> BookmarkAddedIcon to stringResource(R.string.save_state_saved_list_failed)
         SaveStatus.Pending -> BookmarkIcon to stringResource(R.string.save_state_pending)
         // Karakeep could not be reached: nothing is being sent, so no spinner.
         SaveStatus.Waiting -> ScheduleIcon to stringResource(R.string.save_state_waiting)
@@ -438,6 +457,7 @@ private fun AddressChip(
     readerDisplay: ReaderDisplay,
     onStop: () -> Unit,
     onReader: () -> Unit,
+    onPlayMedia: (() -> Unit)?,
     modifier: Modifier,
     @StringRes hint: Int = R.string.address_placeholder,
 ) {
@@ -458,7 +478,7 @@ private fun AddressChip(
         modifier = modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Separate targets: stopping or toggling Reader must not edit or copy the address.
+            // Separate targets: stopping, playing or toggling Reader must not edit or copy the address.
             Row(
                 Modifier
                     .weight(1f)
@@ -500,6 +520,12 @@ private fun AddressChip(
                 )
             }
             }
+            // The page's media stays a tap away after its offer is gone (owner decision, 6 November 2026).
+            if (url != null && onPlayMedia != null) {
+                IconButton(onClick = onPlayMedia) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.action_play_media))
+                }
+            }
             if (url != null) {
                 if (tab.loading) {
                     IconButton(onClick = onStop) {
@@ -522,8 +548,8 @@ private val BAR_HEIGHT = 64.dp
 /** One action's touch target: Android's and Material's 48dp minimum. */
 private val ACTION_TARGET = 48.dp
 
-/** The room the address needs beside the actions to still name a site. */
-private val ADDRESS_MIN_WIDTH = 132.dp + ACTION_TARGET
+/** The room the address needs beside the actions to still name a site, with Play and Reader in the chip. */
+private val ADDRESS_MIN_WIDTH = 132.dp + ACTION_TARGET * 2
 
 /**
  * Below this width the address gets its own row: six actions (Back, Save, Close tab, New tab,

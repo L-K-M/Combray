@@ -1,9 +1,22 @@
 package ch.lkmc.combray.core.browser
 
 import android.content.SharedPreferences
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** How the app picks its colors: follow the system, or one theme whatever the system says. */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -17,17 +30,35 @@ enum class HomeSectionVisibility { SHOWN, HIDDEN }
 /**
  * The browser's own preferences. Service configuration stays in the database, where it binds
  * queued work; these are plain user choices with nothing depending on them transactionally.
+ *
+ * A public [StateFlow] is the durable value: it changes only after `commit()` acknowledged the
+ * write. Every setter returns a [Deferred] that completes with `true` for an acknowledged write
+ * and `false` for a `commit()` that returned false or threw. The disk write runs off the caller's
+ * thread; the caller decides when to await it.
  */
-class BrowserSettings(private val preferences: SharedPreferences) {
-    private val unused = MutableStateFlow(read(KEY_UNUSED_TABS, UnusedTabs.entries, UnusedTabs.KEEP))
-    private val theme = MutableStateFlow(read(KEY_THEME_MODE, ThemeMode.entries, ThemeMode.SYSTEM))
-    private val text = MutableStateFlow(read(KEY_TEXT_SIZE, TextSize.entries, TextSize.DEFAULT))
-    private val counter = MutableStateFlow(read(KEY_TAB_COUNTER, TabCounter.entries, TabCounter.HIDDEN))
+class BrowserSettings(
+    private val preferences: SharedPreferences,
+    private val scope: CoroutineScope,
+) {
+    /**
+     * The last value disk acknowledged for every known key: the exact stored string, or null
+     * when the key is absent. A candidate write is built from this snapshot plus its own change,
+     * so a failed earlier choice cannot ride along with a later write.
+     */
+    private val acknowledged = HashMap<String, String?>()
+
+    /** Serialises writes; UNDISPATCHED admission keeps the caller's order. */
+    private val writes = Mutex()
+
+    private val unused = MutableStateFlow(acknowledge(KEY_UNUSED_TABS, UnusedTabs.entries, UnusedTabs.KEEP))
+    private val theme = MutableStateFlow(acknowledge(KEY_THEME_MODE, ThemeMode.entries, ThemeMode.SYSTEM))
+    private val text = MutableStateFlow(acknowledge(KEY_TEXT_SIZE, TextSize.entries, TextSize.DEFAULT))
+    private val counter = MutableStateFlow(acknowledge(KEY_TAB_COUNTER, TabCounter.entries, TabCounter.HIDDEN))
     private val continueCard = MutableStateFlow(
-        read(KEY_HOME_CONTINUE, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
+        acknowledge(KEY_HOME_CONTINUE, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
     )
     private val frequentSites = MutableStateFlow(
-        read(KEY_HOME_FREQUENT, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
+        acknowledge(KEY_HOME_FREQUENT, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
     )
 
     val unusedTabs: StateFlow<UnusedTabs> = unused.asStateFlow()
@@ -44,26 +75,98 @@ class BrowserSettings(private val preferences: SharedPreferences) {
     /** The new-tab page's automatic frequent-site links. */
     val homeFrequentSites: StateFlow<HomeSectionVisibility> = frequentSites.asStateFlow()
 
-    fun setUnusedTabs(choice: UnusedTabs) = write(KEY_UNUSED_TABS, unused, choice)
+    fun setUnusedTabs(choice: UnusedTabs): Deferred<Boolean> = write(KEY_UNUSED_TABS, unused, choice)
 
-    fun setThemeMode(choice: ThemeMode) = write(KEY_THEME_MODE, theme, choice)
+    fun setThemeMode(choice: ThemeMode): Deferred<Boolean> = write(KEY_THEME_MODE, theme, choice)
 
     /** Only stores the choice: [BrowserCoordinator.applyTextSize] passes it to the engine. */
-    fun setTextSize(size: TextSize) = write(KEY_TEXT_SIZE, text, size)
+    fun setTextSize(size: TextSize): Deferred<Boolean> = write(KEY_TEXT_SIZE, text, size)
 
-    fun setTabCounter(choice: TabCounter) = write(KEY_TAB_COUNTER, counter, choice)
+    fun setTabCounter(choice: TabCounter): Deferred<Boolean> = write(KEY_TAB_COUNTER, counter, choice)
 
-    fun setHomeContinue(choice: HomeSectionVisibility) = write(KEY_HOME_CONTINUE, continueCard, choice)
+    fun setHomeContinue(choice: HomeSectionVisibility): Deferred<Boolean> = write(KEY_HOME_CONTINUE, continueCard, choice)
 
-    fun setHomeFrequentSites(choice: HomeSectionVisibility) = write(KEY_HOME_FREQUENT, frequentSites, choice)
+    fun setHomeFrequentSites(choice: HomeSectionVisibility): Deferred<Boolean> = write(KEY_HOME_FREQUENT, frequentSites, choice)
 
     /** An unknown stored name falls back to its default: preferences never block startup. */
-    private fun <T : Enum<T>> read(key: String, values: List<T>, default: T): T =
-        values.firstOrNull { it.name == preferences.getString(key, null) } ?: default
+    private fun <T : Enum<T>> acknowledge(key: String, values: List<T>, default: T): T {
+        val raw = preferences.getString(key, null)
+        acknowledged[key] = raw
+        return values.firstOrNull { it.name == raw } ?: default
+    }
 
-    private fun <T : Enum<T>> write(key: String, state: MutableStateFlow<T>, choice: T) {
-        preferences.edit().putString(key, choice.name).apply()
-        state.value = choice
+    /**
+     * Publishes [choice] only after disk acknowledged it. The request is admitted synchronously,
+     * so rapid calls keep their order; the disk write itself runs off the caller's thread. The
+     * write runs in [scope], not in the returned [Deferred], so caller cancellation or dismissal
+     * cannot interrupt an admitted write or its bookkeeping; work cancelled while waiting for the
+     * lock never reaches the disk and never reports success.
+     */
+    private fun <T : Enum<T>> write(key: String, state: MutableStateFlow<T>, choice: T): Deferred<Boolean> {
+        val result = CompletableDeferred<Boolean>()
+        val operation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                writes.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (result.isCancelled) return@withLock
+                    // Once admitted, keep the actual disk acknowledgement and reconciliation
+                    // together even if the process scope is cancelled during blocking commit.
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        val previous = acknowledged.getValue(key)
+                        val stored = try {
+                            commit(key, choice)
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (stored) {
+                            acknowledged[key] = choice.name
+                            state.value = choice
+                        } else {
+                            restore(key, previous)
+                        }
+                        result.complete(stored)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                result.cancel(cancelled)
+                throw cancelled
+            } catch (_: Exception) {
+                result.complete(false)
+            }
+        }
+        operation.invokeOnCompletion { failure ->
+            if (failure is CancellationException) result.cancel(failure)
+            else if (failure != null) result.complete(false)
+        }
+        return result
+    }
+
+    /**
+     * Writes the complete acknowledged snapshot plus this request's change. Re-putting every
+     * known key means a failed earlier choice is reconciled even if its own restore was lost.
+     * Unknown keys are left alone.
+     */
+    private fun commit(key: String, choice: Enum<*>): Boolean {
+        val editor = preferences.edit()
+        acknowledged.forEach { (known, raw) ->
+            when {
+                known == key -> editor.putString(known, choice.name)
+                raw == null -> editor.remove(known)
+                else -> editor.putString(known, raw)
+            }
+        }
+        return editor.commit()
+    }
+
+    /**
+     * Best-effort reconciliation of the process-local map after a failed or ambiguous write.
+     * This does not prove disk rollback: the setter still reports false, and a later successful
+     * full-snapshot write reconciles the known keys.
+     */
+    private fun restore(key: String, raw: String?) {
+        val editor = preferences.edit()
+        if (raw == null) editor.remove(key) else editor.putString(key, raw)
+        editor.apply()
     }
 
     companion object {

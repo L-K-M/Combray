@@ -12,6 +12,13 @@ Pages
   /cookie-set?v=<alnum>      sets cookie combray=<v> (one year)
   /cookie-echo               title COOKIE:<Cookie header>
   /opener.html               link with target=_blank to /solid/3b4f8a.html
+  /image-download.html?k=<key>[&linked=1][&redirect=1][&fail=1]
+                             page-filling green image, optionally linked to a blue page;
+                             sets the browser cookie; title IMAGE-DOWNLOAD
+  /download-image.png?k=<key>[&fail=1]
+                             original 1x1 green PNG; fail=1 refuses the separate downloader
+  /download-image-redirect.png?k=<key>[&fail=1]
+                             redirects to the original PNG, forwarding fail
   /rendered.html?p=<alnum>   text rendered by script after load: RENDERED-<p reversed>
   /once.html?k=<alnum>       title ONCE on the first request per key; later ones close unanswered
                              (a reload that fails like a lost connection)
@@ -30,6 +37,13 @@ Pages
   /upload.html               page-filling <input type=file accept=.txt>; title FILE:<name>:<text>
   /shadow-input.html         nested closed-shadow password field; title SHADOW:<state>,
                               then SHADOW:input:<value>:<paste count> after typing or pasting
+  /contenteditable.html     rich text editor; title EDITOR:<state>, then
+                              EDITOR:input:<text>:<last inputType> after each input;
+                              ?k=<key> also reports each event's exact payload and DOM to
+                              /_admin/editor-report, and ?cancel=<inputType> cancels that
+                              beforeinput (no input event, no DOM change)
+  /nested-editable.html     an editing host inside contenteditable=false; NESTED:* titles
+  /shadow-editor.html       a contenteditable in a closed shadow root; SHADOWEDITOR:* titles
   /leave.html[?auto]         link to /solid/2e6b4f.html above a <textarea>; its beforeunload handler
                              always asks to stay (title LEAVE:<times asked>); ?auto follows the link
                              by script a second after load, without any user input
@@ -61,6 +75,12 @@ Pages
                              when the claim is No
   /hls-noext.html?k=<alnum>  the same, but the playlist is /media/hls-manifest: no .m3u8 for
                              the player to infer from
+  /media-player.html?k=<alnum>
+                             a site's own player: in an open shadow root, a <video> of
+                             /media/clip.mp4?k=... taken out of hit testing under an overlay with
+                             an error line and a play button, over the top half of the page; title
+                             PLAYER:errors:<n>:outside:<n>:plays:<n> counts its errors, clicks
+                             below it and clicks on its button
   /media-redirect.html?to=clip|file[&k=<alnum>]
                              <video> from /media/redirect; title REDIRECT:errors:<n>
   /media-local.html          a data: and a file: <video>, neither of them a web address; title LOCAL:errors:<n>
@@ -136,6 +156,8 @@ Admin (for the checks)
   GET  /_admin/state                    JSON: bookmarks, lists, hister documents, reports, request log, media
   GET  /_admin/report-screenshot?id=<report id>
                                         the PNG a report carried (404 when it had none)
+  POST /_admin/editor-report?k=<key>    a page's editor event report, stored under "editor" in the
+                                        state (the page's own beforeinput/input payload and DOM)
   POST /_admin/reset                    forget everything
   POST /_admin/fault?service=karakeep|hister|reports&kind=<fault>&count=<n>
        faults: none, store_then_hang, too_many_requests, server_error, unauthorized
@@ -166,6 +188,10 @@ from site_reports import SERVICE_NAME as REPORTS_SERVICE_NAME  # noqa: E402
 from site_reports import validation as report_validation  # noqa: E402
 
 DEFAULT_PORT = 8766
+# One RGB pixel (#2e6b4f). Tests verify the downloaded bytes, not a screenshot or re-encoding.
+DOWNLOAD_IMAGE = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPQy/YHAAGzAOkONZUWAAAAAElFTkSuQmCC"
+)
 KARAKEEP_KEY = "fixture-key"
 SIGN_IN = ("ada", "lovelace")
 HISTER_TOKEN = "fixture-token"
@@ -193,6 +219,8 @@ CLIP_SHA256 = "ec7875cf658a2ea68bd825088fe8a09d30cc7090fbc5d0561f726aead61488f5"
 MEDIA_SEEN_LIMIT = 20
 STOP_LOAD_TIMEOUT_SECONDS = 60
 STOP_HEARTBEAT_MS = 100
+# Editor event reports per page key; a check reads the events it asked for, not the whole run.
+EDITOR_REPORT_LIMIT = 64
 STOP_KEY = re.compile(r"[a-zA-Z0-9]{1,32}\Z")
 TONE_HZ = 440
 TONE_RATE = 8000
@@ -238,7 +266,7 @@ def fresh_media():
 
 
 state = {"bookmarks": {}, "lists": fresh_lists(), "hister": {}, "reports": {}, "log": [], "media": fresh_media(),
-         "pdf": {}, "stop_loads": {}, "reused_close": {}}
+         "pdf": {}, "stop_loads": {}, "reused_close": {}, "editor": {}}
 faults = {"karakeep": ["none", 0], "hister": ["none", 0], "reports": ["none", 0]}
 # Report id -> the PNG it carried; kept out of the JSON state, which holds metadata only.
 report_screenshots = {}
@@ -666,6 +694,34 @@ def canplay_page(key):
     )
 
 
+def player_page(key):
+    """A site's own player: the <video> sits in an open shadow root, out of hit testing, under an
+    overlay with its error line and play button, as custom players draw it. Clicks on the button
+    and below the player are counted, so a check knows a tap reached the page."""
+    return page(
+        "PLAYER",
+        "<div id='player'></div><div id='below'></div>"
+        "<script>var errors = 0, outside = 0, plays = 0;"
+        " function report() { document.title = 'PLAYER:errors:' + errors + ':outside:' + outside + ':plays:' + plays; }"
+        " var root = document.getElementById('player').attachShadow({ mode: 'open' });"
+        " root.innerHTML = \"<style>:host{display:block;position:relative;height:50vh;background:#000}"
+        "video{display:block;width:100%;height:100%;pointer-events:none}"
+        ".overlay{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;flex-direction:column;"
+        "align-items:center;justify-content:center;color:#fff;font-size:24px}"
+        # The error line is out of the flow, so the button stays in the middle of the player.
+        "p{position:absolute;top:8px;left:0;right:0;margin:0;text-align:center}"
+        "button{font-size:40px;padding:24px 48px}</style>"
+        "<video></video><div class='overlay'><p id='error' hidden>Playback failed.</p><button>&#9654;</button></div>\";"
+        " var video = root.querySelector('video');"
+        " video.addEventListener('error', function () { errors++; root.querySelector('#error').hidden = false; report(); });"
+        " root.querySelector('button').addEventListener('click', function () {"
+        " plays++; report(); var played = video.play(); if (played) played.catch(function () {}); });"
+        " document.getElementById('below').addEventListener('click', function () { outside++; report(); });"
+        f" video.src = '/media/clip.mp4?k={key}'; report();</script>",
+        "<style>html,body{margin:0}#below{height:150vh;background:#2e6b4f}</style>",
+    )
+
+
 def typed_source_page(key):
     """A <video> whose only <source> has a codec-claiming type; a No skips it before its fetch."""
     return page(
@@ -1030,6 +1086,69 @@ HAS_SELECTOR_PAGE = page(
     "#probe:has(> strong.active){color:rgb(70,80,90)}</style>",
 )
 
+def editor_page(prefix, control, setup, editor, extra=""):
+    """A rich-text editor that reports its exact InputEvents and DOM to the fixture server.
+
+    The title keeps the `<prefix>:` form the checks expect. When the address carries `k`, every
+    event also goes to /_admin/editor-report?k=, so a check can assert the payloads and the DOM
+    the engine produced; `extra` adds page-specific facts to each report, and ?cancel=<inputType>
+    makes the page cancel that beforeinput, so a check can prove the default action is gone.
+    """
+    script = (
+        "<script>addEventListener('load',function(){"
+        + setup
+        + "var e=" + editor + ";"
+        "var k=(location.search.match(/[?&]k=([^&]*)/)||['',''])[1];"
+        "var cancel=(location.search.match(/[?&]cancel=([^&]*)/)||['',''])[1];"
+        "var kind='';"
+        "function dom(){var kids=[];"
+        "for(var i=0;i<e.childNodes.length;i++){var n=e.childNodes[i];"
+        "if(n.nodeType===3)kids.push('t:'+n.data);"
+        "else if(n.nodeType===1)kids.push(n.nodeName.toLowerCase()+':'+n.innerHTML);"
+        "else kids.push(n.nodeName)}"
+        "return {html:e.innerHTML,text:e.textContent,children:kids}}"
+        "function sel(){var s=window.getSelection();if(!s||s.rangeCount===0)return null;"
+        "var f=function(n){if(!n)return 'null';"
+        "if(n.nodeType===3)return 't:'+n.data;"
+        "if(n.nodeType===1)return n.nodeName.toLowerCase()+'['+n.innerHTML+']';"
+        "return n.nodeName};"
+        "var root=e.getRootNode();var ranges=s.getComposedRanges({shadowRoots:root.host?[root]:[]});"
+        "var r=ranges[0];var backward=s.direction==='backward';"
+        "var a=r?(backward?r.endContainer:r.startContainer):s.anchorNode;"
+        "var z=r?(backward?r.startContainer:r.endContainer):s.focusNode;"
+        "var ao=r?(backward?r.endOffset:r.startOffset):s.anchorOffset;"
+        "var zo=r?(backward?r.startOffset:r.endOffset):s.focusOffset;"
+        "return {anchor:f(a)+'@'+ao,focus:f(z)+'@'+zo,collapsed:!!s.isCollapsed,text:s.toString()}}"
+        "function report(phase,v){"
+        "var ev={phase:phase,"
+        "inputType:v&&v.inputType!==undefined?v.inputType:null,"
+        "data:v&&v.data!==undefined?v.data:null,"
+        "dataTransfer:v&&v.dataTransfer?String(v.dataTransfer):null,"
+        "isComposing:v?!!v.isComposing:null,"
+        "isTrusted:v?!!v.isTrusted:null,composed:v?!!v.composed:null,"
+        "cancelable:v?!!v.cancelable:null,"
+        "defaultPrevented:v?!!v.defaultPrevented:null,"
+        "target:v&&v.target?(v.target.id||v.target.nodeName):null,"
+        "targetRanges:v&&v.getTargetRanges?v.getTargetRanges().length:null,"
+        "dom:dom(),selection:sel()"
+        + extra + "};"
+        "if(phase==='beforeinput'&&cancel&&ev.inputType===cancel){v.preventDefault();ev.defaultPrevented=true;}"
+        "if(k){fetch('/_admin/editor-report?k='+encodeURIComponent(k),"
+        "{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)})"
+        ".catch(function(){});}"
+        "if(phase==='beforeinput')kind=ev.inputType;"
+        "if(phase==='input')document.title='" + prefix + ":input:'+e.textContent+':'+kind;"
+        "}"
+        "e.onfocus=function(){document.title='" + prefix + ":focused';report('focus',null)};"
+        "e.onblur=function(){document.title='" + prefix + ":blurred';report('blur',null)};"
+        "e.addEventListener('beforeinput',function(v){report('beforeinput',v)});"
+        "e.oninput=function(v){report('input',v)};"
+        "report('ready',null);"
+        "})</script>"
+    )
+    return (prefix + ":ready", control, script)
+
+
 CONTROL_PAGES = {
     "/select.html": (
         "SELECT",
@@ -1088,15 +1207,37 @@ CONTROL_PAGES = {
     ),
     # A rich text editor, as comment boxes are: an editable element rather than a form field.
     # The title shows the editor's text and the type of the last input the page received.
-    "/contenteditable.html": (
-        "EDITOR:ready",
+    "/contenteditable.html": editor_page(
+        "EDITOR",
         "<div class='c' id='editor' contenteditable></div>",
-        "<script>addEventListener('load',function(){var e=document.getElementById('editor');"
-        "var kind='';"
-        "e.onfocus=function(){document.title='EDITOR:focused'};"
-        "e.onblur=function(){document.title='EDITOR:blurred'};"
-        "e.addEventListener('beforeinput',function(v){kind=v.inputType});"
-        "e.oninput=function(){document.title='EDITOR:input:'+e.textContent+':'+kind}})</script>",
+        "",
+        "document.getElementById('editor')",
+    ),
+    # An editing host nested in a non-editable region, as nested widgets are.
+    "/nested-editable.html": editor_page(
+        "NESTED",
+        "<div class='c' id='outer' contenteditable='false'>"
+        "<div id='inner' contenteditable='true' style='box-sizing:border-box;height:100%;font-size:40px'>"
+        "</div></div>",
+        "var outer=document.getElementById('outer');",
+        "document.getElementById('inner')",
+        ",outerAttribute:outer.getAttribute('contenteditable'),"
+        "outerEditable:outer.isContentEditable,innerEditable:e.isContentEditable",
+    ),
+    # A rich editor inside a closed shadow root, as component-based editors are.
+    "/shadow-editor.html": editor_page(
+        "SHADOWEDITOR",
+        "<div class='c' id='host'></div>",
+        "var host=document.getElementById('host');"
+        "var root=host.attachShadow({mode:'closed'});"
+        "var editorEl=document.createElement('div');editorEl.id='editor';"
+        "editorEl.setAttribute('contenteditable','true');"
+        "editorEl.style.cssText='box-sizing:border-box;height:100%;font-size:40px';"
+        "root.appendChild(editorEl);",
+        "editorEl",
+        ",shadowRoot:e.getRootNode()!==document,rootMode:e.getRootNode().mode,"
+        "hostId:(e.getRootNode().host&&e.getRootNode().host.id)||null,"
+        "encapsulated:document.getElementById('editor')===null",
     ),
 }
 
@@ -1169,6 +1310,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, page(f"COOKIE-SET:{value}", "<p>set</p>"), headers=[("Set-Cookie", cookie)])
         if path == "/cookie-echo":
             return self.send(200, page(f"COOKIE:{self.headers.get('Cookie', '')}", "<p>echo</p>"))
+        if path == "/image-download.html":
+            key = re.sub(r"[^a-zA-Z0-9]", "", query.get("k", ["image"])[0])[:32]
+            image_path = "/download-image-redirect.png" if query.get("redirect") == ["1"] else "/download-image.png"
+            image_url = image_path + "?" + urllib.parse.urlencode({"k": key, "fail": query.get("fail", ["0"])[0]})
+            image = f"<img src='{html.escape(image_url, quote=True)}' style='display:block;width:100vw;height:100vh'>"
+            if query.get("linked") == ["1"]:
+                image = f"<a href='/solid/3b4f8a.html'>{image}</a>"
+            return self.send(200, page("IMAGE-DOWNLOAD", image, "<style>html,body{margin:0;background:#5b2a86}</style>"),
+                             headers=[("Set-Cookie", f"{COOKIE_NAME}=image-download-fixture; Path=/")])
+        if path == "/download-image-redirect.png":
+            return self.send(302, headers=[("Location", "/download-image.png?" + urllib.parse.urlencode(
+                {"k": query.get("k", [""])[0], "fail": query.get("fail", ["0"])[0]}))])
+        if path == "/download-image.png":
+            servo = "Servo/" in self.headers.get("User-Agent", "")
+            self.record({"service": "image-download", "key": query.get("k", [""])[0],
+                         "has_cookie": bool(self.headers.get("Cookie")),
+                         "has_referrer": bool(self.headers.get("Referer")), "servo_agent": servo})
+            if query.get("fail") == ["1"] and not servo:
+                return self.send(403, "Download refused")
+            return self.send(200, DOWNLOAD_IMAGE, "image/png")
         if path == "/opener.html":
             # The link fills the page, so a tap anywhere in the page area follows it.
             return self.send(200, page("OPENER", "<a id='open' target='_blank' href='/solid/3b4f8a.html' "
@@ -1186,7 +1347,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Reader view keeps the article and drops the navigation, aside and footer around it.
             return self.send(200, page("ARTICLE", ARTICLE_BODY))
         if path == "/scroll.html":
-            # Distinct endpoints and a live title prove root-page jumps, not just button state.
+            # Distinct endpoints and a live title prove root-page jumps, not just button state. The
+            # title also follows the viewport's height (innerHeight) as the bottom bar comes and goes.
             return self.send(200, page("SCROLL-TOP",
                 "<section style='height:100vh;background:#2e6b4f'>TOP</section>"
                 "<section style='height:500vh;background:#8a5a2b'>MIDDLE</section>"
@@ -1197,7 +1359,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "s.scrollTop+innerHeight>=s.scrollHeight-1?'SCROLL-BOTTOM':'SCROLL-MIDDLE';"
                 "const title=edge+':'+s.scrollTop+','+innerHeight+','+s.scrollHeight;"
                 "if(document.title!==title)document.title=title;};"
-                "addEventListener('scroll',update);</script>"))
+                "addEventListener('scroll',update);addEventListener('resize',update);update();</script>"))
         if path == "/pull-blocked.html":
             return self.send(200, page("PULL-READY", "<p>Page-owned drag</p>",
                 "<style>html,body{margin:0;height:100vh}</style>"
@@ -1266,6 +1428,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, media_page("AUDIO", "audio", "/media/tone.wav"))
         if path == "/canplay.html":
             return self.send(200, canplay_page(media_key(query)))
+        if path == "/media-player.html":
+            return self.send(200, player_page(media_key(query)))
         if path == "/media-source.html":
             return self.send(200, typed_source_page(media_key(query)))
         if path == "/hls.html":
@@ -1483,6 +1647,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Before body(), which stops at MAX_BODY_BYTES: a report with a screenshot is larger.
         if path == f"{REPORTS_PREFIX}/reports":
             return self.reports_create()
+        if path == "/_admin/editor-report":
+            return self.editor_report(self.body(), query)
         raw = self.body()
 
         if path == "/_admin/reset":
@@ -1504,6 +1670,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 once_served.clear()
                 state["media"] = fresh_media()
                 state["pdf"].clear()
+                state["editor"].clear()
                 for value in faults.values():
                     value[0], value[1] = "none", 0
             return self.send_json(200, {"ok": True})
@@ -1552,6 +1719,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if parts[7] not in members:
                 members.append(parts[7])
         return self.send(204)
+
+    def editor_report(self, raw, query):
+        """Store one page-reported editor event under its key; the state keeps only recent ones."""
+        key = "".join(c for c in query.get("k", [""])[0] if c.isascii() and c.isalnum())[:40]
+        if not key:
+            return self.send_json(http.HTTPStatus.BAD_REQUEST, {"error": "editor report needs k"})
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            return self.send_json(http.HTTPStatus.BAD_REQUEST, {"error": "bad editor report"})
+        if not isinstance(event, dict):
+            return self.send_json(http.HTTPStatus.BAD_REQUEST, {"error": "bad editor report"})
+        with lock:
+            events = state["editor"].setdefault(key, [])
+            events.append(event)
+            if len(events) > EDITOR_REPORT_LIMIT:
+                del events[:-EDITOR_REPORT_LIMIT]
+        return self.send_json(http.HTTPStatus.OK, {"ok": True})
 
     def karakeep_create(self, raw):
         fault = take_fault("karakeep")

@@ -2,8 +2,9 @@
 #
 #   scripts — bash -n + shellcheck over scripts/*.sh, the scripts' regression
 #             tests, rustfmt over native/, a syntax check of the engine's
-#             page scripts, and the PDF viewer's modules and host tests
-#             (always meaningful; none needs the Servo tree).
+#             page scripts and host tests of those with logic of their own,
+#             and the PDF viewer's modules and host tests (always
+#             meaningful; none needs the Servo tree).
 #   android — JVM tests, Android lint, debug + release APKs, the device
 #             checks' test APK (compiled, not run), a check that Room's
 #             exported schemas are committed, the third-party notices in
@@ -86,6 +87,10 @@ jobs:
             node -e 'const file = process.argv[1]; new (require("vm").Script)(require("fs").readFileSync(file, "utf8"), { filename: file })' "$f"
           done
 
+      # Page scripts with logic of their own, run on fake pages.
+      - name: Engine page-script tests
+        run: node --test native/src/test/*.test.mjs
+
       # The PDF viewer's module and worker (served by native/src/pdf.rs) are ES
       # modules, which vm.Script would reject: `node --check` parses them as
       # modules. The host tests run the worker against the vendored PDFium and
@@ -116,11 +121,11 @@ jobs:
 
       # Supply-chain gate: reject a tampered gradle-wrapper.jar.
       - if: steps.detect.outputs.present == 'true'
-        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       # JDK 17 is the family default until M0 pins Combray's toolchain (AGENTS.md).
       - if: steps.detect.outputs.present == 'true'
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "17"
@@ -129,7 +134,7 @@ jobs:
       # A compileSdk newer than the runner's AGP knows about also needs
       # android.suppressUnsupportedCompileSdk in gradle.properties.
       - if: steps.detect.outputs.present == 'true'
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       # assembleDebugAndroidTest compiles the device checks, which call core
       # APIs directly; lint does not compile them. Running them needs a device.

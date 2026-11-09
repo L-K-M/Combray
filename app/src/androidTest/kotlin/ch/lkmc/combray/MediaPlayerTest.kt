@@ -8,13 +8,16 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.core.view.descendants
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleCallback
@@ -23,6 +26,7 @@ import androidx.test.runner.lifecycle.Stage
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.media.MediaPolicy
 import ch.lkmc.combray.core.media.PlaybackRequest
+import ch.lkmc.combray.engine.EngineSurfaceView
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.player.MediaFailure
 import ch.lkmc.combray.player.PlaybackPhase
@@ -215,16 +219,55 @@ class MediaPlayerTest {
         assertEquals("clip requests", 0, clip().getInt("requests"))
     }
 
-    /** Play on a notice that outlived its page opens nothing and says so. */
+    /** The offer goes with its page: Home shows none, and nothing was fetched. */
     @Test
-    fun playAfterLeavingThePageSaysSo() {
+    fun leavingThePageTakesItsOfferAway() {
         open(Fixtures.video(key))
         device.browser.newTab()
-        device.awaitState { it.activeTab?.isHome == true }
-        tapPlay()
-        compose.waitUntilAtLeastOneExists(hasText(PAGE_LEFT_NOTICE), Device.LOAD_TIMEOUT_MS)
+        device.awaitState { it.activeTab?.isHome == true && it.mediaOffer == null }
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithText(PLAYABLE_NOTICE).fetchSemanticsNodes().isEmpty() }
         assertNull("no player", resumed() as? PlayerActivity)
         assertEquals("clip requests", 0, clip().getInt("requests"))
+    }
+
+    /**
+     * Check 15: the offer outlasts a notice's ten seconds and, once closed, a tap on the page's
+     * own player (its video in a shadow root, under an overlay) offers the video again, where a
+     * tap beside the player does not. The address field's Play plays it too.
+     */
+    @Test
+    fun aTapOnThePagesOwnPlayerOffersItsVideoAgain() {
+        open(Fixtures.player(key))
+        device.awaitState { playerCount(it.activeTab?.title, "errors") == 1 }
+        Thread.sleep(LONG_NOTICE_MS)
+        assertTrue("the offer outlasts a notice", compose.onAllNodesWithText(PLAYABLE_NOTICE).fetchSemanticsNodes().isNotEmpty())
+
+        compose.onNodeWithContentDescription(DISMISS).performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) { compose.onAllNodesWithText(PLAYABLE_NOTICE).fetchSemanticsNodes().isEmpty() }
+        // The snackbar goes first; the effect that saw it go then closes the offer.
+        device.awaitState { it.mediaOffer == null }
+        compose.onNodeWithContentDescription(PLAY_MEDIA).assertExists()
+
+        // A tap below the player reaches the page, and its media is not offered.
+        tapPageUntil(BELOW_PLAYER) { playerCount(it, "outside") >= 1 }
+        Thread.sleep(TAP_CHECK_MS)
+        assertNull("a tap beside the player", device.browser.browserState.value.mediaOffer)
+
+        // A tap on the player's own button offers its video again.
+        tapPageUntil(ON_PLAYER) { playerCount(it, "plays") >= 1 }
+        compose.waitUntilAtLeastOneExists(hasText(PLAYABLE_NOTICE), Device.LOAD_TIMEOUT_MS)
+        assertEquals("clip requests before Play", 0, clip().getInt("requests"))
+        tapPlay()
+        val player = awaitPlayer()
+        awaitSnapshot(player, "ready") { it.phase in PLAYED }
+        back(player)
+
+        // Played, the offer is done; the address field still plays the video.
+        assertNull(device.browser.browserState.value.mediaOffer)
+        compose.onNodeWithContentDescription(PLAY_MEDIA).performSemanticsAction(SemanticsActions.OnClick)
+        val again = awaitPlayer()
+        awaitSnapshot(again, "ready again") { it.phase in PLAYED }
+        back(again)
     }
 
     /**
@@ -474,6 +517,44 @@ class MediaPlayerTest {
 
     private fun hls(): JSONObject = media().getJSONObject("hls")
 
+    /** Taps halfway across the page at [fraction] of its height until [done] holds for its title. */
+    private fun tapPageUntil(fraction: Float, done: (String?) -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + Device.LOAD_TIMEOUT_MS
+        while (!done(device.browser.browserState.value.activeTab?.title)) {
+            if (SystemClock.uptimeMillis() > deadline) throw AssertionError("no tap reached the page at $fraction")
+            tapPage(fraction)
+            Thread.sleep(TAP_CHECK_MS)
+        }
+    }
+
+    /**
+     * A tap on the page, halfway across and at [fraction] of its viewport's height, where the
+     * page's `vh` measure: the engine's view less the bottom pixels the controls cover.
+     */
+    private fun tapPage(fraction: Float) {
+        device.dismissSystemDialogs()
+        val origin = IntArray(2)
+        var size = 0 to 0
+        instrumentation.runOnMainSync {
+            val surface = (compose.activity.window.decorView as ViewGroup).descendants.filterIsInstance<EngineSurfaceView>().single()
+            surface.getLocationOnScreen(origin)
+            size = surface.width to surface.height
+        }
+        val covered = device.browser.paintedViewport.value?.inset ?: 0
+        val x = origin[0] + size.first / 2f
+        val y = origin[1] + (size.second - covered) * fraction
+        val down = SystemClock.uptimeMillis()
+        instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
+        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))
+    }
+
+    /** One count of the player page's title, `PLAYER:errors:<n>:outside:<n>:plays:<n>`; -1 before it reports. */
+    private fun playerCount(title: String?, name: String): Int {
+        val parts = title?.split(':') ?: return -1
+        val at = parts.indexOf(name)
+        return parts.getOrNull(at + 1)?.toIntOrNull()?.takeIf { at > 0 } ?: -1
+    }
+
     private fun tapPageCenter() {
         device.dismissSystemDialogs()
         val metrics = compose.activity.resources.displayMetrics
@@ -508,8 +589,10 @@ class MediaPlayerTest {
         const val LOG_TAG = "MediaPlayerTest"
         const val PLAYABLE_NOTICE = "This page’s audio or video opens in a separate player."
         const val PLAIN_NOTICE = "This page’s audio or video can’t play in Combray."
-        const val PAGE_LEFT_NOTICE = "That audio or video is on a page no longer shown. Return to the page to play it."
         const val PLAY = "Play"
+        /** The address field's Play, and the offer's close button (Material's label). */
+        const val PLAY_MEDIA = "Play audio or video"
+        const val DISMISS = "Dismiss"
         const val VIDEO_ROW = "Video · slow.bin"
         const val AUDIO_ROW = "Audio · slow.bin"
         val PLAYED = setOf(PlaybackPhase.READY, PlaybackPhase.ENDED)
@@ -518,6 +601,13 @@ class MediaPlayerTest {
         const val AUDIO_ADVANCE_MS = 5_000L
         const val SLOW_MEDIA_MS = 20_000L
         const val TAP_OUTCOME_MS = 5_000L
+        /** Past a long notice's 10 s, which the offer once lasted. */
+        const val LONG_NOTICE_MS = 11_000L
+        /** Time for the engine's hit test after a tap, and for the offer it may bring. */
+        const val TAP_CHECK_MS = 2_000L
+        /** The player page's play button, in the middle of its top half; and its plain bottom half. */
+        const val ON_PLAYER = 0.25f
+        const val BELOW_PLAYER = 0.75f
         const val POLL_MS = 100L
         /** Far enough into the clip that a stop lands between position ticks. */
         const val PLAYING_MS = 500L

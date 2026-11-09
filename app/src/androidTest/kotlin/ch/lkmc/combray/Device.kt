@@ -8,6 +8,11 @@ import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.TabCounter
+import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.core.browser.ThemeMode
+import ch.lkmc.combray.engine.EngineEvent
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -162,6 +167,13 @@ object Fixtures {
      */
     fun canPlay(key: String) = "$BASE/canplay.html?k=$key"
 
+    /**
+     * A site's own player over the top half of the page: [clip] with [key] in an open shadow
+     * root, out of hit testing under an overlay with a play button in its middle. Titled
+     * `PLAYER:errors:<n>:outside:<n>:plays:<n>`: its errors, clicks below it, clicks on its button.
+     */
+    fun player(key: String) = "$BASE/media-player.html?k=$key"
+
     /** A `<video>` whose only `<source>` is [clip] with [key] typed `video/mp4`; titled `TYPED:errors:<n>`. */
     fun typedSource(key: String) = "$BASE/media-source.html?k=$key"
 
@@ -286,6 +298,13 @@ class Device(private val frame: () -> Unit = {}) {
 
     fun awaitEngine() = awaitState { it.engine == EngineStatus.READY }
 
+    /** Waits for the engine's answer to a viewport request (EngineSurfaceView.coverBottom). */
+    fun awaitPaintedViewport(
+        timeoutMs: Long = LOAD_TIMEOUT_MS,
+        predicate: (EngineEvent.ViewportPainted) -> Boolean,
+    ): EngineEvent.ViewportPainted =
+        runBlocking { withTimeout(timeoutMs) { browser.paintedViewport.filterNotNull().first(predicate) } }
+
     /** Waits until the focused tab committed [url] and finished loading. */
     fun awaitPage(url: String, timeoutMs: Long = LOAD_TIMEOUT_MS): BrowserState =
         awaitState(timeoutMs) { it.activeTab?.url == url && it.activeTab?.loading == false }
@@ -293,6 +312,22 @@ class Device(private val frame: () -> Unit = {}) {
     fun recent(): List<RecentItem> = runBlocking { browser.recent().first() }
 
     fun idle() = runBlocking { browser.awaitIdle() }
+
+    /** Settings writes are durable-first: assert acknowledgement before reading the value/UI. */
+    fun setThemeMode(mode: ThemeMode) = awaitPreference(settings.setThemeMode(mode))
+
+    fun setTabCounter(counter: TabCounter) = awaitPreference(settings.setTabCounter(counter))
+
+    fun setHomeContinue(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeContinue(visibility))
+
+    fun setHomeFrequentSites(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeFrequentSites(visibility))
+
+    fun setTextSize(size: TextSize) = awaitPreference(settings.setTextSize(size))
+
+    // Keep the helpers' JVM return type void: expression-bodied JUnit hooks call them.
+    private fun awaitPreference(write: kotlinx.coroutines.Deferred<Boolean>) {
+        check(runBlocking { write.await() }) { "Fixture preference write was not acknowledged" }
+    }
 
     /** Closes every tab so each check starts from the internal home. */
     fun closeAllTabs() {
@@ -304,8 +339,8 @@ class Device(private val frame: () -> Unit = {}) {
 
     /** Fixture isolation: a failed editor check must not hide another check's automatic links. */
     internal fun resetHome() = runBlocking {
-        settings.setHomeContinue(HomeSectionVisibility.SHOWN)
-        settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        check(settings.setHomeContinue(HomeSectionVisibility.SHOWN).await())
+        check(settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN).await())
         val home = app.graph.home
         val state = home.state(flowOf(emptyList())).first()
         state.pins.forEach { home.unpin(it.id) }

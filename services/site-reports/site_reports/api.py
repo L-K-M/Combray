@@ -234,6 +234,7 @@ class _HourlyLimit:
         self._clock = clock
         self._lock = threading.Lock()
         self._counts: dict[str, tuple[int, int]] = {}  # key: (window, count)
+        self._pruned_window: int | None = None
 
     def retry_after(self, key: str) -> int | None:
         """Seconds until the window ends when ``key`` has used it up, else None."""
@@ -248,8 +249,18 @@ class _HourlyLimit:
     def record(self, key: str) -> None:
         window = int(self._clock().timestamp() // _RATE_WINDOW_SECONDS)
         with self._lock:
+            self._prune(window)
             counted_window, count = self._counts.get(key, (window, 0))
             self._counts[key] = (window, count + 1 if counted_window == window else 1)
+
+    def _prune(self, window: int) -> None:
+        """Drop entries from earlier hours: the limit is hourly, so an old window is never read."""
+        if window == self._pruned_window:
+            return
+        stale = [key for key, (counted_window, _) in self._counts.items() if counted_window < window]
+        for key in stale:
+            del self._counts[key]
+        self._pruned_window = window
 
 
 class Handler(BaseHTTPRequestHandler):

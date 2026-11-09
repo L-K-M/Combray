@@ -1,6 +1,7 @@
 package ch.lkmc.combray.ui
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -24,14 +25,16 @@ internal sealed interface FrameCopy {
 /**
  * The frame on screen in [view], read back with PixelCopy. Only the surface's own buffer is
  * copied: the menu, sheets, snackbars and every other part of Combray's window are drawn
- * elsewhere and can never appear in it. No engine handle is touched. The request is made on
- * the main thread, and a copy that does not finish within [timeoutMs] counts as failed.
+ * elsewhere and can never appear in it. Its bottom [coveredBottom] pixels lie under the bottom
+ * controls and are left out. No engine handle is touched. The request is made on the main
+ * thread, and a copy that does not finish within [timeoutMs] counts as failed.
  */
-internal suspend fun copyFrame(view: SurfaceView, timeoutMs: Long = COPY_TIMEOUT_MS): FrameCopy = withContext(Dispatchers.Main.immediate) {
+internal suspend fun copyFrame(view: SurfaceView, coveredBottom: Int = 0, timeoutMs: Long = COPY_TIMEOUT_MS): FrameCopy = withContext(Dispatchers.Main.immediate) {
+    val height = view.height - coveredBottom.coerceAtLeast(0)
     // The surface can go at any time (Home, rotation): never let that crash the browser.
-    if (view.width <= 0 || view.height <= 0 || !view.holder.surface.isValid) return@withContext FrameCopy.Unavailable(ScreenshotOmission.NOT_SHOWN)
+    if (view.width <= 0 || height <= 0 || !view.holder.surface.isValid) return@withContext FrameCopy.Unavailable(ScreenshotOmission.NOT_SHOWN)
     val bitmap = try {
-        createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        createBitmap(view.width, height, Bitmap.Config.ARGB_8888)
     } catch (tooLarge: OutOfMemoryError) {
         return@withContext FrameCopy.Unavailable(ScreenshotOmission.COPY_FAILED)
     }
@@ -39,7 +42,7 @@ internal suspend fun copyFrame(view: SurfaceView, timeoutMs: Long = COPY_TIMEOUT
         suspendCancellableCoroutine { copied ->
             try {
                 // A result after the timeout resumes a cancelled continuation, which ignores it.
-                PixelCopy.request(view, bitmap, { code -> copied.resume(code) }, Handler(Looper.getMainLooper()))
+                PixelCopy.request(view, Rect(0, 0, view.width, height), bitmap, { code -> copied.resume(code) }, Handler(Looper.getMainLooper()))
             } catch (failure: RuntimeException) {
                 // IllegalArgumentException included: the surface became invalid since the check.
                 Log.w(LOG_TAG, "copying the page frame failed: ${failure.javaClass.name}")

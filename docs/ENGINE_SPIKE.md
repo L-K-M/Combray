@@ -60,7 +60,7 @@ Software emulation is slow and timing-sensitive: Android's own framework timed o
 ```
 
 - **Ownership:** `Servo`, `WebView` and the rendering context are `Rc`-based and stay on one engine thread. JNI calls only enqueue commands. Servo's event-loop waker is another sender on the same channel. Delegates copy each notification into a queue; the engine processes the queue after the spin, so no callback re-enters Servo.
-- **Views:** one `WindowRenderingContext` bound to the visible `SurfaceView`; every tab is a separate `WebViewBuilder::build()` (a new constellation browsing context, not a cloned handle). Selecting shows and focuses one view and hides the others; only the selected view is painted. Hidden views keep running (measured in the results).
+- **Views:** one `WindowRenderingContext` bound to the visible `SurfaceView`, and one `OffscreenRenderingContext` made from it that every view renders into: the surface's rows above the app's bottom controls, copied to the top of the surface after each frame ([section 57](#57-bottom-bar-over-a-fixed-surface-8-november-2026)). Every tab is a separate `WebViewBuilder::build()` (a new constellation browsing context, not a cloned handle). Selecting shows and focuses one view and hides the others; only the selected view is painted. Hidden views keep running (measured in the results).
 - **Identity:** events carry the application's tab ID, an engine-wide **generation** per native view (recreating a tab yields a new generation; events from an older generation are dropped), and the **document ID** (Servo's top-level pipeline ID). A new document ID means a new document even at the same URL. Reports from a document that was replaced are marked `stale`; reports that overtake their document's commit (Servo delivers them on a different channel) are held until the commit.
 - **Surface lifecycle:** `surfaceDestroyed` first advances a surface epoch (painting stops at once), then waits for the engine to call `take_window()` and release its `ANativeWindow` reference. A new surface is bound with `set_window()`; Servo, tabs and documents survive.
 - **Panics:** a panic inside a surface operation (Servo and surfman `expect` on some surface errors) becomes an error and the engine continues. Any other panic on the engine thread aborts the process, so Android reports a crash and the app restarts with session recovery, rather than leaving a silently dead engine. Panics on Servo's own threads, and those Servo marks as handled, are left to Servo.
@@ -3076,6 +3076,9 @@ Checks:
 
 ## 51. Typing into rich text editors (7 November 2026)
 
+This records the first typing change. The caret, composition, selection and keyboard-action
+limits below are continued in [§56](#56-rich-editor-carets-composition-and-navigation-7-november-2026).
+
 Validated source: `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a` on `combray/0.7`, which merges
 downstream [PR #35](https://github.com/L-K-M/servo/pull/35) onto the merge of
 [PR #37](https://github.com/L-K-M/servo/pull/37), on §48's pin `4778c513e962`. Its tree is that of
@@ -3162,3 +3165,625 @@ keeps a trailing `<br>`), and `ab`, Enter, `c`, two Backspaces, `X`, two left ar
   - By hand, with Gboard, the Lexical test page took `h`, `i`, space, Backspace, `o`, Enter, `y`
     as two paragraphs, `hio` and `y`, with the keyboard opening on the tap.
 - The full device suite runs in this PR's Engine workflow.
+
+## 52. Bot-check device verification (6 November 2026)
+
+The owner sent an article address and a phone screenshot of a bot-protection block page. The site
+and the protection vendor are not named here, and the captured traffic stayed on the Mac.
+
+Validated source: `8720afc00e4daead852b8f7f63bb59e87e0b2a99` on `combray/0.7`, which merges
+downstream [PR #36](https://github.com/L-K-M/servo/pull/36) onto §51's pin `5aa68fd29b6b`. The
+reload change, [PR #37](https://github.com/L-K-M/servo/pull/37), came with §51's pin. Upstream
+base still v0.7.0.
+
+### Diagnosis
+
+Desktop servoshell at the old pin, with Combray's preferences, reproduced the block. The vendor's
+device check runs in a cross-origin frame, posts its measurements and receives a verdict: a hard
+block, an interactive challenge, or a pass with a cookie and a reload of the page.
+
+- Network: Safari in a private window on the same Mac and network loaded the article, so the
+  address is not blocked as such.
+- User agent: a plain Firefox for Android string, and a desktop Firefox string at desktop size, got
+  the same block. The verdict's reason codes changed only in their first entry. The `Gecko/` token
+  from §50 does not help here.
+- TLS: through a re-encrypting proxy, which replaces Servo's TLS handshake with the proxy's own,
+  Servo stayed blocked. Playwright's headless Firefox 157 through the same proxy got an interactive
+  challenge.
+- Engine features: traces of the Web API calls the check makes (a userscript wrapping prototype
+  methods and getters, replayed offline from the proxy) differ in dozens of places between Servo
+  and Firefox. Firefox was then made to look like Servo in 15 feature groups at once and in a
+  4-bit combination of them (five live runs). It reproduced Servo's block and reason codes exactly
+  when, and only when, the SVG geometry methods were removed: `getBBox()`, `createSVGPoint()`,
+  `isPointInFill()`. The check draws an SVG fingerprint with them. Firefox missing every other
+  difference (navigator properties, `speechSynthesis`, WebGL debug info, OffscreenCanvas in
+  workers, timing values, media types and others) still passed.
+- Reload: with the SVG methods present, the verdict passed, but the reload it triggers was
+  challenged again. Rewriting Servo's reload request toward Firefox's in the proxy, one header group
+  at a time, isolated the `Referer` header. Servo sent the page's own URL; Firefox sends what the
+  original request sent, here nothing, as HTML requires.
+
+### Engine changes
+
+- [PR #36](https://github.com/L-K-M/servo/pull/36) adds `SVGGraphicsElement.getBBox()`,
+  `SVGGeometryElement.isPointInFill()` and `SVGSVGElement.createSVGPoint()`, `createSVGMatrix()`
+  and `createSVGRect()`, computed from the elements' attributes. Text and nested viewports with a
+  `viewBox` throw `NotSupportedError`.
+  - It also makes a negative ellipse radius take the other radius, for `getTotalLength()` too.
+  - Checks: a new 21-case WPT test fails all 21 before the change and passes after; Firefox passes
+    all 21 and Chromium 19. 227 more passing subtests in `svg/`, with no other change against the
+    unchanged build on the same Mac. A 16-page seed sweep turns one `js-error` into `ok` and
+    changes nothing else.
+- [PR #37](https://github.com/L-K-M/servo/pull/37) reloads with the referrer and referrer policy of
+  the request that fetched the document, for `location.reload()` and the embedder's reload alike.
+  - Checks: a new 4-case WPT test fails all 4 before the change and passes after; Firefox passes
+    all 4 and Chromium does not. No change in the 102 upstream tests that reload.
+- Reviews:
+  - Before the PRs: Devin SWE-2, Reflection Beam 1.0 and LongCat 2.5.
+  - On them: GLM 5.3, three rounds on #36 and two on #37.
+  - The PRs list each finding and how it was handled. Two remain open: a style-sheet
+    `display: none` on a direct child of `svg` is still not seen, as servo.css's `svg > *` rule
+    hides it from the rasterizer as well; and `use` of a `symbol` with a `viewBox` throws.
+
+### End to end
+
+Desktop servoshell with both changes, Servo's own user agent, the same network:
+
+- It passes the device check and loads the article.
+- With Servo's Android user agent at phone size, the check offers its interactive challenge instead
+  of the block. Two things fit that: the Mac's fonts and hardware contradict an Android user agent,
+  and the check probes OS-specific fonts. Emulating the phone's pointer, touch, platform and pixel
+  ratio did not change that verdict.
+
+On an arm64 API 36 emulator with the same network, Combray at the old pin and Combray with both
+changes (a local build, `COMBRAY_ABI=arm64 scripts/build.sh --debug`) both stop at the vendor's
+interactive challenge, not at the block. Real Firefox 157 with a Firefox for Android user agent
+and touch emulation on the Mac is blocked as well (reason `25` and another). Neither desktop nor
+emulator therefore shows what a phone gets.
+
+The phone itself is not yet confirmed.
+
+### Not changed
+
+These differences remain, did not decide this check, and are candidates for later work:
+
+- Servo exposes no `navigator.webdriver` or `navigator.maxTouchPoints`.
+- OffscreenCanvas stays behind `dom_offscreen_canvas_enabled`, so the check's worker tasks throw.
+- `performance.timing.navigationStart` is 0.
+- A script reload sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-User: ?1`.
+
+## Integration foundation fixture gates (8 November 2026)
+
+Two foundation candidates passed the complete Engine workflow on their reviewed
+heads. Neither changes native source or the Servo pin:
+`8720afc00e4daead852b8f7f63bb59e87e0b2a99` (upstream source
+`aac43a3f31a259f04a574f5ec4e959c943ad7cc7`).
+
+| Candidate | Reviewed head | Engine run | Build/fixture merge ref |
+| --- | --- | --- | --- |
+| Process-wide Keystore creation lock (#221) | `2f26391d7a4863958e9de8bdd5392416b75287b1` | [42500893043](https://github.com/L-K-M/Combray/actions/runs/42500893043) | `5b67afbc3c7f523791fd06fd176b6a2116d88175` |
+| Nullable queued-job URL, schema 6 (#298) | `745b707e15a35daa397753698961ee545179b6c6` | [42501469481](https://github.com/L-K-M/Combray/actions/runs/42501469481) | `1a472c6ad714c1cd08a83a012fdea00638ddeed2` |
+
+Both runs passed host `cargo fmt --check` and `cargo test --lib --locked`, native
+builds for arm64 and x86_64 through `scripts/build-native.sh`, the complete
+`scripts/check-app.sh` fixture sequence and test-APK artifact cleanup. The device
+was the hosted Android 11/API 30 x86_64 emulator, not a physical phone. The workflow
+pins the Rust/Android build environment; the downloaded `device.txt` records API
+30 and `ro.product.cpu.abi=x86_64`.
+
+Downloaded device evidence contains 209 passed checks for #221 and 207 for #298,
+including process-death preparation and verification. #221's two additional
+`SecretStoreDeviceTest` cases passed on Android Keystore: simultaneous first writes
+remain readable, and separate store instances safely share their isolated alias.
+Those tests use UUID aliases and separate directories, never production credentials.
+
+#298's schema-5-to-6 upgrade regression is JVM/Room coverage. Its emulator evidence
+verifies the current schema, normal fixture workflows and process death; it is not
+an upgrade of an existing physical-phone profile. Legacy queue payloads are decoded
+off the UI thread but may be decoded again on flow emissions, not once per job.
+All endpoints, pages and secrets in these checks are synthetic. No live service or
+personal history was used. These historical results do not validate subsequent
+candidate heads; later rich-editor and service-root checks need their own evidence.
+
+## 53. Image downloads (7 November 2026)
+
+Owner request: offer Download image in the long-press image menu. It is separate
+from Open in new tab and a link's existing Open in background action; those keep
+their behavior. A linked image downloads its image address, not its link.
+
+Implementation default: `app/src/main/kotlin/ch/lkmc/combray/ImageDownloads.kt`
+validates and canonicalizes an HTTP(S) address, then hands it to Android DownloadManager on an IO dispatcher.
+Android owns the download after enqueue, including retries and progress/completion
+notifications. Files go to public Downloads without an added storage permission
+(minSdk 30). Names keep a safe image suffix when known and use a unique UUID to
+avoid overwriting earlier files. They contain no query, fragment, path separators,
+control characters or arbitrary executable suffix; the response determines MIME.
+The native menu dismisses first, then a process-scoped coroutine queues the original
+address. The toast says queued only after the platform accepts it; a refused enqueue
+gets an error, never a saved claim. Tab selection does not change.
+
+Limits and trust boundary:
+
+- This is a new HTTP(S) request through Android, not an export of Servo's cached
+  pixels or authenticated response. No cookies, referrer or integration headers
+  are added. Protected/hotlink-gated images may fail; a server can return different
+  bytes or a sign-in page. Signed image query parameters are retained deliberately
+  for the user-requested download, but never used as a filename or logged by the app.
+- Android's downloader owns redirect/network policy, not the native player's
+  `MediaPolicy`. There is no page-JavaScript download API, automatic download or
+  automatic file opening. Only the native menu's user action hands over an address.
+- `data:`, `blob:`, `file:`, content-provider addresses, embedded credentials and
+  image addresses longer than 8,192 characters are refused. The menu hides the
+  download action for non-web schemes. General attachment/file downloads remain
+  out of scope.
+- No native, downstream Servo, dependency or manifest changes in the image feature.
+  Its original tested engine pin is `5aa68fd29b6b84319b9c411ff1b552da27e0bc6a`.
+  Main's later engine pin `8720afc00e4daead852b8f7f63bb59e87e0b2a99` is retained
+  when integrating the report-JSON fix from PR #202; section 52 records that update.
+
+Evidence on macOS arm64, JDK 21, Rust 1.97.1 and Android SDK under
+`~/Library/Android/sdk` (Rust's toolchain `bin` added to `PATH`):
+
+- Nine `ImageDownloadsTest` checks cover destination/naming, no headers, query
+  retention without fragments, unsupported/credential URLs, duplicate filenames,
+  provider refusal and cancellation. Eight failed against the unavailable stub
+  before implementation; all nine pass after it.
+- Six `ImageDownloadMenuTest` checks cover plain/linked images, dismissal before
+  download, unchanged link background behavior, and hidden unsupported actions.
+- Full JVM/lint/debug/test/release checks pass: 750 tests, no failures or skips.
+  All 121 Python script tests pass, including four new fixture checks. Native
+  formatting and all 169 host tests pass.
+- `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh` passes (11m52s),
+  and `verify-apk.py --expected-arch arm64` passes on the packaged debug APK.
+- Three `ImageDownloadTest` checks pass on an isolated API-36 arm64 emulator
+  (`emulator-5592`, 360×720dp, SwiftShader): a real long-press downloads the original
+  69-byte PNG with its independently pinned SHA-256 and MIME; a linked image follows
+  its image redirect, not its page link; and a separate downloader refused with 403
+  reports Android's failed status. The browser's fixture cookie reaches Servo's
+  image request, but neither it nor the page referrer reaches the download request.
+  The same logical tab stays selected and its image stays painted. Each check removes
+  only its own uniquely addressed download and file.
+- The same API-36 run also passes all eight `PageControlsTest` and 32
+  `AccessibilityTest` checks (43 total), including foreground Open in new tab and
+  the image/linked-image menus' targets.
+- The original full API-30 x86_64 Engine run passed 205 checks, with no failed
+  report-only checks. The updated merge revision reruns the suite in PR checks.
+- The original CI blocker is resolved by main's merged PR #202: JSON depth is
+  explicitly bounded at 32 containers instead of depending on a Python
+  `RecursionError`. The combined revision passes all 209 report-service tests
+  locally on Python 3.13 and 3.15.2, including the 50,000-level regression and
+  exact depth-limit boundary. The image-download implementation is unchanged.
+- Original local evidence: `/tmp/combray-download-images-logs/`. Merge-validation
+  evidence: `/tmp/combray-download-images-merge-logs/`. No physical phone or live
+  personal service was used.
+
+Reproduction:
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 -I -m unittest discover -s scripts/tests
+python3 -I -m unittest discover -s services/site-reports/tests -t services/site-reports
+COMBRAY_ABI=arm64 scripts/build-native.sh
+scripts/check-app.sh <serial> ch.lkmc.combray.ImageDownloadTest ch.lkmc.combray.PageControlsTest ch.lkmc.combray.AccessibilityTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+## 54. Keeping Play reachable (6 November 2026)
+
+### Report
+
+The owner reported a page whose own video player shows its error and never plays (the site is
+not named here). Reproduced on an arm64 API 36 emulator with the Engine workflow's APK of
+PR 196's head, and read from the site's player code:
+
+- The player sits in an open shadow root. Without `MediaSource` it sets `video.src` to a
+  progressive H.264/AAC MP4 listed in the page's own data, whatever `canPlayType` answers
+  (headless Chromium with MSE removed, once with every answer empty and once with Combray's
+  claim table). Combray cancels the load, the element fails with `MEDIA_ERR_SRC_NOT_SUPPORTED`,
+  and the player draws its own error over the video. The MP4 needs no cookie and has its `moov`
+  first.
+- The load was reported and offered: the playable notice came about 7 s after the load
+  started, over the site's cookie sheet on a first visit, and was gone 10 s later
+  (`SnackbarDuration.Long`). More › "Play audio or video" opened the player, which showed the
+  video.
+- A tap on the site's player brought nothing back: the failed element's `play()` is refused
+  without a new load, and the engine reports each address once per page.
+
+The video was playable; Play was out of reach. The owner chose all three remedies offered
+([VIDEO.md](VIDEO.md#owner-decisions)).
+
+### Changes
+
+- `native/src/media_tap.js`, filled by `media::tap_hits_media_script`: whether a tap's point,
+  in CSS pixels, lies in the box of a `<video>` or `<audio>` with `readyState` 0 that was given
+  a source (`networkState` not empty), in the document or in the open shadow roots under the
+  point. The topmost element there must be that element or a container of it across shadow
+  roots, or controls drawn on it: inside its parent and inside its box (1 px slack). A banner
+  sharing the video's parent once counted; the review of this PR caught it. Boxes, not the hit
+  stack: Servo's `ShadowRoot.elementsFromPoint` leaves out a video with `pointer-events: none`,
+  as custom players set it under their controls. Bounded to 16 roots, 64 hits and 64 media
+  elements per root.
+- `engine.rs`: every tap the field tracker recognizes also runs `check_tap_on_media`, only when
+  the document reported a media URL on any of its pages (`media::MediaDocuments`, the tab's 16
+  most recent such documents, as many as the pages a view keeps media for in the application;
+  so a route change or a return to a cached document that loads nothing again keeps it). The answer is
+  drained on the engine thread like the field check and becomes `media_tapped` (`events.rs`)
+  while that document is still current in the active tab.
+- `core`: `BrowserState.mediaOffer` replaces `Notice.MediaPlayable`. It is set by the page's
+  first offered address and by `media_tapped`, cleared by `dismissMediaOffer` and, in
+  `publish()`, as soon as it no longer names the shown page's media.
+- `app`: the offer shows from its own `SnackbarHostState` (`Indefinite`, with a close button),
+  stepping aside while a notice shows; the address chip shows Play while the page has media;
+  the single-row bar stacks below 516dp instead of 468dp.
+- `testing/fixtures/server.py`: `/media-player.html`, a site-style player (shadow root, video
+  out of hit testing, overlay with a play button) that counts its errors, its button's clicks
+  and clicks below it in its title.
+
+### Checks
+
+- Desktop servoshell (`servo-sitecheck`, `--profile medium`, fresh profile) over WebDriver: on
+  `/media-player.html` the script says yes on the play button and on the overlay's corner, no
+  just below the player and no on a fixed banner laid over it. On the reported page, also with
+  a fresh profile: yes at the player's centre and on its controls row, no above and below it.
+  Headless Chromium gives the fixture answers too.
+- `cargo test --lib` in `native/` (165), `node --test native/src/test/*.test.mjs` (13),
+  `cargo fmt --check`, `cargo check --target aarch64-linux-android --locked`, the fixture
+  server's host tests (17), and `./gradlew testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest` pass.
+- Device, on an arm64 API 36 emulator (Pixel 7 profile) with this branch's local arm64 build:
+  `MediaPlayerTest` passes all 15 checks, check 15 and `leavingThePageTakesItsOfferAway`
+  included. Check 1's colour sample failed once, on the first player launch after a fresh
+  install, where API 36 dims the screen behind its "Viewing full screen" hint; it passes once
+  the hint has been acknowledged. `AccessibilityTest` (with `playInTheAddressIsAccessible`) and
+  `BrowsingTest.mediaIsCancelledBeforeDownloadingAndThePageIsTold` pass except
+  `theBottomBarOnANewTabIsAccessible`, which fails the same way on main's build on that
+  emulator ("New tab" and "Recent" share a touch area on Home at 200% font): not this change.
+- The reported page on the same emulator: the offer stays past ten seconds, with Play in the
+  address field; closed, it stays closed while untouched and after a tap beside the video,
+  and comes back after a tap on the player's error text, its play button or its mute button
+  (which the site also handles). Once, a tap on the site's cookie sheet where it covered the
+  video brought the offer back as well; the sheet did not show again on a cleared profile, so
+  whether that tap reached the player in Servo's hit test was left open. Section 55 answers it:
+  a covering layer that takes no hits leaves the tap on the player, by design.
+- The x86_64 emulator suite runs in this PR's Engine workflow.
+
+
+### Merge validation (7 November 2026)
+
+The merge with PR #201 keeps its Servo pin `8720afc00e4daead852b8f7f63bb59e87e0b2a99`.
+On the Mac, `cargo fmt --check`, `cargo test --lib --locked` (172), the media-tap Node
+checks (13), fixture-server tests (24), and `./gradlew testDebugUnitTest lintDebug
+assembleDebug assembleDebugAndroidTest assembleRelease` pass. `COMBRAY_ABI=arm64
+scripts/build-native.sh` builds the merged bridge and engine; APKs assembled afterwards
+pass all 15 `MediaPlayerTest` checks on the same API 36 emulator.
+
+CI job 128454800698 failed before this merge in the existing media-network fixture:
+`aNameWithAClosedAndAnOpenAddressReachesTheOpenOne` chose an ephemeral port on
+`127.0.0.2`, then tried to bind the same port on `127.0.0.1`, where it can already be
+in use. The second listener is unnecessary: the exact connection-attempt assertion
+already verifies that the refused address is never tried. Removing that listener keeps
+the response and allowed-server assertions. The media-network class passes; temporarily
+classifying both addresses as allowed makes the test fail on the extra connection
+attempt, and the full Gradle gate passes after restoring the correct classification.
+
+
+The later merge with PR #214 keeps the same engine pin and adds image downloads to the
+screen. The merged tree passes the full Gradle gate above, 28 fixture-server tests, and
+all 18 `MediaPlayerTest` plus `ImageDownloadTest` checks on the arm64 API 36 emulator.
+The native build is unchanged and passes again; the hit-test script is unchanged.
+
+
+## 55. Hit testing per tree and sheets over the video (7 November 2026)
+
+Two follow-ups to section 54's review, after its merge. Neither changes the tap
+verdicts; the second answers the question section 54 left open.
+
+- `native/src/media_tap.js` asks `elementFromPoint` once per tree instead of once
+  per candidate media element. The topmost hit cannot change within one run of the
+  script, so every verdict is what it was; the sixteen Node checks in
+  `native/src/test/media_tap.test.mjs` pin them. One new check counts the hit tests
+  (one for the document's two overlapping videos, one for the player's tree) and
+  fails against the previous script, which asked the document twice.
+
+- What a tap on a covering layer does does not depend on what is drawn over the
+  video but on whether that layer takes part in hit testing at the point. Desktop
+  servoshell (Servo checkout `825ef1f0356f`, headless, fresh profile), synthetic
+  pages with a `<video>` whose load was cancelled (`readyState` 0, `networkState`
+  3) under a custom element's open shadow root sheet, the script filled in with the
+  tap point: the hittable sheet is the topmost hit (`elementFromPoint` returns the
+  sheet's host) and the script answers no; the same sheet with `pointer-events:
+  none` leaves the video as the topmost hit and it answers yes. Two new Node checks
+  pin both verdicts. So section 54's one-off cookie-sheet tap is consistent with
+  the sheet taking no hits at that point: the tap reached only the page's own
+  player, and the offer came back by design. A sheet that takes hits refuses the
+  tap; what remains untested is the real page's sheet, which did not show again on
+  a cleared profile.
+
+Also in this change: the fixture listing in `testing/fixtures/server.py` names the
+`fail` parameter that `/download-image-redirect.png` forwards with its redirect.
+
+Evidence on macOS arm64: `node --test native/src/test/media_tap.test.mjs` (16),
+the fixture-server tests (28), `cargo fmt --check` and `cargo test --lib` in
+`native/`, `python3 scripts/check_docs.py`, and the Gradle unit tests.
+
+## Capture word boundaries (8 November 2026)
+
+PR #246 preserves a whitespace-only text node between inline elements while
+collapsing repeated spaces across text-node boundaries. Markup that splits a word
+without a rendered separator still adds none; block boundaries and the existing
+UTF-8, node and time budgets stay separate. This changes the embedded
+`native/src/capture.js`, not Servo upstream or the downstream engine pin.
+
+Against current main's script, four of the eight Node capture regressions failed;
+all eight pass with the candidate. The complete page-script suite has 25 passes,
+and its Python capture wrapper passes. On macOS with JDK 21 and Rust 1.97.1:
+
+```sh
+node --test native/src/test/*.test.mjs
+python3 -m unittest discover -s scripts/tests -p 'test_capture_script.py'
+(cd native && cargo fmt --check && cargo test --lib)
+./gradlew --max-workers=2 testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+python3 scripts/check_docs.py
+git diff --check
+```
+
+The paired source pin is `5813399954091a7efd7f736ea6fe14cb1ed523b9`.
+All 185 native host tests, Kotlin/unit/lint and APK/test-APK compilation pass.
+Host Rust does not compile Android-only engine code. The compiled
+`CaptureWhitespaceTest` opens a synthetic article in real Servo, then checks its
+captured phrase through the fixture Hister search. It must pass new both-ABI and
+full emulator gates before merge. Historical device evidence and compilation are
+not current-head runtime proof; no phone, live service or personal history was
+used.
+
+## 56. Rich-editor carets, composition and navigation (7 November 2026)
+
+Pinned source: `5813399954091a7efd7f736ea6fe14cb1ed523b9`, the merge of downstream
+[Servo PR #40](https://github.com/L-K-M/servo/pull/40), based on `80788879d1b`.
+Its tree equals the locally built and independently reviewed head `3125271cf085b80d6667363d98d2a4d61783ddf1`.
+Three local GLM 5.3 engine review rounds finished; the final round has no actionable findings.
+The paired [Combray PR #317](https://github.com/L-K-M/Combray/pull/317) has local code review and
+validation, but hosted CI remains queued. No personal history or reports were read, and no
+reported signed-in editor was checked. The 7 November checks below are inherited
+from that original candidate, not evidence for the later consolidated head.
+
+### Changes
+
+- Servo paints focused editing carets in text, empty, br-only, plaintext-only and shadow editors,
+  without changing the DOM selection or inserting placeholder text. Glyphs cannot cover the
+  caret; content clips, scrolling and later positioned content still apply. Empty-line geometry
+  uses real font metrics, not a `font-size * 1.2` approximation.
+- Up/Down/Home/End use shaped lines, including soft wraps. Vertical movement retains its inline
+  position across shorter and empty lines; wrap affinity keeps repeated End on the intended line.
+  Text endpoints win ties with break boxes, preserving DOM caret identity. Shift selection fires
+  cancelable `selectstart` and revalidates focus and selection after
+  listeners run. Meter/progress controls are atomic units; nested editable hosts have regressions.
+- Android sends each composition preview immediately, including an empty update. Servo retains
+  its own live replacement range separately from the caret. It captures the inserted interval
+  before `input` listeners run, rejects a lost focus epoch, and sends `compositionend` on blur
+  without inserting the preview again. Read-only controls refuse late updates.
+- Native focus-context IDs are process-global, so recreating the engine cannot reuse an old
+  connection's token. A composition's monotonically increasing session ID also rejects older
+  Starts and completions. Retired or contextless input connections refuse edits and cannot enter
+  the compatibility unbound-key path. The original M0 key/commit entry points remain available.
+- The multiline flag now reaches Android's editor configuration. Multiline fields use the
+  newline action; single-line search and password privacy flags remain. Android may commit LF
+  instead of sending Enter: Servo classifies that editing-host action as `insertParagraph` with
+  null data, so paragraph-specific `beforeinput` cancellation works.
+- Keyboard modifiers reach Servo. Fixture reports assert input payloads, DOM structure and
+  selection, including closed shadow roots, cancellation and unfocused isolation.
+
+Principal engine files: `components/layout/caret.rs`, `layout/display_list/`,
+`script/dom/selection{,/geometry,/modify}.rs`, `script/dom/document/editing.rs`,
+`document/document_event_handler/composition.rs`, `execcommand/execcommands.rs`, the text controls,
+`script/layout_dom/servo_layout_node.rs` and `shared/layout/`. `DOWNSTREAM.md` records checks and
+upstream drop conditions. The WPT executor also preserves integer preference types; parsing the
+caret-blink preference as a float panicked Servo's typed preference conversion.
+
+### Checks and red evidence
+
+Local environment: arm64 Mac, Rust 1.97.1, NDK `29.0.14206865`, JDK 21, Android API 36 emulator
+`combray-api36` (`emulator-5570`). This is not phone acceptance.
+
+- The original Android bridge plus the old `5aa68fd` engine failed the live-preview check:
+  after `setComposingText("n", 1)` the page stayed focused instead of showing the preview.
+- Native host tests: **181 passed**; `cargo fmt --check` passes. New context-allocation and replay
+  tests failed with the previous per-engine counter and permissive Start handling.
+- Python script tests: **121 passed**, including **28 fixture-server tests**. JVM tests, lint,
+  debug/instrumentation APK assembly and release assembly pass. Debug and release APKs pass the
+  architecture, ELF, notices and Gradle metadata checks. The contextless-connection JVM regression
+  first reached JNI; it now rejects every edit without a native call.
+- Servo: **10 embedder tests**, each in a separate process, pass with
+  `cargo test --profile medium -p servo --no-default-features --features bundled,js_jit --test webview <name> -- --exact`.
+  The new cases cover live/empty/Unicode replacements, blur/refocus, input-listener mutation,
+  read-only controls and a committed newline's payload and cancellation. Before the guards,
+  an input listener made the next update delete unrelated text, a blur/refocus revived a stale
+  composition, and a read-only input still changed. Blur now also ends the page's composition.
+- Desktop: `./mach build --profile medium --media-stack dummy` passes. All **21 Mozilla editing
+  files plus two standard caret references** pass. The normal-line-height case and both standard
+  preserved-newline references failed before using real font metrics. The final shell reports
+  `Servo 0.7.0-3125271cf0`; the exact baseline reports `Servo 0.7.0-80788879d1b`. The inherited
+  macOS shell build script caches its Git label: touching its watched
+  `ports/servoshell/platform/macos/count_threads.c` input reran it without a source edit. The
+  earlier interrupted broad run is excluded; targeted and broad runs finished after the refresh.
+- Down skipped an empty `br` line or could not reach the final empty line. Two new navigation
+  subtests failed before adding break-box positions. The full repeat then exposed three existing
+  End-key node-identity failures; preferring a text endpoint on equal geometry restores them.
+  GLM's proposed final-`br` geometry change was rejected: synthetic Chromium checks show `a<br>`
+  has one visible line and `a<br><br>` has two. Two pixel references preserve that behavior.
+- Same-machine WPT comparison against an exact build of `80788879d1b`: **1,106 files** across
+  `selection/`, `editing/`, `input-events/` and Mozilla editing; **56 subtests and 12 caret
+  references newly pass**, with no PASS-to-FAIL or worsened nonpassing results. All input logs
+  contain their suite-end records. This compares the raw broad results without isolated-result
+  overrides. A shared-clipboard mismatch in an earlier run passed twice per engine in isolation;
+  the final broad run and both additional candidate repeats pass it. Known upstream failures
+  remain. These are new measurements, not §51's counts.
+- WPT executor pytest: **15 passed**. Servo tidy was unavailable: flake8 and cargo-deny are absent;
+  this is a validation gap, not a passing check.
+- First Android candidate `acc61c0c06e`: the three IME cases passed, but four keyboard cases failed
+  because Enter arrived as `insertText` and paragraph cancellation did not run. After the LF fix,
+  **EditorImeTest (3) and KeyboardTest (12) pass** on the actual merged pin, including real
+  paragraphs, exact payloads, cancellation, nested/shadow hosts and stale-connection rejection.
+  Both arm64 and x86_64 native builds pass; runtime validation here is arm64 only.
+- A broader arm64 run before the final visual-line follow-ups had **206 passes and 3 failures**:
+  new-tab touch-area overlap, video pixels and an RTL reader scroll button. All three fail with
+  the same assertions on exact Combray main `833d3186` and its engine `8720afc00e4d`, and again
+  as isolated checks on the final merged pin. There are no report-only failures. This is not a
+  claim that the full suite was repeated on the final pin; its full hosted suite remains queued.
+
+Reproduction here:
+
+```sh
+COMBRAY_ABI=x86_64 scripts/build-native.sh
+COMBRAY_ABI=arm64 scripts/build-native.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+scripts/check-app.sh emulator-5570 ch.lkmc.combray.EditorImeTest ch.lkmc.combray.KeyboardTest
+```
+
+This Mac's `adb reverse` connects to `::1`; an uncommitted local TCP forwarder bridges port 8766
+from `::1` to the fixture server on `127.0.0.1`. APK hashes, instrumentation output, fixture
+requests and logcat are in the run's `COMBRAY_RESULTS` directory, outside Git.
+
+### Remaining limits
+
+This is not full Android text-input synchronization: surrounding text, selection/extracted-text
+updates and `newCursorPosition` semantics remain unimplemented. Line movement is horizontal;
+sentence, paragraph and bidi-specific movement remain unsupported. `getTargetRanges()` remains
+empty. The existing `insertLineBreak` command's extra trailing-placeholder step remains a TODO;
+this slice validates committed LF paragraph insertion, not every editing command. The signed-in
+reported editor has not been inspected, and no live-service or physical-phone acceptance is
+claimed. Combray PR #317 remains open until hosted checks run and pass; local review is not a
+claim that its queued CI or hosted reviewer ran.
+
+### JVM consolidation follow-up (8 November 2026)
+
+The paired consolidation also retires connections on page changes, reports editor
+status only after a page field prepares it, maps Next to Tab and refuses negative
+or greater-than-1,000 per-direction deletion requests before ending composition.
+The bound is a refusal, not clipping or a guarantee of UTF-16 deletion fidelity.
+
+Four further JVM regressions failed before the parent fixes: code-point deletion
+and explicit range replacement inherited false success from the framework's
+private editable; Previous/unknown actions reached Enter; unhandled IME keys
+reached JNI. Those requests now return false before side effects. Supported Go,
+Done, Search, Send and default/newline actions retain Enter. API-30 and API-35
+Robolectric checks also pin null surrounding-text/snapshot results.
+
+A bounded native review also found that a field can precede its document's History
+commit. Composition ownership now uses the field's stable pipeline, not the changing
+view document. After committing that document, native code replays an already-open
+field after the History event, so Android can rebind its retired connection. Each
+keyboard delivery has a distinct request ID; an older acknowledgement cannot consume
+a replay for the same context. The host commit-replay rule and coordinator late-ack
+regressions failed before the fixes. A withheld autofocus preparation stays on the
+normal activation-tap path rather than overwriting the previous page's hide request;
+its precommit accessibility/editor-state behavior remains unverified.
+
+The complete `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`
+gate, `cargo fmt --check` and 185 native host tests pass locally after these changes.
+The host build does not compile the Android-only engine module. No local cap on
+committed/composed text was invented; no supported bridge limit is established.
+The historical arm64 checks above do not validate these newer changes or a physical
+keyboard/IME.
+
+### Paired-head CI evidence (8 November 2026)
+
+[Engine run 42518553585](https://github.com/L-K-M/Combray/actions/runs/42518553585)
+validated paired PR #317 head `8805846d9ba7c1a7ba7fa9df8180f330af71e8cb`
+through merge ref `5490e8b61dc0ca1f2aa28677bdd99f844fb8a87f`. The downstream pin
+is `5813399954091a7efd7f736ea6fe14cb1ed523b9`. The host job, both Android native
+ABI builds and the full fixture job passed; these builds compile the Android-only
+engine module the local host crate excludes. The device was an Android 11/API 30
+x86_64 emulator, not a physical phone.
+
+`scripts/check-app.sh` recorded 214 passed checks, no failed or failed report-only
+checks, including process-death prepare/verify and all three `EditorImeTest` cases:
+composition preview/update/final replacement, Shift+Arrow selection replacement,
+and stale connection/invalid-context rejection after document replacement. The
+full hosted review was assessed against the source and pinned artifacts; its
+hypothetical missing-definition/global-counter claims did not apply. No Servo
+upstream contact was made.
+
+This evidence applies to the exact paired head above. It is not runtime proof of
+later capture-rollback fences in this branch, real third-party IMEs, physical
+phones or the remaining unsupported editing APIs.
+
+## 57. Bottom bar over a fixed surface (8 November 2026)
+
+### Report
+
+A recording from a phone (One UI, inner foldable display) showed one wrong frame each time the
+bottom bar hid or showed while scrolling. On hide, the page was stretched about 1.09 times,
+pushed up, and a white band filled the bar's old place. On show, it was squeezed about
+0.91 times, pushed down, and a white band appeared under the status bar. The next frame was
+always right. Frame-by-frame row matching against the frame before put the glitch frame's
+content in a layer of the new page size, with its bottom edge at the old one, holding the old
+buffer scaled to fit.
+
+### Diagnosis
+
+The bar was a sibling of the page box in a `Column`, so toggling it resized the
+`EngineSurfaceView`. Android 16's `SurfaceView` (`android16-release`) applies an in-app resize
+(`setBufferSize`, the BLAST queue's destination frame, the window crop, and the render thread's
+position and scale) with the app's next frame. The engine draws at the new size only after
+`surfaceChanged` reaches its thread. Until then SurfaceFlinger scales the old buffer into the new
+geometry. Only window-manager syncs (`isInWMSRequestedSync`) wait for the SurfaceView's next
+buffer (`handleSyncBufferCallback`). An in-app layout change takes `handleSyncNoBuffer`, so
+`surfaceRedrawNeededAsync` cannot hold the frame, and no public API syncs a SurfaceView's buffer
+with its parent's frame. Servo's `WebView` is always as big as its `RenderingContext`.
+
+The bug reproduces on the `combray-toolbar` AVD (arm64, API 36, host GPU). That run used the
+debug APK of Engine run 42503438302 (commit `89a5fe32`), `screenrecord --size 540x1200`, and a
+synthetic long dark page. Five of six bar transitions produced a frame with 131 to 143 white
+rows (at half scale) and content shifted against its neighbors.
+
+### Changes
+
+- The surface no longer resizes when the bottom controls come or go. `BrowserScreen` lays the
+  `EngineSurfaceView` out under the page box, in the page box's area with the bar hidden
+  (`imePadding()` plus `safeDrawing`). The bar and the find bar are opaque `Surface`s over its
+  bottom. Touches reach it through the page box, which takes none itself. The keyboard still
+  resizes it as before.
+- The engine (`native/src/engine.rs`, `native/src/viewport.rs`) renders every view into one
+  `OffscreenRenderingContext` made from the window context. The offscreen context covers the
+  surface minus the bottom rows the app reports (`setViewportInset(inset, request)`, sent by
+  `EngineSurfaceView.coverBottom`). `paint` renders the selected view into it, clears the window
+  to Servo's clear color, copies the page to the window's top rows (GL coordinates:
+  `y = surface height - page height`) and presents. Pages see the smaller viewport
+  (`innerHeight`, fixed elements above the bar). Report screenshots crop the surface to the rows
+  above the controls.
+- A hiding bar stays until the engine has drawn the rows it covered (`bottomBarHeld`, at most
+  400 ms). The app's request ids are process-wide. The engine answers with `viewport_painted`
+  after the first presented frame that shows the whole page. After a resize, Servo's first
+  frames can come from a WebRender frame built for the smaller page, which leaves the new rows
+  in Servo's clear color (`shell_background_color_rgba`, now set explicitly to its default
+  white), and frames in flight while scrolling make "the first frame after the resize"
+  unreliable. So after a growth the engine reads the new rows back. It accepts them when they
+  hold another color, when a whole row among the 32 shown rows above is the clear color too (so
+  the page looks the same either way), or after three new frames. The coordinator publishes the
+  answer through a `StateFlow` outside its queue, which waits on Room reads.
+
+Costs: one framebuffer copy per painted frame and an offscreen framebuffer of the page's size
+(RGBA plus depth), as servoshell's desktop build composites its WebView. A readback of the
+uncovered rows happens only while a growth is unconfirmed.
+
+Not changed: the keyboard's animation still resizes the surface each frame. Switching between
+the bottom bar and a shorter find bar changes the inset without a hold, so the rows between them
+can show the clear color until the next frame.
+
+### Checks
+
+Same AVD, recording and page as the reproduction: with the fix, six bar transitions produced no
+frame with white rows or non-uniform shifts. A page with a `position: fixed; bottom: 0` banner
+reported `innerHeight` 726 with the bar and 838 without, and the banner sat above the bar.
+
+The full device suite (`scripts/check-app.sh`, every class plus process death) on the same AVD,
+with this change rebased onto `ab855bfe` (Servo pin `5813399`): 212 checks pass. Two fail on main
+on these arm64 API 36 AVDs too: `ReaderScrollTest.readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles`
+(reproduced with `ab855bfe` itself) and `AccessibilityTest.theBottomBarOnANewTabIsAccessible`
+("New tab" and "Recent" share a touch area at 200% font). `ScrollTest` now asserts that the surface
+keeps its height while the bar hides and returns, and that the page's `innerHeight` and the
+engine's `viewport_painted` follow the bar. Host checks: `cargo fmt --check`, `cargo test --lib`
+(204), the Gradle unit tests, lint, both APK assemblies, `scripts/tests` (121) and
+`check_docs.py`. A physical phone, including the foldable from the report, is unverified.

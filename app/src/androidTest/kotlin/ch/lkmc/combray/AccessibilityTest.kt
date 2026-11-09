@@ -5,9 +5,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -15,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -32,6 +39,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
@@ -148,6 +156,18 @@ class AccessibilityTest {
         val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
         assertTrue(address.top < back.bottom && address.bottom > back.top)
         assertTrue(address.left >= back.right)
+    }
+
+    /** The page's media keeps a labeled Play in the address field, beside Reader, at full size. */
+    @Test
+    fun playInTheAddressIsAccessible() {
+        show(LARGE_FONT) {
+            Bar(PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved, onPlayMedia = {})
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Play audio or video").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Reader view").assertIsDisplayed()
     }
 
     @Test
@@ -342,7 +362,7 @@ class AccessibilityTest {
     @Test
     fun theTextSizeDialogIsAccessible() {
         // A middle step, so smaller, larger and reset are all enabled.
-        show(LARGE_FONT) { TextSizeDialog(TextSize.PERCENT_110, {}, {}) }
+        show(LARGE_FONT) { TextSizeDialog({ TextSize.PERCENT_110 }, {}, {}) }
 
         assertTargetsAreAccessible()
         for (label in listOf("Smaller text", "Larger text")) {
@@ -468,7 +488,10 @@ class AccessibilityTest {
     }
 
     @Test
-    fun anImageMenuIsAccessible() = assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+    fun anImageMenuIsAccessible() {
+        assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+        compose.onNodeWithText("Download image").assertIsDisplayed()
+    }
 
     /**
      * A linked image lists both menus. At the largest font they can need to scroll on the
@@ -503,6 +526,29 @@ class AccessibilityTest {
         assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
     }
 
+    /**
+     * The scrolling check itself: full-size targets that overlap fail it, reported once, though
+     * they are on screen together only partway down, neither at the start nor after the last
+     * scroll.
+     */
+    @Test
+    fun targetsCrowdedOnlyMidScrollFail() {
+        show(DEFAULT_FONT) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                Spacer(Modifier.height(PAST_THE_SCREEN))
+                Box {
+                    Box(Modifier.size(MIN_TARGET).clickable {}.semantics { contentDescription = "One" })
+                    Box(Modifier.offset(x = MIN_TARGET / 2).size(MIN_TARGET).clickable {}.semantics { contentDescription = "Two" })
+                }
+                Spacer(Modifier.height(PAST_THE_SCREEN))
+                Box(Modifier.size(MIN_TARGET).clickable {}.semantics { contentDescription = "Last" })
+            }
+        }
+
+        val error = assertThrows(AssertionError::class.java) { assertScrollingTargetsAreAccessible() }
+        assertEquals("\"One\" and \"Two\" share touch area", error.message)
+    }
+
     /** A page's dialog, as the browser shows it, at the largest font size unless [fontScale] says otherwise. */
     private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false, fontScale: Float = LARGE_FONT) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -519,6 +565,7 @@ class AccessibilityTest {
                 onOpenInNewTab = {},
                 onOpenInBackground = {},
                 onSaveLink = {},
+                onDownloadImage = {},
                 onShare = {},
                 onNotify = {},
             )
@@ -550,29 +597,52 @@ class AccessibilityTest {
     private fun assertTargetsAreAccessible() {
         val targets = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
         if (targets.isEmpty()) throw AssertionError("nothing to tap")
-        val problems = targets.mapNotNull(::problem) + crowded(targets)
+        val problems = targets.mapNotNull(::problem) + crowded(targets).values
         if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
     }
 
     /**
      * As [assertTargetsAreAccessible], for content taller than the screen: a target scrolled out
-     * of view has no touch area to measure, so each is scrolled into view before it is measured.
+     * of view has no touch area to measure, so each is scrolled into view before it is measured,
+     * and the targets on screen at that scroll position are checked for crowding. A crowded pair
+     * seen at several positions is reported once.
      */
     private fun assertScrollingTargetsAreAccessible() {
-        val count = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().size
+        val targets = compose.onAllNodes(hasClickAction())
+        val count = targets.fetchSemanticsNodes().size
         if (count == 0) throw AssertionError("nothing to tap")
-        val problems = (0 until count).mapNotNull { index ->
-            problem(compose.onAllNodes(hasClickAction())[index].performScrollTo().fetchSemanticsNode())
-        } + crowded(compose.onAllNodes(hasClickAction()).fetchSemanticsNodes())
+        val problems = mutableListOf<String>()
+        val crowding = mutableMapOf<Pair<Int, Int>, String>()
+        for (index in 0 until count) {
+            problem(targets[index].performScrollTo().fetchSemanticsNode())?.let(problems::add)
+            val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            crowding.putAll(crowded(targets.fetchSemanticsNodes().filter { isOnScreen(it, root) }))
+        }
+        problems += crowding.values
         if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
     }
 
-    /** Targets whose touch areas overlap, so neither gets its 48dp to itself. */
-    private fun crowded(targets: List<SemanticsNode>): List<String> = targets.flatMapIndexed { index, target ->
+    /**
+     * Whether [node] can be touched at the current scroll position: its touch bounds are not empty
+     * and overlap [root], the bounds of the Compose root. A scrolling container clips its content,
+     * so a target scrolled out of view reports an empty rectangle (`Rect.Zero`, which would still
+     * overlap a touch area that crosses the origin). The root does not clip touch bounds, so a
+     * target laid out past it is left out as well.
+     */
+    private fun isOnScreen(node: SemanticsNode, root: Rect): Boolean {
+        val bounds = node.touchBoundsInRoot
+        return !bounds.isEmpty && bounds.overlaps(root)
+    }
+
+    /**
+     * Targets whose touch areas overlap, so neither gets its 48dp to itself, keyed by the pair's
+     * semantics ids (smaller first) so a pair found again is recognized.
+     */
+    private fun crowded(targets: List<SemanticsNode>): Map<Pair<Int, Int>, String> = targets.flatMapIndexed { index, target ->
         targets.drop(index + 1)
             .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
-            .map { "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
-    }
+            .map { (minOf(target.id, it.id) to maxOf(target.id, it.id)) to "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
+    }.toMap()
 
     /**
      * What is wrong with one tappable element, or null. Its touch bounds count, not its drawing:
@@ -609,6 +679,7 @@ class AccessibilityTest {
         readerDisplay: ReaderDisplay = ReaderDisplay.PAGE,
         onStop: () -> Unit = {},
         onReader: () -> Unit = {},
+        onPlayMedia: (() -> Unit)? = null,
         width: Dp = NARROW_WIDTH,
     ) = BottomBar(
         tab = tab,
@@ -624,6 +695,7 @@ class AccessibilityTest {
         readerDisplay = readerDisplay,
         onStop = onStop,
         onReader = onReader,
+        onPlayMedia = onPlayMedia,
         onHister = {},
         onKarakeep = {},
         onNewTab = {},
@@ -680,6 +752,9 @@ class AccessibilityTest {
         val REPORT_ENVIRONMENT = ReportEnvironment("0.1.0", 1, "debug", "0.7.0", "6fbfc3d70ad83df5443445d3ff4c43871aae41dd", "15", 35)
 
         val SMALL_TARGET = 40.dp
+
+        /** Taller than the reference emulator's 720dp screen. */
+        val PAST_THE_SCREEN = 1000.dp
 
         val PAGE = ActiveTab(
             id = "tab",
