@@ -421,6 +421,8 @@ All notable changes to this project are documented here. The format follows
   no longer query a closed database during fixture cleanup.
 - Service-form tests run tightly ordered callbacks in one UI turn, so test
   synchronization cannot start a save before the edit they mean to exercise.
+- Service-form tests keep main-thread continuations running while waiting
+  for fixture admission, instead of blocking their own pending Room replies.
 - Preference feedback tests dispose Compose before closing their fixture scope
   and Room, and release a failed test's scripted commit latch before the
   bounded cancel-and-join, so cleanup cannot hang on an admitted write.
