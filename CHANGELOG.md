@@ -320,6 +320,9 @@ All notable changes to this project are documented here. The format follows
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- The report service drops old hourly rate-limit windows without scanning
+  them on every report. It also syncs a new database's directory entry
+  where supported, reducing the risk of losing that entry after power loss.
 - The messages shown when the engine is missing, failed or starting, and the
   page-crashed message with its Reload button, can no longer run off a small
   screen at large font sizes: they scroll instead. Address sheets identify
@@ -418,6 +421,8 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Service-form tests run tightly ordered callbacks in one UI turn, so test
+  synchronization cannot start a save before the edit they mean to exercise.
 - Preference feedback tests dispose Compose before closing their fixture scope
   and Room, and release a failed test's scripted commit latch before the
   bounded cancel-and-join, so cleanup cannot hang on an admitted write.
