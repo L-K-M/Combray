@@ -549,6 +549,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
 | Test against a deployed Hister; cleanup of the test document | **Not run** | — |
 
+**Admission hardening (8 November 2026):** capture admission, replacement budgeting, pause/resume and the content-hash dedupe are transactional and follow the durable job state. Accepted and deliberately refused (406/422) content is not re-sent; failed, discarded or expired content is. A capture paused after claim is held without spending an attempt. Unit tests: `HisterIntegrationTest`; no device or deployed-server run.
+
 ### M4 — Personal-use hardening and handoff
 
 **Depends on:** M1–M3. **Outcome:** an APK the owner can evaluate as a daily browser.
