@@ -141,6 +141,12 @@ A preview sheet shows everything the report sends: the service's host, the scree
 
 Proposed defaults, open questions to the owner (section 11): when `SensitiveUrls` thinks the address carries a sign-in or session code, the preview starts with only its site and path (user information, path parameters, query and fragment removed) and says why, and one tap restores the full address; otherwise it starts with the full address, and a warning shows whenever the address text looks sensitive. The sheet says "Your report service and the agents that read it get everything shown here." In reader view a report has no screenshot, because the copy would show the page under the reader, and the sheet says why. **Status:** implemented; evidence in section 9, M4.
 
+Report screenshot fallback (8 November 2026, #292): injected encoder
+`AssertionError`, `LinkageError` and `OutOfMemoryError` regressions exercise
+terminal screenshot omission, with cancellation kept separate. The non-OOM
+case failed before the fix. This does not establish late PixelCopy callback or
+physical-GPU bitmap lifetime safety; #259's recycling change remains separate.
+
 ### Recent: one mental model, several record types
 
 Recent combines open tabs and recent page visits. Show a small Open/active marker on live or restorable tab rows, title and domain, and relative time on every row (open tabs too, so duplicate tabs can be told apart). Closing an open tab is a distinct accessible action. Its row remains findable as history. A closed row offers reopening; it never appears to have a live renderer. Old page visits within a still-open tab remain recoverable even after that tab navigates elsewhere.
@@ -384,6 +390,15 @@ Bind every job to a non-secret destination/account fingerprint and configuration
 
 For exclusions/forgetting, update policy and invalidate matching pending jobs in a transaction. Maintain tombstones or generation checks so a delayed capture cannot enqueue erased content. Workers recheck policy and destination immediately before sending, and recheck before persisting results. Cancellation cannot retract bytes already delivered to a server: stop further retries and explain remote cleanup separately. Do not rebuild deleted local history from a late worker success or Hister search response.
 
+Integration request bounds (8 November 2026, #256 with #291): Hister trimming
+counts escaped UTF-8 bytes in a suffix scan, then rebuilds the retained prefix
+once. A byte excess is not treated as a code-point count. Titles keep their
+UTF-8 byte cap; Karakeep queries do not split supplementary characters at the
+length cap. Requests whose address alone cannot fit are refused before HTTP.
+The longest-prefix and query-boundary regressions failed before correction and
+pass afterward. These are JVM/HTTP-fixture checks, not device or live-service
+acceptance; current-head CI and review gate the consolidation.
+
 ## 7. Privacy, security, and platform behavior
 
 Capture is initially off until the user configures Hister and explicitly enables it with a clear explanation. Apply exclusions before extraction, before storing a body, and before upload. Proposed defaults exclude the integration services' account/settings pages and known authentication flows. Let the owner exclude exact hosts and, explicitly, subdomains. Do not claim that a short generic exclusion list detects every sensitive site. Support pausing all indexing from Settings without closing tabs.
@@ -524,6 +539,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 4. Build explicit Hister search scope, query generations, both result shapes, pagination, error states and safe URL opening. Keep local Recent usable when offline or unauthorized.
 5. Test realistic rendered text and an excluded/private fixture. Verify a unique fixture phrase is searchable after acceptance, then explicitly clean up the test document when authorized. Record whether accepted-but-skipped documents can be detected.
 
+**Capture consistency (8 November 2026):** requests and replies require the current persisted visit, document key and page address. A synthetic Room rollback regression failed for both another address and a same-address reload before this fence; all capture JVM tests pass after it. This is a capture-boundary mitigation, not adoption of a generic work-item timeout or complete transaction/runtime recovery. Current-candidate device evidence remains pending.
+
 **Gate:** search finds a distinctive phrase that exists only in the rendered content, not just the URL/title. Navigation, same-URL reloads, capture delay, forget/exclusion, offline restart and account switching cannot misattribute or redirect data. UI does not mistake auth errors for no history. Old jobs are not knowingly sent after newer acknowledged content for the same server key.
 
 **Status (19 October 2026): implemented; checked with a fake Hister.** The fake follows the request and response shapes recorded in [INTEGRATIONS.md](INTEGRATIONS.md) for the pinned Hister revision; no deployed Hister was contacted.
@@ -561,6 +578,7 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Local signing configuration | Passed on Linux/JDK 21 with a disposable key; `apksigner verify` confirmed the produced release certificate and v2 signature |
 | Artifact naming and native packaging | Passed: actual arm64 debug and x86_64 debug/release APKs; 13 script regressions cover architecture, missing libraries, malformed/truncated inputs, stale metadata, signing settings and interrupted staging |
 | Build-source recovery | Passed on Linux (24 October 2026): preparation restores the disposable Servo checkout after partial checkouts or source edits, removes untracked leftovers and reuses ignored caches. All 48 script checks pass; macOS build/install unverified. [Evidence](ENGINE_SPIKE.md#19-disposable-build-checkout-recovery-24-october-2026) |
+| Keystore credential key creation | Serialized process-wide across `KeystoreSecretStore` instances, so two first-time service configurations cannot generate different keys for the one alias and orphan a credential. The JVM regression fails before the lock and passes after it. The device check uses a test-only alias and directory, never the app's real credential; it is not run in this environment | `ConcurrentSecretStoreTest`, `SecretStoreDeviceTest` |
 | Personal signing key, native/signing release CI | Pending; signed test output is not a distributable personal release |
 | Engine-update PR CI | Passed (23 October 2026): pinned downstream source, host tests, both native ABI builds, APK checks and all 57 x86_64 emulator checks. Evidence: [ENGINE_SPIKE.md](ENGINE_SPIKE.md#downstream-engine-maintenance-23-october-2026) |
 | Third-party notices and source link | Implemented: Settings › About lists 637 engine components (crates plus hand-checked bundled C/C++ libraries and libc++) and 113 Java/Kotlin libraries with license texts, and names the source repository. Device check `AboutTest` passed on the emulator (run `about3`). Not a legal review |
@@ -765,6 +783,18 @@ M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 i
 The owner-requested rich-editor engine continuation is merged in Servo PR #40. Combray PR #317 pins its actual merge commit; both native ABIs, local checks and 15 focused arm64 device cases pass, with local independent review recorded on the PRs. Hosted CI is still queued. [Section 56](ENGINE_SPIKE.md#56-rich-editor-carets-composition-and-navigation-7-november-2026) records the revisions, red/green checks, three broader failures reproduced on main and the remaining input limits. Finish Combray's CI and merge before describing the app change as landed; the next bounded text-input slice is surrounding-text and selection synchronization. A bounded JVM-side consolidation now accompanies it: `EngineSurfaceView` now reports the page as editable only while a page field has focus (prepared before `restartInput`, cleared on hide, dismissal, detach and a `PageRef` change, which also retires the old connection), the IME Next action sends Tab while Previous/unknown actions are refused before composition or keys, deletion requests beyond `MAX_EDIT_CHARS` (1,000, from the #263/#312 donors) or negative ones are refused rather than clipped, and cursor positions, selection regions, code-point deletions and explicit replacement ranges the bridge cannot represent return false or null instead of being acknowledged. IME keys the native key map cannot handle are refused before side effects. Committed text keeps no local length cap: neither the donors nor the native bridge establishes a supported bound, so none was invented. Surrounding text, selection/extracted-text updates and `newCursorPosition` semantics remain unimplemented, as do UTF-16/surrounding-text synchronization for deletions; the native async stale-context rejection stays the second fence.
 
 Owner-requested and taken ahead of the next task above, neither finished yet: PDF viewing with PDFium-wasm ([PDF.md](PDF.md#phases) phase 1) and a fullscreen video player ([VIDEO.md](VIDEO.md#plan), option C). For the video player, C1 is merged and passes its emulator checks; on 29 October 2026 the owner confirmed its network rules (with home networks open to any page), Media3 with OkHttp and the wording. The `canPlayType`/`<source type>` claim mechanism of C2 is implemented for the progressive types the player reads, and C2 itself — the HLS claim rows, `media3-exoplayer-hls` and the player's HLS source branch — is implemented too ([VIDEO.md](VIDEO.md#phase-c2-x-posts-through-an-hls-claim)); the fixture check plays an X-shaped HLS playlist on the emulator. Next for video: an X-post check on the owner's phone, then option B's probe per [VIDEO.md](VIDEO.md#plan). For PDF, the owner made phase 1's choices on 29 October 2026. The viewer is in place on the engine change, pinned at its merge commit on `combray/0.7` (L-K-M/servo#18, merged 4 November 2026): a tapped PDF opens in a PDFium-wasm viewer document, with device checks in `PdfTest` that run in the Engine workflow. Next for PDF: CJK fonts (slice C2), then text for Find, reader view and Hister (slice D) ([PDF.md](PDF.md#phases)).
+
+Service-root audits #203, #208, #281 and #311 have a candidate consolidation:
+`ServiceUrls` accepts IDNs through Android's nontransitional UTS46 processing, rather
+than mapping deviation characters to another domain. The HTTP client opens that exact
+validated ASCII host. Default ports and trailing dots normalize equivalently; all three
+services retain an existing destination's opaque fingerprint, credentials, generation
+and queued-work bindings instead of rehashing persisted identities. Invalid contextual
+joiners, unassigned Unicode, malformed IPv6 and explicit ports outside 1–65535 are
+refused before a connection. Full JVM/lint/assembly checks, including synthetic legacy
+rows and real loopback HTTP delivery, pass locally. The new Android runtime cases are
+compiled; current-head hosted review and device execution are pending. No deployed
+service or personal data was used.
 
 1. When an arm64 phone is available: `COMBRAY_ABI=arm64 scripts/build-native.sh`, `./gradlew assembleDebug assembleDebugAndroidTest`, `scripts/check-app.sh <serial>` ([BUILDING.md](BUILDING.md#emulator-and-checks)). Record each check as passed, failed or not run. This also tells whether M0's stale-frame defect is specific to SwiftShader.
 2. When live acceptance is authorized, obtain the Karakeep and Hister addresses and versions, sites that must work and hosts never to capture. Configure credentials in the app, not in chat.
