@@ -322,7 +322,7 @@ Do not send speculative fields or require tags/lists to complete one-tap saving.
 
 Snapshot the active committed URL and title at tap time. Disable Save for blank/internal pages and unsupported schemes; report a specific reason when necessary. A local operation key prevents repeated taps from creating concurrent jobs for the same destination and exact URL. A timeout after a server accepted the bookmark is ambiguous; retrying the same link should use Karakeep's duplicate behavior rather than constructing a different URL. An optional lookup can reconcile success where supported. Keep this state separate from Hister capture success.
 
-Tag attachment and list membership use separate endpoints; implement only after quick save works. If a tag/list step fails after creation, retain the bookmark ID and retry that step without recreating or marking the link unsaved. User-initiated Karakeep saves are independent of automatic Hister exclusions, but must never leak a secret-bearing session URL. Provide an explicit explanation for a blocked sensitive URL.
+Tag attachment and list membership use separate endpoints; implement only after quick save works. If a tag/list step fails after creation, retain the bookmark ID and retry that step without recreating or marking the link unsaved. A receipt is bound to the destination and credential generation: after a key change without verified account identity, a duplicate-safe create recovers that account's ID instead of trusting the previous account's receipt. User-initiated Karakeep saves are independent of automatic Hister exclusions, but must never leak a secret-bearing session URL. Provide an explicit explanation for a blocked sensitive URL.
 
 ### Hister ingestion and search
 
@@ -517,11 +517,14 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 
 **Status (19 October 2026): implemented; checked with a fake Karakeep.** No real Karakeep or Kagi was contacted (fixtures only, by the task's rules).
 
+**Receipt checkpoint (8 November 2026):** creation is recorded under the claim fence before the optional list step, and a retry resumes membership only for the same destination and credential generation under the current claim fence. A historical saved row does not acknowledge a new pending or connection-waiting create. Host checks: `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `scripts/check_docs.py`, `git diff --check`. No device or live-service check.
+
 | Gate check | Result | Evidence |
 | --- | --- | --- |
 | One tap saves the page with its title | Passed on the device (`run9`) | `SaveTest#oneTapSavesThePageWithItsTitle` |
 | A list-bound save cannot finish without a usable bookmark ID | Passed against fake Karakeep (21 October 2026): malformed and missing-ID 200/201 responses retry, recover the same bookmark, or need attention after ten attempts; standalone acknowledgment is preserved | `IntegrationsTest` |
 | Lost answer after the server stored the link: retried, one bookmark | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
+| A failed list step keeps the acknowledged bookmark and retries only membership | Passed in unit tests (8 November 2026): the bookmark is recorded under the claim fence before the list step; a restart or re-save under the same credential generation retries membership without another create. A new credential recovers that account's ID through a duplicate-safe create; a parked save rebound to another server is created there | `IntegrationsTest`, `PartialSaveTest` |
 | Rejected key pauses saves until resumed with a working key | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | A new main address parks unsent saves until the user sends them there or discards them | Passed in unit tests | `IntegrationsTest` |
 | Save targets the tapped page when the tab changes right after | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
@@ -556,6 +559,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Captured-body expiry after worker death and during a long drain | Passed in Room/fake-Hister tests (21 October 2026): abandoned claims and bodies crossing seven days expire before dispatch; live leases and fenced completion stay intact | `HisterIntegrationTest` |
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
 | Test against a deployed Hister; cleanup of the test document | **Not run** | — |
+
+**Admission hardening (8 November 2026):** capture admission, replacement budgeting, pause/resume and the content-hash dedupe are transactional and follow the durable job state. Accepted and deliberately refused (406/422) content is not re-sent; failed, discarded or expired content is. A capture paused after claim is held without spending an attempt. Unit tests: `HisterIntegrationTest`; no device or deployed-server run.
 
 ### M4 — Personal-use hardening and handoff
 
@@ -601,6 +606,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Coordinator lifecycle | Implemented: `start()` is idempotent under concurrent and repeated calls; the work queue and the outbox drain survive an `Error` in one step (cancellation still stops them); a crash drops only the crashed view's pending captures, articles, find and keyboard work after checking the full native view identity (tab and generation), and a ready Reader snapshot survives its renderer's crash. JVM regressions in `BrowserCoordinatorTest`, `CaptureTest`, `ReaderTest` and `OutboxTest`; no device run |
 | Engine idle sleep | Merged in [PR #178](https://github.com/L-K-M/Combray/pull/178): sleeps until a command, Servo wakeup or local deadline, retaining capture, dialog, reload-pull, media and paint timers. All 146 native host checks, both Android ABIs and the full emulator suite passed. [Evidence](ENGINE_SPIKE.md#deadline-driven-engine-sleep-1-november-2026). No physical-phone or power measurement |
 | Optional tab counter | Off by default; Settings › Display › Show tab count applies at once and persists. JVM preference tests and two API-30 emulator checks passed (24 October 2026): badge visibility, live count, activity recreation and the existing accessible bar. The device check changes the preference directly; opening Settings under instrumentation hit the known emulator focus timeout. [Evidence](ENGINE_SPIKE.md#17-tab-counter-preference-checks-24-october-2026) |
+| Settings service form races | Implemented: a tap admits one configuration action synchronously, captures the tapped address/key and the edit generation, drops a delayed result after an edit, and releases the admission on failure or cancellation. JVM tests cover two taps before the coroutine starts, an edit after the tap, a delayed result, a failure and cancellation; `SettingsSheetTest` drives the real sheet against a delayed fake key store and transport. Device checks not run |
+| Settings action row | Implemented: Save settings and Check connection share a `FlowRow` that wraps instead of overflowing, so both stay reachable at 320dp and large font scales; the sheet's busy, enabled and live-draft capture behavior is unchanged. `ServiceActionsTest` pins the wrapping mechanism; the exact 200%-font case is manual. Device checks not run |
 | Close-notice appearance | Browser and Recent notices follow the app's light/dark appearance; Home covers the native surface behind them. Light/dark pixel regressions fail on the archived APK; pixel, Undo and Home-spacing checks pass on the fix on the reference emulator. JVM/lint/build checks pass. [Evidence and latest results](ENGINE_SPIKE.md#21-close-notice-appearance-24-october-2026) |
 | Default page contrast | A real-Servo pixel regression reproduces pale default text on white in Dark. The downstream engine supplies a light root color-scheme hint unless metadata or CSS opts in. Native/device results and CI/review are tracked in [PR #130](https://github.com/L-K-M/Combray/pull/130). [Reproduction and engine evidence](ENGINE_SPIKE.md#22-default-page-contrast-25-october-2026) |
 | New-tab launchpad | Implemented from the owner's approved design: Continue, durable pin/edit/reorder/hide/restore, section visibility, direct service scopes, above-field local suggestions and a persistent + button. Room migration, coordinator/preferences tests and local JVM/lint/build checks pass. Local emulator run history and the final PR/CI evidence are recorded in [section 18](ENGINE_SPIKE.md#18-new-tab-launchpad-checks-24-october-2026) |
@@ -758,6 +765,12 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+Overlay consolidation (8 November 2026, #284 with #315): status messages
+scroll at large font sizes; the address sheet has a pane title and status
+messages expose polite live-region semantics. The full Kotlin tests, lint,
+debug assembly and device-test compilation pass locally. The reachability
+and semantics tests are JVM checks, not a new TalkBack or device run.
 
 Capture-timer consolidation (8 November 2026, PR #249 with #314's missing-visit
 case): timers carry their scheduled page identity and a distinct schedule token.

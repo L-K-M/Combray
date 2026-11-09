@@ -35,7 +35,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
             EngineEvent.parse(json)
         } catch (malformed: IllegalArgumentException) {
             // A schema mismatch between native and Kotlin is a bug; never guess at the event.
-            Log.e(LOG_TAG, "unparseable engine event (${json.length} chars)", malformed)
+            // Syntax and semantic failures can both quote input-derived fields or page content.
+            // Keep only the class and size, never the message, cause or stack trace.
+            Log.e(LOG_TAG, "unparseable engine event (${json.length} chars): ${malformed.javaClass.name}")
             return
         }
         listener(event)

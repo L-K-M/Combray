@@ -300,19 +300,26 @@ All notable changes to this project are documented here. The format follows
 - Integration fixtures reserve unreachable loopback ports until test cleanup,
   so another listener cannot turn an offline test into a real HTTP request.
   Their connect waits are bounded separately from response reads.
+- Malformed engine events and failed shared-link/file operations log exception
+  classes, not diagnostic values that can quote private input.
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
-  their address at enqueue in a `url` column (schema 6, auto-migrated);
-  a row without one shows "Unknown page" instead of its raw dedupe key
-  or report id. A row written before the column existed is decoded once,
-  off the UI thread. Finished captures and reports drop the address with
-  their payload; failed and waiting rows keep it for their retry.
-- The report service drops old hourly rate-limit windows without scanning
-  them on every report. It also syncs a new database's directory entry
-  where supported, reducing the risk of losing that entry after power loss.
+  their address at enqueue in a `url` column (schema 6, auto-migrated).
+  If no address can be recovered, a row shows "Unknown page", never its
+  raw dedupe key or report id. Legacy payloads are decoded off the UI
+  thread; flow updates may repeat that work. Finished captures and reports
+  drop the address with their payload; failed and waiting rows keep it
+  for their retry.
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- The report service drops old hourly rate-limit windows without scanning
+  them on every report. It also syncs a new database's directory entry
+  where supported, reducing the risk of losing that entry after power loss.
+- The messages shown when the engine is missing, failed or starting, and the
+  page-crashed message with its Reload button, can no longer run off a small
+  screen at large font sizes: they scroll instead. Address sheets identify
+  their pane, and status messages expose polite accessibility updates.
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
@@ -481,6 +488,13 @@ All notable changes to this project are documented here. The format follows
   twice could have re-sent a request that may already have reached the
   server after failover to the alternate address; the attempt fails loudly
   instead, and the queue does not retry the violation.
+- Settings service forms admit one configuration action at a time. A second
+  tap while a save or check runs is ignored, and a delayed result no longer
+  clears or describes a newer edit: the address and key tapped are the ones
+  saved, and the draft stays.
+- Save settings and Check connection in Settings wrap to two lines
+  instead of running off the screen when large font settings make them
+  too wide for one row.
 - Changing Karakeep's server address cancelled every unsent save without
   a word. Those saves now wait in Settings, which offers to send them to
   the current address or discard them.
@@ -500,6 +514,11 @@ All notable changes to this project are documented here. The format follows
   after ten tries: attempts that could not connect sent nothing and do not
   count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
   and asks for attention once its server has not answered for a week.
+- Hister capture admission is transactional: a replacement capture is
+  charged only for the room it takes, and a capture paused after claim is
+  held without spending an attempt. Unchanged text is sent again after a
+  failed or discarded capture, but not after Hister accepted it or refused
+  it on purpose (406/422).
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
@@ -673,6 +692,14 @@ All notable changes to this project are documented here. The format follows
   stale APKs that do not match Gradle output metadata. Failed copying or
   hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
+- A Karakeep save is recorded as soon as its bookmark is acknowledged, so a
+  failed list step, a deleted list or an offline retry no longer hides the
+  save or creates a second bookmark. The receipt stays bound to its server,
+  credential generation and claim: another account at the same address must
+  recover its own bookmark id. A failed create is not called a list failure,
+  and a corrupt payload no longer rolls back an acknowledged delivery.
+  An older saved record no longer masks a new save still pending or waiting
+  for a connection.
 - A Karakeep save with a chosen list stays pending if its acknowledgment
   has no usable bookmark ID. Duplicate-safe retries recover the ID and
   finish list membership, or stop with a visible failure.
