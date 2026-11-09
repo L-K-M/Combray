@@ -124,6 +124,26 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual([record["meminfo"]["MemTotal"], record["processes"][0]["starttime_ticks"],
                           record["cgroup"]["root"]["max"]], [None, None, None])
 
+    def test_signal_shutdown_does_not_acquire_an_event_lock(self):
+        callbacks = {}
+        event = mock.Mock()
+        event.is_set.return_value = False
+        event.set.side_effect = AssertionError("signal handlers must not acquire a lock")
+
+        def stop_during_wait(_):
+            callbacks[self.module.signal.SIGTERM](self.module.signal.SIGTERM, None)
+
+        event.wait.side_effect = stop_during_wait
+        clock = mock.Mock()
+        clock.monotonic.return_value = 0
+        clock.sleep.side_effect = stop_during_wait
+        with mock.patch("threading.Event", return_value=event), \
+                mock.patch.object(self.module.signal, "signal", side_effect=callbacks.__setitem__), \
+                mock.patch.object(self.module, "time", clock), \
+                mock.patch.object(self.module, "snapshot", return_value={"synthetic": True}):
+            self.module.run(str(self.root / "signals.jsonl"), 1, 10)
+        self.assertEqual(2, len((self.root / "signals.jsonl").read_text().splitlines()))
+
     def test_read_closes_its_file(self):
         handle = io.StringIO("sample")
         with mock.patch("builtins.open", return_value=handle):

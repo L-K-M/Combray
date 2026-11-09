@@ -12,7 +12,6 @@ import math
 import os
 import signal
 import sys
-import threading
 import time
 
 MEMINFO_COUNTERS = ("MemTotal", "MemFree", "MemAvailable", "SwapTotal", "SwapFree", "Dirty", "Writeback", "Slab")
@@ -193,26 +192,32 @@ def _parse_arguments(argv):
 
 def run(output, interval_seconds, duration_seconds, proc_root="/proc", cgroup_root="/sys/fs/cgroup"):
     start = time.monotonic()
-    stop = threading.Event()
+    stop_requested = False
+
+    def request_stop(signum, frame):
+        # A handler can interrupt Event.wait while its condition lock is held.
+        # Only assign a flag here; normal control flow performs the final sample.
+        nonlocal stop_requested
+        stop_requested = True
+
     for number in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(number, lambda signum, frame: stop.set())
+        signal.signal(number, request_stop)
     with open(output, "w", encoding="utf-8", buffering=1) as handle:
         def emit():
             record = snapshot(proc_root, cgroup_root, time.monotonic() - start)
             handle.write(json.dumps(record, sort_keys=True) + "\n")
         emit()
-        last, stopped = 0.0, False
-        while not stop.is_set():
+        last = 0.0
+        while not stop_requested:
             remaining = duration_seconds - (time.monotonic() - start)
             if remaining <= 0:
                 break
-            stop.wait(min(interval_seconds, remaining))
-            if stop.is_set():
-                stopped = True
+            time.sleep(min(interval_seconds, remaining))
+            if stop_requested:
                 break
             emit()
             last = time.monotonic() - start
-        if stopped or last < duration_seconds:
+        if stop_requested or last < duration_seconds:
             emit()
 
 def main(argv=None):
