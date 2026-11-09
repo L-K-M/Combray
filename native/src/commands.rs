@@ -107,6 +107,12 @@ pub enum Command {
         width: u32,
         height: u32,
     },
+    /// The app's bottom controls cover this many bottom rows of the surface; pages lay out
+    /// above them. Outcome: `viewport_painted` with `request` once a frame shows that page.
+    SetViewportInset {
+        inset: u32,
+        request: u64,
+    },
     /// Must complete before `SurfaceHolder.Callback.surfaceDestroyed` returns.
     SurfaceDestroyed {
         done: Done,

@@ -83,10 +83,47 @@ class IncomingIntentsTest {
 
     @Test
     fun aLinkRunningPastTheSearchedPartOfAHugeShareIsRefusedNotCut() {
-        // Only the first 65,536 characters are searched for a link.
-        val text = "a ".repeat(32_760) + "https://a.example/" + "x".repeat(100)
+        // Only the first mebibyte is searched for a link.
+        val text = "a ".repeat(524_280) + "https://a.example/" + "x".repeat(100)
         assertNull(IncomingIntents.firstWebAddress(text))
-        assertNull(IncomingIntents.firstWebAddress("a ".repeat(40_000) + "https://a.example/"))
+        assertNull(IncomingIntents.firstWebAddress("a ".repeat(600_000) + "https://a.example/"))
+    }
+
+    @Test
+    fun aLinkAfterTheOldScanLimitIsStillFound() {
+        // 80,000 characters of prose, then the link: well past the old 64 KiB limit.
+        assertEquals("https://a.example/", IncomingIntents.firstWebAddress("a ".repeat(40_000) + "https://a.example/"))
+    }
+
+    @Test
+    fun aLinkEndingInsideTheNewScanLimitIsFound() {
+        // The link starts at 1,048,000 and ends at 1,048,018, inside the first mebibyte.
+        assertEquals("https://a.example/", IncomingIntents.firstWebAddress("a ".repeat(524_000) + "https://a.example/"))
+    }
+
+    @Test
+    fun aSharedLinkPastTheOldScanLimitOpens() {
+        val text = "a ".repeat(40_000) + "https://a.example/"
+        assertEquals(Incoming.Open("https://a.example/"), send(text))
+    }
+
+    @Test
+    fun aSensitiveLinkPastTheOldScanLimitStillGoesToTheEditor() {
+        val address = "https://me:secret@example.org/"
+        assertEquals(LaunchRequest.EditNewTab(address), send("a ".repeat(40_000) + address))
+    }
+
+    @Test
+    fun aMalformedLinkPastTheOldScanLimitIsNoLink() {
+        assertNull(IncomingIntents.firstWebAddress("a ".repeat(40_000) + "https://."))
+    }
+
+    @Test
+    fun aMaliciousLongCandidateIsRefusedNotCut() {
+        // A candidate that fills the whole scan window is longer than the engine takes.
+        assertNull(IncomingIntents.firstWebAddress("https://a.example/" + "x".repeat(1_048_576)))
+        // A candidate with a huge run of closing brackets is refused before the bracket pass.
+        assertNull(IncomingIntents.firstWebAddress("https://a" + ")".repeat(1_000_000)))
     }
 
     @Test
@@ -99,6 +136,74 @@ class IncomingIntentsTest {
     fun sharedTextWithoutALinkWaitsInTheEditorOnOneLine() {
         assertEquals(LaunchRequest.EditNewTab("Proust madeleine"), send("  Proust\n\tmadeleine  "))
         assertEquals(LaunchRequest.EditNewTab("example.org"), send("example.org"))
+    }
+
+    @Test
+    fun aMultiMegabyteShareStillYieldsTheBoundedLine() {
+        val text = "madeleine " + "x".repeat(30_000_000)
+        val edit = send(text) as LaunchRequest.EditNewTab
+        assertEquals(2_000, edit.text.length)
+        assertTrue(edit.text.startsWith("madeleine x"))
+    }
+
+    @Test(timeout = 1_000)
+    fun megabytesOfWhitespaceAroundShortTextDoNotSwallowIt() {
+        val text = " ".repeat(5_000_000) + "madeleine" + " ".repeat(5_000_000)
+        assertEquals(LaunchRequest.EditNewTab("madeleine"), send(text))
+    }
+
+    @Test(timeout = 1_000)
+    fun megabytesOfMultibyteWhitespaceAroundShortTextDoNotSwallowIt() {
+        // Kotlin's trim() drops U+3000 at the ends, as it does ASCII spaces.
+        val text = "\u3000".repeat(5_000_000) + "madeleine" + "\u3000".repeat(5_000_000)
+        assertEquals(LaunchRequest.EditNewTab("madeleine"), send(text))
+    }
+
+    @Test
+    fun interiorMultibyteWhitespaceIsPreserved() {
+        // Java's \s is ASCII-only, so U+3000 inside the line stays as it is.
+        assertEquals(LaunchRequest.EditNewTab("madeleine\u3000de Proust"), send("madeleine\u3000de Proust"))
+    }
+
+    @Test(timeout = 1_000)
+    fun aHugeInteriorMultibyteWhitespaceRunIsBounded() {
+        val edit = send("madeleine" + "\u3000".repeat(5_000_000) + "de Proust") as LaunchRequest.EditNewTab
+        assertEquals(2_000, edit.text.length)
+        assertTrue(edit.text.startsWith("madeleine"))
+    }
+
+    @Test
+    fun aSupplementaryCharacterAtTheLineCapIsNotSplit() {
+        // The emoji starts at 1998, so both halves fit; the next character is cut.
+        val kept = "a".repeat(1_998) + "\uD83D\uDE00"
+        assertEquals(LaunchRequest.EditNewTab(kept), send(kept + "b".repeat(100)))
+        // The emoji starts at 1999, so the line ends before it and no half is kept.
+        assertEquals(LaunchRequest.EditNewTab("a".repeat(1_999)), send("a".repeat(1_999) + "\uD83D\uDE00" + "b".repeat(100)))
+    }
+
+    @Test
+    fun oneLineCollapsesWhitespaceTrimsAndSaysWhenItCut() {
+        assertEquals(IncomingIntents.OneLine("Proust madeleine", cut = false), IncomingIntents.oneLine("  Proust\n\tmadeleine  "))
+        assertNull(IncomingIntents.oneLine("   \u3000  "))
+        assertEquals(IncomingIntents.OneLine("c".repeat(2_000), cut = false), IncomingIntents.oneLine("c".repeat(2_000)))
+        val cut = IncomingIntents.oneLine("c".repeat(3_000))
+        assertEquals(2_000, cut?.text?.length)
+        assertEquals(true, cut?.cut)
+    }
+
+    @Test
+    fun aHugeShareIsExaminedOnlyAsFarAsTheLineLimit() {
+        val huge = CountingText("word ".repeat(300_000))
+        val line = IncomingIntents.oneLine(huge)
+        assertEquals(2_000, line?.text?.length)
+        assertEquals(true, line?.cut)
+        // Before the scan was bounded, trim-and-replace copied and read the whole share here.
+        assertTrue("examined ${huge.reads} characters", huge.reads < 10_000)
+    }
+
+    @Test(timeout = 1_000)
+    fun aLongWhitespaceRunBeforeTheTextIsSkipped() {
+        assertEquals(LaunchRequest.EditNewTab("madeleine"), send(" ".repeat(300_000) + "madeleine"))
     }
 
     @Test
@@ -192,4 +297,15 @@ class IncomingIntentsTest {
         assertNull(IncomingIntents.interpret(Intent.ACTION_MAIN, null) { "https://example.org/" })
         assertNull(IncomingIntents.interpret(null, "https://example.org/") { null })
     }
+}
+
+/** Counts how many characters a scan reads, so a test can prove the scan stops early. */
+private class CountingText(private val body: String) : CharSequence {
+    var reads = 0
+
+    override val length get() = body.length
+
+    override fun get(index: Int): Char = body[index].also { reads++ }
+
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = body.subSequence(startIndex, endIndex)
 }
