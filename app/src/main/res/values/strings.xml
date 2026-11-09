@@ -364,7 +364,9 @@
     <string name="report_queued">Report queued.</string>
     <string name="report_not_set_up">Reporting needs your report service. Set it up in Settings.</string>
     <string name="report_too_many">Too many reports are waiting to be sent. See Settings.</string>
-    <string name="report_not_stored">The report could not be stored. Try again.</string>
+    <string name="report_not_stored">Your report could not be confirmed as queued. Try again or check Settings.</string>
+    <string name="report_previously_stored">This report was already saved. Check or retry its delivery in Settings.</string>
+    <string name="report_lost_previously_stored">Your report was already saved. Check its delivery in Settings.</string>
     <string name="report_invalid_address">This address cannot be sent. Check it and try again.</string>
     <string name="report_comment_too_long">The comment is too long.</string>
     <string name="report_screenshot_invalid">The screenshot cannot be sent. Untick it and try again.</string>

@@ -310,9 +310,10 @@ All notable changes to this project are documented here. The format follows
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
-- Tapping Send again on a report whose delivery had failed queues the
-  report for delivery again. Before, it reported "queued" while the
-  failed job stayed failed and nothing was retried.
+- Tapping Send again retries one failed report using its original payload
+  and destination, rather than claiming a still-failed job is queued.
+  Parked reports and unconfirmed retries say the earlier report was saved
+  and offer Settings, without claiming new delivery or overwriting it.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had

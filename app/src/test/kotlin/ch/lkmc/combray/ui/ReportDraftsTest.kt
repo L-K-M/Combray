@@ -90,6 +90,17 @@ class ReportDraftsTest {
     }
 
     @Test
+    fun anEarlierStoredReportKeepsItsDraftAndOffersDeliverySettings() = runBlocking {
+        answer = { ReportRequest.PreviouslyStored }
+        val draft = drafts.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Unavailable(ScreenshotOmission.READER_VIEW))
+        val report = checkNotNull(draft.toDraft(FORM, draft.shot.value))
+        assertEquals(ReportRequest.PreviouslyStored, checkNotNull(drafts.send(draft, report)).await())
+        assertSame(draft, drafts.current.value)
+        assertEquals(ReportProblem.PREVIOUSLY_STORED, draft.progress.value.problem)
+        assertTrue(ReportProblem.PREVIOUSLY_STORED.offersSettings)
+    }
+
+    @Test
     fun aFailingStoreIsNotStoredRatherThanACrash() = runBlocking {
         answer = { throw IllegalStateException("disk") }
         val draft = drafts.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Unavailable(ScreenshotOmission.READER_VIEW))

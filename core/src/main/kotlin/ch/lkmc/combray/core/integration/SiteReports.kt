@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import ch.lkmc.combray.core.browser.Clock
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.JobKind
+import ch.lkmc.combray.core.data.JobState
 import ch.lkmc.combray.core.data.OutboxJobEntity
 import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.data.ServiceKind
@@ -119,8 +120,11 @@ data class ReportDraft(
 enum class ReportField { ID, URL, COMMENT, SCREENSHOT, DETAILS }
 
 sealed interface ReportRequest {
-    /** Stored durably (screenshot file and job); it is sent when the service can be reached. */
+    /** Stored durably with an active delivery job; delivery may later fail or need attention. */
     data object Queued : ReportRequest
+
+    /** A prior submission exists, but no active delivery was confirmed. Settings shows its state. */
+    data object PreviouslyStored : ReportRequest
 
     /** No report service is set up (or it was removed before the report was stored). */
     data object NotConfigured : ReportRequest
@@ -128,7 +132,7 @@ sealed interface ReportRequest {
     /** [SiteReports.MAX_UNSENT_REPORTS] reports are waiting already; Settings lists them. */
     data object TooMany : ReportRequest
 
-    /** The device could not store the report; nothing was queued and no file is left. */
+    /** No new admission was confirmed; a previous submission may still exist if storage could not be read. */
     data object NotStored : ReportRequest
 
     data class Invalid(val field: ReportField) : ReportRequest
@@ -247,8 +251,8 @@ class SiteReports internal constructor(
 
     /**
      * Queues [draft] for the report service configured now. Returns [ReportRequest.Queued] only
-     * once the screenshot file and the job are both stored (invariant 7); on any other result
-     * nothing of this report is left on the device.
+     * once the screenshot file and an active job are stored (invariant 7). A prior submission
+     * may remain on other results; resubmission never replaces its payload or destination.
      */
     suspend fun submit(draft: ReportDraft): ReportRequest {
         val payload = when (val checked = payloadOf(draft, environment)) {
@@ -258,7 +262,7 @@ class SiteReports internal constructor(
         // Not cancellable: leaving the screen must not stop between the file and the job.
         val result = withContext(NonCancellable) {
             try {
-                val service = dao.service(ServiceKind.SITE_REPORTS) ?: return@withContext ReportRequest.NotConfigured
+                val service = dao.service(ServiceKind.SITE_REPORTS)
                 filesLock.withLock { store(service, payload, draft.screenshot?.png) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -272,15 +276,14 @@ class SiteReports internal constructor(
         return result
     }
 
-    private suspend fun store(service: ServiceEntity, payload: ReportPayload, png: ByteArray?): ReportRequest {
+    private suspend fun store(service: ServiceEntity?, payload: ReportPayload, png: ByteArray?): ReportRequest {
         val id = payload.reportId
-        // The same draft sent twice (a repeated tap): its job exists and holds its file. A failed
-        // job has stopped moving, so the tap is the user trying again: queue it again, rather than
-        // say "Queued" while nothing happens.
+        // An existing submission owns its original payload, screenshot and destination. A new
+        // draft value must not replace it, nor imply that a parked/failed job is actively queued.
         if (id in dao.reportIdsHoldingFiles()) {
-            dao.failedJobs(JobKind.SITE_REPORT, service.fingerprint, id).forEach { outbox.retryNow(it.id) }
-            return ReportRequest.Queued
+            return if (service == null) ReportRequest.PreviouslyStored else retryStored(service, id)
         }
+        if (service == null) return ReportRequest.NotConfigured
         if (dao.unsentReports() >= MAX_UNSENT_REPORTS) return ReportRequest.TooMany
 
         val enqueued = try {
@@ -307,6 +310,26 @@ class SiteReports internal constructor(
                 ReportRequest.NotConfigured
             }
         }
+    }
+
+    private suspend fun retryStored(service: ServiceEntity, id: String): ReportRequest = try {
+        database.withTransaction {
+            val active = dao.activeJobs(JobKind.SITE_REPORT, service.fingerprint, id)
+            if (active.any { it.state in DELIVERY_QUEUED_STATES }) return@withTransaction ReportRequest.Queued
+            if (active.isNotEmpty()) return@withTransaction ReportRequest.PreviouslyStored
+            // Do not revive several legacy rows for one report or move a parked report. Settings
+            // exposes those decisions explicitly; one unambiguous failed job can use normal Retry.
+            val failed = dao.failedJobs(JobKind.SITE_REPORT, service.fingerprint, id).singleOrNull()
+                ?: return@withTransaction ReportRequest.PreviouslyStored
+            outbox.retryNow(failed.id)
+            if (dao.job(failed.id)?.state in DELIVERY_QUEUED_STATES) ReportRequest.Queued else ReportRequest.PreviouslyStored
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        // The prior durable submission is known even if this retry could not be confirmed.
+        Log.w(LOG_TAG, "retrying a stored report failed: ${failure.javaClass.name}")
+        ReportRequest.PreviouslyStored
     }
 
     /** Sends one queued report: its own payload, its own file, to the destination it was made for. */
@@ -356,6 +379,7 @@ class SiteReports internal constructor(
 
     companion object {
         private const val LOG_TAG = "CombrayReports"
+        private val DELIVERY_QUEUED_STATES = setOf(JobState.PENDING, JobState.RUNNING, JobState.RETRY_WAIT)
 
         /** API suffixes users paste with the address; removed so endpoints are not doubled. */
         private val REPORTS_SUFFIXES = listOf("/v1")
