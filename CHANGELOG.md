@@ -297,6 +297,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Integration fixtures reserve unreachable loopback ports until test cleanup,
+  so another listener cannot turn an offline test into a real HTTP request.
+  Their connect waits are bounded separately from response reads.
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
   their address at enqueue in a `url` column (schema 6, auto-migrated);
