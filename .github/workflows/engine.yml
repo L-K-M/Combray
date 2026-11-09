@@ -216,7 +216,9 @@ jobs:
   device:
     name: Emulator fixture checks (x86_64)
     needs: engine
-    runs-on: ubuntu-latest
+    # Keep the device host stable while investigating owned qemu SIGSEGVs.
+    # Android images, emulator resources, renderer and fixture deadlines stay unchanged.
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     # An arm64 failure must not forfeit the x86_64 device evidence.
     # The artifact download below is the real gate — when the x86_64 leg did not
@@ -306,6 +308,18 @@ jobs:
               > servo-checkout/logs/host-oomd.log \
               2> servo-checkout/logs/host-oomd-error.log; then
             echo "::warning::host userspace OOM diagnostics unavailable"
+          fi
+
+      - name: Classify an owned emulator crash without uploading dumps
+        if: always()
+        run: |
+          mkdir -p servo-checkout/logs
+          if ! python3 -I scripts/m0/emulator_crash_summary.py \
+              --emulator-log servo-checkout/logs/emulator.log \
+              --exit-file servo-checkout/logs/emulator-exit.json \
+              --crash-root "/tmp/android-$(id -un)" \
+              --output servo-checkout/logs/emulator-crash-summary.json; then
+            echo "::warning::emulator crash classification unavailable"
           fi
 
       - name: Upload device-check evidence

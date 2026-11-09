@@ -254,9 +254,16 @@ class Integrations(
         }
     }
 
-    /** Newest bookmarks for a blank [query], otherwise Karakeep's search. Null when not configured. */
-    suspend fun karakeepBookmarks(query: String, cursor: String? = null): KarakeepRead<KarakeepPage>? {
+    /**
+     * Newest bookmarks for a blank [query], otherwise Karakeep's search. Null when not
+     * configured, or when [expected] names a destination the current configuration no longer
+     * matches: a page request bound to an older server must not reach a newer one.
+     */
+    suspend fun karakeepBookmarks(query: String, cursor: String? = null, expected: ServiceEntity? = null): KarakeepRead<KarakeepPage>? {
         val (service, key) = karakeepSnapshot()
+        if (expected != null && (service == null || service.fingerprint != expected.fingerprint || service.generation != expected.generation)) {
+            return null
+        }
         service ?: return null
         key ?: return KarakeepRead.Unauthorized
         return readKarakeep(service) { client, root -> client.bookmarks(root, key, query.trim().ifEmpty { null }, cursor) }

@@ -236,6 +236,10 @@ All notable changes to this project are documented here. The format follows
   resources, renderer and timeouts stay unchanged; no cause is claimed.
   Launch supervision records the owned emulator child's exit or signal
   and reaps it. Old pid files are evidence, never permission to stop a process.
+  Bounded crash classification runs on the test runner and exports only known
+  SDK module names and exception codes, never raw dumps or private payloads.
+  The device job uses a pinned Ubuntu 24.04 LTS host for a bounded environment
+  trial after host-emulator SIGSEGVs, not a claimed root-cause fix.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -498,6 +502,20 @@ All notable changes to this project are documented here. The format follows
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
+- Recent's Hister and Karakeep scopes no longer send the local filter
+  to the server on their own: the panels prefill the field, and the first
+  request needs a keystroke or the keyboard's Search key inside the
+  panel. A blank Karakeep field still lists the newest bookmarks, and an
+  unchanged query is resent by an explicit submit.
+- The Hister and Karakeep scopes keep the last results on screen while a
+  new search is in flight, show a progress line, and a failed page keeps
+  its rows and cursor for a retry. Karakeep's Load more waits for the
+  current page, so repeated taps no longer start duplicate requests or let
+  an older page append rows or release a newer request's gate.
+- A Hister search whose answer names one address twice, as when its
+  index and its history both match, no longer crashes Recent's Hister
+  list with duplicate row keys. Rows are deduplicated by the exact
+  address, preserving promoted-history order.
 - Hister search no longer shows a "More results" button that does nothing
   after the last page, or under "No results in Hister." While more results
   load, the button waits under a progress bar; if they fail, the reason
