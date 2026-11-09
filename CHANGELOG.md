@@ -231,6 +231,9 @@ All notable changes to this project are documented here. The format follows
 - Every verified APK (release, Engine and CI artifacts, `scripts/build.sh`)
   must carry the third-party notices. The device checks' test APK is no
   longer a downloadable CI artifact.
+- Native checks keep host memory, process and cgroup samples and host and
+  guest kernel logs to investigate intermittent ADB loss. Tests, VM
+  resources, renderer and timeouts stay unchanged; no cause is claimed.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -313,6 +316,9 @@ All notable changes to this project are documented here. The format follows
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- The report service drops old hourly rate-limit windows without scanning
+  them on every report. It also syncs a new database's directory entry
+  where supported, reducing the risk of losing that entry after power loss.
 - The messages shown when the engine is missing, failed or starting, and the
   page-crashed message with its Reload button, can no longer run off a small
   screen at large font sizes: they scroll instead. Address sheets identify

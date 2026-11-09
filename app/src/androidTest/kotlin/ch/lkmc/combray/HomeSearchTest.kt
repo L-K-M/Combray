@@ -3,6 +3,7 @@ package ch.lkmc.combray
 import android.app.SearchManager
 import android.content.Intent
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertTextEquals
@@ -124,9 +125,23 @@ class HomeSearchTest {
             device.browser.closeTab(blank)
             device.awaitState { it.activeTab == null }
             // Core publication precedes the lifecycle collector updating the field's target.
-            compose.waitUntil(Device.LOAD_TIMEOUT_MS) {
-                compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().singleOrNull()
-                    ?.config?.get(SemanticsProperties.EditableText)?.text == ""
+            var observedFields = 0
+            var observedLength: Int? = null
+            try {
+                compose.waitUntil(Device.LOAD_TIMEOUT_MS) {
+                    val fields = compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes()
+                    observedFields = fields.size
+                    val text = fields.singleOrNull()?.config?.get(SemanticsProperties.EditableText)?.text
+                    observedLength = text?.length
+                    text == ""
+                }
+            } catch (timeout: ComposeTimeoutException) {
+                // Counts distinguish a missing field from stale text without quoting input.
+                throw AssertionError(
+                    "Closed Home did not clear: fields=$observedFields, length=$observedLength, " +
+                        "activeTabAbsent=${device.browser.browserState.value.activeTab == null}",
+                    timeout,
+                )
             }
             assertEquals("", compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         } finally {
