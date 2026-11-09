@@ -231,6 +231,9 @@ All notable changes to this project are documented here. The format follows
 - Every verified APK (release, Engine and CI artifacts, `scripts/build.sh`)
   must carry the third-party notices. The device checks' test APK is no
   longer a downloadable CI artifact.
+- Native checks keep host memory, process and cgroup samples and host and
+  guest kernel logs to investigate intermittent ADB loss. Tests, VM
+  resources, renderer and timeouts stay unchanged; no cause is claimed.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
