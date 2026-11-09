@@ -322,7 +322,7 @@ Do not send speculative fields or require tags/lists to complete one-tap saving.
 
 Snapshot the active committed URL and title at tap time. Disable Save for blank/internal pages and unsupported schemes; report a specific reason when necessary. A local operation key prevents repeated taps from creating concurrent jobs for the same destination and exact URL. A timeout after a server accepted the bookmark is ambiguous; retrying the same link should use Karakeep's duplicate behavior rather than constructing a different URL. An optional lookup can reconcile success where supported. Keep this state separate from Hister capture success.
 
-Tag attachment and list membership use separate endpoints; implement only after quick save works. If a tag/list step fails after creation, retain the bookmark ID and retry that step without recreating or marking the link unsaved. User-initiated Karakeep saves are independent of automatic Hister exclusions, but must never leak a secret-bearing session URL. Provide an explicit explanation for a blocked sensitive URL.
+Tag attachment and list membership use separate endpoints; implement only after quick save works. If a tag/list step fails after creation, retain the bookmark ID and retry that step without recreating or marking the link unsaved. A receipt is bound to the destination and credential generation: after a key change without verified account identity, a duplicate-safe create recovers that account's ID instead of trusting the previous account's receipt. User-initiated Karakeep saves are independent of automatic Hister exclusions, but must never leak a secret-bearing session URL. Provide an explicit explanation for a blocked sensitive URL.
 
 ### Hister ingestion and search
 
@@ -509,11 +509,14 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 
 **Status (19 October 2026): implemented; checked with a fake Karakeep.** No real Karakeep or Kagi was contacted (fixtures only, by the task's rules).
 
+**Receipt checkpoint (8 November 2026):** creation is recorded under the claim fence before the optional list step, and a retry resumes membership only for the same destination and credential generation under the current claim fence. A historical saved row does not acknowledge a new pending or connection-waiting create. Host checks: `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `scripts/check_docs.py`, `git diff --check`. No device or live-service check.
+
 | Gate check | Result | Evidence |
 | --- | --- | --- |
 | One tap saves the page with its title | Passed on the device (`run9`) | `SaveTest#oneTapSavesThePageWithItsTitle` |
 | A list-bound save cannot finish without a usable bookmark ID | Passed against fake Karakeep (21 October 2026): malformed and missing-ID 200/201 responses retry, recover the same bookmark, or need attention after ten attempts; standalone acknowledgment is preserved | `IntegrationsTest` |
 | Lost answer after the server stored the link: retried, one bookmark | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
+| A failed list step keeps the acknowledged bookmark and retries only membership | Passed in unit tests (8 November 2026): the bookmark is recorded under the claim fence before the list step; a restart or re-save under the same credential generation retries membership without another create. A new credential recovers that account's ID through a duplicate-safe create; a parked save rebound to another server is created there | `IntegrationsTest`, `PartialSaveTest` |
 | Rejected key pauses saves until resumed with a working key | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
 | A new main address parks unsent saves until the user sends them there or discards them | Passed in unit tests | `IntegrationsTest` |
 | Save targets the tapped page when the tab changes right after | Passed on the device (`run9`) and in unit tests | `SaveTest`, `IntegrationsTest` |
