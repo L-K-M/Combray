@@ -579,6 +579,9 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- A screenshot encoder Error no longer leaves a site report preparing
+  forever. The draft continues without a screenshot; cancellation still
+  stops preparation rather than being reported as a copy failure.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
