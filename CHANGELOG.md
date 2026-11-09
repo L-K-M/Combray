@@ -194,6 +194,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Browser preferences (appearance, tab count, closing unused tabs, Home
+  sections and text size) commit to disk off the main thread before the
+  choice is published. A failed write shows a generic failure and leaves
+  the previous choice; text size's immediate preview rolls back, and rapid
+  steps keep their order.
 - Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
   Guava pins together so CI tests the combined build dependency set.
 - Play stays within reach on pages whose own video player shows an error:
@@ -234,6 +239,9 @@ All notable changes to this project are documented here. The format follows
   stop running three database reads on the command queue, and the open
   tab count is a COUNT query instead of loading every open row; taps
   and page events share that queue, so it stays short.
+- The active tab is one joined query instead of a session read plus a tab
+  read, and releasing hidden renderers reads the open tabs once instead of
+  once per live view.
 - A complete pine and ivory palette in light and dark mode: sheets,
   dialogs, menus, snackbars and the tab count no longer show Material's
   default purple or red, and the bottom bar's color reaches the screen
@@ -389,6 +397,9 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Preference feedback tests dispose Compose before closing their fixture scope
+  and Room, and release a failed test's scripted commit latch before the
+  bounded cancel-and-join, so cleanup cannot hang on an admitted write.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -586,6 +597,9 @@ All notable changes to this project are documented here. The format follows
   encrypted just because the URL starts with `https`. Cleartext HTTP is
   still called not encrypted. Page info no longer claims a verified
   connection the engine has not reported.
+- System Back and the bottom bar's Back now answer an open page question
+  (a script dialog, a `<select>`, sign-in, or the leave-page prompt, where
+  Back answers Stay) instead of navigating the page behind it.
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.
@@ -620,6 +634,8 @@ All notable changes to this project are documented here. The format follows
   reporting timeouts.
 - `scripts/check-app.sh` skipped the reader view checks: its default run
   now covers every device-check class, and `--list` prints them.
+- Forgetting a page or site cancels its scheduled capture, including other
+  fragments of the same page and timers already queued for execution.
 - Forgetting a page or site commits local deletion and queued Hister
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch

@@ -62,7 +62,7 @@ class TextSizeTest {
     }
 
     private fun setTextSize(size: TextSize) {
-        device.app.graph.settings.setTextSize(size)
+        device.setTextSize(size)
         device.browser.applyTextSize()
         device.idle()
     }
