@@ -3,6 +3,7 @@ package ch.lkmc.combray.ui
 import android.app.Application
 import android.content.Context
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.semantics.SemanticsActions
@@ -220,11 +222,12 @@ class SettingsSheetTest {
     }
 
     @Test
+    @Config(qualifiers = "w320dp-h480dp")
     fun aCheckAndARemoveWhileASaveIsPendingAdmitOnlyTheSave() {
         show()
         field("API key").performTextInput("new-key")
         blockWrites = true
-        saveButton().performClick()
+        saveButton().performScrollTo().assertIsDisplayed().performClick()
         assertTrue(writeEntered.await(5, TimeUnit.SECONDS))
         checkButton().assertIsNotEnabled()
         removeButton().assertIsNotEnabled()
@@ -236,7 +239,7 @@ class SettingsSheetTest {
         checkButton().assertIsEnabled()
         removeButton().assertIsEnabled()
 
-        checkButton().performClick()
+        checkButton().performScrollTo().assertIsDisplayed().performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Connected.").fetchSemanticsNodes().isNotEmpty()
         }
@@ -246,7 +249,7 @@ class SettingsSheetTest {
     fun aSaveAndARemoveWhileACheckIsPendingAdmitOnlyTheCheck() {
         show()
         blockChecks = true
-        checkButton().performClick()
+        checkButton().performScrollTo().assertIsDisplayed().performClick()
         compose.waitForIdle()
         compose.onAllNodesWithText("Checking…").onFirst().assertExists()
         assertTrue(checkEntered.await(5, TimeUnit.SECONDS))
@@ -260,7 +263,7 @@ class SettingsSheetTest {
         saveButton().assertIsEnabled()
         removeButton().assertIsEnabled()
 
-        removeButton().performClick()
+        removeButton().performScrollTo().assertIsDisplayed().performClick()
         compose.onNodeWithText("Remove Karakeep?").assertExists()
         compose.onAllNodesWithText("Remove").onLast().performClick()
         compose.waitUntil(5_000) {
