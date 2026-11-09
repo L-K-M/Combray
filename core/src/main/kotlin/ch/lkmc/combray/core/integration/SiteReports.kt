@@ -274,8 +274,13 @@ class SiteReports internal constructor(
 
     private suspend fun store(service: ServiceEntity, payload: ReportPayload, png: ByteArray?): ReportRequest {
         val id = payload.reportId
-        // The same draft sent twice (a repeated tap): its job exists and holds its file.
-        if (id in dao.reportIdsHoldingFiles()) return ReportRequest.Queued
+        // The same draft sent twice (a repeated tap): its job exists and holds its file. A failed
+        // job has stopped moving, so the tap is the user trying again: queue it again, rather than
+        // say "Queued" while nothing happens.
+        if (id in dao.reportIdsHoldingFiles()) {
+            dao.failedJobs(JobKind.SITE_REPORT, service.fingerprint, id).forEach { outbox.retryNow(it.id) }
+            return ReportRequest.Queued
+        }
         if (dao.unsentReports() >= MAX_UNSENT_REPORTS) return ReportRequest.TooMany
 
         val enqueued = try {
