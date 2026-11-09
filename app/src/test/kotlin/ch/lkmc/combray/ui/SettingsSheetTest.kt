@@ -157,7 +157,7 @@ class SettingsSheetTest {
             compose.mainClock.autoAdvance = true
         }
         compose.waitForIdle()
-        assertTrue("the save never reached the key store", writeEntered.await(5, TimeUnit.SECONDS))
+        awaitAdmission(writeEntered)
         assertEquals("a second tap launched a second save", 1, writeCount.get())
         writeRelease.countDown()
         assertTrue(writeReturned.await(5, TimeUnit.SECONDS))
@@ -187,7 +187,7 @@ class SettingsSheetTest {
             compose.mainClock.autoAdvance = true
         }
         compose.waitForIdle()
-        assertTrue(writeEntered.await(5, TimeUnit.SECONDS))
+        awaitAdmission(writeEntered)
         writeRelease.countDown()
         assertTrue(writeReturned.await(5, TimeUnit.SECONDS))
         compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
@@ -217,7 +217,7 @@ class SettingsSheetTest {
             compose.mainClock.autoAdvance = true
         }
         compose.waitForIdle()
-        assertTrue(writeEntered.await(5, TimeUnit.SECONDS))
+        awaitAdmission(writeEntered)
         writeRelease.countDown()
         compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
         val saved = runBlocking { integrations.karakeepService.first() }!!
@@ -232,7 +232,7 @@ class SettingsSheetTest {
         field("API key").performTextInput("new-key")
         blockWrites = true
         saveButton().performScrollTo().assertIsDisplayed().performClick()
-        assertTrue(writeEntered.await(5, TimeUnit.SECONDS))
+        awaitAdmission(writeEntered)
         checkButton().assertIsNotEnabled()
         removeButton().assertIsNotEnabled()
 
@@ -256,7 +256,7 @@ class SettingsSheetTest {
         checkButton().performScrollTo().assertIsDisplayed().performClick()
         compose.waitForIdle()
         compose.onAllNodesWithText("Checking…").onFirst().assertExists()
-        assertTrue(checkEntered.await(5, TimeUnit.SECONDS))
+        awaitAdmission(checkEntered)
         saveButton().assertIsNotEnabled()
         removeButton().assertIsNotEnabled()
 
@@ -273,6 +273,12 @@ class SettingsSheetTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isEmpty()
         }
+    }
+
+    private fun awaitAdmission(latch: CountDownLatch) {
+        // Room can resume the action on main before it reaches the IO fake. Blocking this
+        // thread on the admission latch can prevent that continuation from ever running.
+        compose.waitUntil(5_000) { latch.count == 0L }
     }
 
     private fun show() {
