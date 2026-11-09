@@ -52,8 +52,9 @@ use the existing browser preferences. Icons are local monograms.
 
 ## Typing and recall
 
-Home's search field is editable in place. While typing, local matches appear
-above the anchored field, beside which
+Home's search field is editable in place, and a page's address edits the
+same way in the bar (owner request, 9 November 2026). While typing, local
+matches appear above the anchored field, beside which
 **+** stays visible above the keyboard. Only the suggestion area scrolls.
 Up to five matches show title/domain highlights; open-tab rows explicitly
 switch to that tab, while history rows navigate in the tab being edited.

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.R
+import ch.lkmc.combray.core.data.ServiceEntity
 import ch.lkmc.combray.core.integration.HisterHit
 import ch.lkmc.combray.core.integration.HisterIntegration
 import ch.lkmc.combray.core.integration.HisterSearch
@@ -41,62 +43,97 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** The rows shown so far, with [page] added: one row per address, in arrival order. */
+internal fun mergeHits(hits: List<HisterHit>, page: List<HisterHit>): List<HisterHit> =
+    (hits + page).distinctBy { it.url }
+
 private sealed interface SearchUi {
     data object Idle : SearchUi
-
-    data object Loading : SearchUi
 
     data class Answer(val result: HisterSearch) : SearchUi
 }
 
 /**
  * The explicit Hister scope of Recent. Only text typed here is sent to Hister; typing in local
- * Recent never is. A newer query's answer always wins over a slower older one.
+ * Recent never is. A newer query's answer always wins over a slower older one, and the last
+ * answer stays on screen while the next search is in flight.
  */
 @Composable
 fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val service by hister.service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
+    HisterSearchPanelContent(service, initialQuery, { page -> hister.search(page.query, page.cursor, page.service) }, onOpen, onSettings)
+}
+
+/**
+ * The panel's state and UI, separated from service observation so delayed-read checks can drive
+ * it directly. [search] receives the page's bound query, cursor and destination.
+ */
+@Composable
+internal fun HisterSearchPanelContent(
+    service: ServiceEntity?,
+    initialQuery: String,
+    search: suspend (SearchPage) -> HisterSearch?,
+    onOpen: (String) -> Unit,
+    onSettings: () -> Unit,
+) {
     var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // A query seeded from Recent's local filter is not the user's text: it is sent only after
+    // the user types in this field or submits it. The submit nonce re-runs an unchanged query.
+    var typed by rememberSaveable { mutableStateOf(false) }
+    var submit by rememberSaveable { mutableIntStateOf(0) }
     var ui by remember { mutableStateOf<SearchUi>(SearchUi.Idle) }
     var hits by remember { mutableStateOf<List<HisterHit>>(emptyList()) }
-    var nextPage by remember { mutableStateOf<String?>(null) }
+    var nextPage by remember { mutableStateOf<SearchPage?>(null) }
     var loadingMore by remember { mutableStateOf(false) }
+    // True while a search is in flight: the last answer stays on screen with the progress line,
+    // so typing does not clear the list the user is still reading.
+    var searching by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(query, service) {
+    // Capture policy and route bookkeeping do not change the remote search or its cursor.
+    LaunchedEffect(query, service?.fingerprint, service?.generation, typed, submit) {
         val mine = ++generation
-        // The last answer belongs to the last query: no stale count while the next one waits.
-        ui = SearchUi.Idle
-        hits = emptyList()
-        nextPage = null
         loadingMore = false
-        if (service == null || query.isBlank()) {
+        // Hister has no default list: a blank query stays idle, as before. A seeded non-blank
+        // query is sent only after the user types or submits it.
+        if (service == null || query.isBlank() || !typed) {
             ui = SearchUi.Idle
+            hits = emptyList()
+            nextPage = null
+            searching = false
             return@LaunchedEffect
         }
+        val sentQuery = query.trim()
+        searching = true
         delay(SEARCH_DEBOUNCE_MS)
-        ui = SearchUi.Loading
-        val answer = hister.search(query.trim()) ?: return@LaunchedEffect
+        val answer = search(SearchPage(sentQuery, null, mine, service))
         if (mine != generation) return@LaunchedEffect
+        searching = false
+        // Null: the service went away or its destination changed; the flow restarts this effect.
+        if (answer == null) return@LaunchedEffect
         ui = SearchUi.Answer(answer)
         if (answer is HisterSearch.Results) {
-            hits = answer.hits
-            nextPage = answer.nextPage
+            hits = mergeHits(emptyList(), answer.hits)
+            nextPage = answer.nextPage?.let { SearchPage(sentQuery, it, mine, service) }
+        } else {
+            hits = emptyList()
+            nextPage = null
         }
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; typed = true },
             singleLine = true,
             enabled = service != null,
             placeholder = { Text(stringResource(R.string.search_all_hint)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { typed = true; submit++ }),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (ui == SearchUi.Loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        if (searching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
         val notice = when {
             service == null -> stringResource(R.string.search_all_not_configured)
             else -> when (val state = ui) {
@@ -155,23 +192,29 @@ fun HisterSearchPanel(hister: HisterIntegration, initialQuery: String, onOpen: (
                     onClick = {
                         // Two taps in one frame both see the button still enabled.
                         if (loadingMore) return@TextButton
-                        val mine = generation
+                        // The page belongs to an older search: a newer query owns the list now.
+                        if (page.generation != generation) return@TextButton
                         loadingMore = true
                         scope.launch {
-                            val more = hister.search(query.trim(), page)
-                            // A newer query owns the list and the loading state now.
-                            if (mine != generation) return@launch
-                            loadingMore = false
-                            // Null: the service went away meanwhile; its removal restarts the search.
-                            more ?: return@launch
-                            // A failed page keeps the rows shown and says why above them.
-                            ui = SearchUi.Answer(more)
-                            if (more !is HisterSearch.Results) return@launch
-                            hits = hits + more.hits.filter { hit -> hits.none { it.url == hit.url } }
-                            nextPage = more.nextPage
+                            try {
+                                val more = search(page)
+                                // A newer query owns the list and the loading state now.
+                                if (page.generation != generation) return@launch
+                                // Null: the service went away or its destination changed.
+                                more ?: return@launch
+                                // A failed page keeps the rows shown and says why above them.
+                                ui = SearchUi.Answer(more)
+                                if (more is HisterSearch.Results) {
+                                    hits = mergeHits(hits, more.hits)
+                                    nextPage = more.nextPage?.let { SearchPage(page.query, it, page.generation, page.service) }
+                                }
+                            } finally {
+                                // An old page must not release a newer query/destination's gate.
+                                if (page.generation == generation) loadingMore = false
+                            }
                         }
                     },
-                    enabled = !loadingMore,
+                    enabled = !loadingMore && page.generation == generation,
                     modifier = Modifier.padding(16.dp).heightIn(min = 48.dp),
                 ) { Text(stringResource(R.string.search_all_more)) }
             }

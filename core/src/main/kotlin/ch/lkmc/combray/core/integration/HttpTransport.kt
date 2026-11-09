@@ -1,10 +1,13 @@
 package ch.lkmc.combray.core.integration
 
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.URI
+import java.net.URISyntaxException
 
 data class HttpRequest(
     val method: String,
@@ -41,8 +44,11 @@ class UrlConnectionTransport(
 ) : HttpTransport {
     override fun execute(request: HttpRequest): HttpOutcome {
         val connection = try {
-            URL(request.url).openConnection() as HttpURLConnection
+            val url = requestUrl(request.url) ?: return HttpOutcome.Failure("bad_url")
+            url.openConnection() as? HttpURLConnection ?: return HttpOutcome.Failure("bad_url")
         } catch (malformed: IOException) {
+            return HttpOutcome.Failure("bad_url")
+        } catch (malformed: IllegalArgumentException) {
             return HttpOutcome.Failure("bad_url")
         }
         return try {
@@ -84,16 +90,35 @@ class UrlConnectionTransport(
         }
     }
 
+    /** Builds the exact destination that will be opened, before any connection or credential. */
+    internal fun requestUrl(input: String): URL? {
+        val uri = try {
+            URI(input)
+        } catch (_: URISyntaxException) {
+            return null
+        }
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val authority = ServiceUrls.parseAuthority(uri.rawAuthority ?: return null) ?: return null
+        val file = (uri.rawPath ?: "") + (uri.rawQuery?.let { "?$it" } ?: "")
+        // Do not validate the ICU name and then open the original Unicode/JDK-IDNA2003 name.
+        return URL(scheme, authority.host, authority.port ?: -1, file)
+    }
+
     private fun readBounded(stream: InputStream): ByteArray {
-        val buffer = ByteArray(maxResponseBytes + 1)
+        // A small buffer, not the whole cap: most answers are a few KiB, and a 256 KiB array per
+        // request is garbage during a capture burst.
+        val buffer = ByteArray(minOf(maxResponseBytes, BUFFER_BYTES))
+        val contents = ByteArrayOutputStream(minOf(maxResponseBytes, BUFFER_BYTES))
         var read = 0
-        while (read < buffer.size) {
-            val count = stream.read(buffer, read, buffer.size - read)
+        while (read < maxResponseBytes) {
+            val count = stream.read(buffer, 0, minOf(buffer.size, maxResponseBytes - read))
             if (count < 0) break
+            contents.write(buffer, 0, count)
             read += count
         }
         // Over the cap: keep the prefix; parsers then see a truncated, invalid body.
-        return buffer.copyOf(minOf(read, maxResponseBytes))
+        return contents.toByteArray()
     }
 
     companion object {
@@ -103,5 +128,8 @@ class UrlConnectionTransport(
         /** Shorter: an address unreachable from this network (home server, outside) fails fast. */
         const val CONNECT_TIMEOUT_MS = 8_000
         const val MAX_RESPONSE_BYTES = 256 * 1024
+
+        /** The read chunk, and the initial output buffer, for a bounded response. */
+        const val BUFFER_BYTES = 8 * 1024
     }
 }

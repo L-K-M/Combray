@@ -607,6 +607,20 @@ class Store:
                 for statement in _SCHEMA:
                     conn.execute(statement)
                 conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+            self._fsync_root()
+
+    def _fsync_root(self) -> None:
+        """Make the new database file's directory entry durable, not just its commits.
+
+        `PRAGMA synchronous = FULL` fsyncs the file, but a power loss could still leave the
+        directory without the entry, so the store would look empty after acknowledged commits.
+        Best effort: where the platform cannot fsync a directory, the file itself is still
+        durable.
+        """
+        try:
+            _fsync_directory(self._root)
+        except OSError:
+            pass
 
     @contextmanager
     def _writer(self) -> Iterator[None]:

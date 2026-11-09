@@ -54,7 +54,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -168,6 +170,11 @@ private fun ArticleText(
     var edge by remember(article) { mutableStateOf<ScrollEdge?>(null) }
     var scrollActivity by remember(article) { mutableIntStateOf(0) }
     val latestOnScroll by rememberUpdatedState(onScroll)
+    val latestOnOpenLink = rememberUpdatedState(onOpenLink)
+    // One stable callback for the blocks: their remembered strings hold it in their link
+    // annotations, and a fresh lambda identity from the screen would invalidate every visible
+    // block on each recomposition.
+    val openLink = remember { { url: String -> latestOnOpenLink.value(url) } }
     LaunchedEffect(list, article) {
         var previous = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
         var previousViewport = list.layoutInfo.viewportSize
@@ -201,7 +208,7 @@ private fun ArticleText(
             ) {
                 item { ShowPageBar(onClose) }
                 item { ArticleHeader(article) }
-                items(article.blocks) { block -> Block(block, onOpenLink) }
+                items(article.blocks) { block -> Block(block, openLink) }
                 if (article.truncated) {
                     item { Paragraph(stringResource(R.string.reader_truncated), MaterialTheme.typography.bodySmall, Modifier.padding(bottom = 24.dp)) }
                 }
@@ -251,7 +258,9 @@ private fun ArticleHeader(article: Article) {
 
 @Composable
 private fun Block(block: ArticleBlock, onOpenLink: (String) -> Unit) {
-    val text = annotated(block, onOpenLink)
+    // Built once per block and theme change, never per recomposition (Phase 1 finding).
+    val linkStyle = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
+    val text = remember(block, linkStyle, onOpenLink) { annotated(block, linkStyle, onOpenLink) }
     val body = ReaderType.body
     when (block.kind) {
         BlockKind.HEADING -> Text(
@@ -313,10 +322,15 @@ private fun Paragraph(text: AnnotatedString, style: TextStyle, modifier: Modifie
     Text(text, style = style, modifier = Modifier.articleWidth().then(modifier))
 }
 
-/** The block's runs, links underlined and handed to [onOpenLink] when tapped. */
-@Composable
-private fun annotated(block: ArticleBlock, onOpenLink: (String) -> Unit): AnnotatedString {
-    val linkStyle = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
+/**
+ * The block's runs, links underlined and handed to [onOpenLink] when tapped.
+ * Counts its builds for ReaderBlockStabilityTest: one per block and theme change, never per
+ * recomposition.
+ */
+internal var annotatedBuilds = 0
+
+private fun annotated(block: ArticleBlock, linkStyle: TextLinkStyles, onOpenLink: (String) -> Unit): AnnotatedString {
+    annotatedBuilds++
     return buildAnnotatedString {
         for (span in block.spans) {
             val href = span.href
@@ -336,7 +350,7 @@ private fun ReaderMessage(message: String, action: @Composable () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(message, textAlign = TextAlign.Center)
+        Text(message, textAlign = TextAlign.Center, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         action()
     }
 }

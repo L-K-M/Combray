@@ -12,12 +12,17 @@ All notable changes to this project are documented here. The format follows
   on a phone is unconfirmed; see the [engine investigation](docs/ENGINE_SPIKE.md#40-verification-stall-and-automation-signals-2-november-2026).
 - The page Copy button and manual text selection are reported broken;
   tracked separately in [#168](https://github.com/L-K-M/Combray/issues/168).
-- Rich text editors, such as many comment boxes, show no text cursor yet,
-  and a word you are typing appears when the keyboard commits it, as in
-  form fields.
 
 ### Added
 
+- Long-press a web image and choose Download image to save it to Downloads
+  without opening a tab. Android handles progress, completion and retries,
+  including after Combray closes. This uses a new request without the page’s
+  cookies or referrer; protected images may fail. `data:` and `blob:` images
+  are not supported yet.
+- Rich text editors show a caret, including empty fields. Words update as
+  you compose them, and multiline editors keep the keyboard's newline key.
+  Up/Down/Home/End and Shift+arrow selection work in focused editors.
 - Tap a PDF link and read it: a top-level PDF opens in Combray's own
   viewer inside Servo, drawn by PDFium, with its pages one under another
   at the screen's width. The tab takes the PDF's own title when it has one,
@@ -175,6 +180,9 @@ All notable changes to this project are documented here. The format follows
   the page and listed in the third-party notices.
 - A Karakeep scope in Recent: the newest bookmarks, or Karakeep's search
   for what you type; a result opens in a new tab.
+- Recent rows offer Copy and Share for a past page, using the exact
+  address recorded for it. Android 13+ confirms the copy itself; older
+  versions show "Link copied".
 - Settings › Karakeep › List for saves: saved pages are also added to a
   manual Karakeep list you choose.
 - Recent, Hister and Karakeep results mark the words you typed, ignoring
@@ -182,13 +190,33 @@ All notable changes to this project are documented here. The format follows
 - A launch screen with the Combray icon, shown until your open tabs are
   restored (at most two seconds).
 - More › Close tab closes the current tab, with the same Undo as Recent.
-- The address sheet lists up to five open tabs and recent pages that match
-  what you type, under "On this device": a tab switches to that tab, and a
+- The address editor lists up to five open tabs and recent pages that match
+  what you type: a tab switches to that tab, and a
   page opens where the typed address would. The matches come from this
   device; nothing is sent while you type.
 
 ### Changed
 
+- Tapping the address no longer opens a sheet: the bar itself becomes the
+  field, rides up with the keyboard in one motion and dims the page, which
+  keeps its layout meanwhile. ← (or Back, or a tap on the page) leaves, ✕
+  clears the text, and + opens a new tab. Above the field, one list grows
+  upward: what Go will do, tinted, the other reading of the text, then up
+  to five matching tabs and recent pages, the best nearest your thumb.
+  Typing no longer makes the list blank and come back with every key, and
+  the page's own address offers no Go button until you change it. Home's
+  search field uses the same list.
+- Browser preferences (appearance, tab count, closing unused tabs, Home
+  sections and text size) commit to disk off the main thread before the
+  choice is published. A failed write shows a generic failure and leaves
+  the previous choice; text size's immediate preview rolls back, and rapid
+  steps keep their order.
+- Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
+  Guava pins together so CI tests the combined build dependency set.
+- Play stays within reach on pages whose own video player shows an error:
+  the offer to open the page's audio or video in the player now stays
+  until you play or close it, the address field shows Play while the page
+  has media, and tapping the page's player brings the offer back.
 - The engine sleeps until a message or pending deadline instead of polling
   every 250 ms. Capture, dialog, reload-pull, media and paint retries stay timed.
 - The media notice offers Play.
@@ -215,6 +243,15 @@ All notable changes to this project are documented here. The format follows
 - Every verified APK (release, Engine and CI artifacts, `scripts/build.sh`)
   must carry the third-party notices. The device checks' test APK is no
   longer a downloadable CI artifact.
+- Native checks keep host memory, process and cgroup samples and host and
+  guest kernel logs to investigate intermittent ADB loss. Tests, VM
+  resources, renderer and timeouts stay unchanged; no cause is claimed.
+  Launch supervision records the owned emulator child's exit or signal
+  and reaps it. Old pid files are evidence, never permission to stop a process.
+  Bounded crash classification runs on the test runner and exports only known
+  SDK module names and exception codes, never raw dumps or private payloads.
+  The device job uses a pinned Ubuntu 24.04 LTS host for a bounded environment
+  trial after host-emulator SIGSEGVs, not a claimed root-cause fix.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -223,6 +260,9 @@ All notable changes to this project are documented here. The format follows
   stop running three database reads on the command queue, and the open
   tab count is a COUNT query instead of loading every open row; taps
   and page events share that queue, so it stays short.
+- The active tab is one joined query instead of a session read plus a tab
+  read, and releasing hidden renderers reads the open tabs once instead of
+  once per live view.
 - A complete pine and ivory palette in light and dark mode: sheets,
   dialogs, menus, snackbars and the tab count no longer show Material's
   default purple or red, and the bottom bar's color reaches the screen
@@ -267,16 +307,56 @@ All notable changes to this project are documented here. The format follows
   current tab is highlighted. Day headers name the weekday for the past
   week. TalkBack announces the scope chips as tabs and says what tapping
   a row does.
+- Recent's scope chips wrap onto a second line at a narrow width or a
+  large font, so Hister and Karakeep stay visible instead of scrolling
+  off-screen. The local filter's keyboard Search key puts the keyboard
+  away; the filter still applies as you type.
 - The Hister field's hint reads "Words you remember, searched in Hister…".
 - Reader view sets the article in a serif reading face (the system's Noto
   Serif) with a larger title, and has a "Show the page" button at the top.
 
+### Changed
+
+- Engine events name the schema they are written for, and a native/Kotlin
+  schema mismatch fails loudly instead of misparsing events one by one.
+
 ### Fixed
 
-- A device clock set far forward (manual date change, bad NTP sync) no
-  longer wipes local history and closes unused tabs in one go: retention
-  now anchors the wall clock to the monotonic clock, persisted across
-  process death, and clamps forward jumps.
+- Integration fixtures reserve unreachable loopback ports until test cleanup,
+  so another listener cannot turn an offline test into a real HTTP request.
+  Their connect waits are bounded separately from response reads.
+- Malformed engine events and failed shared-link/file operations log exception
+  classes, not diagnostic values that can quote private input.
+- Settings no longer decodes whole job payloads (up to 256 KiB of
+  captured page text) per row while composing the queue. Jobs record
+  their address at enqueue in a `url` column (schema 6, auto-migrated).
+  If no address can be recovered, a row shows "Unknown page", never its
+  raw dedupe key or report id. Legacy payloads are decoded off the UI
+  thread; flow updates may repeat that work. Finished captures and reports
+  drop the address with their payload; failed and waiting rows keep it
+  for their retry.
+- The site-report service refuses JSON nested deeper than 32 levels on
+  every Python. It used to rely on Python's recursion limit, which
+  Python 3.15 no longer reaches, so CI on the new runner image failed.
+- The report service drops old hourly rate-limit windows without scanning
+  them on every report. It also syncs a new database's directory entry
+  where supported, reducing the risk of losing that entry after power loss.
+- The messages shown when the engine is missing, failed or starting, and the
+  page-crashed message with its Reload button, can no longer run off a small
+  screen at large font sizes: they scroll instead. Address sheets identify
+  their pane, and status messages expose polite accessibility updates.
+- Karakeep's connection check verifies a bookmarks-list response before
+  reporting a working connection. A proxy login page or unrelated HTTP 200
+  response now reports the wrong address instead of a false success.
+- Check connection in Settings no longer tells you to check the address
+  when Karakeep, Hister or the report service is failing or busy. A
+  request timeout (HTTP 408), rate limit (429) or server error (5xx) now
+  says the server answered with an error and to try again later, matching
+  the statuses queued saves, captures and reports retry.
+- A search typed into the new-tab page's field survives switching to a page
+  tab and back. Before, the draft was dropped with the field and you typed
+  it again. Starting a new entry clears the earlier draft and shared prefill
+  instead of restoring them into a different tab or entry.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -292,6 +372,12 @@ All notable changes to this project are documented here. The format follows
 - Reloading a page sends the referrer of the request that first loaded it,
   as Firefox does, instead of the page's own address. A bot check that
   compared the two requests turned the reload away.
+- Pages behind a bot check that measures SVG shapes no longer block
+  Combray as automated: Servo now answers SVG's `getBBox()`,
+  `isPointInFill()` and `createSVGPoint()` (with `createSVGMatrix()` and
+  `createSVGRect()`), as other browsers do, so the check can finish.
+  Chart libraries that lay out labels with `getBBox()` work on shapes too;
+  boxes of SVG text are not computed yet.
 - Pages whose scripts check for SVG's `SVGAnimatedString`, as some site
   generators' link prefetching does, no longer stop with a script error:
   Servo now has the interface, and `className` on SVG elements reflects
@@ -356,6 +442,15 @@ All notable changes to this project are documented here. The format follows
   that already showed its notice. Media found while a page you asked for
   never arrives (a download, a 204 answer) is offered on the page you are
   still on.
+- Queue UI tests dispose Compose before closing Room, so live collectors
+  no longer query a closed database during fixture cleanup.
+- Service-form tests run tightly ordered callbacks in one UI turn, so test
+  synchronization cannot start a save before the edit they mean to exercise.
+- Service-form tests keep main-thread continuations running while waiting
+  for fixture admission, instead of blocking their own pending Room replies.
+- Preference feedback tests dispose Compose before closing their fixture scope
+  and Room, and release a failed test's scripted commit latch before the
+  bounded cancel-and-join, so cleanup cannot hang on an admitted write.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -373,6 +468,9 @@ All notable changes to this project are documented here. The format follows
   `local.properties`.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
+- A failed history commit no longer lets a capture label the new page's
+  text with the old address. Capture requests and replies check the
+  persisted visit and document identity, including same-address reloads.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
   the sentence "Unknown content type (application/pdf).", and reader view
   no longer offers that sentence as an article. Servo shows such a file as
@@ -420,10 +518,35 @@ All notable changes to this project are documented here. The format follows
 - An engine that fails before it is ready (for example a graphics driver
   error) now shows the engine-failed message instead of claiming the
   engine is still starting forever.
+- Recent's Hister and Karakeep scopes no longer send the local filter
+  to the server on their own: the panels prefill the field, and the first
+  request needs a keystroke or the keyboard's Search key inside the
+  panel. A blank Karakeep field still lists the newest bookmarks, and an
+  unchanged query is resent by an explicit submit.
+- The Hister and Karakeep scopes keep the last results on screen while a
+  new search is in flight, show a progress line, and a failed page keeps
+  its rows and cursor for a retry. Karakeep's Load more waits for the
+  current page, so repeated taps no longer start duplicate requests or let
+  an older page append rows or release a newer request's gate.
+- A Hister search whose answer names one address twice, as when its
+  index and its history both match, no longer crashes Recent's Hister
+  list with duplicate row keys. Rows are deduplicated by the exact
+  address, preserving promoted-history order.
 - Hister search no longer shows a "More results" button that does nothing
   after the last page, or under "No results in Hister." While more results
   load, the button waits under a progress bar; if they fail, the reason
   shows above the results.
+- A service attempt now sends at most one request. A handler that sent
+  twice could have re-sent a request that may already have reached the
+  server after failover to the alternate address; the attempt fails loudly
+  instead, and the queue does not retry the violation.
+- Settings service forms admit one configuration action at a time. A second
+  tap while a save or check runs is ignored, and a delayed result no longer
+  clears or describes a newer edit: the address and key tapped are the ones
+  saved, and the draft stays.
+- Save settings and Check connection in Settings wrap to two lines
+  instead of running off the screen when large font settings make them
+  too wide for one row.
 - Changing Karakeep's server address cancelled every unsent save without
   a word. Those saves now wait in Settings, which offers to send them to
   the current address or discard them.
@@ -437,15 +560,28 @@ All notable changes to this project are documented here. The format follows
   stayed open; they now update every 30 seconds.
 - After scrolling Recent, a new filter or scope could leave its first
   matches out of view; the list now starts at the top.
+- The Recent list reserves the height of its Undo snackbar, so the last
+  row can scroll clear of it instead of sitting under the action.
 - Starting the app with open tabs no longer shows "New tab" for a moment
   before the restored page, as if the tabs were lost.
 - A save or capture made while its server cannot be reached no longer stops
   after ten tries: attempts that could not connect sent nothing and do not
   count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
   and asks for attention once its server has not answered for a week.
+- Hister capture admission is transactional: a replacement capture is
+  charged only for the room it takes, and a capture paused after claim is
+  held without spending an attempt. Unchanged text is sent again after a
+  failed or discarded capture, but not after Hister accepted it or refused
+  it on purpose (406/422).
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Two services configured for the first time at the same time could race the
+  device's first Keystore key creation, and one could replace the key the
+  other's credential had just been sealed with, silently losing it. Key
+  creation is now serialized process-wide across store instances. The device
+  check uses its own Keystore alias and directory, so it never deletes or
+  overwrites the app's real credential.
 - Addresses with common credential parameters (`auth_token`, `accessToken`,
   `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
   `code` with its `state`, session IDs) could be saved to Karakeep or captured
@@ -454,6 +590,8 @@ All notable changes to this project are documented here. The format follows
   such as `pageToken` and `NextToken` are still allowed. In a fragment only
   `name=value` pairs count, so an anchor such as `#token-usage` is not
   mistaken for a credential.
+- Scrolling a long article in reader view does less work: each block's text
+  is built once, not again every time the screen around it recomposes.
 - Reader view showed numbered lists as bullets, and section headings
   smaller than the text under them. Numbered items now show the page's
   numbers, and no heading is smaller than the body text.
@@ -480,6 +618,11 @@ All notable changes to this project are documented here. The format follows
   another app at device data (`file:`, `content:`). The page stays on screen, but
   Servo still stops what it was loading: a link tapped before the page
   finished loading leaves it unfinished.
+- A share or "Search with Kagi" selection of any size is handled without
+  copying and scanning all of it on the main thread, which could jank or
+  freeze the app for a multi-megabyte share. A link is now found up to the
+  first mebibyte of the share, past the old 64 KiB scan point; a link that
+  runs past the limit is refused rather than cut.
 - After an HTTP sign-in, the page's address carried the username and
   password (Servo 0.6.0 puts them in the URL), so the address bar,
   Recent, Share and restore after a restart showed or kept them. The
@@ -490,6 +633,9 @@ All notable changes to this project are documented here. The format follows
 - Proxy sign-ins Servo saved in its profile are deleted when the engine
   starts instead of being sent again after a restart. They still reach
   the disk while the app runs until a Servo patch change.
+- Large Hister requests retain the longest text prefix that fits the JSON
+  byte limit, without splitting Unicode characters or over-trimming escaped
+  text. Multibyte titles and Karakeep search queries stay bounded too.
 - With Hister capture on, a large page could stop responding for seconds
   after it loaded while Combray read its text. Reading now stops in time
   and keeps what it has, and waits while you scroll or tap.
@@ -520,6 +666,19 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- A screenshot encoder Error no longer leaves a site report preparing
+  forever. The draft continues without a screenshot; cancellation still
+  stops preparation rather than being reported as a copy failure.
+- The browser starts once and keeps working after an internal error. A
+  second or concurrent start no longer starts a second work queue, and an
+  `Error` in one state update (for example running out of memory while
+  preparing an article) no longer silently stops every later navigation,
+  tab and history action until the app is restarted. Cancellation still
+  stops the queue.
+- A crashed renderer's pending capture, article, find and keyboard work is
+  dropped, and only its own: a stale crash from a replaced view no longer
+  clears a healthy tab's requests, and a ready Reader snapshot survives its
+  renderer's crash.
 - The durable queue: one broken job cycle (a storage error, a recorder
   bug) no longer strands the jobs behind it or skips their wakeup; a job
   whose worker died before finishing stops at the attempt limit instead
@@ -530,6 +689,13 @@ All notable changes to this project are documented here. The format follows
   encrypted just because the URL starts with `https`. Cleartext HTTP is
   still called not encrypted. Page info no longer claims a verified
   connection the engine has not reported.
+- System Back and the bottom bar's Back now answer an open page question
+  (a script dialog, a `<select>`, sign-in, or the leave-page prompt, where
+  Back answers Stay) instead of navigating the page behind it.
+- Files picked for a page's upload survive a delayed startup cleanup: the
+  one-time cleanup finishes before the first pick is copied and removes
+  only copies from earlier processes. A provider's failure message, which
+  can name a private attachment, no longer reaches logcat.
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.
@@ -556,12 +722,18 @@ All notable changes to this project are documented here. The format follows
 - Abandoned Hister captures expire after seven days, including when a
   running queue crosses the age limit. Expiry clears page bodies and
   rejects late results without invalidating a live request's lease.
+- The Paste/Cancel menu of a page's text field opens above the keyboard
+  at the bottom of the screen instead of at its top-left corner.
 - A page's prompt dialog labels its text field, so TalkBack names it.
 - A device check whose fixture server could not start (another run holds
   the port) now stops and says so instead of testing against no page and
   reporting timeouts.
 - `scripts/check-app.sh` skipped the reader view checks: its default run
   now covers every device-check class, and `--list` prints them.
+- Forgetting a page or site cancels its scheduled capture, including other
+  fragments of the same page and timers already queued for execution.
+- Hister capture keeps spaces between inline pieces of a sentence, so
+  adjacent links no longer turn into a single search word.
 - Forgetting a page or site commits local deletion and queued Hister
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch
@@ -585,6 +757,14 @@ All notable changes to this project are documented here. The format follows
   stale APKs that do not match Gradle output metadata. Failed copying or
   hashing preserves the previous APK and checksum. Release CI applies the same
   packaging checks before staging an arm64 artifact.
+- A Karakeep save is recorded as soon as its bookmark is acknowledged, so a
+  failed list step, a deleted list or an offline retry no longer hides the
+  save or creates a second bookmark. The receipt stays bound to its server,
+  credential generation and claim: another account at the same address must
+  recover its own bookmark id. A failed create is not called a list failure,
+  and a corrupt payload no longer rolls back an acknowledged delivery.
+  An older saved record no longer masks a new save still pending or waiting
+  for a connection.
 - A Karakeep save with a chosen list stays pending if its acknowledgment
   has no usable bookmark ID. Duplicate-safe retries recover the ID and
   finish list membership, or stop with a visible failure.
@@ -603,6 +783,34 @@ All notable changes to this project are documented here. The format follows
   credentials, also as one word of a longer text, so a search such as
   `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
   image digest (`nginx:1.25@sha256:…`) is still searched.
+- Service setup accepts Unicode (IDN) names without mapping deviation
+  characters to a different server. A trailing dot or default port keeps
+  existing credential, queue and saved-page bindings. Explicit ports must
+  be 1–65535: zero, negative, overflowing, empty or malformed ports are
+  refused before a connection, and unsupported addresses report failure.
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
+- A page field's keyboard now reports the page as editable only while a
+  field has focus, so TalkBack no longer announces the whole page as an
+  editable field and the keyboard cannot come back with no field behind
+  it. The keyboard's Next action moves focus like Tab instead of
+  submitting the field, and a page change retires the old input
+  connection, so a delayed word cannot land in the page that replaced it.
+- A deletion request longer than the bridge's bounded edit length
+  (1,000 characters in either direction), or a negative one, is refused
+  instead of clipped: the keyboard is no longer told an edit succeeded
+  when only part of it was sent. A cursor position or selection region
+  the page cannot represent is refused too, rather than acknowledged
+  while ignored. Unmapped keyboard actions (including Previous) no longer
+  submit the form as Enter; unsupported replacement ranges and code-point
+  deletions do not pretend to edit the page through Android's private buffer.
+- A site whose name begins with "www." and has no further dots, such as
+  `www.com`, no longer shows as its bare suffix (`com`) in the address
+  bar, tab switcher, Recent and the new-tab page: the label is dropped
+  only when a longer name follows it.
+- The page no longer flickers when the bottom bar hides or shows as you
+  scroll. For one frame, the page appeared stretched and shifted, with a
+  white band where the bar had been. The page area now keeps its size
+  under the bar, pages lay out above the bar, and a hiding bar leaves
+  only once the page under it is drawn.

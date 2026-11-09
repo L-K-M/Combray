@@ -40,12 +40,12 @@ class PdfTest {
         device.awaitEngine()
         device.closeAllTabs()
         // The viewer's background colour is checked in the light appearance.
-        device.settings.setThemeMode(ThemeMode.LIGHT)
+        device.setThemeMode(ThemeMode.LIGHT)
     }
 
     @After
     fun restoreTheme() {
-        device.settings.setThemeMode(originalTheme)
+        device.setThemeMode(originalTheme)
     }
 
     private fun key(name: String) = "$name${System.currentTimeMillis()}"

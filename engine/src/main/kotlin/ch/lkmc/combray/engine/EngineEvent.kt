@@ -87,6 +87,12 @@ sealed interface EngineEvent {
 
     data object SurfaceUnbound : EngineEvent
 
+    /**
+     * A frame on screen shows the page above the [inset] pixels that the app's viewport request
+     * [request] said its controls cover, the pixels it uncovered included.
+     */
+    data class ViewportPainted(val request: Long, val inset: Int) : EngineEvent
+
     data class TabCreated(val view: ViewRef) : EngineEvent
 
     data class TabSelected(val view: ViewRef) : EngineEvent
@@ -189,6 +195,8 @@ sealed interface EngineEvent {
         val multiline: Boolean,
         val kind: String,
         val showKeyboard: Boolean,
+        /** Native editing-context identity, not an address or an Android view identity. */
+        val context: Long = 0,
     ) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
@@ -212,6 +220,13 @@ sealed interface EngineEvent {
         override fun toString() = "MediaBlocked(view=$view, document=$document, kind=$kind, hasUrl=${url != null})"
     }
 
+    /**
+     * The user tapped a media element of [document] that has no data (the engine cancelled its load),
+     * or controls the page laid over one, after the page reported a media address. The page's
+     * media can be offered again.
+     */
+    data class MediaTapped(val view: ViewRef, val document: Long) : EngineEvent
+
     /** A page control waits for [EnginePort.respondToControl] with [control]. */
     data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
 
@@ -234,18 +249,26 @@ sealed interface EngineEvent {
     data class Other(val type: String) : EngineEvent
 
     companion object {
+        /** The event format this parser speaks; every event carries it (native/src/events.rs). */
+        private const val SCHEMA = 1
+
         private val json = Json { ignoreUnknownKeys = true }
 
         /**
-         * Parses one event. Throws [IllegalArgumentException] for malformed JSON or a known
-         * event type with missing fields: the native side and this parser must agree.
+         * Parses one event. Throws [IllegalArgumentException] for malformed JSON, an unknown
+         * schema, or a known event type with missing fields: the native side and this parser
+         * must agree.
          */
         fun parse(text: String): EngineEvent {
             val event = json.parseToJsonElement(text).jsonObject
+            // A schema bump must fail here, loudly, rather than misparse events one by one.
+            val schema = event.int("schema")
+            require(schema == SCHEMA) { "engine event schema $schema, expected $SCHEMA" }
             return when (val type = event.string("type")) {
                 "engine_ready" -> EngineReady(event.int("width"), event.int("height"), event.string("user_agent"))
                 "surface_bound" -> SurfaceBound(event.int("width"), event.int("height"))
                 "surface_unbound" -> SurfaceUnbound
+                "viewport_painted" -> ViewportPainted(event.long("request"), event.int("inset"))
                 "tab_created" -> TabCreated(event.view())
                 "tab_selected" -> TabSelected(event.view())
                 "tab_closed" -> TabClosed(event.view())
@@ -302,6 +325,7 @@ sealed interface EngineEvent {
                     event.boolean("multiline"),
                     event.optionalString("kind") ?: "text",
                     event.boolean("show_keyboard"),
+                    event.long("context"),
                 )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
@@ -312,6 +336,7 @@ sealed interface EngineEvent {
                     event.optionalString("url"),
                     event.optionalString("referrer"),
                 )
+                "media_tapped" -> MediaTapped(event.view(), event.long("document"))
                 "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
                 "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))

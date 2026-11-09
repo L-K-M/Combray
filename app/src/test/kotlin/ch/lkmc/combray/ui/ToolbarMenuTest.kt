@@ -304,6 +304,7 @@ class ToolbarMenuTest {
                         readerDisplay = ReaderDisplay.PAGE,
                         onStop = {},
                         onReader = {},
+                        onPlayMedia = null,
                         onHister = {},
                         onKarakeep = {},
                         onNewTab = {},

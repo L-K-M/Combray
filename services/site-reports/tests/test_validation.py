@@ -749,6 +749,22 @@ class JsonDecodingTest(ValidationTestCase):
         body = b'{"a":' * 50_000 + b"1" + b"}" * 50_000
         self.assert_rejected(body, ErrorCode.INVALID_JSON, None)
 
+    def test_nesting_past_the_limit_is_refused_before_any_recursion_limit(self) -> None:
+        body = b'{"a":[' * 20 + b"1" + b"]}" * 20
+        error = self.assert_rejected(body, ErrorCode.INVALID_JSON, None)
+        self.assertEqual(error.detail, "nested too deeply")
+
+    def test_the_depth_limit_boundary_is_not_off_by_one(self) -> None:
+        # No report field allows nesting this deep, so a body at the limit
+        # fails the schema instead; that error is what shows the depth rule
+        # accepts exactly _MAX_JSON_DEPTH containers. One container more is
+        # refused as too deep.
+        at_limit = b'{"a":[' * 15 + b'{"a":{"a":1}}' + b']}' * 15
+        self.assert_rejected(at_limit, ErrorCode.UNKNOWN_FIELD, "a")
+        past = b'{"a":[' * 15 + b'{"a":{"a":{"a":1}}}' + b']}' * 15
+        error = self.assert_rejected(past, ErrorCode.INVALID_JSON, None)
+        self.assertEqual(error.detail, "nested too deeply")
+
     def test_a_body_with_too_many_values_is_refused_before_parsing(self) -> None:
         body = b'{"client":[' + b"{}," * 70_000 + b"{}]}"
         error = self.assert_rejected(body, ErrorCode.INVALID_JSON, None)
