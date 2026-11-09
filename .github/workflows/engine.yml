@@ -301,6 +301,12 @@ jobs:
               2> servo-checkout/logs/host-kernel-error.log; then
             echo "::warning::host kernel diagnostics unavailable"
           fi
+          if ! sudo -n journalctl --no-pager --output=short-iso \
+              --unit=systemd-oomd.service \
+              > servo-checkout/logs/host-oomd.log \
+              2> servo-checkout/logs/host-oomd-error.log; then
+            echo "::warning::host userspace OOM diagnostics unavailable"
+          fi
 
       - name: Upload device-check evidence
         if: always()
