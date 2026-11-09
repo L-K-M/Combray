@@ -265,6 +265,7 @@
     <string name="check_unauthorized">The server rejected the API key.</string>
     <string name="check_wrong_address">The server answered, but not like Karakeep (HTTP %1$d). Check the address.</string>
     <string name="check_unreachable">Could not reach the server (%1$s).</string>
+    <string name="check_server_error">The server answered with an error (HTTP %1$d). Try again later.</string>
     <string name="check_running">Checking…</string>
     <string name="queue_title">Unfinished saves</string>
     <string name="queue_empty">Nothing waiting.</string>

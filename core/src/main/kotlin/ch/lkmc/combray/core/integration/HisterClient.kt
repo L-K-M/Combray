@@ -83,7 +83,8 @@ class HisterClient(private val transport: HttpTransport) {
         is HisterSearch.Results -> ConnectionCheck.Connected(result.total?.toString())
         HisterSearch.Unauthorized -> ConnectionCheck.Unauthorized
         is HisterSearch.Unreachable -> ConnectionCheck.Unreachable(result.category)
-        is HisterSearch.ServerError -> ConnectionCheck.WrongAddress(result.status)
+        // Every other status lands here; only the ones the outbox retries mean server trouble.
+        is HisterSearch.ServerError -> HttpStatus.classifyCheckFailure(result.status)
         HisterSearch.Malformed -> ConnectionCheck.WrongAddress(200)
     }
 
