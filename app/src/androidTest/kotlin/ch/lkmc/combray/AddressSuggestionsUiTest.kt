@@ -1,6 +1,8 @@
 package ch.lkmc.combray
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -26,7 +28,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.policy.AddressDecision
 import ch.lkmc.combray.core.policy.AddressPolicy
-import ch.lkmc.combray.ui.AddressSheetContent
+import ch.lkmc.combray.ui.AddressEditorContent
 import ch.lkmc.combray.ui.CombrayTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,10 +37,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The address editor's typing layout on real bounds: local matches above the anchored field,
- * its New tab beside it, and only the match rows scrolling when they overflow. [AddressSheetContent]
- * runs without the sheet's window, which software emulation cannot focus (docs/BUILDING.md), so
- * the field below is the one the user types into.
+ * The address editor's typing layout on real bounds: one panel above the anchored field, with
+ * what Go does nearest it, the other reading above that and the local matches above those, best
+ * first; Close and New tab flank the field, and only the panel scrolls when it overflows. The
+ * editor sits at the bottom like the bar it lives in. [AddressEditorContent] is checked apart
+ * from the browser, so the field below is the one the user types into.
  */
 @RunWith(AndroidJUnit4::class)
 class AddressSuggestionsUiTest {
@@ -72,24 +75,35 @@ class AddressSuggestionsUiTest {
         }
 
         val field = compose.onNode(FIELD).getUnclippedBoundsInRoot()
-        val heading = compose.onNodeWithText("On this device").getUnclippedBoundsInRoot()
-        assertTrue(heading.bottom <= field.top)
-        for (title in listOf("A garden through the seasons", "Garden notes")) {
-            assertTrue(row(title).let { compose.onNode(it).getUnclippedBoundsInRoot().bottom <= field.top })
-        }
+        // Bottom up: what Go does, the other reading, then the matches, the best one lowest.
+        val search = compose.onNode(row("Search Kagi for")).getUnclippedBoundsInRoot()
+        val other = compose.onNode(row("Go to https://")).getUnclippedBoundsInRoot()
+        val tab = compose.onNode(row("Garden notes")).getUnclippedBoundsInRoot()
+        val visit = compose.onNode(row("A garden through the seasons")).getUnclippedBoundsInRoot()
+        assertTrue(search.bottom <= field.top)
+        assertTrue(other.bottom <= search.top)
+        assertTrue(tab.bottom <= other.top)
+        assertTrue(visit.bottom <= tab.top)
 
-        // New tab beside the field on its own row, at least 48dp to touch.
+        // New tab beside the field on its row, at least 48dp to touch.
         val plus = compose.onNodeWithContentDescription("New tab")
         val plusBounds = plus.getUnclippedBoundsInRoot()
-        assertTrue(plusBounds.right <= field.left)
+        assertTrue(plusBounds.left >= field.right)
         assertTrue(plusBounds.top < field.bottom && plusBounds.bottom > field.top)
         val touch = plus.fetchSemanticsNode().touchBoundsInRoot
         with(compose.density) {
             assertTrue(touch.width.toDp() >= 48.dp && touch.height.toDp() >= 48.dp)
         }
+    }
 
-        // The primary submission stays obvious: the Kagi button under the field row.
-        compose.onNodeWithText("Search Kagi for", substring = true).assertIsDisplayed()
+    @Test
+    fun theCurrentAddressOffersNoActionUntilEdited() {
+        show(DEFAULT_FONT) {
+            Editor(matches = emptyList(), offersDecision = false)
+        }
+        compose.onNode(FIELD).assertIsDisplayed()
+        compose.onNodeWithText("Search Kagi for", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Go to", substring = true).assertDoesNotExist()
     }
 
     @Test
@@ -112,10 +126,11 @@ class AddressSuggestionsUiTest {
         compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
         compose.onNodeWithContentDescription("Close").assertIsDisplayed()
 
-        // The list outgrew its region above the field: the last row is clipped below the window
-        // edge instead of pushing the field or the buttons off.
+        // The panel outgrew its room above the field: it starts at its bottom, so the least
+        // likely match leaves at the top instead of pushing the field or the buttons off, and
+        // what Go does stays in view next to the field.
         val last = compose.onNode(hasText("Garden page 8", substring = true)).getUnclippedBoundsInRoot()
-        assertTrue(last.top >= window.bottom)
+        assertTrue(last.bottom <= window.top)
         compose.onNodeWithText("Search Kagi for", substring = true).assertIsDisplayed()
     }
 
@@ -161,6 +176,12 @@ class AddressSuggestionsUiTest {
         compose.onNode(row("A garden through the seasons")).performClick()
         assertEquals(listOf(AddressPolicy.interpret("https://example.org/garden").primary), decisions)
 
+        // What Go does, and the other reading, each one tap.
+        compose.onNode(row("Search Kagi for")).performClick()
+        compose.onNode(row("Go to https://")).performClick()
+        val reading = AddressPolicy.interpret("garden")
+        assertEquals(listOf(AddressPolicy.interpret("https://example.org/garden").primary, reading.primary, reading.alternative), decisions)
+
         compose.onNodeWithContentDescription("New tab").performClick()
         assertEquals(1, newTabs)
     }
@@ -169,18 +190,34 @@ class AddressSuggestionsUiTest {
     private fun row(title: String): SemanticsMatcher =
         hasClickAction() and hasText(title, substring = true)
 
+    /** At the bottom of the window, as in the bar: the panel grows upward from the field. */
     @Composable
     private fun Editor(
         matches: List<RecentItem>,
         target: String? = null,
+        offersDecision: Boolean = true,
         onDecision: (AddressDecision) -> Unit = {},
         onSelectTab: (String) -> Unit = {},
         onNewTab: () -> Unit = {},
         onDismiss: () -> Unit = {},
-    ) = AddressSheetContent(
+    ) = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Content(matches, target, offersDecision, onDecision, onSelectTab, onNewTab, onDismiss)
+    }
+
+    @Composable
+    private fun Content(
+        matches: List<RecentItem>,
+        target: String?,
+        offersDecision: Boolean,
+        onDecision: (AddressDecision) -> Unit,
+        onSelectTab: (String) -> Unit,
+        onNewTab: () -> Unit,
+        onDismiss: () -> Unit,
+    ) = AddressEditorContent(
         field = TextFieldValue("garden"),
         onFieldChange = {},
         matches = matches,
+        offersDecision = offersDecision,
         target = target,
         onDecision = onDecision,
         onSelectTab = onSelectTab,

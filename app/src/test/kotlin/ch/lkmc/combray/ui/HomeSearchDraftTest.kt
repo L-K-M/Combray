@@ -28,7 +28,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Home's search field shares the address editor with the page's address sheet. The editor's
+ * Home's search field shares the address editor with a page's address in the bar. The editor's
  * draft is `rememberSaveable` keyed by `(target, restartKey)`, so it survives rotation but not
  * a tab switch: the home slot leaves composition with the bottom bar, and the draft goes with
  * it. PR 283 wraps the home slot in a `SaveableStateProvider` to keep it.
@@ -217,8 +217,9 @@ class HomeSearchDraftTest {
                         menuButton = {},
                         onCopyAddress = {},
                         onSwipeTab = {},
-                        homeMode = AddressEditorMode.EDITING,
-                        homeSearch = {
+                        // As BrowserScreen passes it: Home's mode on Home; a page is not being edited.
+                        editorMode = if (shownTab?.url == null) AddressEditorMode.EDITING else AddressEditorMode.IDLE,
+                        editor = {
                             val editor: @Composable () -> Unit = {
                                 AddressEditor(
                                     target = shownTab?.id,

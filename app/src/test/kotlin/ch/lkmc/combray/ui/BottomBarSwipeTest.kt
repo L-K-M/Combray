@@ -2,6 +2,9 @@ package ch.lkmc.combray.ui
 
 import android.app.Application
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -203,6 +206,27 @@ class BottomBarSwipeTest {
         assertNoFeedback()
     }
 
+    /** A page's address opens in the bar: the editor takes it whole, and a drag moves the cursor. */
+    @Test
+    fun editingAPagesAddressReplacesTheBarAndDoesNotSwitchTabs() {
+        showBar(mode = AddressEditorMode.EDITING, editor = { Box(Modifier.fillMaxWidth().height(64.dp).testTag(EDITOR)) })
+        compose.onNodeWithContentDescription("Edit address", substring = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Back").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Close tab").assertDoesNotExist()
+
+        compose.onNodeWithTag(EDITOR).assertIsDisplayed().performTouchInput { swipe(center, center + Offset(swipeDistance(), 0f)) }
+        compose.runOnIdle { assertTrue(steps.isEmpty()) }
+        assertNoFeedback()
+    }
+
+    /** Not editing, a page keeps its address and actions even when the bar has an editor slot. */
+    @Test
+    fun anIdlePageKeepsItsAddressBesideTheEditorSlot() {
+        showBar(editor = { Box(Modifier.testTag(EDITOR)) })
+        address().assertIsDisplayed()
+        compose.onNodeWithTag(EDITOR).assertDoesNotExist()
+    }
+
     @Test
     fun aCancelledSwipeDoesNotSwitchTabs() {
         showBar()
@@ -317,6 +341,7 @@ class BottomBarSwipeTest {
         mode: AddressEditorMode = AddressEditorMode.IDLE,
         direction: LayoutDirection = LayoutDirection.Ltr,
         media: Boolean = false,
+        editor: (@Composable () -> Unit)? = null,
     ) {
         shownTab = tab
         compose.setContent {
@@ -352,7 +377,8 @@ class BottomBarSwipeTest {
                             },
                             onCopyAddress = { clicks += "copy" },
                             onSwipeTab = { steps += it },
-                            homeMode = mode,
+                            editorMode = mode,
+                            editor = editor,
                         )
                     }
                 }
@@ -362,6 +388,7 @@ class BottomBarSwipeTest {
 
     private companion object {
         const val PLAY_MEDIA = "Play audio or video"
+        const val EDITOR = "editor"
         val PAGE = ActiveTab("tab", "https://example.org/", "Example", false, true, false, false, true)
     }
 }

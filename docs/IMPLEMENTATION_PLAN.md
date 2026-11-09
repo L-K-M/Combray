@@ -94,7 +94,7 @@ or referrer-gated images may fail, and a server can return different content. `d
 and `blob:` images, arbitrary file downloads and authenticated image export remain
 unsupported. [Checks and limits](ENGINE_SPIKE.md#53-image-downloads-7-november-2026).
 
-Tapping the address surface opens an editable address/search sheet above the keyboard. Select the current address (on a Kagi results page, its search words) for replacement. Provide a clear explicit submit action. Keep the text and primary actions above IME and system gesture insets. Handle predictive/system Back in this order: dismiss keyboard, transient sheet or find bar, navigate the active live tab back if available, return from a tab a page opened to its opener (see Closing below), then use normal Android activity behavior. Do not turn Back into a destructive history clear. Test Back with nested sheets and a focused page field.
+Tapping the address surface edits it in place: the bottom bar becomes the address/search field above the keyboard, with no separate sheet (owner request, 9 November 2026), and the page dims behind it. Select the current address (on a Kagi results page, its search words) for replacement. Provide a clear explicit submit action: above the field, the row for what Go does, tinted, then the other reading of the text, then the local matches, best nearest the field; the unchanged current address offers no row, and Go still submits it. The engine surface keeps its size and the page its layout while the editor holds the keyboard. Keep the text and primary actions above IME and system gesture insets. Handle predictive/system Back in this order: dismiss keyboard, transient sheet or find bar, navigate the active live tab back if available, return from a tab a page opened to its opener (see Closing below), then use normal Android activity behavior. Do not turn Back into a destructive history clear. Test Back with nested sheets and a focused page field.
 
 Pull down at the page's top and release to reload (owner request, 31 October 2026). The proposed threshold is 80dp beyond touch slop, with a progress ring. The compositor checks the root, touched scroll chain and pinch viewport at the start and release; an unknown position does not arm a pull. Short pulls, cancellation, horizontal gestures, multi-touch, page-prevented touches and CSS-owned vertical drags do not reload. The coordinator rejects stale, hidden, crashed, loading and Reader documents. [Checks](ENGINE_SPIKE.md#35-pull-to-reload-31-october-2026).
 
@@ -356,7 +356,7 @@ Build `https://kagi.com/search?q=<UTF-8 query encoded exactly once>` using a URI
 
 Address classification is explicit and testable: complete HTTP(S) URLs navigate; plausible scheme-less hosts may gain `https://`, except private, loopback and link-local IP literals and `localhost`, which gain `http://` with `https://` offered instead (owner decision, 22 October 2026; Chrome does not upgrade them either); home-network names (`.lan`, `.local`, `.home.arpa`, `.internal`, `.localdomain`, or one word with a port) offer `http://` instead of a search; text queries search; unsupported schemes produce a clear decision instead of becoming an accidental web search. Include single-label intranet hosts, ports, IPv4/IPv6, IDNs, spaces, bangs, `&`, `#`, emoji and pasted URLs in the policy tests. Show the interpretation in the submit UI where ambiguous. Do not prepend HTTPS to `javascript:` or treat credentials in a URL as harmless; a scheme-less `user:password@host`, also as one word of a longer text, is rejected, not searched (a content digest after the `@`, as in `nginx:1.25@sha256:…`, is no address).
 
-No network autosuggest in the first version: search typing stays local until submit. Once you edit the text, the address sheet lists up to five matches in all, open tabs first, then recent pages, from the local Recent projection; a tab match switches to that exact tab, and a history match opens through the address policy where the typed address would: in the tab being edited, or in a new tab when the editor is for a new tab (owner decision, 22 October 2026). On a Kagi results page the sheet starts with the search query instead of the results address (with the address itself when the query is empty or malformed). First-run Kagi use may require normal web login; test that login and cookie persistence with Servo. Kagi's optional private-session login link is a credential-bearing URL and is not the default integration. If added later, establish its exact supported format and prevent it from entering Recent, Hister, Karakeep, shares and diagnostics. Do not guess a token parameter or store the link as ordinary history.
+No network autosuggest in the first version: search typing stays local until submit. Once you edit the text, the address editor lists up to five matches in all, open tabs first, then recent pages, from the local Recent projection; a tab match switches to that exact tab, and a history match opens through the address policy where the typed address would: in the tab being edited, or in a new tab when the editor is for a new tab (owner decision, 22 October 2026). On a Kagi results page the editor starts with the search query instead of the results address (with the address itself when the query is empty or malformed). First-run Kagi use may require normal web login; test that login and cookie persistence with Servo. Kagi's optional private-session login link is a credential-bearing URL and is not the default integration. If added later, establish its exact supported format and prevent it from entering Recent, Hister, Karakeep, shares and diagnostics. Do not guess a token parameter or store the link as ordinary history.
 
 ### Site reports
 
@@ -769,6 +769,28 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+Address editing in place (9 November 2026, owner request after a screen
+recording of the old sheet): the page's address opens in the bar like Home's
+field, with one bottom-anchored list above it, a page scrim, and the engine
+surface held at its size while the editor owns the keyboard. Typing keeps
+the rows that still match until the next ranking instead of blanking the
+list. A page field that had the keyboard lets go of its focus when the editor
+takes the keyboard over (`EngineSurfaceView.yieldKeyboard`), so a tap on it
+opens the keyboard again afterwards. `AddressEditorTest` (JVM) covers row
+order, the actions and the no-blank regression, which failed against the old
+clearing; `KeyboardTest` covers the keyboard hand-off, which failed with the
+first version's hidden page keyboard. On an arm64 API 36 emulator, with the
+engine library from CI's arm64 build for #333 (same Servo pin; only
+`capture.js` differs from main), 112 of 113 checks in ten related device
+classes passed (`AddressSuggestionsUiTest`, `HomeTest`,
+`HomeSearchTest`, `HomeDraftRoundTripTest`, `TabSwipeTest`,
+`AccessibilityTest`, `KeyboardTest`, `EditorImeTest`, `BrowsingTest`,
+`FindTest`). The failure, `theBottomBarOnANewTabIsAccessible` (Home's + and
+Recent share a touch area at 200% font), fails the same way with origin/main
+on that emulator and passes in CI's API 30 run. Frame-by-frame recordings
+found and fixed a page shift while the keyboard rose past the navigation
+bar.
 
 Overlay consolidation (8 November 2026, #284 with #315): status messages
 scroll at large font sizes; the address sheet has a pane title and status
