@@ -3252,6 +3252,39 @@ These differences remain, did not decide this check, and are candidates for late
 - `performance.timing.navigationStart` is 0.
 - A script reload sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-User: ?1`.
 
+## Integration foundation fixture gates (8 November 2026)
+
+Two foundation candidates passed the complete Engine workflow on their reviewed
+heads. Neither changes native source or the Servo pin:
+`8720afc00e4daead852b8f7f63bb59e87e0b2a99` (upstream source
+`aac43a3f31a259f04a574f5ec4e959c943ad7cc7`).
+
+| Candidate | Reviewed head | Engine run | Build/fixture merge ref |
+| --- | --- | --- | --- |
+| Process-wide Keystore creation lock (#221) | `2f26391d7a4863958e9de8bdd5392416b75287b1` | [42500893043](https://github.com/L-K-M/Combray/actions/runs/42500893043) | `5b67afbc3c7f523791fd06fd176b6a2116d88175` |
+| Nullable queued-job URL, schema 6 (#298) | `745b707e15a35daa397753698961ee545179b6c6` | [42501469481](https://github.com/L-K-M/Combray/actions/runs/42501469481) | `1a472c6ad714c1cd08a83a012fdea00638ddeed2` |
+
+Both runs passed host `cargo fmt --check` and `cargo test --lib --locked`, native
+builds for arm64 and x86_64 through `scripts/build-native.sh`, the complete
+`scripts/check-app.sh` fixture sequence and test-APK artifact cleanup. The device
+was the hosted Android 11/API 30 x86_64 emulator, not a physical phone. The workflow
+pins the Rust/Android build environment; the downloaded `device.txt` records API
+30 and `ro.product.cpu.abi=x86_64`.
+
+Downloaded device evidence contains 209 passed checks for #221 and 207 for #298,
+including process-death preparation and verification. #221's two additional
+`SecretStoreDeviceTest` cases passed on Android Keystore: simultaneous first writes
+remain readable, and separate store instances safely share their isolated alias.
+Those tests use UUID aliases and separate directories, never production credentials.
+
+#298's schema-5-to-6 upgrade regression is JVM/Room coverage. Its emulator evidence
+verifies the current schema, normal fixture workflows and process death; it is not
+an upgrade of an existing physical-phone profile. Legacy queue payloads are decoded
+off the UI thread but may be decoded again on flow emissions, not once per job.
+All endpoints, pages and secrets in these checks are synthetic. No live service or
+personal history was used. These historical results do not validate subsequent
+candidate heads; later rich-editor and service-root checks need their own evidence.
+
 ## 53. Image downloads (7 November 2026)
 
 Owner request: offer Download image in the long-press image menu. It is separate
@@ -3621,6 +3654,27 @@ The complete `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 gate, `cargo fmt --check` and 185 native host tests pass locally after these changes.
 The host build does not compile the Android-only engine module. No local cap on
 committed/composed text was invented; no supported bridge limit is established.
-Current-head Android native builds, full emulator fixtures and hosted review remain
-pending. The historical arm64 checks above do not validate these newer changes or a
-physical keyboard/IME.
+The historical arm64 checks above do not validate these newer changes or a physical
+keyboard/IME.
+
+### Paired-head CI evidence (8 November 2026)
+
+[Engine run 42518553585](https://github.com/L-K-M/Combray/actions/runs/42518553585)
+validated paired PR #317 head `8805846d9ba7c1a7ba7fa9df8180f330af71e8cb`
+through merge ref `5490e8b61dc0ca1f2aa28677bdd99f844fb8a87f`. The downstream pin
+is `5813399954091a7efd7f736ea6fe14cb1ed523b9`. The host job, both Android native
+ABI builds and the full fixture job passed; these builds compile the Android-only
+engine module the local host crate excludes. The device was an Android 11/API 30
+x86_64 emulator, not a physical phone.
+
+`scripts/check-app.sh` recorded 214 passed checks, no failed or failed report-only
+checks, including process-death prepare/verify and all three `EditorImeTest` cases:
+composition preview/update/final replacement, Shift+Arrow selection replacement,
+and stale connection/invalid-context rejection after document replacement. The
+full hosted review was assessed against the source and pinned artifacts; its
+hypothetical missing-definition/global-counter claims did not apply. No Servo
+upstream contact was made.
+
+This evidence applies to the exact paired head above. It is not runtime proof of
+later capture-rollback fences in this branch, real third-party IMEs, physical
+phones or the remaining unsupported editing APIs.

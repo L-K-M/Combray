@@ -15,6 +15,9 @@ sealed interface DispatchResult {
         val delivery: Delivery = Delivery.MAY_HAVE_ARRIVED,
     ) : DispatchResult
 
+    /** Not sent: the user paused capture after claim. Keep its body without spending an attempt. */
+    data object Paused : DispatchResult
+
     /** 401/403: pause until the user fixes the credential (or the CSRF convention). */
     data class AuthRequired(val category: String) : DispatchResult
 

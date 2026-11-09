@@ -1,5 +1,8 @@
 package ch.lkmc.combray.core.integration
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -45,6 +48,61 @@ class HisterClientTest {
         val text = "\"".repeat(600 * 1024) + "😀"
         assertEquals(DispatchResult.Done(null), client.add(server.root, FakeHister.TOKEN, "https://a.example/", null, text))
         assertTrue(server.requestSizes.single() <= HisterClient.MAX_REQUEST_BYTES)
+    }
+
+    @Test
+    fun aLargePlainTextIsCutOnceAndLandsOnTheLimit() {
+        val text = "a".repeat(1_000_000)
+        assertEquals(DispatchResult.Done(null), client.add(server.root, FakeHister.TOKEN, "https://a.example/", null, text))
+        val sent = server.requestSizes.single()
+        assertTrue(sent <= HisterClient.MAX_REQUEST_BYTES)
+        assertEquals(HisterClient.MAX_REQUEST_BYTES, sent)
+    }
+
+    @Test
+    fun aMultibyteTitleIsBoundedByBytesNotCharacters() {
+        val title = "é".repeat(HisterClient.MAX_TITLE_CHARS)
+        assertEquals(DispatchResult.Done(null), client.add(server.root, FakeHister.TOKEN, "https://a.example/", title, "text"))
+        val sent = Json.parseToJsonElement(server.added.single()).jsonObject.getValue("title").jsonPrimitive.content
+        assertEquals(HisterClient.MAX_TITLE_CHARS, sent.toByteArray(Charsets.UTF_8).size)
+    }
+
+    @Test
+    fun anOversizedBodyKeepsTheLongestWholeCodePointPrefix() {
+        for (unit in listOf("é", "😀", "\"", "\\", "\n", "\u0000", "a😀\"\u0001")) {
+            var request: HttpRequest? = null
+            val bounded = HisterClient(HttpTransport {
+                request = it
+                HttpOutcome.Response(201, emptyMap(), ByteArray(0))
+            })
+            val text = unit.repeat(500_000)
+            bounded.add(server.root, FakeHister.TOKEN, "https://a.example/", null, text)
+            val bytes = request!!.body!!
+            val body = Json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject
+            val kept = body.getValue("text").jsonPrimitive.content
+            assertTrue("The body must respect its wire limit", bytes.size <= HisterClient.MAX_REQUEST_BYTES)
+            assertTrue("Text must remain an original prefix", text.startsWith(kept))
+            assertTrue("The prefix must not discard usable space for $unit", bytes.size >= HisterClient.MAX_REQUEST_BYTES - 5)
+            val nextEnd = text.offsetByCodePoints(kept.length, 1)
+            val next = body.toMutableMap().apply {
+                put("text", kotlinx.serialization.json.JsonPrimitive(text.substring(0, nextEnd)))
+            }
+            assertTrue(kotlinx.serialization.json.JsonObject(next).toString().toByteArray(Charsets.UTF_8).size > HisterClient.MAX_REQUEST_BYTES)
+        }
+    }
+
+    @Test
+    fun anAddressThatCannotFitIsRejectedWithoutSending() {
+        var calls = 0
+        val bounded = HisterClient(HttpTransport {
+            calls++
+            HttpOutcome.Response(201, emptyMap(), ByteArray(0))
+        })
+        assertEquals(
+            DispatchResult.Rejected("payload_too_large"),
+            bounded.add(server.root, FakeHister.TOKEN, "https://a.example/" + "a".repeat(1_000_000), "Title", "text"),
+        )
+        assertEquals(0, calls)
     }
 
     @Test

@@ -6,7 +6,9 @@ import ch.lkmc.combray.core.integration.ReportDisplay
 import ch.lkmc.combray.core.integration.ReportDraft
 import ch.lkmc.combray.core.integration.ReportRequest
 import ch.lkmc.combray.core.integration.ScreenshotOmission
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,6 +56,44 @@ class ReportDraftsTest {
         val report = checkNotNull(draft.toDraft(FORM, ready))
         assertSame(ready.screenshot, report.screenshot)
         assertNull(report.omitted)
+    }
+
+    @Test
+    fun anEncoderErrorFinishesWithoutAScreenshotOrAnUncaughtFailure() = runBlocking {
+        for (error in listOf(AssertionError("synthetic"), LinkageError("synthetic"), OutOfMemoryError("synthetic"))) {
+            val uncaught = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+            val isolated = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, failure -> uncaught += failure })
+            try {
+                val failing = ReportDrafts(isolated, { ReportRequest.Queued }, encode = { throw error })
+                val draft = failing.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Copied(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)))
+                withTimeout(TIMEOUT_MS) { draft.preparation!!.join() }
+                assertEquals(ReportShot.Omitted(ScreenshotOmission.COPY_FAILED), draft.shot.value)
+                assertTrue(uncaught.isEmpty())
+            } finally {
+                isolated.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun anEncoderErrorAfterCancellationDoesNotPublishACopyFailure() = runBlocking {
+        val cancelling = ReportDrafts(scope, { ReportRequest.Queued }, encode = {
+            scope.cancel()
+            throw AssertionError("synthetic encoder failure after cancellation")
+        })
+        val draft = cancelling.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Copied(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)))
+        withTimeout(TIMEOUT_MS) { draft.preparation!!.join() }
+        assertTrue(draft.preparation!!.isCancelled)
+        assertTrue("Cancelled preparation must not publish a copy failure", draft.shot.value is ReportShot.Pending)
+    }
+
+    @Test
+    fun cancellingPreparationIsNotReportedAsACopyFailure() = runBlocking {
+        val cancelling = ReportDrafts(scope, { ReportRequest.Queued }, encode = { throw CancellationException("synthetic") })
+        val draft = cancelling.start(CREATED_AT, SNAPSHOT, HOST, FrameCopy.Copied(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)))
+        withTimeout(TIMEOUT_MS) { draft.preparation!!.join() }
+        assertTrue(draft.preparation!!.isCancelled)
+        assertTrue(draft.shot.value is ReportShot.Pending)
     }
 
     /** One draft at a time: a lost sheet cannot pile up screenshots. */
