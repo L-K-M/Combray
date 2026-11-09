@@ -326,6 +326,11 @@ All notable changes to this project are documented here. The format follows
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
+- Check connection in Settings no longer tells you to check the address
+  when Karakeep, Hister or the report service is failing or busy. A
+  request timeout (HTTP 408), rate limit (429) or server error (5xx) now
+  says the server answered with an error and to try again later, matching
+  the statuses queued saves, captures and reports retry.
 - A search typed into the new-tab page's field survives switching to a page
   tab and back. Before, the draft was dropped with the field and you typed
   it again. Starting a new entry clears the earlier draft and shared prefill

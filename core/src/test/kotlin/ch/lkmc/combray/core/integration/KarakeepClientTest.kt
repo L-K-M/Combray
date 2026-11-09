@@ -73,6 +73,18 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun connectionCheckTellsAFailingOrBusyServerFromAWrongAddress() {
+        for (status in listOf(408, 429, 500, 502, 503, 504)) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.ServerError(status), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+        for (status in listOf(302, 400, 404, 405)) {
+            val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.WrongAddress(status), checked.checkConnection(server.root, FakeKarakeep.KEY))
+        }
+    }
+
+    @Test
     fun connectionCheckAcceptsEmptyAndPopulatedListsWithUnknownFields() {
         for (body in listOf("{\"bookmarks\":[]}", "{\"bookmarks\":[{\"id\":\"bm1\"}],\"nextCursor\":null,\"extra\":true}")) {
             val checked = KarakeepClient(HttpTransport { HttpOutcome.Response(200, emptyMap(), body.toByteArray()) })
