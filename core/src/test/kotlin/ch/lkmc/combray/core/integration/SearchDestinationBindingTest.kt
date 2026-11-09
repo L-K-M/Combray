@@ -6,10 +6,12 @@ import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -20,6 +22,7 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.ConcurrentHashMap
 
 /** A page request bound to an older destination must not reach a newly configured service. */
 @RunWith(RobolectricTestRunner::class)
@@ -56,10 +59,13 @@ class SearchDestinationBindingTest {
 
     @After
     fun tearDown() {
-        scope.cancel()
-        database.close()
-        karakeep.close()
-        hister.close()
+        try {
+            runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
+        } finally {
+            if (::database.isInitialized) database.close()
+            karakeep.close()
+            hister.close()
+        }
     }
 
     @Test
@@ -84,7 +90,7 @@ class SearchDestinationBindingTest {
     }
 
     private class MemorySecrets : SecretStore {
-        private val values = HashMap<SecretName, String>()
+        private val values = ConcurrentHashMap<SecretName, String>()
 
         override fun read(name: SecretName) = values[name]
 
