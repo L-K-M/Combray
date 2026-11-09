@@ -94,7 +94,7 @@ or referrer-gated images may fail, and a server can return different content. `d
 and `blob:` images, arbitrary file downloads and authenticated image export remain
 unsupported. [Checks and limits](ENGINE_SPIKE.md#53-image-downloads-7-november-2026).
 
-Tapping the address surface opens an editable address/search sheet above the keyboard. Select the current address (on a Kagi results page, its search words) for replacement. Provide a clear explicit submit action. Keep the text and primary actions above IME and system gesture insets. Handle predictive/system Back in this order: dismiss keyboard, transient sheet or find bar, navigate the active live tab back if available, return from a tab a page opened to its opener (see Closing below), then use normal Android activity behavior. Do not turn Back into a destructive history clear. Test Back with nested sheets and a focused page field.
+Tapping the address surface edits it in place: the bottom bar becomes the address/search field above the keyboard, with no separate sheet (owner request, 9 November 2026), and the page dims behind it. Select the current address (on a Kagi results page, its search words) for replacement. Provide a clear explicit submit action: above the field, the row for what Go does, tinted, then the other reading of the text, then the local matches, best nearest the field; the unchanged current address offers no row, and Go still submits it. The engine surface keeps its size and the page its layout while the editor holds the keyboard. Keep the text and primary actions above IME and system gesture insets. Handle predictive/system Back in this order: dismiss keyboard, transient sheet or find bar, navigate the active live tab back if available, return from a tab a page opened to its opener (see Closing below), then use normal Android activity behavior. Do not turn Back into a destructive history clear. Test Back with nested sheets and a focused page field.
 
 Pull down at the page's top and release to reload (owner request, 31 October 2026). The proposed threshold is 80dp beyond touch slop, with a progress ring. The compositor checks the root, touched scroll chain and pinch viewport at the start and release; an unknown position does not arm a pull. Short pulls, cancellation, horizontal gestures, multi-touch, page-prevented touches and CSS-owned vertical drags do not reload. The coordinator rejects stale, hidden, crashed, loading and Reader documents. [Checks](ENGINE_SPIKE.md#35-pull-to-reload-31-october-2026).
 
@@ -356,7 +356,7 @@ Build `https://kagi.com/search?q=<UTF-8 query encoded exactly once>` using a URI
 
 Address classification is explicit and testable: complete HTTP(S) URLs navigate; plausible scheme-less hosts may gain `https://`, except private, loopback and link-local IP literals and `localhost`, which gain `http://` with `https://` offered instead (owner decision, 22 October 2026; Chrome does not upgrade them either); home-network names (`.lan`, `.local`, `.home.arpa`, `.internal`, `.localdomain`, or one word with a port) offer `http://` instead of a search; text queries search; unsupported schemes produce a clear decision instead of becoming an accidental web search. Include single-label intranet hosts, ports, IPv4/IPv6, IDNs, spaces, bangs, `&`, `#`, emoji and pasted URLs in the policy tests. Show the interpretation in the submit UI where ambiguous. Do not prepend HTTPS to `javascript:` or treat credentials in a URL as harmless; a scheme-less `user:password@host`, also as one word of a longer text, is rejected, not searched (a content digest after the `@`, as in `nginx:1.25@sha256:…`, is no address).
 
-No network autosuggest in the first version: search typing stays local until submit. Once you edit the text, the address sheet lists up to five matches in all, open tabs first, then recent pages, from the local Recent projection; a tab match switches to that exact tab, and a history match opens through the address policy where the typed address would: in the tab being edited, or in a new tab when the editor is for a new tab (owner decision, 22 October 2026). On a Kagi results page the sheet starts with the search query instead of the results address (with the address itself when the query is empty or malformed). First-run Kagi use may require normal web login; test that login and cookie persistence with Servo. Kagi's optional private-session login link is a credential-bearing URL and is not the default integration. If added later, establish its exact supported format and prevent it from entering Recent, Hister, Karakeep, shares and diagnostics. Do not guess a token parameter or store the link as ordinary history.
+No network autosuggest in the first version: search typing stays local until submit. Once you edit the text, the address editor lists up to five matches in all, open tabs first, then recent pages, from the local Recent projection; a tab match switches to that exact tab, and a history match opens through the address policy where the typed address would: in the tab being edited, or in a new tab when the editor is for a new tab (owner decision, 22 October 2026). On a Kagi results page the editor starts with the search query instead of the results address (with the address itself when the query is empty or malformed). First-run Kagi use may require normal web login; test that login and cookie persistence with Servo. Kagi's optional private-session login link is a credential-bearing URL and is not the default integration. If added later, establish its exact supported format and prevent it from entering Recent, Hister, Karakeep, shares and diagnostics. Do not guess a token parameter or store the link as ordinary history.
 
 ### Site reports
 
@@ -770,6 +770,28 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+Address editing in place (9 November 2026, owner request after a screen
+recording of the old sheet): the page's address opens in the bar like Home's
+field, with one bottom-anchored list above it, a page scrim, and the engine
+surface held at its size while the editor owns the keyboard. Typing keeps
+the rows that still match until the next ranking instead of blanking the
+list. A page field that had the keyboard lets go of its focus when the editor
+takes the keyboard over (`EngineSurfaceView.yieldKeyboard`), so a tap on it
+opens the keyboard again afterwards. `AddressEditorTest` (JVM) covers row
+order, the actions and the no-blank regression, which failed against the old
+clearing; `KeyboardTest` covers the keyboard hand-off, which failed with the
+first version's hidden page keyboard. On an arm64 API 36 emulator, with the
+engine library from CI's arm64 build for #333 (same Servo pin; only
+`capture.js` differs from main), 112 of 113 checks in ten related device
+classes passed (`AddressSuggestionsUiTest`, `HomeTest`,
+`HomeSearchTest`, `HomeDraftRoundTripTest`, `TabSwipeTest`,
+`AccessibilityTest`, `KeyboardTest`, `EditorImeTest`, `BrowsingTest`,
+`FindTest`). The failure, `theBottomBarOnANewTabIsAccessible` (Home's + and
+Recent share a touch area at 200% font), fails the same way with origin/main
+on that emulator and passes in CI's API 30 run. Frame-by-frame recordings
+found and fixed a page shift while the keyboard rose past the navigation
+bar.
+
 Overlay consolidation (8 November 2026, #284 with #315): status messages
 scroll at large font sizes; the address sheet has a pane title and status
 messages expose polite live-region semantics. The full Kotlin tests, lint,
@@ -797,7 +819,25 @@ The open PRs from 22 October are triaged and landing in waves; what each remaini
 
 M0–M3 are implemented and their device checks pass on an x86_64 emulator. M4 is in progress: page controls, sign-in, link menu, notices and touch-target checks are done; the owner confirmed the application ID and selected emulator validation for now. Engine-related PRs now pass native builds and full emulator fixtures through the Engine workflow. **Next task:** wire native compilation into the release workflow and supply the owner's signing key. Without the owner, extend `AccessibilityTest` to Recent and Settings, and check dark mode and landscape.
 
-The owner-requested rich-editor engine continuation is merged in Servo PR #40. Combray PR #317 pins its actual merge commit; both native ABIs, local checks and 15 focused arm64 device cases pass, with local independent review recorded on the PRs. Hosted CI is still queued. [Section 56](ENGINE_SPIKE.md#56-rich-editor-carets-composition-and-navigation-7-november-2026) records the revisions, red/green checks, three broader failures reproduced on main and the remaining input limits. Finish Combray's CI and merge before describing the app change as landed; the next bounded text-input slice is surrounding-text and selection synchronization. A bounded JVM-side consolidation now accompanies it: `EngineSurfaceView` now reports the page as editable only while a page field has focus (prepared before `restartInput`, cleared on hide, dismissal, detach and a `PageRef` change, which also retires the old connection), the IME Next action sends Tab while Previous/unknown actions are refused before composition or keys, deletion requests beyond `MAX_EDIT_CHARS` (1,000, from the #263/#312 donors) or negative ones are refused rather than clipped, and cursor positions, selection regions, code-point deletions and explicit replacement ranges the bridge cannot represent return false or null instead of being acknowledged. IME keys the native key map cannot handle are refused before side effects. Committed text keeps no local length cap: neither the donors nor the native bridge establishes a supported bound, so none was invented. Surrounding text, selection/extracted-text updates and `newCursorPosition` semantics remain unimplemented, as do UTF-16/surrounding-text synchronization for deletions; the native async stale-context rejection stays the second fence.
+Recent-sheet consolidation (local, 8 November 2026): the local filter's
+keyboard Search action, the scope chips' wrapping at a narrow width, the
+Undo snackbar's row clearance, and Recent row Copy/Share are implemented in
+`app/src/main/kotlin/ch/lkmc/combray/ui/RecentSheet.kt`, with focused JVM
+tests (`RecentFilterFieldTest`, `RecentScopeChipsTest`, `RecentVisitMenuTest`).
+`RecentActionsTest` adds two compiled real-Android regressions: prove the
+sheet's IME is visible before Search, then verify hidden IME, cleared focus
+and retained filter; Copy a real synthetic closed visit and check its exact
+address and sensitive clipboard hint. The temporary hardware-keyboard
+setting is captured before mutation and restored with acknowledgement.
+Local evidence: `testDebugUnitTest`, `lintDebug`, `assembleDebug`,
+`assembleDebugAndroidTest` and `python3 scripts/check_docs.py` pass on the
+branch. No device or emulator run of this candidate yet. The JVM test alone
+cannot establish final focus dismissal: Robolectric's text-input session
+re-requests focus after `clearFocus()`. Both new cases must pass the full
+current-head Engine workflow before merge; narrow-layout/snackbar and Share
+chooser behavior still need integrated runtime evidence.
+
+The owner-requested rich-editor engine continuation is merged in Servo PR #40. Combray PR #317 is merged with its paired Kotlin/JNI/Rust contract and downstream pin. Both native ABIs and all 214 API-30 x86_64 emulator checks passed at head `8805846d`, including process death and the three real InputConnection cases; the full review was assessed on the PR. The earlier 15 arm64 cases remain historical evidence, not a physical-phone or third-party IME claim. [Section 56](ENGINE_SPIKE.md#56-rich-editor-carets-composition-and-navigation-7-november-2026) records the revisions, red/green checks, three broader failures reproduced on main and the remaining input limits. The next bounded text-input slice is surrounding-text and selection synchronization. A bounded JVM-side consolidation now accompanies it: `EngineSurfaceView` now reports the page as editable only while a page field has focus (prepared before `restartInput`, cleared on hide, dismissal, detach and a `PageRef` change, which also retires the old connection), the IME Next action sends Tab while Previous/unknown actions are refused before composition or keys, deletion requests beyond `MAX_EDIT_CHARS` (1,000, from the #263/#312 donors) or negative ones are refused rather than clipped, and cursor positions, selection regions, code-point deletions and explicit replacement ranges the bridge cannot represent return false or null instead of being acknowledged. IME keys the native key map cannot handle are refused before side effects. Committed text keeps no local length cap: neither the donors nor the native bridge establishes a supported bound, so none was invented. Surrounding text, selection/extracted-text updates and `newCursorPosition` semantics remain unimplemented, as do UTF-16/surrounding-text synchronization for deletions; the native async stale-context rejection stays the second fence.
 
 Owner-requested and taken ahead of the next task above, neither finished yet: PDF viewing with PDFium-wasm ([PDF.md](PDF.md#phases) phase 1) and a fullscreen video player ([VIDEO.md](VIDEO.md#plan), option C). For the video player, C1 is merged and passes its emulator checks; on 29 October 2026 the owner confirmed its network rules (with home networks open to any page), Media3 with OkHttp and the wording. The `canPlayType`/`<source type>` claim mechanism of C2 is implemented for the progressive types the player reads, and C2 itself — the HLS claim rows, `media3-exoplayer-hls` and the player's HLS source branch — is implemented too ([VIDEO.md](VIDEO.md#phase-c2-x-posts-through-an-hls-claim)); the fixture check plays an X-shaped HLS playlist on the emulator. Next for video: an X-post check on the owner's phone, then option B's probe per [VIDEO.md](VIDEO.md#plan). For PDF, the owner made phase 1's choices on 29 October 2026. The viewer is in place on the engine change, pinned at its merge commit on `combray/0.7` (L-K-M/servo#18, merged 4 November 2026): a tapped PDF opens in a PDFium-wasm viewer document, with device checks in `PdfTest` that run in the Engine workflow. Next for PDF: CJK fonts (slice C2), then text for Find, reader view and Hister (slice D) ([PDF.md](PDF.md#phases)).
 

@@ -144,8 +144,10 @@ class HomeTest {
         open(Device.GREEN)
         val original = device.browser.browserState.value.activeTab!!.id
         compose.onNodeWithContentDescription("Edit address", substring = true).performClick()
-        compose.waitUntilAtLeastOneExists(EDIT_FIELD and isFocused(), Device.LOAD_TIMEOUT_MS)
-        val field = compose.onNode(EDIT_FIELD and isFocused())
+        // The address opens in the bar itself, not in a sheet's window.
+        compose.waitUntilAtLeastOneExists(hasSetTextAction() and isFocused(), Device.LOAD_TIMEOUT_MS)
+        compose.onNode(isDialog()).assertDoesNotExist()
+        val field = compose.onNode(hasSetTextAction() and isFocused())
         assertEquals(Fixtures.solid(Device.GREEN), field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         val url = Fixtures.solid(Device.BLUE)
         field.performTextReplacement(url)
