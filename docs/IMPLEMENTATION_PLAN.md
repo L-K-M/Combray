@@ -525,6 +525,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 4. Build explicit Hister search scope, query generations, both result shapes, pagination, error states and safe URL opening. Keep local Recent usable when offline or unauthorized.
 5. Test realistic rendered text and an excluded/private fixture. Verify a unique fixture phrase is searchable after acceptance, then explicitly clean up the test document when authorized. Record whether accepted-but-skipped documents can be detected.
 
+**Capture consistency (8 November 2026):** requests and replies require the current persisted visit, document key and page address. A synthetic Room rollback regression failed for both another address and a same-address reload before this fence; all capture JVM tests pass after it. This is a capture-boundary mitigation, not adoption of a generic work-item timeout or complete transaction/runtime recovery. Current-candidate device evidence remains pending.
+
 **Gate:** search finds a distinctive phrase that exists only in the rendered content, not just the URL/title. Navigation, same-URL reloads, capture delay, forget/exclusion, offline restart and account switching cannot misattribute or redirect data. UI does not mistake auth errors for no history. Old jobs are not knowingly sent after newer acknowledged content for the same server key.
 
 **Status (19 October 2026): implemented; checked with a fake Hister.** The fake follows the request and response shapes recorded in [INTEGRATIONS.md](INTEGRATIONS.md) for the pinned Hister revision; no deployed Hister was contacted.
