@@ -123,6 +123,11 @@ class HomeSearchTest {
 
             device.browser.closeTab(blank)
             device.awaitState { it.activeTab == null }
+            // Core publication precedes the lifecycle collector updating the field's target.
+            compose.waitUntil(Device.LOAD_TIMEOUT_MS) {
+                compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().singleOrNull()
+                    ?.config?.get(SemanticsProperties.EditableText)?.text == ""
+            }
             assertEquals("", compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync { activity.intent = originalIntent }

@@ -667,6 +667,11 @@ All notable changes to this project are documented here. The format follows
   credentials, also as one word of a longer text, so a search such as
   `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
   image digest (`nginx:1.25@sha256:…`) is still searched.
+- Service setup accepts Unicode (IDN) names without mapping deviation
+  characters to a different server. A trailing dot or default port keeps
+  existing credential, queue and saved-page bindings. Explicit ports must
+  be 1–65535: zero, negative, overflowing, empty or malformed ports are
+  refused before a connection, and unsupported addresses report failure.
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
