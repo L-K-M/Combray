@@ -630,6 +630,10 @@ All notable changes to this project are documented here. The format follows
 - System Back and the bottom bar's Back now answer an open page question
   (a script dialog, a `<select>`, sign-in, or the leave-page prompt, where
   Back answers Stay) instead of navigating the page behind it.
+- Files picked for a page's upload survive a delayed startup cleanup: the
+  one-time cleanup finishes before the first pick is copied and removes
+  only copies from earlier processes. A provider's failure message, which
+  can name a private attachment, no longer reaches logcat.
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.
