@@ -236,6 +236,8 @@ All notable changes to this project are documented here. The format follows
   resources, renderer and timeouts stay unchanged; no cause is claimed.
   Launch supervision records the owned emulator child's exit or signal
   and reaps it. Old pid files are evidence, never permission to stop a process.
+  Bounded crash classification runs on the test runner and exports only known
+  SDK module names and exception codes, never raw dumps or private payloads.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -421,6 +423,8 @@ All notable changes to this project are documented here. The format follows
   no longer query a closed database during fixture cleanup.
 - Service-form tests run tightly ordered callbacks in one UI turn, so test
   synchronization cannot start a save before the edit they mean to exercise.
+- Service-form tests keep main-thread continuations running while waiting
+  for fixture admission, instead of blocking their own pending Room replies.
 - Preference feedback tests dispose Compose before closing their fixture scope
   and Room, and release a failed test's scripted commit latch before the
   bounded cancel-and-join, so cleanup cannot hang on an admitted write.

@@ -308,6 +308,18 @@ jobs:
             echo "::warning::host userspace OOM diagnostics unavailable"
           fi
 
+      - name: Classify an owned emulator crash without uploading dumps
+        if: always()
+        run: |
+          mkdir -p servo-checkout/logs
+          if ! python3 -I scripts/m0/emulator_crash_summary.py \
+              --emulator-log servo-checkout/logs/emulator.log \
+              --exit-file servo-checkout/logs/emulator-exit.json \
+              --crash-root "/tmp/android-$(id -un)" \
+              --output servo-checkout/logs/emulator-crash-summary.json; then
+            echo "::warning::emulator crash classification unavailable"
+          fi
+
       - name: Upload device-check evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
