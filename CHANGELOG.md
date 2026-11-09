@@ -669,6 +669,10 @@ All notable changes to this project are documented here. The format follows
 - A screenshot encoder Error no longer leaves a site report preparing
   forever. The draft continues without a screenshot; cancellation still
   stops preparation rather than being reported as a copy failure.
+- Tapping Send again retries one failed report using its original payload
+  and destination, rather than claiming a still-failed job is queued.
+  Parked reports and unconfirmed retries say the earlier report was saved
+  and offer Settings, without claiming new delivery or overwriting it.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
