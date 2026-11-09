@@ -300,6 +300,8 @@ All notable changes to this project are documented here. The format follows
 - Integration fixtures reserve unreachable loopback ports until test cleanup,
   so another listener cannot turn an offline test into a real HTTP request.
   Their connect waits are bounded separately from response reads.
+- Malformed engine events and failed shared-link/file operations log exception
+  classes, not diagnostic values that can quote private input.
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
   their address at enqueue in a `url` column (schema 6, auto-migrated);
@@ -310,6 +312,10 @@ All notable changes to this project are documented here. The format follows
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- The messages shown when the engine is missing, failed or starting, and the
+  page-crashed message with its Reload button, can no longer run off a small
+  screen at large font sizes: they scroll instead. Address sheets identify
+  their pane, and status messages expose polite accessibility updates.
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
@@ -501,6 +507,11 @@ All notable changes to this project are documented here. The format follows
   after ten tries: attempts that could not connect sent nothing and do not
   count. Save shows "Waiting for Karakeep" instead of a spinning "Saving",
   and asks for attention once its server has not answered for a week.
+- Hister capture admission is transactional: a replacement capture is
+  charged only for the room it takes, and a capture paused after claim is
+  held without spending an attempt. Unchanged text is sent again after a
+  failed or discarded capture, but not after Hister accepted it or refused
+  it on purpose (406/422).
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.

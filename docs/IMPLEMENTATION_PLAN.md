@@ -549,6 +549,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Auth errors shown as such, not as "no history" | Passed in unit tests (distinct search states) | `HisterClientTest` |
 | Test against a deployed Hister; cleanup of the test document | **Not run** | — |
 
+**Admission hardening (8 November 2026):** capture admission, replacement budgeting, pause/resume and the content-hash dedupe are transactional and follow the durable job state. Accepted and deliberately refused (406/422) content is not re-sent; failed, discarded or expired content is. A capture paused after claim is held without spending an attempt. Unit tests: `HisterIntegrationTest`; no device or deployed-server run.
+
 ### M4 — Personal-use hardening and handoff
 
 **Depends on:** M1–M3. **Outcome:** an APK the owner can evaluate as a daily browser.
@@ -752,6 +754,12 @@ Which Android device/API/ABI is the owner using? Which sites must work? How many
 Do not stop initial source/build/fixture work to collect every answer. Ask focused questions when they affect a concrete choice. Never ask for raw credentials in chat or commit them; implement protected settings first.
 
 ## 12. Next implementation session
+
+Overlay consolidation (8 November 2026, #284 with #315): status messages
+scroll at large font sizes; the address sheet has a pane title and status
+messages expose polite live-region semantics. The full Kotlin tests, lint,
+debug assembly and device-test compilation pass locally. The reachability
+and semantics tests are JVM checks, not a new TalkBack or device run.
 
 Capture-timer consolidation (8 November 2026, PR #249 with #314's missing-visit
 case): timers carry their scheduled page identity and a distinct schedule token.

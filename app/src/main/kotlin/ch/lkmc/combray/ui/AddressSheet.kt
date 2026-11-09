@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
@@ -207,8 +208,13 @@ internal fun AddressSheetContent(
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val inset = Modifier.padding(horizontal = 16.dp)
+    // The sheet is its own window: give it a pane title so TalkBack lands with context.
+    val sheetTitle = stringResource(R.string.address_title)
 
-    Column(modifier.fillMaxWidth().padding(bottom = if (mode == AddressEditorMode.EDITING) 16.dp else 0.dp)) {
+    Column(
+        modifier.fillMaxWidth().padding(bottom = if (mode == AddressEditorMode.EDITING) 16.dp else 0.dp)
+            .semantics { paneTitle = sheetTitle },
+    ) {
         // Only the room left above the keyboard, scrolling within it: the field row below stays
         // next to the keyboard, where the thumb is, however many rows there are.
         if (mode == AddressEditorMode.EDITING && matches.isNotEmpty()) {

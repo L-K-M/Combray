@@ -23,16 +23,6 @@ import java.net.Socket
 class UnreachableRootsTest {
     @get:Rule val roots = UnreachableRoots()
 
-    /** The old fixture's weakness: a closed allocation leaves the port free for another listener. */
-    @Test
-    fun aClosedPortAllocationCanBeTakenByAnotherListener() {
-        val port = ServerSocket(0).use { it.localPort }
-
-        bind(port).use { rebound ->
-            assertEquals(port, rebound.localPort)
-        }
-    }
-
     /** The protected fixture: while held, the port accepts no other listener and no connection. */
     @Test
     fun aReservedPortRejectsAnotherListeningBindAndAConnection() {
