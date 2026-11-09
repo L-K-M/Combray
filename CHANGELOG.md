@@ -297,6 +297,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Integration fixtures reserve unreachable loopback ports until test cleanup,
+  so another listener cannot turn an offline test into a real HTTP request.
+  Their connect waits are bounded separately from response reads.
 - Malformed engine events and failed shared-link/file operations log exception
   classes, not diagnostic values that can quote private input.
 - Settings no longer decodes whole job payloads (up to 256 KiB of
