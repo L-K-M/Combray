@@ -231,6 +231,9 @@ All notable changes to this project are documented here. The format follows
 - Every verified APK (release, Engine and CI artifacts, `scripts/build.sh`)
   must carry the third-party notices. The device checks' test APK is no
   longer a downloadable CI artifact.
+- Native checks keep host memory, process and cgroup samples and host and
+  guest kernel logs to investigate intermittent ADB loss. Tests, VM
+  resources, renderer and timeouts stay unchanged; no cause is claimed.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -320,10 +323,10 @@ All notable changes to this project are documented here. The format follows
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
-- Tapping Send again retries one failed report using its original payload
-  and destination, rather than claiming a still-failed job is queued.
-  Parked reports and unconfirmed retries say the earlier report was saved
-  and offer Settings, without claiming new delivery or overwriting it.
+- A search typed into the new-tab page's field survives switching to a page
+  tab and back. Before, the draft was dropped with the field and you typed
+  it again. Starting a new entry clears the earlier draft and shared prefill
+  instead of restoring them into a different tab or entry.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -616,6 +619,10 @@ All notable changes to this project are documented here. The format follows
 - A screenshot encoder Error no longer leaves a site report preparing
   forever. The draft continues without a screenshot; cancellation still
   stops preparation rather than being reported as a copy failure.
+- Tapping Send again retries one failed report using its original payload
+  and destination, rather than claiming a still-failed job is queued.
+  Parked reports and unconfirmed retries say the earlier report was saved
+  and offer Settings, without claiming new delivery or overwriting it.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
@@ -754,3 +761,8 @@ All notable changes to this project are documented here. The format follows
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped
   only when a longer name follows it.
+- The page no longer flickers when the bottom bar hides or shows as you
+  scroll. For one frame, the page appeared stretched and shifted, with a
+  white band where the bar had been. The page area now keeps its size
+  under the bar, pages lay out above the bar, and a hiding bar leaves
+  only once the page under it is drawn.

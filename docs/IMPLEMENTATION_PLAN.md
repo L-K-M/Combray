@@ -618,6 +618,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 | Page Copy and text selection | Open: the owner reports the diagnostic's Copy button and manual text selection do not work. Deferred to a separate follow-up, [#168](https://github.com/L-K-M/Combray/issues/168), as requested (31 October 2026) |
 | Queue address metadata | Outbox jobs record their address at enqueue in a nullable `url` column (schema 6, auto-migrated from 5; one new schema, earlier hashes unchanged). Settings queue rows show the host without decoding payloads, and a pre-schema-6 row is decoded once off the UI thread; a row with no usable address shows "Unknown page", never its dedupe key or report id. Finished captures and reports drop the address with their payload (success, cancel, supersede, expiry); failed and waiting rows keep it. Migration, outbox, integration and Settings-sheet JVM tests pass; no device run | `MigrationTest`, `OutboxTest`, `IntegrationsTest`, `HisterIntegrationTest`, `SiteReportsTest`, `SettingsQueueTest` |
 
+Home draft follow-up (#283): a typed draft survives a page-tab detour within the same editor entry. Restored field and prefill share a validated tab/restart identity, so a fresh entry cannot revive an earlier one-shot search. Eight real BottomBar/AddressEditor JVM cases pass; fresh full runtime proof is pending. This uses activity-saveable state, not a claim that queries are never persisted.
+
 Build/signing commands and evidence: [BUILDING.md](BUILDING.md#local-release-signing). Latest whole-suite device evidence: `full11` and `about4` (M1 status above).
 
 ## 10. Acceptance and verification

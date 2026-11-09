@@ -40,17 +40,25 @@ class ScrollTest {
     @Test
     fun scrollingDownHidesTheBarAndScrollingUpRestoresIt() {
         val page = device.browser.browserState.value.activeTab!!.page!!
-        val originalHeight = pageHeight()
+        val surface = surfaceHeight()
+        val shownViewport = awaitViewport { true }
         compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
 
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
         compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
-        assertTrue("hidden controls did not free page space", pageHeight() > originalHeight)
+        // The page lays out in the space the bar freed, and the engine has drawn it there. The
+        // surface keeps its size: a SurfaceView resized by the app's own layout shows its last
+        // frame stretched into the new size for a frame (the flicker this guards against).
+        awaitViewport { it > shownViewport }
+        device.awaitPaintedViewport { it.inset == 0 }
+        assertEquals("the bar's coming and going resized the surface", surface, surfaceHeight())
 
         swipe(0.35f, 0.65f)
         compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
-        assertEquals(originalHeight, pageHeight())
+        awaitViewport { it == shownViewport }
+        device.awaitPaintedViewport { it.inset > 0 }
+        assertEquals("the bar's coming and going resized the surface", surface, surfaceHeight())
         assertEquals(page, device.browser.browserState.value.activeTab!!.page)
 
         // Both viewport changes must leave the real renderer usable.
@@ -274,8 +282,15 @@ class ScrollTest {
         compose.waitForIdle()
     }
 
-    private fun pageHeight(): Int = compose.runOnIdle {
+    private fun surfaceHeight(): Int = compose.runOnIdle {
         (compose.activity.window.decorView as ViewGroup).descendants.filterIsInstance<EngineSurfaceView>().single().height
+    }
+
+    /** The page's innerHeight once [predicate] holds, from the fixture's live title. */
+    private fun awaitViewport(predicate: (Int) -> Boolean): Int {
+        fun viewport(title: String?) = title?.substringAfter(':', "")?.split(',')?.getOrNull(1)?.toIntOrNull()
+        val state = device.awaitState { state -> viewport(state.activeTab?.title)?.let(predicate) == true }
+        return viewport(state.activeTab?.title)!!
     }
 
     private fun swipe(start: Float, end: Float) {

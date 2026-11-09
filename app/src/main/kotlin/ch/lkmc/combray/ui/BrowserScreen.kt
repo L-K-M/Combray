@@ -107,7 +107,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 private enum class Sheet { NONE, ADDRESS, RECENT, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA, REPORT }
 
@@ -132,6 +134,7 @@ fun BrowserScreen(
     val state by browser.browserState.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val textSize by graph.settings.textSize.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val paintedViewport by browser.paintedViewport.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var homeMode by rememberSaveable { mutableStateOf(AddressEditorMode.IDLE) }
     var homeEntry by rememberSaveable { mutableIntStateOf(0) }
@@ -420,15 +423,34 @@ fun BrowserScreen(
     // A new document or editing context starts with reachable controls, not an old drag.
     var barDirection by remember(tab?.id, page, state.reader, barBehavior) { mutableStateOf<ScrollEdge?>(null) }
     val showBar = bottomBarVisible(barDirection, barBehavior)
-    val pageInsets = if (showBar || state.find != null) {
+    // The engine surface lies under the bottom controls and keeps its size when they come or go
+    // (see EngineSurfaceView.coverBottom); the engine lays pages out above the pixels they cover.
+    // Measured from both boxes' bottom edges: the page box ends where the controls start.
+    var pageBottom by remember { mutableFloatStateOf(0f) }
+    var surfaceBottom by remember { mutableFloatStateOf(0f) }
+    val drawnOverlap = (surfaceBottom - pageBottom).roundToInt().coerceAtLeast(0)
+    val coveredInset = if (showBar || state.find != null) drawnOverlap else 0
+    var viewportRequest by remember { mutableStateOf<ViewportRequest?>(null) }
+    LaunchedEffect(coveredInset, surfaceView, state.engine) {
+        val view = surfaceView ?: return@LaunchedEffect
+        viewportRequest = ViewportRequest(view.coverBottom(coveredInset), coveredInset)
+    }
+    // A bar the user's scroll hides stays until the engine has drawn the page under it.
+    var barHoldExpired by remember(showBar) { mutableStateOf(false) }
+    LaunchedEffect(showBar) {
+        if (showBar) return@LaunchedEffect
+        delay(BAR_HOLD_TIMEOUT_MS)
+        barHoldExpired = true
+    }
+    val drawBar = showBar || bottomBarHeld(viewportRequest, paintedViewport?.request, barHoldExpired)
+    val pageInsets = if (drawBar || state.find != null) {
         WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
     } else WindowInsets.safeDrawing
     var barHeight by remember { mutableStateOf(0.dp) }
-    val noticeInset = if (showBar || state.find != null) barHeight else with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
+    val noticeInset = if (drawBar || state.find != null) barHeight else with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
     // A shown snackbar covers the page's bottom-left corner, where the scroll button sits, and
     // takes the taps there: the button moves above it. Measured from both edges, as snackbars
     // clear the bottom bar's last height, which is not the find bar's.
-    var pageBottom by remember { mutableFloatStateOf(0f) }
     var snackbarTop by remember { mutableStateOf<Float?>(null) }
     val snackbarReach = (snackbarTop?.let { top -> with(density) { (pageBottom - top).toDp() } } ?: 0.dp).coerceAtLeast(0.dp)
     val scrollButtonPadding = scrollButtonPadding(snackbarReach)
@@ -469,7 +491,10 @@ fun BrowserScreen(
                     return@launch
                 }
                 // Before any sheet or keyboard: the keyboard shrinks the page, which lays out again.
-                val frame = if (blocker == null && view != null) copyFrame(view) else FrameCopy.Unavailable(blocker ?: ScreenshotOmission.NOT_SHOWN)
+                // Only the part of the surface above the bottom controls shows the page.
+                val frame = if (blocker == null && view != null) {
+                    copyFrame(view, coveredBottom = drawnOverlap)
+                } else FrameCopy.Unavailable(blocker ?: ScreenshotOmission.NOT_SHOWN)
                 // Only the page shown at the tap may be sent.
                 val checked = checkedFrame(frame, reported = reported.page, shown = browser.browserState.value.activeTab?.page)
                 reportDraftId = graph.reportDrafts.start(createdAt, snapshot, displayHost(service.baseUrl), checked).id
@@ -526,6 +551,25 @@ fun BrowserScreen(
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // The page box's area with the bottom controls hidden, under the controls when they show.
+        // Touches pass the page box, which takes none of its own, to reach it.
+        AndroidView(
+            factory = { viewContext ->
+                EngineSurfaceView(viewContext) { graph.engineRunning() }.also { surfaceView = it }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .onGloballyPositioned { surfaceBottom = it.boundsInRoot().bottom },
+            update = { view ->
+                view.observeScroll(page) {
+                    barDirection = it
+                    scrollEdge = it.takeIf { reloadPull == null }
+                    scrollActivity++
+                }
+            },
+        )
         Column(Modifier.fillMaxSize().imePadding()) {
             Box(
                 Modifier
@@ -534,19 +578,6 @@ fun BrowserScreen(
                     .windowInsetsPadding(pageInsets)
                     .onGloballyPositioned { pageBottom = it.boundsInRoot().bottom },
             ) {
-                AndroidView(
-                    factory = { viewContext ->
-                        EngineSurfaceView(viewContext) { graph.engineRunning() }.also { surfaceView = it }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    update = { view ->
-                        view.observeScroll(page) {
-                            barDirection = it
-                            scrollEdge = it.takeIf { reloadPull == null }
-                            scrollActivity++
-                        }
-                    },
-                )
                 PageOverlay(
                     state = state,
                     onReload = browser::reload,
@@ -622,7 +653,7 @@ fun BrowserScreen(
                     modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
                 )
             }
-            if (state.find == null && showBar) BottomBar(
+            if (state.find == null && drawBar) BottomBar(
                 tab = tab,
                 openTabs = state.openTabCount,
                 tabCounter = tabCounter,
@@ -1027,6 +1058,9 @@ internal fun backResponse(content: PageControlContent): ControlResponse =
 
 /** Space between a snackbar and the bottom bar under it. */
 private val SNACKBAR_GAP = 8.dp
+
+/** Longest a hidden bar waits for the engine to draw the page under it (bottomBarHeld). */
+private const val BAR_HOLD_TIMEOUT_MS = 400L
 
 /**
  * "Open this link in another app?" over the page. The page wrote the link, so it is shown as is,

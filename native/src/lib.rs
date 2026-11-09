@@ -13,12 +13,13 @@
 //!                         ├─ find: find in page (bounded in-page search)
 //!                         ├─ keyboard: taps that open the keyboard for a focused field
 //!                         ├─ pdf: the combray-pdf: scheme serving the PDF viewer's files
+//!                         ├─ viewport: the page's part of the surface, above the app's controls
 //!                         └─ native_window: ANativeWindow ownership
 //! ```
 //!
 //! `activation`, `animations`, `events`, `keyboard`, `media`, `navigation`, `page_zoom`,
-//! `panic_policy`, `profile`, `user_agent`, `userinfo` and the pure parts of `capture`, `find` and
-//! `pdf` build on any host so their tests run without Servo.
+//! `panic_policy`, `profile`, `user_agent`, `userinfo`, `viewport` and the pure parts of `capture`,
+//! `find` and `pdf` build on any host so their tests run without Servo.
 
 pub mod activation;
 mod animations;
@@ -37,6 +38,7 @@ mod profile;
 pub mod reload_pull;
 mod user_agent;
 mod userinfo;
+mod viewport;
 mod wakeup;
 
 #[cfg(target_os = "android")]
