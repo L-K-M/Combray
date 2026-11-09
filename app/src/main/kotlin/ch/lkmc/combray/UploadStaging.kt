@@ -34,8 +34,9 @@ class UploadStaging(private val root: File, private val resolver: ContentResolve
             uris.mapIndexed { index, uri -> copy(uri, File(pick, index.toString())) }
         } catch (failure: Exception) {
             // Another app's provider may throw anything (IO, permission, bad URI): cancel the upload.
-            // No suspension point in the block, so cancellation cannot be swallowed here.
-            Log.w(LOG_TAG, "could not copy a picked file", failure)
+            // No suspension point in the block, so cancellation cannot be swallowed here. The class
+            // only: an exception message can quote the picked content URI or a storage path.
+            Log.w(LOG_TAG, "could not copy a picked file: ${failure.javaClass.name}")
             pick.deleteRecursively()
             null
         }
