@@ -7,7 +7,8 @@
 #
 # Found by listing the members and symbols of the linked static archives (SpiderMonkey's
 # prebuilt libjs_static.a, the build-script outputs under target/<abi>/release/build). Recheck
-# after changing the Servo pin or Cargo.lock. zlib is not listed: Android provides libz.so.
+# after changing the Servo pin or Cargo.lock. The engine's zlib is not listed: Android provides
+# libz.so (pdfium.wasm builds in its own, listed below).
 
 [[library]]
 name = "SpiderMonkey"
@@ -191,6 +192,136 @@ name = "Web Bluetooth GATT blocklist"
 license = "Apache-2.0"
 # gatt_blocklist.txt, from https://github.com/WebBluetoothCG/registries
 spdx-text = "Apache-2.0"
+
+# The PDF viewer's renderer (native/src/pdf.rs): pdfium.wasm and index.browser.js of the
+# @embedpdf/pdfium package, embedded gzip-compressed in the engine library. The package ships
+# the licenses of its own code and of PDFium, but not those of the libraries PDFium and
+# Emscripten build into pdfium.wasm and index.browser.js. Those were identified from the
+# package's build recipe (embed-pdf-viewer's packages/pdfium on its v2 branch: PDFium fork
+# embedpdf/pdfium at 73a041a5, pdf_use_skia=false, Emscripten 3.1.70) and confirmed in the
+# binary through its strings, data tables and constants; their texts come from the libraries' own
+# releases or the copies PDFium's DEPS pins (native/licenses/README.md). Recheck after updating
+# PDFium (docs/BUILDING.md, "Updating PDFium").
+[[library]]
+name = "@embedpdf/pdfium"
+version = "2.15.1"
+license = "MIT"
+repo-files = ["native/src/pdf/vendor/embedpdf-pdfium.LICENSE"]
+requires-text = ["MIT License"]
+
+[[library]]
+name = "PDFium"
+license = "BSD-3-Clause AND Apache-2.0"
+# The package's LICENSE.pdfium: PDFium's BSD license followed by the Apache License 2.0.
+repo-files = ["native/src/pdf/vendor/pdfium.LICENSE"]
+requires-text = ["Copyright 2014 PDFium Authors", "Apache License"]
+
+[[library]]
+name = "FreeType (PDFium)"
+license = "FTL"
+repo-files = ["native/licenses/pdfium-wasm/freetype/LICENSE.TXT", "native/licenses/pdfium-wasm/freetype/FTL.TXT"]
+requires-text = ["The FreeType Project LICENSE"]
+
+[[library]]
+name = "libpng (PDFium)"
+version = "1.6.43"
+license = "libpng-2.0"
+repo-files = ["native/licenses/pdfium-wasm/libpng/LICENSE"]
+requires-text = ["PNG Reference Library License version 2"]
+
+[[library]]
+name = "zlib (PDFium)"
+version = "1.3.1"
+license = "Zlib"
+repo-files = ["native/licenses/pdfium-wasm/zlib/LICENSE"]
+requires-text = ["Jean-loup Gailly and Mark Adler"]
+
+[[library]]
+name = "OpenJPEG (PDFium)"
+license = "BSD-2-Clause"
+repo-files = ["native/licenses/pdfium-wasm/openjpeg/LICENSE"]
+requires-text = ["Universite catholique de Louvain"]
+
+[[library]]
+name = "Little CMS (PDFium)"
+license = "MIT"
+repo-files = ["native/licenses/pdfium-wasm/lcms2/LICENSE"]
+requires-text = ["Marti Maria Saguer"]
+
+# PDFium's rasterizer when Skia is off; the package builds without Skia and exports no Skia API.
+[[library]]
+name = "Anti-Grain Geometry (PDFium)"
+version = "2.3"
+license = "AGG notice (MIT in PDFium's README.pdfium)"
+repo-files = ["native/licenses/pdfium-wasm/agg23/copying"]
+requires-text = ["Maxim Shemanarev"]
+
+# The IJG license requires the statement in `text` in the documentation of a binary.
+[[library]]
+name = "libjpeg-turbo (PDFium)"
+version = "3.1.0"
+license = "IJG AND Zlib"
+repo-files = ["native/licenses/pdfium-wasm/libjpeg-turbo/LICENSE.md", "native/licenses/pdfium-wasm/libjpeg-turbo/README.ijg"]
+text = "This software is based in part on the work of the Independent JPEG Group."
+requires-text = ["This software is based in part on the work of the Independent JPEG Group.", "Thomas G. Lane"]
+
+# Character properties for PDFium's text handling (ICU's ucase tables are in the binary).
+[[library]]
+name = "ICU (PDFium)"
+version = "77.1"
+license = "Unicode-3.0"
+repo-files = ["native/licenses/pdfium-wasm/icu/LICENSE"]
+requires-text = ["UNICODE LICENSE V3", "ICU License - ICU 1.8.1 to ICU 57.1"]
+
+# Number parsing in PDFium's fxcrt. Offered under Apache-2.0, BSL-1.0 or MIT; shown under MIT.
+[[library]]
+name = "fast_float (PDFium)"
+license = "Apache-2.0 OR BSL-1.0 OR MIT"
+repo-files = ["native/licenses/pdfium-wasm/fast_float/LICENSE-MIT"]
+requires-text = ["The fast_float authors"]
+
+# PDFium's fxcrt uses Abseil's containers (flat_hash_set, InlinedVector).
+[[library]]
+name = "Abseil (PDFium)"
+license = "Apache-2.0"
+repo-files = ["native/licenses/pdfium-wasm/abseil/LICENSE"]
+requires-text = ["Apache License"]
+
+# index.browser.js is Emscripten's runtime (shell.js, preamble.js, the FS and PATH libraries;
+# PATH derives from Node.js), and pdfium.wasm links Emscripten's system libraries.
+[[library]]
+name = "Emscripten (PDFium)"
+version = "3.1.70"
+license = "MIT OR NCSA"
+repo-files = ["native/licenses/pdfium-wasm/emscripten/LICENSE"]
+requires-text = ["Emscripten authors", "Joyent"]
+
+# Emscripten's C library in pdfium.wasm.
+[[library]]
+name = "musl libc (PDFium)"
+license = "MIT"
+repo-files = ["native/licenses/pdfium-wasm/musl/COPYRIGHT"]
+requires-text = ["Rich Felker"]
+
+# Emscripten's copies of the LLVM runtime libraries, linked into pdfium.wasm (PDFium builds
+# with use_custom_libcxx=false). Each directory carries its own variant of the LLVM text.
+[[library]]
+name = "LLVM libc++ (PDFium)"
+license = "Apache-2.0 WITH LLVM-exception"
+repo-files = ["native/licenses/pdfium-wasm/llvm-libcxx/LICENSE.TXT"]
+requires-text = ["LLVM Exceptions to the Apache 2.0 License", "University of Illinois"]
+
+[[library]]
+name = "LLVM libc++abi (PDFium)"
+license = "Apache-2.0 WITH LLVM-exception"
+repo-files = ["native/licenses/pdfium-wasm/llvm-libcxxabi/LICENSE.TXT"]
+requires-text = ["LLVM Exceptions to the Apache 2.0 License", "University of Illinois"]
+
+[[library]]
+name = "LLVM compiler-rt (PDFium)"
+license = "Apache-2.0 WITH LLVM-exception"
+repo-files = ["native/licenses/pdfium-wasm/llvm-compiler-rt/LICENSE.TXT"]
+requires-text = ["LLVM Exceptions to the Apache 2.0 License", "University of Illinois"]
 
 # Crates for which cargo-about finds no license file with a copyright line and fills in an SPDX
 # template ("<year> <owner>"). These texts replace the template; the generator fails on any

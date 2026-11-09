@@ -14,51 +14,63 @@ class MoreActionsTest {
             listOf(
                 MoreAction.FORWARD,
                 MoreAction.RELOAD,
-                MoreAction.CLOSE_TAB,
+                MoreAction.SHARE,
                 MoreAction.PAGE_INFO,
-                MoreAction.READER,
                 MoreAction.FIND,
+                MoreAction.REPORT_SITE,
                 MoreAction.TEXT_SIZE,
                 MoreAction.SETTINGS,
             ),
-            moreActions(PAGE.copy(canGoForward = true), readerOpen = false),
+            moreActions(PAGE.copy(canGoForward = true), readerDisplay = ReaderDisplay.PAGE),
         )
     }
 
     @Test
-    fun playAppearsOnlyWithMediaBetweenFindAndTextSize() {
-        assertEquals(false, MoreAction.PLAY_MEDIA in moreActions(PAGE, readerOpen = false))
+    fun playAppearsOnlyWithMediaBetweenFindAndReport() {
+        assertEquals(false, MoreAction.PLAY_MEDIA in moreActions(PAGE, readerDisplay = ReaderDisplay.PAGE))
         val withMedia = PAGE.copy(
             media = listOf(PlayableMedia(1, MediaKind.VIDEO, "clip.mp4", "example.org")),
             mediaPage = MediaPageRef("tab", 1),
         )
         assertEquals(
-            listOf(MoreAction.FIND, MoreAction.PLAY_MEDIA, MoreAction.TEXT_SIZE),
-            moreActions(withMedia, readerOpen = false).dropWhile { it != MoreAction.FIND }.take(3),
+            listOf(MoreAction.FIND, MoreAction.PLAY_MEDIA, MoreAction.REPORT_SITE, MoreAction.TEXT_SIZE),
+            moreActions(withMedia, readerDisplay = ReaderDisplay.PAGE).dropWhile { it != MoreAction.FIND }.take(4),
         )
         // Reader view covers the page, not its media.
-        assertEquals(true, MoreAction.PLAY_MEDIA in moreActions(withMedia, readerOpen = true))
+        assertEquals(true, MoreAction.PLAY_MEDIA in moreActions(withMedia, readerDisplay = ReaderDisplay.ARTICLE))
     }
 
     /** Find searches the page, which reader view covers. */
     @Test
     fun readerViewHasNoFind() {
-        val rows = moreActions(PAGE, readerOpen = true)
+        val rows = moreActions(PAGE, readerDisplay = ReaderDisplay.ARTICLE)
         assertEquals(false, MoreAction.FIND in rows)
-        assertEquals(true, MoreAction.READER in rows)
+        assertEquals(true, MoreAction.SHARE in rows)
+    }
+
+    /** Reader view, an error page and a crashed tab are all worth reporting; Home is not a site. */
+    @Test
+    fun reportIsOfferedWheneverTheTabHasAnAddress() {
+        assertEquals(
+            listOf(MoreAction.PAGE_INFO, MoreAction.REPORT_SITE, MoreAction.TEXT_SIZE),
+            moreActions(PAGE, readerDisplay = ReaderDisplay.ARTICLE).dropWhile { it != MoreAction.PAGE_INFO }.take(3),
+        )
+        assertEquals(true, MoreAction.REPORT_SITE in moreActions(PAGE.copy(loadFailed = true), readerDisplay = ReaderDisplay.PAGE))
+        assertEquals(true, MoreAction.REPORT_SITE in moreActions(PAGE.copy(crashed = true, hasView = false), readerDisplay = ReaderDisplay.PAGE))
+        assertEquals(false, MoreAction.REPORT_SITE in moreActions(PAGE.copy(url = null, title = null, hasView = false), readerDisplay = ReaderDisplay.PAGE))
     }
 
     @Test
-    fun aNewTabHomeCanBeClosedButHasNoPageRows() {
+    fun aNewTabHomeHasNoPageRows() {
         assertEquals(
-            listOf(MoreAction.CLOSE_TAB, MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
-            moreActions(PAGE.copy(url = null, title = null, hasView = false), readerOpen = false),
+            listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS),
+            moreActions(PAGE.copy(url = null, title = null, hasView = false), readerDisplay = ReaderDisplay.PAGE),
         )
     }
 
     @Test
     fun withoutATabThereIsNothingToClose() {
-        assertEquals(listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerOpen = false))
+        assertEquals(listOf(MoreAction.TEXT_SIZE, MoreAction.SETTINGS), moreActions(null, readerDisplay = ReaderDisplay.PAGE))
     }
 
     private companion object {

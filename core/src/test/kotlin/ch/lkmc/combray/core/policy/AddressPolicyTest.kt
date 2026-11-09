@@ -173,6 +173,14 @@ class AddressPolicyTest {
     }
 
     @Test
+    fun thePdfViewerSchemeIsRejectedNotSearched() {
+        val viewer = "combray-pdf://viewer-00112233445566778899aabbccddeeff"
+        for (input in listOf("$viewer/pdfium/pdfium.wasm", "COMBRAY-PDF://viewer-0/", "combray-pdf:x", "$viewer/a b")) {
+            assertEquals(input, AddressInterpretation(AddressDecision.Rejected(RejectReason.UNSUPPORTED_SCHEME), null), AddressPolicy.interpret(input))
+        }
+    }
+
+    @Test
     fun credentialsInAddressesAreRejected() {
         assertEquals(AddressDecision.Rejected(RejectReason.EMBEDDED_CREDENTIALS), primary("https://user:secret@example.org/"))
     }
@@ -280,6 +288,21 @@ class AddressPolicyTest {
         assertFalse(HostNames.matches("badexample.com", "example.com", includeSubdomains = true))
         assertFalse(HostNames.matches("a.example.com", "example.com", includeSubdomains = false))
         assertEquals("xn--bcher-kva.de", HostNames.of("https://BÜCHER.de./x"))
+    }
+
+    @Test
+    fun wwwMergesOnlyWhenItIsASpellingVariant() {
+        assertEquals("example.com", HostNames.mergedSite("www.example.com"))
+        assertEquals("sub.example.com", HostNames.mergedSite("www.sub.example.com"))
+        assertEquals("example.net", HostNames.mergedSite("example.net"))
+        // "www.com" names the site itself: stripping would leave the bare suffix "com".
+        assertEquals("www.com", HostNames.mergedSite("www.com"))
+        // A longer remainder still strips; "www.co.uk" cannot be a registered site anyway.
+        assertEquals("co.uk", HostNames.withoutWwwLabel("www.co.uk"))
+        // The www form of a dotless merged key is its own site, not a spelling of it.
+        assertEquals(listOf("example.com", "www.example.com"), HostNames.siteSpellings("example.com"))
+        assertEquals(listOf("com"), HostNames.siteSpellings("com"))
+        assertEquals(listOf("www.com", "www.www.com"), HostNames.siteSpellings("www.com"))
     }
 
     @Test

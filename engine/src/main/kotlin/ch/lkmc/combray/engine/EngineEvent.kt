@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
@@ -27,6 +28,8 @@ enum class HistoryKind {
 }
 
 enum class LoadPhase { STARTED, HEAD_PARSED, COMPLETE }
+
+enum class ReloadPullPhase { PULLING, RELEASED, CANCELLED }
 
 /**
  * How a report relates to its tab's current document. Reports from a replaced document are
@@ -84,6 +87,12 @@ sealed interface EngineEvent {
 
     data object SurfaceUnbound : EngineEvent
 
+    /**
+     * A frame on screen shows the page above the [inset] pixels that the app's viewport request
+     * [request] said its controls cover, the pixels it uncovered included.
+     */
+    data class ViewportPainted(val request: Long, val inset: Int) : EngineEvent
+
     data class TabCreated(val view: ViewRef) : EngineEvent
 
     data class TabSelected(val view: ViewRef) : EngineEvent
@@ -94,6 +103,11 @@ sealed interface EngineEvent {
     data class TabOpened(val view: ViewRef, val opener: ViewRef) : EngineEvent
 
     data class NavigationRequested(val view: ViewRef, val request: Long, val url: String) : EngineEvent
+
+    /** The retained document, or the new empty initial document. */
+    data class LoadingStopped(val view: ViewRef, val request: Long, val document: Long) : EngineEvent
+
+    data class LoadingStopFailed(val view: ViewRef, val request: Long) : EngineEvent
 
     data class PageNavigationRequested(val view: ViewRef, val url: String) : EngineEvent
 
@@ -164,6 +178,9 @@ sealed interface EngineEvent {
         val capped: Boolean,
     ) : EngineEvent
 
+    /** A compositor-checked pull on one document; release asks the coordinator to reload it. */
+    data class ReloadPull(val page: PageRef, val phase: ReloadPullPhase, val progress: Float) : EngineEvent
+
     data class Painted(val view: ViewRef, val frames: Long) : EngineEvent
 
     /**
@@ -178,6 +195,8 @@ sealed interface EngineEvent {
         val multiline: Boolean,
         val kind: String,
         val showKeyboard: Boolean,
+        /** Native editing-context identity, not an address or an Android view identity. */
+        val context: Long = 0,
     ) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
@@ -201,6 +220,13 @@ sealed interface EngineEvent {
         override fun toString() = "MediaBlocked(view=$view, document=$document, kind=$kind, hasUrl=${url != null})"
     }
 
+    /**
+     * The user tapped a media element of [document] that has no data (the engine cancelled its load),
+     * or controls the page laid over one, after the page reported a media address. The page's
+     * media can be offered again.
+     */
+    data class MediaTapped(val view: ViewRef, val document: Long) : EngineEvent
+
     /** A page control waits for [EnginePort.respondToControl] with [control]. */
     data class ControlShown(val view: ViewRef, val control: Long, val content: PageControlContent) : EngineEvent
 
@@ -223,23 +249,33 @@ sealed interface EngineEvent {
     data class Other(val type: String) : EngineEvent
 
     companion object {
+        /** The event format this parser speaks; every event carries it (native/src/events.rs). */
+        private const val SCHEMA = 1
+
         private val json = Json { ignoreUnknownKeys = true }
 
         /**
-         * Parses one event. Throws [IllegalArgumentException] for malformed JSON or a known
-         * event type with missing fields: the native side and this parser must agree.
+         * Parses one event. Throws [IllegalArgumentException] for malformed JSON, an unknown
+         * schema, or a known event type with missing fields: the native side and this parser
+         * must agree.
          */
         fun parse(text: String): EngineEvent {
             val event = json.parseToJsonElement(text).jsonObject
+            // A schema bump must fail here, loudly, rather than misparse events one by one.
+            val schema = event.int("schema")
+            require(schema == SCHEMA) { "engine event schema $schema, expected $SCHEMA" }
             return when (val type = event.string("type")) {
                 "engine_ready" -> EngineReady(event.int("width"), event.int("height"), event.string("user_agent"))
                 "surface_bound" -> SurfaceBound(event.int("width"), event.int("height"))
                 "surface_unbound" -> SurfaceUnbound
+                "viewport_painted" -> ViewportPainted(event.long("request"), event.int("inset"))
                 "tab_created" -> TabCreated(event.view())
                 "tab_selected" -> TabSelected(event.view())
                 "tab_closed" -> TabClosed(event.view())
                 "tab_opened" -> TabOpened(event.view(), ViewRef(event.long("opener_tab"), event.long("opener_generation")))
                 "navigation_requested" -> NavigationRequested(event.view(), event.long("request"), event.string("url"))
+                "loading_stopped" -> LoadingStopped(event.view(), event.long("request"), event.long("document"))
+                "loading_stop_failed" -> LoadingStopFailed(event.view(), event.long("request"))
                 "page_navigation_requested" -> PageNavigationRequested(event.view(), event.string("url"))
                 "external_link" -> ExternalLink(event.view(), event.string("url"))
                 "popup_blocked" -> PopupBlocked(event.view())
@@ -276,6 +312,12 @@ sealed interface EngineEvent {
                     (event["index"] as? JsonPrimitive)?.intOrNull,
                     event.boolean("capped"),
                 )
+                "reload_pull" -> ReloadPull(
+                    PageRef(event.view(), event.long("document")),
+                    ReloadPullPhase.valueOf(event.string("phase").uppercase()),
+                    event.primitive("progress").floatOrNull?.takeIf { it.isFinite() && it in 0f..1f }
+                        ?: throw IllegalArgumentException("invalid reload pull progress"),
+                )
                 "painted" -> Painted(event.view(), event.long("frames"))
                 "ime_shown" -> ImeShown(
                     event.view(),
@@ -283,6 +325,7 @@ sealed interface EngineEvent {
                     event.boolean("multiline"),
                     event.optionalString("kind") ?: "text",
                     event.boolean("show_keyboard"),
+                    event.long("context"),
                 )
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
@@ -293,6 +336,7 @@ sealed interface EngineEvent {
                     event.optionalString("url"),
                     event.optionalString("referrer"),
                 )
+                "media_tapped" -> MediaTapped(event.view(), event.long("document"))
                 "control_shown" -> ControlShown(event.view(), event.long("control"), event.pageControl())
                 "control_hidden" -> ControlHidden(event.view(), event.long("control"))
                 "error" -> EngineError(event.string("message"), event.optionalLong("tab"), event.optionalLong("request"))
@@ -377,6 +421,7 @@ sealed interface EngineEvent {
                 array("extensions").map { (it as? JsonPrimitive)?.contentOrNull ?: throw IllegalArgumentException("extension is not a string") },
             )
             "link_menu" -> PageControlContent.LinkMenu(optionalString("link"), optionalString("image"))
+            "paste_menu" -> PageControlContent.PasteMenu
             "sign_in" -> PageControlContent.SignIn(string("origin"), boolean("proxy"))
             "leave_page" -> PageControlContent.LeavePage
             else -> throw IllegalArgumentException("unknown control kind $kind")

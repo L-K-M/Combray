@@ -8,6 +8,11 @@ import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.RecentItem
+import ch.lkmc.combray.core.browser.TabCounter
+import ch.lkmc.combray.core.browser.TextSize
+import ch.lkmc.combray.core.browser.ThemeMode
+import ch.lkmc.combray.engine.EngineEvent
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -25,6 +30,9 @@ enum class LinkTrigger { TAP, SCRIPT }
 /** Where a fixture's link opens: in its own page or in a new window (`target=_blank`). */
 enum class LinkTarget { SAME_WINDOW, NEW_WINDOW }
 
+/** Whether Stop retains a parsed article or cancels a response before any commit. */
+enum class StopFixtureStage { COMMITTED, PENDING }
+
 /** Synthetic pages and fake services from testing/fixtures/server.py, through `adb reverse`. */
 object Fixtures {
     /** Pages (through `adb reverse`). */
@@ -40,6 +48,10 @@ object Fixtures {
     const val HISTER_ROOT = "$SERVICES/hister"
     const val HISTER_TOKEN = "fixture-token"
 
+    /** The fake report service, which checks each report with the real service's rules. */
+    const val REPORTS_ROOT = "$SERVICES/reports"
+    const val REPORTS_TOKEN = "fixture-reporter-token"
+
     fun solid(color: Int) = "$BASE/solid/%06x.html".format(color and 0xFFFFFF)
 
     /** A news-style page with navigation, an aside and a footer around its article. */
@@ -51,6 +63,9 @@ object Fixtures {
     /** Titled `WA:ok` once Element.animate() behaves, `WA:missing` without it, `WA:fail:<why>` otherwise. */
     const val ANIMATE = "$BASE/animate.html"
 
+    /** Titled `PC:ok` once a message reaches a port whose transferred-away object was closed. */
+    const val PORT_CLOSE = "$BASE/port-close.html"
+
     /** Titled `XP:ok` once FontFace, adoptedStyleSheets and IndexedDB work, `XP:fail:<why>` otherwise. */
     const val APIS = "$BASE/apis.html"
 
@@ -58,6 +73,14 @@ object Fixtures {
     fun once(key: String) = "$BASE/once.html?k=$key"
 
     const val ONCE_TITLE = "ONCE"
+
+    /**
+     * Answered (title [FRESH_TITLE]) as a connection's first request; on a connection that already
+     * carried one, the fixture closes it unanswered. [state] "reused_close" counts both per [key].
+     */
+    fun reusedClose(key: String) = "$BASE/reused-close.html?k=$key"
+
+    const val FRESH_TITLE = "FRESH"
 
     /** Titled `SCREEN:<screen.width>:<screen.availWidth>:<outerWidth>:<innerWidth>` as the page reads them. */
     const val SCREEN = "$BASE/screen.html"
@@ -84,13 +107,47 @@ object Fixtures {
     const val EMPTY = "$BASE/empty.html"
 
     /**
-     * A one-page PDF (`application/pdf`) reading PDF-FIXTURE-TEXT. Servo cannot show it: it
-     * commits a stand-in page, "Unknown content type (application/pdf).", with no title.
+     * A one-page PDF sent as `application/octet-stream` with `nosniff`. Servo cannot show it: it
+     * commits a stand-in page, "Unknown content type (application/octet-stream).", with no title.
      */
-    const val PDF = "$BASE/document.pdf"
+    const val UNSHOWN_FILE = "$BASE/document.bin"
+
+    /**
+     * A generated PDF of testing/fixtures/server.py ([name] under `/pdf/`): each page is a band of
+     * one colour (`Device.PDF_*`) over its top 65%, and most have a metadata title. `plain.pdf`
+     * ([Device.PDF_PLUM], [PDF_PLAIN_TITLE]) and `large.pdf` are counted per [key] in [pdfServed].
+     */
+    fun pdf(name: String, key: String? = null) = "$BASE/pdf/$name" + (key?.let { "?k=$it" } ?: "")
+
+    const val PDF_PLAIN_TITLE = "PDF-PLAIN-TITLE"
+
+    /** A page-filling [Device.PDF_LINK_PAGE] link to `plain.pdf` with [key]. */
+    fun pdfLink(key: String) = "$BASE/pdf/link.html?k=$key"
+
+    /** A page-filling frame of `plain.pdf` with [key]; titled `PDF-FRAME:loaded` once the frame loaded. */
+    fun pdfFrame(key: String) = "$BASE/pdf/frame.html?k=$key"
+
+    /** What the server sent for the counted PDF with [key]: requests, bytesSent and ended, or null. */
+    fun pdfServed(key: String): JSONObject? = state().optJSONObject("pdf")?.optJSONObject(key)
+
+    /** `large.pdf`'s Content-Length: over the viewer's 64 MiB cap. */
+    const val PDF_TOO_LARGE_BYTES = 65L * 1024 * 1024
 
     /** A page the server answers only after several seconds. */
     const val SLOW = "$BASE/slow.html"
+
+    fun stopPage(key: String, stage: StopFixtureStage): String {
+        val path = when (stage) {
+            StopFixtureStage.COMMITTED -> "stop-loading.html"
+            StopFixtureStage.PENDING -> "stop-loading-pending.html"
+        }
+        return "$BASE/$path?k=$key"
+    }
+
+    fun finishStopLoad(key: String) = request(HTTP_POST, "/_admin/finish-stop-load?k=$key")
+
+    fun stopLoadRequested(key: String): Boolean =
+        state().getJSONObject("stop_loads").optJSONObject(key)?.optInt("requested", 0)?.let { it > 0 } == true
 
     /** A `<video>` and an `<audio>` element; titled `MEDIA:errors:2` once both failed. */
     const val MEDIA = "$BASE/media.html"
@@ -103,6 +160,32 @@ object Fixtures {
 
     /** A `<video>` playing [clip] with [key]; titled `VIDEO:errors:<n>`. */
     fun video(key: String) = "$BASE/video.html?k=$key"
+
+    /**
+     * A `<video>` that attaches [clip] with [key] only when `canPlayType` claims the MP4
+     * codecs; titled `CANPLAY:errors:<n>`, or `CANPLAY:unsupported` when the claim is empty.
+     */
+    fun canPlay(key: String) = "$BASE/canplay.html?k=$key"
+
+    /**
+     * A site's own player over the top half of the page: [clip] with [key] in an open shadow
+     * root, out of hit testing under an overlay with a play button in its middle. Titled
+     * `PLAYER:errors:<n>:outside:<n>:plays:<n>`: its errors, clicks below it, clicks on its button.
+     */
+    fun player(key: String) = "$BASE/media-player.html?k=$key"
+
+    /** A `<video>` whose only `<source>` is [clip] with [key] typed `video/mp4`; titled `TYPED:errors:<n>`. */
+    fun typedSource(key: String) = "$BASE/media-source.html?k=$key"
+
+    /**
+     * A `<video>` that attaches its playlist with [key] only when `canPlayType` claims the HLS
+     * codecs; titled `HLS:errors:<n>`, or `HLS:unsupported` when the claim is empty. The
+     * playlist and its segments are counted under "media" › "hls" in [state].
+     */
+    fun hls(key: String) = "$BASE/hls.html?k=$key"
+
+    /** [hls], but the playlist address carries no `.m3u8` for the player to infer from. */
+    fun hlsNoExt(key: String) = "$BASE/hls-noext.html?k=$key"
 
     /** The 6 s fixture clip, [Device.GREEN] then [Device.BLUE]; "media" › "clip" in [state] records its requests. */
     fun clip(key: String) = "$BASE/media/clip.mp4?k=$key"
@@ -122,8 +205,29 @@ object Fixtures {
     /** Titled `ZOOM:<innerWidth>:<devicePixelRatio>` on load and on every resize. */
     const val ZOOM = "$BASE/zoom.html"
 
+    /**
+     * A row of an icon and a long sentence in an auto grid column, titled
+     * `FIT:<scrollWidth>:<innerWidth>` on load and on every resize.
+     */
+    const val FIT_WIDTH = "$BASE/fit-width.html"
+
+    /**
+     * Refused with 403 when the `User-Agent` names Firefox without a `Gecko/` token, as some site
+     * firewalls do; else titled `AGENT:same` when `navigator.userAgent` is that header.
+     */
+    const val AGENT = "$BASE/agent.html"
+
     /** A transparent fixed drawer over the page, optionally held loading by an image. */
     const val FIXED_SCROLL = "$BASE/fixed-scroll.html"
+
+    /**
+     * Titled `WIDE`: a 1080 CSS px row, red on its left half and green on its right, without a
+     * viewport meta tag, so it opens zoomed out to its full width.
+     */
+    const val WIDE = "$BASE/wide.html"
+
+    /** [WIDE] with `width=device-width, initial-scale=1`, so it opens at 100%. */
+    const val WIDE_AT_INITIAL_SCALE = "$BASE/wide.html?initial-scale=1"
 
     fun finishScrollLoad() = request("POST", "/_admin/finish-scroll-load")
 
@@ -139,14 +243,41 @@ object Fixtures {
 
     fun fault(service: String, kind: String, count: Int) = request("POST", "/_admin/fault?service=$service&kind=$kind&count=$count")
 
-    private fun request(method: String, path: String): String {
+    /** Report id -> the validated metadata the fake report service stored (no screenshot bytes). */
+    fun reports(): JSONObject = state().getJSONObject("reports")
+
+    /** The PNG report [id] carried, as the service received it. */
+    fun reportScreenshot(id: String): ByteArray = bytes("GET", "/_admin/report-screenshot?id=$id")
+
+    /** Waits until the fake report service holds a report that [matches]; returns its metadata. */
+    fun awaitReport(timeoutMs: Long = Device.LOAD_TIMEOUT_MS, matches: (JSONObject) -> Boolean): JSONObject {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            val reports = reports()
+            reports.keys().asSequence().map(reports::getJSONObject).firstOrNull(matches)?.let { return it }
+            if (System.currentTimeMillis() > deadline) throw AssertionError("no matching report among ${reports.length()} received")
+            Thread.sleep(REPORT_POLL_MS)
+        }
+    }
+
+    /** The fake report service's POSTs, in order, as the request log has them. */
+    fun reportPosts(): List<JSONObject> = state().getJSONArray("log").let { log ->
+        (0 until log.length()).map(log::getJSONObject).filter { it.getString("service") == "reports" && it.getString("method") == HTTP_POST }
+    }
+
+    private const val HTTP_POST = "POST"
+    private const val REPORT_POLL_MS = 1_000L
+
+    private fun request(method: String, path: String): String = bytes(method, path).toString(Charsets.UTF_8)
+
+    private fun bytes(method: String, path: String): ByteArray {
         val connection = URL(BASE + path).openConnection() as HttpURLConnection
         connection.requestMethod = method
         if (method == "POST") {
             connection.doOutput = true
             connection.outputStream.close()
         }
-        return connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }.also { connection.disconnect() }
+        return connection.inputStream.use { it.readBytes() }.also { connection.disconnect() }
     }
 }
 
@@ -167,6 +298,13 @@ class Device(private val frame: () -> Unit = {}) {
 
     fun awaitEngine() = awaitState { it.engine == EngineStatus.READY }
 
+    /** Waits for the engine's answer to a viewport request (EngineSurfaceView.coverBottom). */
+    fun awaitPaintedViewport(
+        timeoutMs: Long = LOAD_TIMEOUT_MS,
+        predicate: (EngineEvent.ViewportPainted) -> Boolean,
+    ): EngineEvent.ViewportPainted =
+        runBlocking { withTimeout(timeoutMs) { browser.paintedViewport.filterNotNull().first(predicate) } }
+
     /** Waits until the focused tab committed [url] and finished loading. */
     fun awaitPage(url: String, timeoutMs: Long = LOAD_TIMEOUT_MS): BrowserState =
         awaitState(timeoutMs) { it.activeTab?.url == url && it.activeTab?.loading == false }
@@ -174,6 +312,22 @@ class Device(private val frame: () -> Unit = {}) {
     fun recent(): List<RecentItem> = runBlocking { browser.recent().first() }
 
     fun idle() = runBlocking { browser.awaitIdle() }
+
+    /** Settings writes are durable-first: assert acknowledgement before reading the value/UI. */
+    fun setThemeMode(mode: ThemeMode) = awaitPreference(settings.setThemeMode(mode))
+
+    fun setTabCounter(counter: TabCounter) = awaitPreference(settings.setTabCounter(counter))
+
+    fun setHomeContinue(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeContinue(visibility))
+
+    fun setHomeFrequentSites(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeFrequentSites(visibility))
+
+    fun setTextSize(size: TextSize) = awaitPreference(settings.setTextSize(size))
+
+    // Keep the helpers' JVM return type void: expression-bodied JUnit hooks call them.
+    private fun awaitPreference(write: kotlinx.coroutines.Deferred<Boolean>) {
+        check(runBlocking { write.await() }) { "Fixture preference write was not acknowledged" }
+    }
 
     /** Closes every tab so each check starts from the internal home. */
     fun closeAllTabs() {
@@ -185,8 +339,8 @@ class Device(private val frame: () -> Unit = {}) {
 
     /** Fixture isolation: a failed editor check must not hide another check's automatic links. */
     internal fun resetHome() = runBlocking {
-        settings.setHomeContinue(HomeSectionVisibility.SHOWN)
-        settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        check(settings.setHomeContinue(HomeSectionVisibility.SHOWN).await())
+        check(settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN).await())
         val home = app.graph.home
         val state = home.state(flowOf(emptyList())).first()
         state.pins.forEach { home.unpin(it.id) }
@@ -267,5 +421,19 @@ class Device(private val frame: () -> Unit = {}) {
         const val OCHRE = 0x8a5a2b
         /** opener.html's background: no other screen of the app or the fixtures uses it. */
         const val VIOLET = 0x5b2a86
+        /** Bands of the generated PDFs ([Fixtures.pdf]); nothing else uses these colours. */
+        const val PDF_PLUM = 0x7a2e64
+        const val PDF_TEAL = 0x2a8a8a
+        const val PDF_SAND = 0xa08a3a
+        const val PDF_NAVY = 0x24306e
+        /** The PDF viewer's background in the light appearance (native/src/pdf/viewer.css). */
+        const val PDF_VIEWER_LIGHT = 0xe4e4e7
+        /**
+         * Servo's stand-in page for a file it cannot show, away from its one line of text. The
+         * light home screen's paper colour also matches it within [TOLERANCE].
+         */
+        const val STAND_IN_WHITE = 0xffffff
+        /** The background of [Fixtures.pdfLink]. */
+        const val PDF_LINK_PAGE = 0x6b4a2e
     }
 }

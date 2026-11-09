@@ -87,14 +87,16 @@ sealed interface Notice {
     /** The engine could not open an address (it does not parse as a URL Servo can load). */
     data object AddressNotOpened : Notice
 
+    data object StopFailed : Notice
+
     /** A link opened in a tab that did not take focus ([Placement.BACKGROUND_TAB]). */
     data class OpenedInBackground(val tabId: String) : Notice
 
-    /** The shown page has audio or video that nothing can play; its media was not downloaded. */
+    /**
+     * The shown page has audio or video that nothing can play; its media was not downloaded.
+     * Media the player can fetch is offered through [BrowserState.mediaOffer] instead.
+     */
     data object MediaUnplayable : Notice
-
-    /** The shown page has audio or video at a web address ([ActiveTab.media]); it was not downloaded. */
-    data class MediaPlayable(val page: MediaPageRef) : Notice
 
     /** The shown page asked for a window without the user's tap, and it was not opened. */
     data object PopupBlocked : Notice
@@ -108,15 +110,16 @@ enum class ReopenFocus {
     KEEP_CURRENT,
 }
 
+// requestId distinguishes a replay for the same field from the UI's older acknowledgement.
 sealed interface KeyboardRequest {
     /** A page field took focus; [kind] is its type ("text", "password", "email", ...). */
-    data class Show(val kind: String) : KeyboardRequest
+    data class Show(val kind: String, val multiline: Boolean = false, val context: Long = 0, val requestId: Long = 0) : KeyboardRequest
 
     /**
      * A page field took focus before the user used the page (a field focused on load): set the
      * keyboard up for [kind] without opening it. A tap on the field brings a [Show].
      */
-    data class Prepare(val kind: String) : KeyboardRequest
+    data class Prepare(val kind: String, val multiline: Boolean = false, val context: Long = 0, val requestId: Long = 0) : KeyboardRequest
 
     data object Hide : KeyboardRequest
 }
@@ -170,6 +173,9 @@ enum class SessionState {
  */
 data class ExternalLink(val id: Long, val url: String)
 
+/** Transient feedback for a pull on one particular page. */
+data class ReloadPullState(val page: PageRef, val progress: Float)
+
 data class BrowserState(
     val engine: EngineStatus = EngineStatus.STARTING,
     val session: SessionState = SessionState.RESTORING,
@@ -187,9 +193,16 @@ data class BrowserState(
     /** Find in page over the focused tab's page, while the find bar is open. */
     val find: FindState? = null,
     val notice: Notice? = null,
+    /**
+     * The focused page offers its media ([ActiveTab.mediaPage]) to play: from its first address,
+     * or when the user taps one of its media elements, until the user plays or closes the offer,
+     * or the page leaves the screen. Unlike a [Notice], it lasts as long as the page it names.
+     */
+    val mediaOffer: MediaPageRef? = null,
+    val reloadPull: ReloadPullState? = null,
 )
 
-/** A step along the open tabs in Recent order, as a swipe along the bottom bar asks for one. */
+/** A step through fixed tab creation order, as a swipe along the bottom bar asks for one. */
 enum class TabStep { OLDER, NEWER }
 
 /**
@@ -223,6 +236,10 @@ fun List<RecentItem>.matching(query: String?, historyLimit: Int = RECENT_HISTORY
     return filter { it.matches(query) && (it !is RecentItem.Visit || history++ < historyLimit) }
 }
 
+/** Newest-created tabs first, IDs for ties; All and history keep last-use ordering. */
+fun List<RecentItem>.openTabsInCreationOrder(): List<RecentItem.OpenTab> =
+    filterIsInstance<RecentItem.OpenTab>().sortedWith(compareByDescending<RecentItem.OpenTab> { it.createdAt }.thenBy { it.tabId })
+
 /** A site the user visits often, for the new-tab page's quick links. */
 data class TopSite(
     /** The host without "www.", so both spellings of a site rank as one. */
@@ -239,7 +256,7 @@ sealed interface RecentItem {
     val url: String?
     val title: String?
 
-    /** Time used for ordering: last use for tabs (focus, or navigation in focus), last interaction for history. */
+    /** Last interaction shown in the row; All sorts by this, Open tabs by creation time. */
     val time: Long
 
     /** Whether the local Recent filter keeps this row; a blank query keeps everything. */
@@ -256,6 +273,8 @@ sealed interface RecentItem {
         override val title: String?,
         override val time: Long,
         val active: Boolean,
+        /** Fixed tab order uses creation time; [time] remains the last use shown in the row. */
+        val createdAt: Long,
     ) : RecentItem {
         override val key get() = "tab:$tabId"
     }

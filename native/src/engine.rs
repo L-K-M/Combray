@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use dpi::PhysicalSize;
@@ -25,14 +26,16 @@ use log::{error, info, warn};
 use serde_json::{Map, Number, Value};
 use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
+use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    AuthenticationRequest, CompositionEvent, CompositionState, DevicePoint, EmbedderControl,
-    EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, JSValue, JavaScriptEvaluationError,
-    Key, KeyState, KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey,
-    NavigationRequest, Opts, PipelineId, PrefValue, Preferences, RenderingContext,
-    SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, Theme,
-    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
-    WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    AuthenticationRequest, ContextMenuAction, ContextMenuItem, DeviceIntPoint, DeviceIntRect,
+    DeviceIntSize, DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent,
+    InputEvent, InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
+    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
+    OffscreenRenderingContext, Opts, PanicReporter, PipelineId, PrefValue, Preferences,
+    RenderingContext, SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder,
+    SimpleDialog, StopLoadingError, Theme, TouchEvent, TouchEventType, TouchId, TouchPointerType,
+    UserContentManager, UserScript, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
@@ -53,13 +56,23 @@ use crate::events::{
 use crate::find::{self, FindAction};
 use crate::keyboard::{self, TapTracker};
 use crate::media::{
-    self, MediaBudget, MediaKind, MediaReport, PageMedia, PendingMedia, UnattributedMedia,
+    self, MediaBudget, MediaDocuments, MediaKind, MediaReport, PageMedia, PendingMedia,
+    UnattributedMedia,
 };
+use crate::media_backend;
 use crate::native_window::NativeWindow;
 use crate::navigation::{self, PageNavigation, Shown};
 use crate::page_zoom;
 use crate::panic_policy;
+use crate::pdf::{self, PdfProtocolHandler, ViewerPreferences, ViewerToken};
 use crate::profile;
+use crate::reload_pull::{
+    DefaultAction, InputDecision, PullFeedback, PullInputGate, PullUpdate, ReloadPull,
+    StartPosition,
+};
+use crate::user_agent;
+use crate::viewport::{self, GlRect, Strip, StripCheck, ViewportAck};
+use crate::wakeup::{self, PaintRetry};
 
 /// Receives engine events on the engine thread.
 pub trait EventSink {
@@ -73,8 +86,6 @@ pub struct EngineConfig {
     pub density: f32,
 }
 
-/// Longest sleep between event loop iterations when nothing wakes the engine.
-const IDLE_TICK: Duration = Duration::from_millis(250);
 /// Reports buffered per tab for documents whose commit has not been seen yet.
 const MAX_HELD_REPORTS: usize = 64;
 /// Minimum interval between `painted` progress events per tab.
@@ -89,6 +100,30 @@ const USER_ACTIVATION_WINDOW: Duration = Duration::from_secs(5);
 /// First tab ID for views that pages open (`window.open`). Applications number their own tabs
 /// from small positive values, so the two ranges never meet.
 const PAGE_TAB_BASE: i64 = 1 << 52;
+const PULL_INPUT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How the panic hook reaches Servo while it runs (see `panic_policy`). Combray installs its own
+/// logger, so Servo's `setup_logging`, which would report panics, is never called.
+static PANIC_REPORTER: Mutex<Option<PanicReporter>> = Mutex::new(None);
+
+/// Reports the current thread's panic to Servo, if Servo is running. Called by the panic hook;
+/// for a script thread, Servo crashes its pages, which the app then offers to reload.
+pub(crate) fn report_panic(message: &str) {
+    // Reporting sends to the constellation and records a backtrace: not under the lock.
+    let reporter = PANIC_REPORTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some(reporter) = reporter {
+        reporter.report_panic(message);
+    }
+}
+
+fn set_panic_reporter(reporter: Option<PanicReporter>) {
+    *PANIC_REPORTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = reporter;
+}
 
 pub fn run(
     config: EngineConfig,
@@ -98,7 +133,13 @@ pub fn run(
 ) {
     let mut engine = Engine::new(config, wake, sink);
     loop {
-        let command = match commands.recv_timeout(engine.next_timeout()) {
+        // JNI commands and Servo's paint/embedder/net/constellation proxies all wake this channel.
+        // Delegate/evaluation queues drain inside pump; only the native deadlines below need timers.
+        let received = match engine.next_timeout() {
+            Some(timeout) => commands.recv_timeout(timeout),
+            None => commands.recv().map_err(RecvTimeoutError::from),
+        };
+        let command = match received {
             Ok(command) => Some(command),
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => break,
@@ -148,7 +189,12 @@ impl EventLoopWaker for ChannelWaker {
 /// Servo and its rendering context exist once the first surface arrives.
 struct Runtime {
     servo: Servo,
+    /// The Android surface. Pages do not render into it directly: see `page_context`.
     rendering_context: Rc<WindowRenderingContext>,
+    /// What every view renders into: the surface's rows above the app's bottom controls, copied
+    /// to the top of the surface by `paint`. The controls showing or hiding then changes this
+    /// size, not the surface's (see `viewport`).
+    page_context: Rc<OffscreenRenderingContext>,
     /// Scripts every view's documents run before their own (see `animations.js`).
     user_content: Rc<UserContentManager>,
 }
@@ -190,10 +236,13 @@ struct Tab {
     held: VecDeque<HeldReport>,
     /// Media the current page loaded, so each URL is reported once per page (see `media`).
     page_media: PageMedia,
+    /// Documents that reported a media URL, whose taps `check_tap_on_media` checks; the
+    /// application knows which of their pages has media to offer.
+    media_documents: MediaDocuments<PipelineId>,
     /// Bounds the tab's `media_blocked` reports. Kept across same-document address changes, so a
     /// pushState loop stays bounded; restarts when another document commits.
     media_budget: MediaBudget,
-    /// Loads waiting for the document about to commit (see `media::PendingMedia`).
+    /// Loads waiting for the document the tab awaits (see `media::PendingMedia`).
     pending_media: PendingMedia,
     frames_painted: u64,
     last_paint_report: Option<Instant>,
@@ -211,6 +260,9 @@ struct Tab {
     /// The field that has Servo's input method. Servo keeps focus per document, so a hidden
     /// tab keeps its field; only the selected tab's field gets the keyboard.
     ime_field: Option<ImeField>,
+    /// The application's last `SetThrottling` for this tab. A throttled tab stays hidden and
+    /// unfocused even when selected, until the application lifts the throttling.
+    throttling: Throttling,
 }
 
 impl Tab {
@@ -246,7 +298,10 @@ impl Tab {
                     .page_media
                     .note(load.url.as_deref(), &mut self.media_budget, now_ms)
                 {
-                    MediaReport::Playable(url) => Some(url),
+                    MediaReport::Playable(url) => {
+                        self.media_documents.note(document);
+                        Some(url)
+                    },
                     MediaReport::Unplayable => None,
                     MediaReport::Nothing => continue,
                 };
@@ -259,6 +314,36 @@ impl Tab {
             });
         }
         reports
+    }
+
+    /// Credits `media` to the committed document now; the first `unawaited` of them waited for
+    /// a document that did not come in time (`media::PendingMedia::expire`). Before any commit
+    /// there is no document to name, and nothing is reported (the loads were still cancelled).
+    fn credit_now(
+        &mut self,
+        media: Vec<UnattributedMedia>,
+        unawaited: usize,
+        now_ms: u64,
+    ) -> Vec<EngineEvent> {
+        if media.is_empty() {
+            return Vec::new();
+        }
+        let Some(document) = self.current_document else {
+            info!(
+                "view {:?}: {} media loads dropped: no document has committed",
+                self.view,
+                media.len()
+            );
+            return Vec::new();
+        };
+        if unawaited > 0 {
+            info!(
+                "view {:?}: {unawaited} media loads held for a navigation credited to committed document {}",
+                self.view,
+                u64::from(document)
+            );
+        }
+        self.credit_media(document, media, now_ms)
     }
 }
 
@@ -273,6 +358,7 @@ enum Keyboard {
 #[derive(Clone, Copy)]
 struct ImeField {
     control: EmbedderControlId,
+    context: u64,
     multiline: bool,
     kind: &'static str,
     keyboard: Keyboard,
@@ -283,6 +369,7 @@ impl ImeField {
         EngineEvent::ImeShown {
             view,
             document: u64::from(self.control.pipeline_id),
+            context: self.context,
             multiline: self.multiline,
             kind: self.kind,
             show_keyboard: self.keyboard == Keyboard::Open,
@@ -293,6 +380,8 @@ impl ImeField {
 /// A page control waiting for the application's answer. Dropping it answers with Servo's default.
 struct PendingControl {
     view: ViewKey,
+    /// The top-level document at opening, including for a menu inside a frame.
+    document: Option<PipelineId>,
     control: ControlHandle,
 }
 
@@ -364,6 +453,14 @@ type TapCheck = (
 );
 type TapChecks = Rc<RefCell<Vec<TapCheck>>>;
 
+/// A tap checked against a view's media elements: the view, its document and the page's answer.
+type MediaTapCheck = (
+    ViewKey,
+    PipelineId,
+    Result<JSValue, JavaScriptEvaluationError>,
+);
+type MediaTapChecks = Rc<RefCell<Vec<MediaTapCheck>>>;
+
 struct Engine {
     config: EngineConfig,
     wake: Sender<Command>,
@@ -371,6 +468,10 @@ struct Engine {
     runtime: Option<Runtime>,
     surface: Surface,
     size: PhysicalSize<u32>,
+    /// Bottom rows of the surface the app's controls cover; pages lay out above them.
+    viewport_inset: u32,
+    /// Which rows of the page a presented frame shows, for the app's viewport requests.
+    viewport: ViewportAck,
     tabs: BTreeMap<i64, Tab>,
     active: Option<i64>,
     next_generation: u64,
@@ -378,7 +479,15 @@ struct Engine {
     next_sequence: u64,
     needs_paint: bool,
     field_taps: TapTracker,
+    composition:
+        crate::composition::CompositionSession<(i64, Option<PipelineId>, EmbedderControlId)>,
+    reload_pull: ReloadPull,
+    reload_pull_page: Option<(ViewKey, PipelineId)>,
+    reload_pull_inputs: PullInputGate<InputEventId>,
+    reload_pull_feedback: PullFeedback,
+    reload_pull_release: Option<(f32, f32, Instant)>,
     tap_checks: TapChecks,
+    media_tap_checks: MediaTapChecks,
     delegate_queue: DelegateQueue,
     capture_results: CaptureResults,
     evaluation_results: EvaluationResults,
@@ -386,6 +495,8 @@ struct Engine {
     pending_captures: HashMap<i64, PendingCapture>,
     page_controls: HashMap<u64, PendingControl>,
     next_control: u64,
+    /// Process-global editing context IDs, so a recreated engine never reuses one.
+    editor_contexts: crate::composition::EditorContexts,
     /// Page zoom of every view (`SetPageZoom`); kept here so views created later start at it.
     page_zoom: f32,
     /// The user's last tap or key press: in which tab, on which of its documents, and when.
@@ -415,6 +526,8 @@ impl Engine {
             runtime: None,
             surface: Surface::Unbound,
             size: PhysicalSize::new(1, 1),
+            viewport_inset: 0,
+            viewport: ViewportAck::default(),
             tabs: BTreeMap::new(),
             active: None,
             next_generation: 1,
@@ -422,7 +535,14 @@ impl Engine {
             next_sequence: 1,
             needs_paint: false,
             field_taps: TapTracker::new(density),
+            composition: Default::default(),
+            reload_pull: ReloadPull::new(density),
+            reload_pull_page: None,
+            reload_pull_inputs: Default::default(),
+            reload_pull_feedback: Default::default(),
+            reload_pull_release: None,
             tap_checks: Default::default(),
+            media_tap_checks: Default::default(),
             delegate_queue: Default::default(),
             capture_results: Default::default(),
             evaluation_results: Default::default(),
@@ -430,6 +550,7 @@ impl Engine {
             pending_captures: HashMap::new(),
             page_controls: HashMap::new(),
             next_control: 1,
+            editor_contexts: Default::default(),
             page_zoom: page_zoom::DEFAULT_ZOOM,
             last_activation: None,
             taps,
@@ -459,8 +580,11 @@ impl Engine {
         });
     }
 
-    fn next_timeout(&self) -> Duration {
+    /// All native timed work: captures, touch-quiet retries, controls, pull release, media and paint.
+    /// New timer-owned work must join this chain; eligibility/log throttles need no wakeup.
+    fn next_timeout(&self) -> Option<Duration> {
         let now = Instant::now();
+        let now_ms = self.now_ms();
         let controls = self
             .page_controls
             .values()
@@ -478,14 +602,29 @@ impl Engine {
                     longest,
                 )
             });
-        self.pending_captures
+        let media = self
+            .tabs
+            .values()
+            .filter_map(|tab| tab.pending_media.next_expiry_ms())
+            .map(|deadline| Duration::from_millis(deadline.saturating_sub(now_ms)));
+        let pull_release = self.reload_pull_release.map(|(_, _, deadline)| deadline);
+        let until_deadline = self
+            .pending_captures
             .values()
             .map(|pending| pending.deadline)
             .chain(controls)
+            .chain(pull_release)
             .map(|deadline| deadline.saturating_duration_since(now))
             .chain(deferred)
-            .min()
-            .map_or(IDLE_TICK, |until_deadline| until_deadline.min(IDLE_TICK))
+            .chain(media)
+            .min();
+        // `pump` ends in `paint`; a usable surface with pending paint needs a retry.
+        let paint = if self.needs_paint && self.runtime.is_some() && self.surface.usable() {
+            PaintRetry::Pending
+        } else {
+            PaintRetry::NotNeeded
+        };
+        wakeup::sleep_limit(until_deadline, paint)
     }
 
     fn handle(&mut self, command: Command) -> Flow {
@@ -500,6 +639,7 @@ impl Engine {
             Command::SurfaceChanged { width, height } => {
                 self.resize(PhysicalSize::new(width, height))
             },
+            Command::SetViewportInset { inset, request } => self.set_viewport_inset(inset, request),
             Command::SurfaceDestroyed { done } => {
                 self.surface_destroyed();
                 let _ = done.send(());
@@ -521,9 +661,21 @@ impl Engine {
                     tab.webview.go_forward(1);
                 }
             },
-            Command::Reload { tab } => {
-                if let Some(tab) = self.tab(tab) {
-                    tab.webview.reload();
+            Command::Reload { tab } => self.reload(tab),
+            Command::StopLoading { view, request } => self.stop_loading(view, request),
+            Command::LoadingStopped {
+                view,
+                request,
+                result,
+            } => self.loading_stopped(view, request, result),
+            Command::ReloadPage { view, document } => {
+                let current = self.tabs.get(&view.tab).is_some_and(|tab| {
+                    tab.view == view
+                        && tab.current_document.map(u64::from) == Some(document)
+                        && self.active == Some(view.tab)
+                });
+                if current {
+                    self.reload(view.tab);
                 }
             },
             Command::ScrollToEdge {
@@ -531,26 +683,7 @@ impl Engine {
                 document,
                 edge,
             } => self.scroll_to_edge(view, document, edge),
-            // Servo throttles exactly the hidden views, so throttling hides a view and
-            // lifting it shows the view again only if it is the selected one.
-            Command::SetThrottling {
-                tab: id,
-                throttling,
-            } => {
-                if let Some(tab) = self.tab(id) {
-                    match throttling {
-                        Throttling::Throttled => {
-                            tab.webview.set_focused(false);
-                            tab.webview.hide();
-                        },
-                        Throttling::Normal if self.active == Some(id) => {
-                            tab.webview.show();
-                            tab.webview.set_focused(true);
-                        },
-                        Throttling::Normal => {},
-                    }
-                }
-            },
+            Command::SetThrottling { tab, throttling } => self.set_throttling(tab, throttling),
             Command::SetPageZoom { zoom } => self.set_page_zoom(zoom),
             Command::Touch {
                 phase,
@@ -559,7 +692,21 @@ impl Engine {
                 y,
             } => self.touch(phase, pointer, x, y),
             Command::Key { action, key } => self.key(action, key),
-            Command::ImeCommit { text } => self.ime_commit(text),
+            Command::ImeCommit { context, text } => {
+                if context.is_none_or(|context| self.ime_context_is_current(context)) {
+                    self.ime_commit(text);
+                }
+            },
+            Command::ImeComposition {
+                id,
+                context,
+                phase,
+                text,
+            } => {
+                if self.ime_context_is_current(context) {
+                    self.ime_composition(id, phase, text);
+                }
+            },
             Command::ImeDismissed => self.ime_dismissed(),
             Command::ContextClick { x, y } => self.context_click(x, y),
             Command::RespondToControl { control, response } => {
@@ -593,14 +740,22 @@ impl Engine {
         if let Some(runtime) = &self.runtime {
             runtime.servo.spin_event_loop();
         }
+        if self
+            .reload_pull_release
+            .is_some_and(|(_, _, deadline)| Instant::now() >= deadline)
+        {
+            self.reject_reload_pull();
+        }
         self.drain_delegate_events();
         self.start_deferred_captures();
         self.drain_capture_results();
         self.drain_evaluations();
         self.drain_find_results();
         self.drain_tap_checks();
+        self.drain_media_tap_checks();
         self.expire_captures();
         self.expire_leave_page_questions();
+        self.expire_media_holds();
         self.paint();
     }
 
@@ -674,6 +829,8 @@ impl Engine {
             epoch,
         };
         self.resize(size);
+        self.viewport
+            .surface_bound(viewport::page_size(to_size(size), self.viewport_inset));
         self.needs_paint = true;
         // Report the first paint on the new surface even if the last report was recent.
         for tab in self.tabs.values_mut() {
@@ -695,6 +852,8 @@ impl Engine {
                 return false;
             },
         };
+        let page = viewport::page_size(to_size(size), self.viewport_inset);
+        let page_context = Rc::new(rendering_context.offscreen_context(to_physical(page)));
 
         if let Err(error) = std::fs::create_dir_all(&self.config.profile_dir) {
             self.error(format!("creating the profile directory failed: {error}"));
@@ -711,6 +870,10 @@ impl Engine {
         }
         let mut opts = Opts::default();
         opts.config_dir = Some(self.config.profile_dir.clone());
+        // Servo's default, meant for test runners, exits the process when a reported thread
+        // panic reaches the constellation. Crash the thread's pages instead, so the app can offer
+        // Reload (the panic hook reports these panics; see `panic_policy`).
+        opts.hard_fail = false;
         let mut preferences = Preferences::default();
         preferences.set_value("viewport_meta_enabled", PrefValue::Bool(true));
         // Off by default in Servo 0.6.0 (servoshell lists it as experimental), but sites built
@@ -723,14 +886,38 @@ impl Engine {
         preferences.set_value("dom_fontface_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_indexeddb_enabled", PrefValue::Bool(true));
         preferences.set_value("dom_adoptedstylesheet_enabled", PrefValue::Bool(true));
+        // Experimental in Servo 0.7 as well: typing into editable page elements (the rich text
+        // editors of comment and message boxes) runs its execCommand editing. It also gives
+        // pages document.execCommand, as other browsers do.
+        preferences.set_value("dom_exec_command_enabled", PrefValue::Bool(true));
+        set_pdf_viewer_preferences(&mut preferences);
+        // Servo's default, set here because `paint` reads rows back expecting this color where a
+        // frame has no content.
+        preferences.shell_background_color_rgba =
+            viewport::CLEAR_RGBA.map(|c| f64::from(c) / 255.0);
+        // Firefox for Android's Gecko token, or firewalls that take a Firefox agent without one
+        // for a forged one refuse every page (see `user_agent`).
+        match user_agent::with_gecko_token(&preferences.user_agent) {
+            Some(agent) => preferences.user_agent = agent,
+            None => warn!(
+                "Servo's user agent has an unexpected shape, so it is sent without a Gecko token: {}",
+                preferences.user_agent
+            ),
+        }
         // The application's own fetches (the media player) send what Servo sends.
         let user_agent = preferences.user_agent.clone();
+
+        // The player answers canPlayType and <source type>, not Servo's dummy backend, or
+        // capability-driven pages attach nothing the delegate can report (media_backend).
+        media_backend::install();
 
         let servo = ServoBuilder::default()
             .opts(opts)
             .preferences(preferences)
+            .protocol_registry(protocols())
             .event_loop_waker(Box::new(ChannelWaker(self.wake.clone())))
             .build();
+        set_panic_reporter(Some(servo.panic_reporter()));
 
         let user_content = Rc::new(UserContentManager::new(&servo));
         user_content.add_script(Rc::new(UserScript::from(animations::page_script())));
@@ -740,6 +927,7 @@ impl Engine {
         self.runtime = Some(Runtime {
             servo,
             rendering_context,
+            page_context,
             user_content,
         });
         self.emit(EngineEvent::EngineReady {
@@ -753,6 +941,7 @@ impl Engine {
     fn surface_destroyed(&mut self) {
         // The gesture on this surface ends without its up events.
         self.touches.forget_pointers();
+        self.cancel_reload_pull();
         let Surface::Bound { .. } = self.surface else {
             return;
         };
@@ -779,14 +968,53 @@ impl Engine {
         let Some(runtime) = &self.runtime else {
             return;
         };
-        if !self.surface.usable() || runtime.rendering_context.size() == size {
+        if !self.surface.usable() {
+            return;
+        }
+        let context = &runtime.rendering_context;
+        if context.size() != size {
+            if let Err(error) = context.make_current() {
+                warn!("making the GL context current failed: {error:?}");
+            }
+            context.resize(size);
+            self.needs_paint = true;
+        }
+        self.apply_viewport();
+    }
+
+    /// The app's bottom controls now cover `inset` rows of the surface. Acknowledged with
+    /// `viewport_painted` once a presented frame shows the page above them in full.
+    fn set_viewport_inset(&mut self, inset: u32, request: u64) {
+        self.viewport_inset = inset;
+        self.viewport.requested(request, inset);
+        self.apply_viewport();
+        // Even an unchanged page is acknowledged after a frame, not before.
+        self.needs_paint = true;
+    }
+
+    /// Lays every view out in the surface's rows above the app's controls.
+    fn apply_viewport(&mut self) {
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        if !self.surface.usable() {
+            return;
+        }
+        let page = viewport::page_size(to_size(self.size), self.viewport_inset);
+        if runtime.page_context.size() == to_physical(page) {
             return;
         }
         // All views share the context; resizing through one resizes it for every view.
         match self.tabs.values().next() {
-            Some(tab) => tab.webview.resize(size),
-            None => runtime.rendering_context.resize(size),
+            Some(tab) => tab.webview.resize(to_physical(page)),
+            None => {
+                if let Err(error) = runtime.page_context.make_current() {
+                    warn!("making the GL context current failed: {error:?}");
+                }
+                runtime.page_context.resize(to_physical(page));
+            },
         }
+        self.viewport.page_resized(page);
         self.needs_paint = true;
     }
 
@@ -827,7 +1055,7 @@ impl Engine {
         };
         self.next_generation += 1;
 
-        let rendering_context: Rc<dyn RenderingContext> = runtime.rendering_context.clone();
+        let rendering_context: Rc<dyn RenderingContext> = runtime.page_context.clone();
         let webview = WebViewBuilder::new(&runtime.servo, rendering_context)
             .url(url)
             .hidpi_scale_factor(Scale::new(self.config.density))
@@ -836,6 +1064,11 @@ impl Engine {
             .build();
 
         let webview_id = self.insert_tab(view, webview, None, OpeningTap::default());
+        let now_ms = self.now_ms();
+        if let Some(created) = self.tabs.get_mut(&tab) {
+            // Its first document's media loads can arrive before anything else about it.
+            created.pending_media.navigation_requested(now_ms);
+        }
         self.emit(EngineEvent::TabCreated {
             view,
             webview: webview_id,
@@ -870,6 +1103,7 @@ impl Engine {
                 retired: HashSet::new(),
                 held: VecDeque::new(),
                 page_media: PageMedia::default(),
+                media_documents: MediaDocuments::default(),
                 media_budget: MediaBudget::default(),
                 pending_media: PendingMedia::default(),
                 frames_painted: 0,
@@ -878,6 +1112,7 @@ impl Engine {
                 opener,
                 shown: Shown::InitialBlank,
                 opening_tap,
+                throttling: Throttling::Normal,
                 ime_field: None,
             },
         );
@@ -910,7 +1145,7 @@ impl Engine {
         self.next_page_tab += 1;
         self.next_generation += 1;
 
-        let rendering_context: Rc<dyn RenderingContext> = runtime.rendering_context.clone();
+        let rendering_context: Rc<dyn RenderingContext> = runtime.page_context.clone();
         let webview = request
             .builder(rendering_context)
             .hidpi_scale_factor(Scale::new(self.config.density))
@@ -922,8 +1157,31 @@ impl Engine {
         self.emit(EngineEvent::TabOpened { view, opener });
     }
 
+    /// Servo throttles exactly the hidden views, so throttling hides a view and lifting it
+    /// shows the view again only if it is the selected one.
+    fn set_throttling(&mut self, id: i64, throttling: Throttling) {
+        let active = self.active == Some(id);
+        let Some(tab) = self.tabs.get_mut(&id) else {
+            self.refuse(format!("no tab {id}"), Some(id), None);
+            return;
+        };
+        tab.throttling = throttling;
+        match throttling {
+            Throttling::Throttled => {
+                tab.webview.set_focused(false);
+                tab.webview.hide();
+            },
+            Throttling::Normal if active => {
+                tab.webview.show();
+                tab.webview.set_focused(true);
+            },
+            Throttling::Normal => {},
+        }
+    }
+
     /// Hides every view; the surface shows no page until a tab is selected again.
     fn select_none(&mut self) {
+        self.cancel_reload_pull();
         for tab in self.tabs.values() {
             tab.webview.set_focused(false);
             tab.webview.hide();
@@ -986,10 +1244,15 @@ impl Engine {
                 other.webview.hide();
             }
         }
-        selected.webview.show();
-        selected.webview.set_focused(true);
+        // The application may throttle a view before selecting it (while it is in the
+        // background): it stays hidden until the throttling is lifted.
+        if selected.throttling == Throttling::Normal {
+            selected.webview.show();
+            selected.webview.set_focused(true);
+        }
 
         if self.active != Some(tab) {
+            self.cancel_reload_pull();
             self.withhold_keyboard();
         }
         self.active = Some(tab);
@@ -1057,7 +1320,8 @@ impl Engine {
     }
 
     fn navigate(&mut self, tab: i64, request: i64, url: &str) {
-        let Some(found) = self.tabs.get(&tab) else {
+        let now_ms = self.now_ms();
+        let Some(found) = self.tabs.get_mut(&tab) else {
             self.refuse(
                 format!("no tab {tab} to navigate"),
                 Some(tab),
@@ -1069,6 +1333,7 @@ impl Engine {
         match Url::parse(url) {
             Ok(parsed) => {
                 found.webview.load(parsed);
+                found.pending_media.navigation_requested(now_ms);
                 self.emit(EngineEvent::NavigationRequested {
                     view,
                     request,
@@ -1080,6 +1345,53 @@ impl Engine {
                 Some(tab),
                 Some(request),
             ),
+        }
+    }
+
+    fn reload(&mut self, tab: i64) {
+        let now_ms = self.now_ms();
+        let Some(found) = self.tabs.get_mut(&tab) else {
+            self.refuse(format!("no tab {tab}"), Some(tab), None);
+            return;
+        };
+        found.webview.reload();
+        // A reload's document is a new one, whose media loads can overtake it like any other.
+        found.pending_media.navigation_requested(now_ms);
+    }
+
+    fn stop_loading(&self, view: ViewKey, request: i64) {
+        let Some(tab) = self.tabs.get(&view.tab).filter(|tab| tab.view == view) else {
+            self.emit(EngineEvent::LoadingStopFailed { view, request });
+            return;
+        };
+        let wake = self.wake.clone();
+        let result = tab.webview.stop_loading(move |result| {
+            // Queue completion until Servo releases its event-loop borrows.
+            let _ = wake.send(Command::LoadingStopped {
+                view,
+                request,
+                result: result.map(u64::from),
+            });
+        });
+        if result.is_err() {
+            self.emit(EngineEvent::LoadingStopFailed { view, request });
+        }
+    }
+
+    fn loading_stopped(&self, view: ViewKey, request: i64, result: Result<u64, StopLoadingError>) {
+        if !self.tabs.get(&view.tab).is_some_and(|tab| tab.view == view) {
+            return;
+        }
+        match result {
+            Ok(document) => self.emit(EngineEvent::LoadingStopped {
+                view,
+                request,
+                document,
+            }),
+            Err(error) => {
+                warn!("stop loading failed: {error:?}");
+                self.emit(EngineEvent::LoadingStopFailed { view, request });
+            },
         }
     }
 
@@ -1141,20 +1453,151 @@ impl Engine {
             TouchPhase::Up => TouchEventType::Up,
             TouchPhase::Cancel => TouchEventType::Cancel,
         };
-        webview.notify_input_event(InputEvent::Touch(TouchEvent::new(
+        let input = webview.notify_input_event(InputEvent::Touch(TouchEvent::new(
             event_type,
             TouchId(pointer),
             DevicePoint::new(x, y).into(),
             TouchPointerType::Touch,
         )));
+        // Down resets a preceding fling's hit-test cache before we inspect the new target.
+        let track_input = self.track_reload_pull(phase, pointer, x, y);
+        if track_input && self.reload_pull_inputs.sent(input) == InputDecision::Cancelled {
+            self.reject_reload_pull();
+        }
         // Only a tap: the end of a scroll, fling or pinch must not let the page open an app.
         if tapped {
             self.note_activation();
         }
 
+        // The field tracker sees every gesture, so its taps are the page's taps too.
         if let Some((x, y)) = field_tap {
             self.check_tap_on_field(x, y);
+            self.check_tap_on_media(x, y);
         }
+    }
+
+    fn cancel_reload_pull(&mut self) {
+        self.reject_reload_pull();
+        self.reload_pull.reset();
+        self.reload_pull_page = None;
+    }
+
+    fn reject_reload_pull(&mut self) {
+        self.reload_pull.cancel_gesture();
+        self.reload_pull_inputs.reset();
+        self.reload_pull_release = None;
+        if let Some((view, document)) = self.reload_pull_page {
+            self.emit_reload_pull(view, document, PullUpdate::Cancelled);
+        }
+    }
+
+    fn emit_reload_pull(&mut self, view: ViewKey, document: PipelineId, update: PullUpdate) {
+        let Some(update) = self.reload_pull_feedback.update(update) else {
+            return;
+        };
+        self.emit(EngineEvent::ReloadPull {
+            view,
+            document: u64::from(document),
+            update,
+        });
+    }
+
+    fn track_reload_pull(&mut self, phase: TouchPhase, pointer: i32, x: f32, y: f32) -> bool {
+        if phase == TouchPhase::Down {
+            self.reload_pull_inputs.reset();
+            self.reload_pull_release = None;
+        }
+        let page = self
+            .active
+            .and_then(|id| self.tabs.get(&id))
+            .and_then(|tab| Some((tab.view, tab.current_document?)));
+        if page != self.reload_pull_page {
+            self.cancel_reload_pull();
+            self.reload_pull_page = page;
+        }
+        let Some((view, document)) = page else {
+            return false;
+        };
+
+        // Read the compositor, not scrollY: script metrics can lag behind a painted jump.
+        let position = if matches!(phase, TouchPhase::Down | TouchPhase::Up) {
+            match self.tabs[&view.tab]
+                .webview
+                .can_scroll_up_at_point(DevicePoint::new(x, y).into())
+            {
+                Some(false) => StartPosition::Top,
+                Some(true) => StartPosition::Scrollable,
+                None => StartPosition::Unknown,
+            }
+        } else {
+            StartPosition::Unknown
+        };
+        let update = match phase {
+            TouchPhase::Down => self.reload_pull.press(pointer, x, y, position),
+            TouchPhase::Move => self.reload_pull.moved(pointer, x, y),
+            TouchPhase::Up => self.reload_pull.release(pointer, x, y, position),
+            TouchPhase::Cancel => {
+                self.reload_pull.reset();
+                PullUpdate::Cancelled
+            },
+        };
+        if update == PullUpdate::Released {
+            self.reload_pull_inputs.release();
+            self.reload_pull_release = Some((x, y, Instant::now() + PULL_INPUT_TIMEOUT));
+            return true;
+        }
+        if update == PullUpdate::Cancelled {
+            self.reload_pull_inputs.reset();
+            self.reload_pull_release = None;
+        }
+        self.emit_reload_pull(view, document, update);
+        matches!(update, PullUpdate::Pulling(_))
+    }
+
+    fn reload_pull_input_handled(
+        &mut self,
+        view: ViewKey,
+        id: InputEventId,
+        result: InputEventResult,
+    ) {
+        if self.reload_pull_page.map(|(page_view, _)| page_view) != Some(view) {
+            return;
+        }
+        let action = if result
+            .intersects(InputEventResult::DefaultPrevented | InputEventResult::DispatchFailed)
+        {
+            DefaultAction::Prevented
+        } else {
+            DefaultAction::Allowed
+        };
+        match self.reload_pull_inputs.handled(id, action) {
+            InputDecision::Waiting => return,
+            InputDecision::Cancelled => {
+                self.reject_reload_pull();
+                return;
+            },
+            InputDecision::Released => {},
+        }
+        let Some((x, y, deadline)) = self.reload_pull_release.take() else {
+            return;
+        };
+        let Some((_, document)) = self.reload_pull_page else {
+            return;
+        };
+        let current = self.tabs.get(&view.tab).filter(|tab| {
+            tab.view == view
+                && tab.current_document == Some(document)
+                && self.active == Some(view.tab)
+        });
+        let at_top = current.and_then(|tab| {
+            tab.webview
+                .can_scroll_up_at_point(DevicePoint::new(x, y).into())
+        }) == Some(false);
+        if Instant::now() >= deadline || !at_top {
+            self.reject_reload_pull();
+            return;
+        }
+        self.emit_reload_pull(view, document, PullUpdate::Released);
     }
 
     fn note_activation(&mut self) {
@@ -1251,13 +1694,67 @@ impl Engine {
         }
     }
 
+    /// A tap on the selected page after its document reported a media URL: if the tap landed on
+    /// a media element without data, or on controls the page laid over one, the application
+    /// offers the page's media again (`media::tap_hits_media_script`). Servo handles the tap at
+    /// the same time, so the page's own player reacts as well.
+    fn check_tap_on_media(&mut self, x: f32, y: f32) {
+        let Some(tab) = self.active.and_then(|tab| self.tabs.get(&tab)) else {
+            return;
+        };
+        let Some(document) = tab.current_document else {
+            return;
+        };
+        if !tab.media_documents.contains(document) {
+            return;
+        }
+        // As for a field: without Servo's pinch-zoom offset, a tap on a zoomed page can miss.
+        let scale = tab.webview.device_pixels_per_css_pixel().get();
+        let Some(script) = media::tap_hits_media_script(x / scale, y / scale) else {
+            return;
+        };
+        let view = tab.view;
+        let checks = self.media_tap_checks.clone();
+        tab.webview
+            .evaluate_javascript_in_document(document, script, move |result| {
+                checks.borrow_mut().push((view, document, result))
+            });
+    }
+
+    fn drain_media_tap_checks(&mut self) {
+        let checks: Vec<_> = self.media_tap_checks.borrow_mut().drain(..).collect();
+        for (view, document, result) in checks {
+            // Anything but a plain yes (a script error, a replaced document) offers nothing.
+            if !matches!(result, Ok(JSValue::Boolean(true))) || self.active != Some(view.tab) {
+                continue;
+            }
+            if self
+                .live_tab(view)
+                .is_none_or(|tab| tab.current_document != Some(document))
+            {
+                continue;
+            }
+            self.emit(EngineEvent::MediaTapped {
+                view,
+                document: u64::from(document),
+            });
+        }
+    }
+
     fn key(&mut self, action: KeyAction, key: KeyInput) {
+        if key
+            .context
+            .is_some_and(|context| !self.ime_context_is_current(context))
+        {
+            return;
+        }
         if action == KeyAction::Press {
             self.note_interaction();
         }
         let Some(webview) = self.active_webview() else {
             return;
         };
+        let modifiers = key.modifiers;
         let Some(key) = servo_key(key) else {
             return;
         };
@@ -1265,9 +1762,24 @@ impl Engine {
             KeyAction::Press => KeyState::Down,
             KeyAction::Release => KeyState::Up,
         };
-        webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
-            state, key,
-        )));
+        let mut event = KeyboardEvent::from_state_and_key(state, key);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::SHIFT, modifiers.shift);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::CONTROL, modifiers.control);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::ALT, modifiers.alt);
+        event
+            .event
+            .modifiers
+            .set(servo::Modifiers::META, modifiers.meta);
+        webview.notify_input_event(InputEvent::Keyboard(event));
         if action == KeyAction::Press {
             self.note_activation();
         }
@@ -1306,18 +1818,48 @@ impl Engine {
         let Some(webview) = self.active_webview() else {
             return;
         };
-        // Same sequence as Servo's own Android shell: a composition that ends with the text.
+        // Same sequence as Servo's own Android shell: committed text, which editable elements
+        // take as well as form fields (a composition ending with it reaches form fields only).
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             KeyState::Down,
             Key::Named(NamedKey::Process),
         )));
-        webview.notify_input_event(InputEvent::Ime(ImeEvent::Composition(CompositionEvent {
-            state: CompositionState::End,
-            data: text,
-        })));
+        webview.notify_input_event(InputEvent::Ime(ImeEvent::Commit(text)));
         webview.notify_input_event(InputEvent::Keyboard(KeyboardEvent::from_state_and_key(
             KeyState::Up,
             Key::Named(NamedKey::Process),
+        )));
+    }
+
+    fn ime_context_is_current(&self, context: u64) -> bool {
+        self.active
+            .and_then(|id| self.tabs.get(&id))
+            .and_then(|tab| tab.ime_field)
+            .is_some_and(|field| field.context == context)
+    }
+
+    fn ime_composition(&mut self, id: u64, phase: crate::composition::Phase, text: String) {
+        let owner = self.active.and_then(|id| {
+            self.tabs.get(&id).and_then(|tab| {
+                // The field's pipeline is stable even when its History commit arrives later.
+                tab.ime_field
+                    .map(|field| (id, Some(field.control.pipeline_id), field.control))
+            })
+        });
+        if !self.composition.accept(id, phase, owner) {
+            return;
+        }
+        self.note_interaction();
+        let Some(webview) = self.active_webview() else {
+            return;
+        };
+        let state = match phase {
+            crate::composition::Phase::Start => servo::CompositionState::Start,
+            crate::composition::Phase::Update => servo::CompositionState::Update,
+            crate::composition::Phase::End => servo::CompositionState::End,
+        };
+        webview.notify_input_event(InputEvent::Ime(ImeEvent::Composition(
+            servo::CompositionEvent { state, data: text },
         )));
     }
 
@@ -1731,9 +2273,13 @@ impl Engine {
                 }
             },
             DelegateEvent::PageNavigation { view, request } => self.page_navigation(view, request),
+            DelegateEvent::InputHandled { view, id, result } => {
+                self.reload_pull_input_handled(view, id, result)
+            },
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
+                    self.viewport.frame_ready();
                 }
             },
             DelegateEvent::ImeShown {
@@ -1751,8 +2297,19 @@ impl Engine {
                 } else {
                     Keyboard::Withheld
                 };
+                // The ID must be new for this process: the application may still hold an older
+                // field's ID. When the positive Java `long` space is spent, fail closed rather
+                // than hand out zero or a reused ID.
+                let Some(context) = self.editor_contexts.allocate() else {
+                    if let Some(tab) = self.live_tab(view) {
+                        tab.ime_field = None;
+                    }
+                    self.error("the process has run out of editor focus context IDs");
+                    return;
+                };
                 let field = ImeField {
                     control,
+                    context,
                     multiline,
                     kind,
                     keyboard,
@@ -1815,14 +2372,15 @@ impl Engine {
     /// A load names its view but not its document, so it is attributed to the tab's committed
     /// document at the time the delegate sees it. Servo delivers load interceptions (net thread),
     /// document starts (script) and history changes (constellation) on separate channels in no
-    /// fixed order. A load that arrives after a new document reported its start and before its
-    /// commit is held and given to that document when it commits (`media::PendingMedia`). What
-    /// remains: a load that overtakes both its document's start and commit, or a `pushState`,
-    /// counts for the page before it, and a late load of the replaced document, or of the
-    /// previous route, counts for the new page. The application's document check cannot tell,
-    /// because the event carries the document stamped here. A load before the tab's first
-    /// commit is held for its first document once that reported its start; without a start,
-    /// there is no document to name and nothing is reported (the load is still cancelled).
+    /// fixed order. A load that arrives after the application asked for a page (a new tab, an
+    /// address, a reload) or after a new document reported its start, and before a commit, is
+    /// held and given to the document that commits (`media::PendingMedia`). What remains: a load
+    /// that overtakes the start and commit of a document the page navigated to itself (a link),
+    /// or a `pushState`, counts for the page before it; a late load of the replaced document, or
+    /// of the previous route, counts for the new page; and a hold that ends without a commit
+    /// gives its loads to the committed document. The application's document check cannot tell,
+    /// because the event carries the document stamped here. Without a committed document there
+    /// is nothing to name and nothing is reported (the load is still cancelled).
     fn media_blocked(
         &mut self,
         view: ViewKey,
@@ -1839,12 +2397,26 @@ impl Engine {
             url,
             referrer,
         };
-        // Held first: a tab's first document starts before any document has committed.
-        let admitted = tab.pending_media.admit(load, now_ms);
-        let Some(document) = tab.current_document else {
-            return;
-        };
-        for report in tab.credit_media(document, admitted, now_ms) {
+        // A hold whose document did not come in time ends first, so loads keep their order.
+        let mut loads = tab.pending_media.expire(now_ms);
+        let unawaited = loads.len();
+        loads.extend(tab.pending_media.admit(load, now_ms));
+        for report in tab.credit_now(loads, unawaited, now_ms) {
+            self.emit(report);
+        }
+    }
+
+    /// Ends the media holds whose document did not come in time (`media::PendingMedia`): a
+    /// request that commits nothing, or a start that never commits.
+    fn expire_media_holds(&mut self) {
+        let now_ms = self.now_ms();
+        let mut reports = Vec::new();
+        for tab in self.tabs.values_mut() {
+            let ended = tab.pending_media.expire(now_ms);
+            let unawaited = ended.len();
+            reports.extend(tab.credit_now(ended, unawaited, now_ms));
+        }
+        for report in reports {
             self.emit(report);
         }
     }
@@ -1926,9 +2498,10 @@ impl Engine {
     }
 
     fn show_page_control(&mut self, view: ViewKey, control: ControlHandle) {
-        if self.live_tab(view).is_none() {
+        let Some(tab) = self.live_tab(view) else {
             return;
-        }
+        };
+        let document = tab.current_document;
         let description = match &control {
             ControlHandle::Embedder(control) => describe(control),
             ControlHandle::SignIn(request) => Some(ControlDescription::SignIn {
@@ -1943,8 +2516,14 @@ impl Engine {
         };
         let id = self.next_control;
         self.next_control += 1;
-        self.page_controls
-            .insert(id, PendingControl { view, control });
+        self.page_controls.insert(
+            id,
+            PendingControl {
+                view,
+                document,
+                control,
+            },
+        );
         self.emit(EngineEvent::ControlShown {
             view,
             control: id,
@@ -2130,6 +2709,26 @@ impl Engine {
                 picker.submit();
             },
             (EmbedderControl::FilePicker(picker), ControlResponse::Dismiss) => picker.dismiss(),
+            (EmbedderControl::ContextMenu(menu), ControlResponse::Paste { text }) => {
+                // A late answer cannot paste into another tab or a replacement document.
+                let Some(tab) = self.tabs.get(&pending.view.tab).filter(|tab| {
+                    tab.view == pending.view
+                        && self.active == Some(pending.view.tab)
+                        && tab.current_document == pending.document
+                        && tab.webview.active_document_id() == pending.document
+                }) else {
+                    return;
+                };
+                if tab.current_document.is_none() || !allows_paste(&menu) {
+                    return;
+                }
+                // The long-press cancelled its touch: choosing Paste is the page interaction.
+                self.note_interaction();
+                self.note_activation();
+                // The text travels with the original menu's pipeline and node. No clipboard
+                // grant remains available for an unrelated request or a replaced frame.
+                menu.paste_text(text);
+            },
             // The application performed the action itself.
             (EmbedderControl::ContextMenu(menu), ControlResponse::Dismiss) => menu.dismiss(),
             // Dropping a select keeps its previous selection.
@@ -2202,13 +2801,25 @@ impl Engine {
 
         // Servo hides no input method when a navigation replaces the field's document (a form
         // sent with Enter). A field of the new document can be reported before its commit.
-        let field_replaced = change == HistoryChange::NewDocument
-            && tab
+        let field_commit = if change == HistoryChange::NewDocument {
+            keyboard::committed_field(
+                document,
+                tab.ime_field.map(|field| field.control.pipeline_id),
+            )
+        } else {
+            keyboard::CommittedField::None
+        };
+        let field_replaced = field_commit == keyboard::CommittedField::Hide;
+        let replay_field = match field_commit {
+            keyboard::CommittedField::Hide => {
+                tab.ime_field = None;
+                None
+            },
+            keyboard::CommittedField::Replay => tab
                 .ime_field
-                .is_some_and(|field| field.control.pipeline_id != document);
-        if field_replaced {
-            tab.ime_field = None;
-        }
+                .filter(|field| field.keyboard == Keyboard::Open),
+            keyboard::CommittedField::None => None,
+        };
 
         // Release reports that overtook this commit; discard those of replaced documents.
         let mut released = Vec::new();
@@ -2228,16 +2839,27 @@ impl Engine {
         // Media loads that overtook this commit, credited to this document's new page.
         let released_media = if change == HistoryChange::NewDocument {
             let held = tab.pending_media.committed(u64::from(document));
+            if !held.is_empty() {
+                info!(
+                    "view {view:?}: {} media loads held until document {} committed",
+                    held.len(),
+                    u64::from(document)
+                );
+            }
             tab.credit_media(document, held, now_ms)
         } else {
             Vec::new()
         };
 
         if change == HistoryChange::NewDocument {
-            // Another document replaced the one asking (a load the application started): its
-            // question is moot.
+            // A replacement document cannot answer the previous page's question or paste menu.
             self.hide_controls(|pending| {
-                pending.view == view && matches!(pending.control, ControlHandle::LeavePage { .. })
+                pending.view == view
+                    && matches!(
+                        pending.control,
+                        ControlHandle::LeavePage { .. }
+                            | ControlHandle::Embedder(EmbedderControl::ContextMenu(_))
+                    )
             });
         }
 
@@ -2253,6 +2875,15 @@ impl Engine {
             index,
             length,
         });
+        // Android retires the old PageRef's connection on this commit. Restore an open
+        // retained field without changing its context or losing its live composition.
+        // Do not replay a withheld preparation over the old page's keyboard-hide request;
+        // its normal activation tap will prepare and open it.
+        if shown {
+            if let Some(field) = replay_field {
+                self.emit(field.shown_event(view));
+            }
+        }
         for report in released {
             self.emit_document_report(view, report, Attribution::HeldUntilCommit);
         }
@@ -2322,16 +2953,30 @@ impl Engine {
         self.needs_paint = false;
 
         let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) else {
-            // No selected view: clear, so a closed page never stays on screen.
-            let gl = context.gleam_gl_api();
+            // No selected view: clear, so a closed page never stays on screen. Nothing else is
+            // meant to be there, so the whole page counts as shown.
             context.prepare_for_rendering();
-            gl.clear_color(1.0, 1.0, 1.0, 1.0);
-            gl.clear(gleam::gl::COLOR_BUFFER_BIT);
+            clear(&*context.gleam_gl_api());
             context.present();
+            self.acknowledge_viewport(Strip::Painted);
             return;
         };
 
         tab.webview.paint();
+        let strip = self.viewport.check().map_or(Strip::Painted, |check| {
+            read_strip(&runtime.page_context, check)
+        });
+        // The page goes at the top of the surface; the rows below it lie under the app's
+        // controls and get the clear color.
+        context.prepare_for_rendering();
+        clear(&*context.gleam_gl_api());
+        if let Some(copy) = runtime.page_context.render_to_parent_callback() {
+            let target = viewport::page_target(
+                to_size(context.size()),
+                to_size(runtime.page_context.size()),
+            );
+            copy(&context.glow_gl_api(), gl_rect(target));
+        }
         context.present();
         tab.frames_painted += 1;
 
@@ -2343,6 +2988,17 @@ impl Engine {
             tab.last_paint_report = Some(now);
             let (view, frames) = (tab.view, tab.frames_painted);
             self.emit(EngineEvent::Painted { view, frames });
+        }
+        self.acknowledge_viewport(strip);
+    }
+
+    /// After a frame was presented: tells the app once it shows the page it last asked for.
+    fn acknowledge_viewport(&mut self, strip: Strip) {
+        if let Some(shown) = self.viewport.presented(strip) {
+            self.emit(EngineEvent::ViewportPainted {
+                request: shown.request,
+                inset: shown.inset,
+            });
         }
     }
 
@@ -2359,13 +3015,20 @@ impl Engine {
             let Runtime {
                 servo,
                 rendering_context,
+                page_context,
                 user_content,
             } = runtime;
+            set_panic_reporter(None);
             // The user content manager holds a Servo handle of its own.
             drop(user_content);
             // Dropping the last handle asks the constellation to exit and spins until it has;
             // this is when Servo writes cookies and HSTS state to the profile directory.
             drop(servo);
+            // Its framebuffer is deleted in the context it was made in.
+            if let Err(error) = rendering_context.make_current() {
+                warn!("making the GL context current for shutdown failed: {error:?}");
+            }
+            drop(page_context);
             if let Surface::Bound { .. } = self.surface {
                 if let Err(error) = surface_operation(|| rendering_context.take_window()) {
                     warn!("unbinding the surface during shutdown failed: {error}");
@@ -2382,6 +3045,87 @@ impl Engine {
         self.surface = Surface::Unbound;
         self.emit(EngineEvent::ShutdownComplete);
     }
+}
+
+fn to_size(size: PhysicalSize<u32>) -> viewport::Size {
+    viewport::Size {
+        width: size.width,
+        height: size.height,
+    }
+}
+
+fn to_physical(size: viewport::Size) -> PhysicalSize<u32> {
+    PhysicalSize::new(size.width, size.height)
+}
+
+fn gl_rect(rect: GlRect) -> euclid::Rect<i32, euclid::UnknownUnit> {
+    euclid::Rect::new(
+        euclid::Point2D::new(rect.x, rect.y),
+        euclid::Size2D::new(rect.width, rect.height),
+    )
+}
+
+/// Clears the bound framebuffer to the color Servo leaves where a frame has no content.
+fn clear(gl: &dyn gleam::gl::Gl) {
+    let [red, green, blue, alpha] = viewport::CLEAR_RGBA.map(|c| f32::from(c) / 255.0);
+    gl.disable(gleam::gl::SCISSOR_TEST);
+    gl.clear_color(red, green, blue, alpha);
+    gl.clear(gleam::gl::COLOR_BUFFER_BIT);
+}
+
+/// Reads the page rows `check` names back from the frame just rendered into `page`.
+fn read_strip(page: &OffscreenRenderingContext, check: StripCheck) -> Strip {
+    let read = |rect: GlRect| {
+        page.read_to_image(DeviceIntRect::from_origin_and_size(
+            DeviceIntPoint::new(rect.x, rect.y),
+            DeviceIntSize::new(rect.width, rect.height),
+        ))
+    };
+    let strip = read(check.strip);
+    let above = check.above.and_then(read);
+    viewport::classify(
+        strip.as_ref().map(|image| image.as_raw().as_slice()),
+        above.as_ref().map(|image| image.as_raw().as_slice()),
+        usize::try_from(check.strip.width).unwrap_or(0),
+    )
+}
+
+/// Turns on the PDF viewer (docs/PDF.md): the engine then shows a top-level PDF in a viewer
+/// document that loads `pdf/viewer.mjs` from `combray-pdf:` under the viewer's CSP. Without the
+/// scheme's token, which [protocols] also needs, the preferences stay empty and PDFs keep
+/// Servo's stand-in page.
+fn set_pdf_viewer_preferences(preferences: &mut Preferences) {
+    let token = match ViewerToken::for_process() {
+        Ok(token) => token,
+        Err(error) => {
+            error!("no PDF viewer without a random token: {error}");
+            return;
+        },
+    };
+    let viewer = ViewerPreferences::new(token);
+    preferences.set_value("combray_pdf_viewer_module", PrefValue::Str(viewer.module));
+    preferences.set_value("combray_pdf_viewer_csp", PrefValue::Str(viewer.csp));
+    preferences.set_value(
+        "combray_pdf_viewer_max_bytes",
+        PrefValue::UInt(viewer.max_bytes),
+    );
+}
+
+/// Combray's own schemes, merged into Servo's built-in ones. `combray-pdf:` serves the PDF
+/// viewer's files to the viewer documents the engine makes (docs/PDF.md).
+fn protocols() -> ProtocolRegistry {
+    let mut registry = ProtocolRegistry::default();
+    let token = match ViewerToken::for_process() {
+        Ok(token) => token,
+        Err(error) => {
+            error!("no {} scheme without a random token: {error}", pdf::SCHEME);
+            return registry;
+        },
+    };
+    if let Err(error) = registry.register(pdf::SCHEME, PdfProtocolHandler::new(token)) {
+        error!("registering the {} scheme failed: {error:?}", pdf::SCHEME);
+    }
+    registry
 }
 
 /// What the application needs to present `control`; `None` for controls it does not present.
@@ -2412,18 +3156,30 @@ fn describe(control: &EmbedderControl) -> Option<ControlDescription> {
                 .map(|pattern| pattern.0.clone())
                 .collect(),
         },
-        // Only links and images: the bottom bar has back, forward and reload, and editing
-        // actions need a clipboard bridge the app does not have.
         EmbedderControl::ContextMenu(menu) => {
             let info = menu.element_info();
             return controls::link_menu(
                 info.link_url.as_ref().map(Url::as_str),
                 info.image_url.as_ref().map(Url::as_str),
-            );
+            )
+            .or_else(|| allows_paste(menu).then_some(ControlDescription::PasteMenu));
         },
         _ => return None,
     };
     Some(description)
+}
+
+fn allows_paste(menu: &servo::ContextMenu) -> bool {
+    menu.items().iter().any(|item| {
+        matches!(
+            item,
+            ContextMenuItem::Item {
+                action: ContextMenuAction::Paste,
+                enabled: true,
+                ..
+            }
+        )
+    })
 }
 
 /// Flattens `<optgroup>`s: each option remembers its group's label.

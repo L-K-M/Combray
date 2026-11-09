@@ -21,6 +21,8 @@ internal fun saveFeedback(previous: PageSaveStatus, current: PageSaveStatus): Sa
 
     return when (current.status) {
         SaveStatus.Saved -> SaveFeedback.CONFIRM
+        // The link was stored; only the list step failed, so the save itself succeeded.
+        is SaveStatus.SavedWithListFailure -> SaveFeedback.CONFIRM
         is SaveStatus.NeedsAttention -> SaveFeedback.REJECT
         SaveStatus.NotConfigured, SaveStatus.Unsaved, SaveStatus.Pending, SaveStatus.Waiting -> null
     }

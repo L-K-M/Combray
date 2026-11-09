@@ -13,6 +13,9 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -81,6 +84,20 @@ class ReaderTest {
     }
 
     @Test
+    fun aRefusedLinkKeepsTheArticleOpen() {
+        val reader = openReader(Fixtures.ARTICLE, ARTICLE_TITLE) as ReaderState.Ready
+        val link = reader.article.blocks.flatMap { it.spans }.single { it.text == "READER-REFUSED-LINK" }
+        assertEquals("https://", link.href)
+
+        tapText("READER-BODY-ONE", "READER-REFUSED-LINK")
+        device.idle()
+
+        assertEquals(reader, device.browser.browserState.value.reader)
+        assertEquals(Fixtures.ARTICLE, device.browser.browserState.value.activeTab?.url)
+        assertEquals(1, device.browser.browserState.value.openTabCount)
+    }
+
+    @Test
     fun aNumberedListKeepsThePagesNumbers() {
         val reader = openReader(Fixtures.ARTICLE, ARTICLE_TITLE) as ReaderState.Ready
         fun ordinalOf(marker: String) = reader.article.blocks.single { block -> block.spans.any { it.text == marker } }.ordinal
@@ -92,6 +109,19 @@ class ReaderTest {
 
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("9."))
         compose.onNodeWithText("9.").assertIsDisplayed()
+    }
+
+    @Test
+    fun scrollingTheReaderHidesAndRevealsTheBottomBar() {
+        openReader(Fixtures.ARTICLE, ARTICLE_TITLE)
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp(durationMillis = SWIPE_DURATION_MS) }
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown(durationMillis = SWIPE_DURATION_MS) }
+        compose.onNodeWithContentDescription(NEW_TAB).assertIsDisplayed()
+        assertTrue(device.browser.browserState.value.reader is ReaderState.Ready)
     }
 
     @Test
@@ -111,12 +141,22 @@ class ReaderTest {
 
     @Test
     fun aFileServoCannotShowHasNoArticle() {
-        // Servo's page in place of the PDF, "Unknown content type (application/pdf).", is no article.
-        device.browser.openUrl(Fixtures.PDF, Placement.CURRENT_TAB)
+        // Servo's page in place of the file, "Unknown content type (application/octet-stream).",
+        // is no article.
+        device.browser.openUrl(Fixtures.UNSHOWN_FILE, Placement.CURRENT_TAB)
         // The stand-in page has committed: a Servo that stopped showing one would not pass for this.
-        device.awaitState { it.activeTab?.url == Fixtures.PDF && it.activeTab?.page != null && it.activeTab?.loading == false }
+        device.awaitState { it.activeTab?.url == Fixtures.UNSHOWN_FILE && it.activeTab?.page != null && it.activeTab?.loading == false }
         device.browser.openReader()
         val reader = device.awaitState { it.reader != null && it.reader !is ReaderState.Loading }.reader
+        assertTrue("$reader", reader is ReaderState.Unavailable)
+    }
+
+    @Test
+    fun aPdfHasNoArticleYet() {
+        // A damaged PDF: once the viewer has named it, its message ("Loading PDF…", then why the
+        // file cannot be shown) is text in the page, and only reader.js's viewer check keeps that
+        // from being an article. Reading a PDF as text is a later step (docs/PDF.md).
+        val reader = openReader(Fixtures.pdf("corrupt.pdf", "reader${System.currentTimeMillis()}"), "corrupt.pdf")
         assertTrue("$reader", reader is ReaderState.Unavailable)
     }
 
@@ -132,5 +172,7 @@ class ReaderTest {
 
     private companion object {
         const val ARTICLE_TITLE = "ARTICLE"
+        const val NEW_TAB = "New tab"
+        const val SWIPE_DURATION_MS = 600L
     }
 }

@@ -181,6 +181,30 @@ class BrowsingTest {
     }
 
     @Test
+    fun aRequestOnAConnectionTheServerDroppedIsSentAgain() {
+        // The first page leaves its kept-alive connection in the engine's pool. The fixture drops
+        // the next request on that connection unanswered, as a server whose idle timeout races the
+        // request does; the engine sends it again on a new connection instead of failing the load.
+        open(Device.GREEN)
+        val key = System.currentTimeMillis().toString()
+        val url = Fixtures.reusedClose(key)
+        device.browser.openUrl(url, Placement.CURRENT_TAB)
+        // Either outcome ends the wait, so a failed load fails the check below rather than timing out.
+        device.awaitState {
+            val tab = it.activeTab
+            tab?.url == url && !tab.loading && (tab.title == Fixtures.FRESH_TITLE || tab.loadFailed)
+        }
+
+        val tab = device.browser.browserState.value.activeTab!!
+        assertFalse(tab.loadFailed)
+        assertEquals(Fixtures.FRESH_TITLE, tab.title)
+        val counts = Fixtures.state().getJSONObject("reused_close").getJSONObject(key)
+        // A request sent on a new connection from the start would prove nothing.
+        assertEquals(1, counts.getInt("dropped"))
+        assertEquals(1, counts.getInt("answered"))
+    }
+
+    @Test
     fun tenTabsCanBeSwitched() {
         val colors = (0 until 10).map { 0x204060 + it * 0x101010 }
         val tabs = colors.mapIndexed { index, color ->
@@ -342,6 +366,18 @@ class BrowsingTest {
     }
 
     @Test
+    fun closingATransferredMessagePortKeepsThePageRunning() {
+        device.browser.openUrl(Fixtures.PORT_CLOSE, Placement.CURRENT_TAB)
+        val state = device.awaitState {
+            val tab = it.activeTab
+            val title = tab?.title.orEmpty()
+            tab != null && (tab.crashed || title.startsWith(PORT_CLOSE_PREFIX) && title != PORT_CLOSE_WAITING)
+        }
+        assertFalse("the page crashed", state.activeTab?.crashed == true)
+        assertEquals(PORT_CLOSE_OK, state.activeTab?.title)
+    }
+
+    @Test
     fun pagesSeeAScreenAtLeastAsWideAsTheirWindow() {
         device.browser.openUrl(Fixtures.SCREEN, Placement.CURRENT_TAB)
         val state = device.awaitState { it.activeTab?.title?.startsWith(SCREEN_PREFIX) == true }
@@ -365,10 +401,10 @@ class BrowsingTest {
 
         // Both elements fired `error`, and they no longer hold back the page's load event.
         device.awaitState { it.activeTab?.title == MEDIA_FAILED }
-        val loaded = device.awaitPage(Fixtures.MEDIA)
-        // Reported before the elements' `error` handlers ran: the video's and the audio's address
-        // (they differ in their query).
-        assertEquals("media entries", 2, loaded.activeTab?.media?.size)
+        device.awaitPage(Fixtures.MEDIA)
+        // Page completion and the native media reports arrive independently.
+        val reported = device.awaitState { (it.activeTab?.media?.size ?: 0) >= MEDIA_ENTRIES }
+        assertEquals("media entries", MEDIA_ENTRIES, reported.activeTab?.media?.size)
         val media = Fixtures.state().getJSONObject("media")
         assertEquals("media requests that reached the server", 0, media.getInt("requests"))
         assertEquals("media responses sent in full", 0, media.getInt("completed"))
@@ -558,11 +594,15 @@ class BrowsingTest {
         const val ANIMATE_PREFIX = "WA:"
         const val ANIMATE_WAITING = "WA:waiting"
         const val ANIMATE_OK = "WA:ok"
+        const val PORT_CLOSE_PREFIX = "PC:"
+        const val PORT_CLOSE_WAITING = "PC:waiting"
+        const val PORT_CLOSE_OK = "PC:ok"
         const val APIS_PREFIX = "XP:"
         const val APIS_WAITING = "XP:waiting"
         const val APIS_OK = "XP:ok"
         const val SCREEN_PREFIX = "SCREEN:"
         const val SCREEN_WIDTHS = 4
+        const val MEDIA_ENTRIES = 2
         const val MEDIA_FAILED = "MEDIA:errors:2"
         /** Both elements' addresses are on the fixture's own (local) host: the player may fetch them. */
         const val MEDIA_NOTICE = "This page’s audio or video opens in a separate player."

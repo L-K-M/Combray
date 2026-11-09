@@ -24,11 +24,14 @@ import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.PageRef
+import ch.lkmc.combray.engine.ReloadPullPhase
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -96,6 +99,10 @@ class BrowserCoordinator(
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val state = MutableStateFlow(BrowserState())
 
+    /** Guards the one-time setup in [start]; [started] is safe to read without the lock. */
+    private val setupLock = Any()
+    @Volatile private var started = false
+
     // Runtime state, touched only by the consumer.
     private val liveByTab = HashMap<String, LiveView>()
     private val liveByNative = HashMap<Long, LiveView>()
@@ -129,10 +136,6 @@ class BrowserCoordinator(
     /** The tab another app's link opened, until focus moves elsewhere (process memory only). */
     private var otherAppTab: String? = null
 
-    /** The open tabs in Recent order when the current run of bar swipes began, and its last swipe. */
-    private var swipeRun: List<String> = emptyList()
-    private var swipeRunAt: Long? = null
-
     /** Tab -> the tab whose page opened it, while Back may return there (process memory only). */
     private val openers = HashMap<String, String>()
 
@@ -147,45 +150,66 @@ class BrowserCoordinator(
 
     val browserState: StateFlow<BrowserState> = state.asStateFlow()
 
+    private val viewportPainted = MutableStateFlow<EngineEvent.ViewportPainted?>(null)
+
+    /**
+     * The engine's latest answer to a viewport request (`EngineSurfaceView.coverBottom`). Set as
+     * it arrives, never behind the queue: the bottom bar stays on screen until it comes.
+     */
+    val paintedViewport: StateFlow<EngineEvent.ViewportPainted?> = viewportPainted.asStateFlow()
+
     /**
      * Starts the engine (synchronously, so a surface created right after this can bind) and the
-     * work queue, then restores the session. Call once per process.
+     * work queue, then restores the session. Call once per process: a second or concurrent call
+     * is a no-op, because a second work-queue consumer would break the one-consumer ordering
+     * invariant.
      */
     fun start() {
-        startEngine()
-        scope.launch {
-            for (job in work) {
-                try {
-                    job()
-                } catch (failure: Exception) {
-                    // A failed step must not stop the queue; it is a bug worth surfacing.
-                    Log.e(LOG_TAG, "browser state update failed", failure)
-                    // Restoring ends even if it was this step that failed: show what there is, not a blank page.
-                    state.update {
-                        // Before the session is restored the user has done nothing: it was the restore.
-                        val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
-                        it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+        if (started) return
+        synchronized(setupLock) {
+            if (started) return
+            startEngine()
+            scope.launch {
+                for (job in work) {
+                    try {
+                        job()
+                    } catch (failure: Throwable) {
+                        // A dependency can cancel independently; only our own cancellation
+                        // ends the consumer. An inner timeout must not strand later commands.
+                        if (failure is CancellationException && !currentCoroutineContext().isActive) throw failure
+                        // A failed step must not stop the queue; it is a bug worth surfacing.
+                        // An Error (article JSON parsing runs here) is caught too: losing the
+                        // consumer would silently stop every later command.
+                        // Messages and causes can contain page text or native credentials.
+                        Log.e(LOG_TAG, "browser state update failed: ${failure.javaClass.name}")
+                        // Restoring ends even if it was this step that failed: show what there is, not a blank page.
+                        state.update {
+                            // Before the session is restored the user has done nothing: it was the restore.
+                            val problem = if (it.session == SessionState.RESTORING) RESTORE_FAILED else ACTION_FAILED
+                            it.copy(session = SessionState.RESTORED, notice = Notice.Problem(problem))
+                        }
                     }
                 }
             }
-        }
-        submit {
-            // The stored tabs are shown even if maintenance fails, and the problem is named as
-            // the restore: publishing first ends RESTORING, so the queue's handler would call it
-            // "the last action".
-            val failure = try {
-                maintain()
-                null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failed: Exception) {
-                failed
+            submit {
+                // The stored tabs are shown even if maintenance fails, and the problem is named as
+                // the restore: publishing first ends RESTORING, so the queue's handler would call it
+                // "the last action".
+                val failure = try {
+                    maintain()
+                    null
+                } catch (failed: Throwable) {
+                    if (failed is CancellationException && !currentCoroutineContext().isActive) throw failed
+                    // An Error or a cancelled dependency must not skip the stored tabs.
+                    failed
+                }
+                publish()
+                if (failure != null) {
+                    Log.e(LOG_TAG, "restoring the session failed: ${failure.javaClass.name}")
+                    state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
+                }
             }
-            publish()
-            if (failure != null) {
-                Log.e(LOG_TAG, "restoring the session failed", failure)
-                state.update { it.copy(notice = Notice.Problem(RESTORE_FAILED)) }
-            }
+            started = true
         }
     }
 
@@ -217,7 +241,7 @@ class BrowserCoordinator(
         ) { tabs, visits, session, _ ->
             val cutoff = clock.now() - retention.closedHistoryMillis
             val items = tabs.map {
-                RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId)
+                RecentItem.OpenTab(it.id, it.url, it.title, it.lastFocusedAt, it.id == session?.activeTabId, createdAt = it.createdAt)
             } + visits.filter { it.lastSeenAt >= cutoff }.map { RecentItem.Visit(it.id, it.tabId, it.url, it.title, it.lastSeenAt) }
             items.sortedByDescending { it.time }
         }
@@ -269,7 +293,7 @@ class BrowserCoordinator(
             }
             val used = eligible.filter { it.tab.lastFocusedAt >= it.tab.createdAt }
             (used + (eligible - used)).firstOrNull()?.let {
-                RecentItem.OpenTab(it.tab.id, it.tab.url, it.tab.title, it.tab.lastFocusedAt, active = false)
+                RecentItem.OpenTab(it.tab.id, it.tab.url, it.tab.title, it.tab.lastFocusedAt, active = false, createdAt = it.tab.createdAt)
             }
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
@@ -420,25 +444,16 @@ class BrowserCoordinator(
         publish()
     }
 
-    /**
-     * A swipe along the bottom bar: focuses the [step] neighbour of the focused tab in Recent
-     * order. Focusing reorders Recent, so a run of swipes walks the order as the run found it:
-     * repeated swipes go further back instead of flipping between the two newest tabs. A pause
-     * of [SWIPE_RUN_MS] starts the next run from the order as it is then.
-     */
+    /** A bar swipe follows fixed creation order, never focus recency, and does not wrap. */
     fun stepTab(step: TabStep) = submit {
-        val now = clock.now()
-        val open = dao.openTabs()
-        if (swipeRunAt.let { it == null || now - it > SWIPE_RUN_MS }) swipeRun = open.map { it.id }
-        swipeRunAt = now
-        // Tabs closed during the run drop out; tabs opened during it wait for the next run.
-        val order = swipeRun.filter { id -> open.any { it.id == id } }
-        val index = order.indexOf(activeTab()?.id)
+        val open = dao.openTabsInCreationOrder()
+        val active = activeTab()?.id
+        val index = open.indexOfFirst { it.id == active }
         val target = when (step) {
-            TabStep.OLDER -> order.getOrNull(index + 1)
-            TabStep.NEWER -> if (index > 0) order[index - 1] else null
+            TabStep.OLDER -> open.getOrNull(index + 1)
+            TabStep.NEWER -> if (index > 0) open[index - 1] else null
         } ?: return@submit
-        focus(open.first { it.id == target })
+        focus(target)
         reconcile()
         publish()
     }
@@ -491,6 +506,18 @@ class BrowserCoordinator(
         engine.scrollToEdge(page, edge)
     }
 
+    /** Cancels only the tab whose loading control was pressed, awaiting an engine result. */
+    fun stopLoading(tabId: String) = submit {
+        if (activeTab()?.id != tabId) return@submit
+        val view = liveByTab[tabId]?.takeIf { !it.crashed } ?: return@submit
+        if ((!view.loading && !view.awaitingCommit) || view.pendingStop != null) return@submit
+
+        val request = nextRequest++
+        view.pendingStop = PendingStop(request, view.commitRequests, view.currentDocument)
+        // A first-frame tap can precede TabCreated. Keep its intent until the view is identified.
+        view.generation?.let { engine.stopLoading(ViewRef(view.nativeTab, it), request) }
+    }
+
     /** Reloads the page; a crashed renderer is replaced by a new one at the tab's address. */
     fun reload() = submit {
         val tab = activeTab() ?: return@submit
@@ -509,16 +536,36 @@ class BrowserCoordinator(
         publish()
     }
 
+    private fun pullView(page: PageRef): LiveView? = view(page.view)?.takeIf {
+        it.nativeTab == selectedNative && it.currentDocument == page.document && !it.crashed &&
+            !it.loading && !it.awaitingCommit && reader == null && it.controls.isEmpty()
+    }
+
+    /** Progress stays in memory; only a valid release changes the browser projection. */
+    private fun onReloadPull(event: EngineEvent.ReloadPull): Boolean {
+        val live = pullView(event.page) ?: return false
+        val pull = if (event.phase == ReloadPullPhase.PULLING) ReloadPullState(event.page, event.progress) else null
+        state.update { it.copy(reloadPull = pull) }
+        if (event.phase != ReloadPullPhase.RELEASED) return false
+
+        engine.reload(event.page)
+        awaitCommit(live)
+        return true
+    }
+
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
+        var forgottenUrl: String? = null
         database.withTransaction {
             val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
             if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
+            forgottenUrl = visit.url
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
             capture?.forgetUrl(visit.url)
         }
+        forgottenUrl?.let { url -> cancelPendingCapture { it == url.substringBefore('#') } }
     }
 
     /**
@@ -546,6 +593,10 @@ class BrowserCoordinator(
             }
             spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
         }
+        cancelPendingCapture { url ->
+            val candidate = HostNames.of(url) ?: return@cancelPendingCapture false
+            spellings.any { HostNames.matches(candidate, it, includeSubdomains) }
+        }
     }
 
     /**
@@ -564,8 +615,32 @@ class BrowserCoordinator(
     }
 
     /** The text size setting changed: every page, open or opened later, lays out at it. */
-    fun applyTextSize() = submit {
-        if (engineReady) engine.setPageZoom(textSize().zoom)
+    fun applyTextSize(size: TextSize = textSize()) = submit {
+        if (engineReady) engine.setPageZoom(size.zoom)
+    }
+
+    private fun onLoadingStopped(view: LiveView, event: EngineEvent.LoadingStopped) {
+        val pending = view.pendingStop?.takeIf {
+            it.request == event.request && it.navigation == view.commitRequests
+        } ?: return
+        if (view.currentDocument != pending.document && view.currentDocument != event.document) {
+            view.pendingStop = null
+            return
+        }
+        if (view.currentDocument != event.document) {
+            // Persist the retained document before reporting completion or allowing a recovery load.
+            pending.acknowledgement = event
+            return
+        }
+        view.pendingStop = null
+        view.loading = false
+        view.stoppedDocument = event.document
+        // Reports held for the cancelled navigation cannot become the retained page's media.
+        view.heldMedia.clear()
+        stopAwaitingCommit(view)
+        view.awaitedRequest = null
+        view.awaitedUrl = null
+        if (view.currentDocument == event.document) scheduleCapture(view, event.document, view.currentPage?.address, captureTiming.debounceMs)
     }
 
     /**
@@ -677,7 +752,7 @@ class BrowserCoordinator(
         // Only where the dialog offered it: a stray request must not silence the page's dialogs.
         if (blocking == DialogBlocking.BLOCK_FOR_PAGE && answered.offerBlocking) view.dialogsBlocked = true
         // Stay cancels the navigation or reload the page asked about: nothing will commit (#92).
-        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) view.awaitingCommit = false
+        if (answered.content is PageControlContent.LeavePage && response == ControlResponse.Dismiss) stopAwaitingCommit(view)
         engine.respondToControl(control, response)
         publish()
     }
@@ -685,7 +760,10 @@ class BrowserCoordinator(
     /** Clears [notice] (or an equal duplicate); a different one posted while the UI showed it is kept. */
     fun noticeShown(notice: Notice) = state.update { if (it.notice == notice) it.copy(notice = null) else it }
 
-    /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
+    /** The user played or closed [offer]; a later offer of the same page shows again. */
+    fun dismissMediaOffer(offer: MediaPageRef) = state.update { if (it.mediaOffer == offer) it.copy(mediaOffer = null) else it }
+
+    /** Clears only this delivery; a commit replay or a different field may have posted a newer one. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
     /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
@@ -704,7 +782,15 @@ class BrowserCoordinator(
 
     // --- Engine events ----------------------------------------------------------------------------
 
-    private fun onEngineEvent(event: EngineEvent) = submit {
+    private fun onEngineEvent(event: EngineEvent) {
+        if (event is EngineEvent.ViewportPainted) {
+            viewportPainted.value = event
+            return
+        }
+        handleEngineEvent(event)
+    }
+
+    private fun handleEngineEvent(event: EngineEvent) = submit {
         when (event) {
             is EngineEvent.EngineReady -> {
                 engineReady = true
@@ -716,21 +802,33 @@ class BrowserCoordinator(
                 engine.setAppearance(appearance)
                 reconcile()
             }
-            is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { it.generation = event.view.generation }
+            is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { live ->
+                live.generation = event.view.generation
+                live.pendingStop?.let { engine.stopLoading(event.view, it.request) }
+            }
             is EngineEvent.TabOpened -> onTabOpened(event)
             is EngineEvent.TabClosed -> view(event.view)?.let { onClosedByPage(it) }
             is EngineEvent.HistoryChanged -> view(event.view)?.let { onHistory(it, event) }
+            is EngineEvent.LoadingStopped -> view(event.view)?.let { onLoadingStopped(it, event) }
+            is EngineEvent.LoadingStopFailed -> view(event.view)?.let { live ->
+                val pending = live.pendingStop
+                if (pending?.request == event.request && pending.navigation == live.commitRequests) {
+                    live.pendingStop = null
+                    state.update { it.copy(notice = Notice.StopFailed) }
+                }
+            }
             is EngineEvent.LoadStatus -> view(event.view)?.let {
-                if (event.document == it.currentDocument && event.attribution != Attribution.STALE) {
+                if (event.document == it.currentDocument && event.document != it.stoppedDocument && event.attribution != Attribution.STALE) {
                     it.loading = event.phase != LoadPhase.COMPLETE
                     if (event.phase == LoadPhase.COMPLETE) {
-                        scheduleCapture(it, event.document, captureTiming.settleMs)
+                        scheduleCapture(it, event.document, it.currentPage?.address, captureTiming.settleMs)
                         showPendingMediaNotice(it, event.document)
                     }
                 }
             }
             is EngineEvent.CaptureResult -> if (event.capture in pendingArticles) onArticleResult(event) else onCaptureResult(event)
             is EngineEvent.FindResult -> onFindResult(event)
+            is EngineEvent.ReloadPull -> if (!onReloadPull(event)) return@submit
             is EngineEvent.TitleChanged -> view(event.view)?.let { onTitle(it, event) }
             // Said once per document: a page that keeps trying must not keep a notice up.
             is EngineEvent.PopupBlocked -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
@@ -748,31 +846,51 @@ class BrowserCoordinator(
                 // Only a field that opens the keyboard owns it: one the next document focuses on
                 // load must not keep the previous document's keyboard through the navigation.
                 if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
-                val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
+                val request = if (event.showKeyboard) {
+                    KeyboardRequest.Show(event.kind, event.multiline, event.context, requestId = nextRequest++)
+                } else {
+                    KeyboardRequest.Prepare(event.kind, event.multiline, event.context, requestId = nextRequest++)
+                }
                 state.update { it.copy(keyboard = request) }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 keyboardOwner = null
                 state.update { it.copy(keyboard = KeyboardRequest.Hide) }
             }
-            is EngineEvent.Crashed -> view(event.view)?.let {
-                Log.w(LOG_TAG, "renderer crashed: ${event.reason}")
-                it.crashed = true
-                it.loading = false
-                it.awaitingCommit = false
-                it.controls.clear()
-                it.dialogDocument = null
-                it.dialogCount = 0
-                it.dialogsBlocked = false
+            is EngineEvent.Crashed -> {
+                // A crash for a view that was already replaced is stale: that tab is alive. The
+                // full identity (native tab and generation) is checked before anything is dropped.
+                val crashed = view(event.view) ?: return@submit
+                // A crashed view's requests can never be answered. Drop them here, not only when
+                // a result arrives, so they cannot outlive the view or match a recreated one.
+                pendingCaptures.entries.removeAll { it.value.view == event.view }
+                pendingArticles.entries.removeAll { it.value.view == event.view }
+                // Find searched the crashed document, and the keyboard belonged to its field.
+                if (findSession?.nativeTab == event.view.tab) findSession = null
+                releaseKeyboard(event.view.tab)
+                // Reader view was waiting on that page: say so now, not when a result never comes.
+                // A ready snapshot is immutable and stays.
+                val waiting = reader as? ReaderState.Loading
+                if (waiting?.tabId == crashed.tabId) reader = ReaderState.Unavailable(crashed.tabId)
+                Log.w(LOG_TAG, "renderer crashed")
+                crashed.crashed = true
+                crashed.loading = false
+                crashed.awaitingCommit = false
+                crashed.pendingStop = null
+                crashed.controls.clear()
+                crashed.dialogDocument = null
+                crashed.dialogCount = 0
+                crashed.dialogsBlocked = false
             }
             is EngineEvent.MediaBlocked -> view(event.view)?.let { onMediaBlocked(it, event) }
+            is EngineEvent.MediaTapped -> view(event.view)?.let { onMediaTapped(it, event) }
             is EngineEvent.ControlShown -> view(event.view)?.let { onControlShown(it, event) }
             is EngineEvent.ControlHidden -> view(event.view)?.let { live ->
                 val hidden = live.controls.filter { it.id == event.control }
                 live.controls.removeAll(hidden)
                 // The engine answers an unanswered leave-page question Stay (its deadline, or the
                 // tab left the screen), or drops it as the page commits; either way stop waiting.
-                if (hidden.any { it.content is PageControlContent.LeavePage }) live.awaitingCommit = false
+                if (hidden.any { it.content is PageControlContent.LeavePage }) stopAwaitingCommit(live)
             }
             is EngineEvent.EngineError -> onEngineError(event)
             // Heartbeats, echoes, navigation confirmations and diagnostics cannot change what
@@ -785,6 +903,8 @@ class BrowserCoordinator(
             // tab projection, reader state, live views or any table publish() reads.
             is EngineEvent.Painted,
             is EngineEvent.TabSelected,
+            // Published by onEngineEvent, without the queue.
+            is EngineEvent.ViewportPainted,
             is EngineEvent.SurfaceBound,
             is EngineEvent.SurfaceUnbound,
             is EngineEvent.NavigationRequested,
@@ -825,20 +945,25 @@ class BrowserCoordinator(
      * name the wrong page. An address the player may not fetch from this page ([MediaPolicy])
      * counts as media without one.
      *
-     * Only the tab on screen gets notices, at most two per page: the plain one, then the playable
-     * one if an address arrives later. The first address gives the playable notice at once. Media
-     * without an address gives the plain notice only once the page has loaded and still has none,
-     * so a `<track>` cancelled just before its video does not give a notice of its own.
+     * Only the tab on screen gets notices, at most two per page: the plain one, then the offer
+     * ([BrowserState.mediaOffer]) if an address arrives later. The first address gives the offer
+     * at once; later ones join it without a second one (a tap on the page's media offers it again,
+     * [onMediaTapped]). Media without an address gives the plain notice only once the page has
+     * loaded and still has none, so a `<track>` cancelled just before its video does not give a
+     * notice of its own.
      */
     private fun onMediaBlocked(view: LiveView, event: EngineEvent.MediaBlocked) {
+        // A crashed page shows the crash: a load the engine held for it is neither offered nor told.
+        if (view.crashed) return
         val key = view.currentPage?.takeIf { it.document == event.document && view.currentDocument == event.document } ?: return
         // A load names no document, so the engine credits it to the committed one. While a page the app asked
-        // for is pending, a load whose referrer is another origin than the committed page's is most likely the
-        // pending page's, overtaking its commit (a data: page leaving for a fixture page did so on the emulator):
-        // it waits for that commit. Without a pending navigation (a cross-origin frame's media, a late load of
-        // a replaced page) it is the committed page's, as before.
+        // for is pending, a load can be the pending page's, overtaking its commit (a data: page leaving for a
+        // fixture page did so on the emulator, and so did a fixture page leaving for another on the same
+        // origin, whose Play notice the earlier page had already used): it waits for that commit, and goes to
+        // the committed page if the wait ends without one (stopAwaitingCommit). Without a pending navigation (a
+        // cross-origin frame's media, a late load of a replaced page) it is the committed page's at once.
         val referrer = event.referrer
-        if (view.awaitingCommit && referrer != null && !MediaPolicy.isAt(key.address, referrer)) {
+        if (view.awaitingCommit && referrer != null) {
             if (view.heldMedia.size == MAX_HELD_MEDIA) view.heldMedia.removeFirst()
             view.heldMedia.addLast(HeldMedia(event, view.commitRequests))
             return
@@ -856,6 +981,20 @@ class BrowserCoordinator(
             .forEach { recordMedia(view, key, it.event) }
     }
 
+    /**
+     * The app stops waiting for the page it asked for without a commit: no answer in time, a refusal, the user
+     * stayed on the page, or the address only moved within the page. The reports held meanwhile were the
+     * committed page's after all; those of a document no longer current are dropped.
+     */
+    private fun stopAwaitingCommit(view: LiveView) {
+        view.awaitingCommit = false
+        if (view.heldMedia.isEmpty()) return
+        val held = view.heldMedia.toList()
+        view.heldMedia.clear()
+        val key = view.currentPage?.takeIf { it.document == view.currentDocument } ?: return
+        held.filter { it.event.document == key.document }.forEach { recordMedia(view, key, it.event) }
+    }
+
     private fun recordMedia(view: LiveView, key: PageKey, event: EngineEvent.MediaBlocked) {
         val page = view.pages.getOrPut(key) { PageMediaState(nextMediaId++) }
         val shown = view.nativeTab == selectedNative
@@ -867,8 +1006,13 @@ class BrowserCoordinator(
             if (!shown || page.playableShown) return
             page.playableShown = true
             page.plainPending = false
-            // Overwrites any notice the UI has not taken yet, as every notice does; that includes this page's plain one.
-            state.update { it.copy(notice = Notice.MediaPlayable(MediaPageRef(view.tabId, page.id))) }
+            // One page, one message: the offer replaces this page's plain notice if the UI has not taken it yet.
+            state.update {
+                it.copy(
+                    mediaOffer = MediaPageRef(view.tabId, page.id),
+                    notice = it.notice.takeUnless { notice -> notice == Notice.MediaUnplayable },
+                )
+            }
             return
         }
         if (!shown || page.entries.isNotEmpty() || page.plainShown || page.playableShown) return
@@ -877,6 +1021,17 @@ class BrowserCoordinator(
             return
         }
         showPlainMediaNotice(page)
+    }
+
+    /**
+     * The user tapped a media element of the page shown, which cannot play in the page: offer the
+     * page's media again, also after the user closed the offer. Only while the tap's document is
+     * still shown and its page has media the player may fetch.
+     */
+    private fun onMediaTapped(view: LiveView, event: EngineEvent.MediaTapped) {
+        if (view.nativeTab != selectedNative || view.crashed || view.currentDocument != event.document) return
+        val page = view.shownPageMedia()?.takeIf { it.entries.isNotEmpty() } ?: return
+        state.update { it.copy(mediaOffer = MediaPageRef(view.tabId, page.id)) }
     }
 
     /** The plain media notice a page deferred until it loaded, if it is still on screen and found no address. */
@@ -947,18 +1102,19 @@ class BrowserCoordinator(
                 HistoryKind.DOCUMENT_COMMITTED -> {
                     view.awaitingCommit = false
                     view.currentDocument = event.document
+                    if (view.stoppedDocument != event.document) view.stoppedDocument = null
                     // Find searched the replaced document, and its selection went with it.
                     if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
-                    view.loading = event.document !in view.documentVisits
-                    scheduleCapture(view, event.document, captureTiming.fallbackMs)
+                    view.loading = event.document != view.stoppedDocument && event.document !in view.documentVisits
+                    scheduleCapture(view, event.document, event.url, captureTiming.fallbackMs)
                     if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
                     // Only an awaited address within this page (a typed "#part") commits this way:
                     // the old page rewriting its own address does not answer the request.
-                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) view.awaitingCommit = false
-                    scheduleCapture(view, event.document, captureTiming.debounceMs)
+                    if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) stopAwaitingCommit(view)
+                    scheduleCapture(view, event.document, event.url, captureTiming.debounceMs)
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
@@ -978,7 +1134,10 @@ class BrowserCoordinator(
                 tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
             )
         }
-        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) releaseHeldMedia(view, event.document)
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED) {
+            releaseHeldMedia(view, event.document)
+            view.pendingStop?.acknowledgement?.let { onLoadingStopped(view, it) }
+        }
     }
 
     /**
@@ -1091,13 +1250,36 @@ class BrowserCoordinator(
 
     // --- Capture ----------------------------------------------------------------------------------
 
-    /** (Re)starts the capture timer of [view] for [document]; a newer trigger replaces it. */
-    private fun scheduleCapture(view: LiveView, document: Long, delayMs: Long) {
+    /** Arms a page-bound timer; no known address means there is no safe capture target yet. */
+    private fun scheduleCapture(view: LiveView, document: Long, url: String?, delayMs: Long) {
         if (capture == null) return
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
+        val page = PageKey(document, url?.substringBefore('#') ?: return)
+        view.pendingCapturePage = page
         view.captureTimer = scope.launch {
             delay(delayMs)
-            submit { requestCapture(view, document) }
+            submit {
+                // Cancellation can arrive after this work was queued. A new timer for even the
+                // same page gets a distinct token; it must not be cleared by an older callback.
+                if (view.pendingCapturePage !== page) return@submit
+                view.captureTimer = null
+                view.pendingCapturePage = null
+                if (view.currentPage == page) requestCapture(view, document)
+            }
+        }
+    }
+
+    private fun cancelCaptureTimer(view: LiveView) {
+        view.captureTimer?.cancel()
+        view.captureTimer = null
+        view.pendingCapturePage = null
+    }
+
+    /** Cancels the scheduled capture of a page [matches], so a timer cannot enqueue erased content. */
+    private fun cancelPendingCapture(matches: (String) -> Boolean) {
+        liveByTab.values.forEach { view ->
+            val page = view.pendingCapturePage
+            if (page != null && matches(page.address)) cancelCaptureTimer(view)
         }
     }
 
@@ -1107,6 +1289,7 @@ class BrowserCoordinator(
      * answer, a download) stops showing after [navigationTimeoutMs].
      */
     private fun awaitCommit(view: LiveView) {
+        view.pendingStop = null
         view.awaitingCommit = true
         view.awaitedRequest = null
         view.awaitedUrl = null
@@ -1115,10 +1298,18 @@ class BrowserCoordinator(
             delay(navigationTimeoutMs)
             submit {
                 if (view.commitRequests != request || !view.awaitingCommit) return@submit
-                view.awaitingCommit = false
+                stopAwaitingCommit(view)
                 publish()
             }
         }
+    }
+
+    /** A Room rollback does not roll back view bookkeeping: only committed identity may leave the process. */
+    private suspend fun visitForCapture(view: LiveView, document: Long, tab: TabEntity): VisitEntity? {
+        val url = tab.url ?: return null
+        if (view.currentPage != PageKey(document, url.substringBefore('#'))) return null
+        val visit = tab.currentVisitId?.let { dao.visit(it) } ?: return null
+        return visit.takeIf { it.tabId == tab.id && it.url == url && it.documentKey == documentKey(view, document) }
     }
 
     private suspend fun requestCapture(view: LiveView, document: Long) {
@@ -1130,10 +1321,11 @@ class BrowserCoordinator(
         val generation = view.generation ?: return
         // A forgotten page is not sent again while its tab shows it ([TabEntity.pageForgotten]).
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && !it.pageForgotten } ?: return
-        val url = tab.url ?: return
+        val visit = visitForCapture(view, document, tab) ?: return
+        val url = visit.url
         val policy = sink.wantsCapture(url) ?: return
         val id = nextRequest++
-        pendingCaptures[id] = PendingCapture(view.tabId, ViewRef(view.nativeTab, generation), document, url, tab.currentVisitId, policy)
+        pendingCaptures[id] = PendingCapture(view.tabId, ViewRef(view.nativeTab, generation), document, url, visit.id, policy)
         engine.capture(view.nativeTab, document, id, captureTiming.maxTextBytes, captureTiming.timeoutMs)
     }
 
@@ -1150,10 +1342,11 @@ class BrowserCoordinator(
         val view = view(event.view)?.takeIf { it.currentDocument == pending.document && pending.document !in it.errorDocuments } ?: return
         // A capture that was on its way when the site was forgotten is dropped with it.
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url && !it.pageForgotten } ?: return
+        val visit = visitForCapture(view, pending.document, tab)?.takeIf { it.id == pending.visitId } ?: return
         capture?.captured(
             CapturedPage(
                 tabId = tab.id,
-                visitId = pending.visitId,
+                visitId = visit.id,
                 url = pending.url,
                 title = content.title.takeIf { it.isNotBlank() },
                 text = content.text,
@@ -1239,8 +1432,7 @@ class BrowserCoordinator(
         state.update { it.copy(engine = status) }
     }
 
-    private suspend fun activeTab(): TabEntity? =
-        dao.session()?.activeTabId?.let { dao.tab(it) }?.takeIf { it.state == TabState.OPEN }
+    private suspend fun activeTab(): TabEntity? = dao.activeTab()
 
     private suspend fun createTab(url: String?, openerTabId: String? = null): String {
         val now = clock.now()
@@ -1369,7 +1561,7 @@ class BrowserCoordinator(
 
     /** Drops the bookkeeping for a renderer the engine no longer has. */
     private fun forgetView(view: LiveView) {
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
         releaseKeyboard(view.nativeTab)
@@ -1430,7 +1622,7 @@ class BrowserCoordinator(
                 // A refusal of an earlier address must not end the wait for a newer one. The
                 // refused address never commits, so it no longer marks a typed navigation.
                 if (event.request == view.awaitedRequest) {
-                    view.awaitingCommit = false
+                    stopAwaitingCommit(view)
                     view.awaitedUrl = null
                 }
                 state.update { it.copy(notice = Notice.AddressNotOpened) }
@@ -1481,10 +1673,18 @@ class BrowserCoordinator(
      */
     private suspend fun releaseViewsBeyond(keep: Int) {
         if (liveByTab.size <= keep) return
-        val recency = dao.openTabs().mapIndexed { index, tab -> tab.id to index }.toMap()
+        // One open-tab snapshot serves recency and protects windows without a recovery URL.
+        // A logical close can commit before engine.closeView throws: a view absent from this
+        // snapshot is orphaned and remains eligible for a later close attempt.
+        val open = dao.openTabs()
+        val recency = open.mapIndexed { index, tab -> tab.id to index }.toMap()
+        val urls = open.associate { it.id to it.url }
         liveByTab.values
             // A page waiting for an answer would lose it: keep its renderer.
-            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && dao.tab(it.tabId)?.url != null }
+            .filter {
+                it.nativeTab != selectedNative && it.controls.isEmpty() &&
+                    (urls[it.tabId] != null || it.tabId !in recency)
+            }
             .sortedByDescending { recency[it.tabId] ?: Int.MAX_VALUE }
             .take(liveByTab.size - keep)
             .forEach { closeView(it) }
@@ -1541,6 +1741,7 @@ class BrowserCoordinator(
             ?: tab?.currentVisitId?.let { dao.visit(it)?.failed }
             ?: false
         val shownMedia = view?.takeIf { !it.crashed }?.shownPageMedia()?.takeIf { it.entries.isNotEmpty() }
+        val mediaPage = tab?.let { active -> shownMedia?.let { MediaPageRef(active.id, it.id) } }
         state.update {
             it.copy(
                 activeTab = tab?.let { active ->
@@ -1561,9 +1762,11 @@ class BrowserCoordinator(
                             live.currentDocument?.let { PageRef(ViewRef(live.nativeTab, generation), it) }
                         },
                         media = shownMedia?.entries?.map { it.playable() }.orEmpty(),
-                        mediaPage = shownMedia?.let { MediaPageRef(active.id, it.id) },
+                        mediaPage = mediaPage,
                     )
                 },
+                // The offer lasts while its page is shown: another page, tab or document, Home or a crash ends it.
+                mediaOffer = it.mediaOffer?.takeIf { offer -> offer == mediaPage },
                 pageControl = view?.controls?.firstOrNull()?.let { shown ->
                     PageControl(shown.id, tab.url?.let(HostNames::of)?.let(HostNames::forDisplay), shown.content, shown.offerBlocking)
                 },
@@ -1572,11 +1775,16 @@ class BrowserCoordinator(
                 // Every publish reads the stored session, so the first one ends restoring.
                 session = SessionState.RESTORED,
                 find = findSession?.state(),
+                reloadPull = it.reloadPull?.takeIf { pull -> pullView(pull.page) != null },
             )
         }
     }
 
     private fun documentKey(view: LiveView, document: Long) = "$processKey:${view.generation}:$document"
+
+    private class PendingStop(val request: Long, val navigation: Long, val document: Long?) {
+        var acknowledgement: EngineEvent.LoadingStopped? = null
+    }
 
     /** One native view incarnation for a logical tab. */
     private class LiveView(val tabId: String, val nativeTab: Long) {
@@ -1593,6 +1801,8 @@ class BrowserCoordinator(
 
         /** The awaited address, when the app navigated to one; a reload or a new view awaits none. */
         var awaitedUrl: String? = null
+        var pendingStop: PendingStop? = null
+        var stoppedDocument: Long? = null
         var canGoBack = false
         var canGoForward = false
         var crashed = false
@@ -1601,6 +1811,9 @@ class BrowserCoordinator(
         val documentVisits = HashMap<Long, String>()
 
         var captureTimer: Job? = null
+
+        /** A distinct token for each schedule, including successive timers for the same page. */
+        var pendingCapturePage: PageKey? = null
 
         /** Documents that are Servo's error pages (network or certificate failure). */
         val errorDocuments = HashSet<Long>()
@@ -1719,8 +1932,6 @@ class BrowserCoordinator(
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
         const val PROCESS_KEY_LENGTH = 8
 
-        /** How long a pause between bar swipes keeps them one run over the same order. */
-        const val SWIPE_RUN_MS = 3_000L
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */
         val SERVO_ERROR_TITLES = setOf("Error loading page", "Certificate error")
 

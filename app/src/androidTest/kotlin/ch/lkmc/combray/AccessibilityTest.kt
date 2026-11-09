@@ -1,15 +1,28 @@
 package ch.lkmc.combray
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
@@ -18,12 +31,15 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
@@ -44,7 +60,11 @@ import ch.lkmc.combray.core.browser.MediaPageRef
 import ch.lkmc.combray.core.browser.PlayableMedia
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.ThemeMode
+import ch.lkmc.combray.core.integration.EncodedScreenshot
+import ch.lkmc.combray.core.integration.ReportDisplay
+import ch.lkmc.combray.core.integration.ReportEnvironment
 import ch.lkmc.combray.core.integration.SaveStatus
+import ch.lkmc.combray.core.integration.ScreenshotOmission
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.SelectEntry
@@ -54,13 +74,24 @@ import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.FindBar
 import ch.lkmc.combray.ui.HomeContent
 import ch.lkmc.combray.ui.MediaEntries
+import ch.lkmc.combray.ui.MenuButtonDisplay
+import ch.lkmc.combray.ui.ReaderDisplay
 import ch.lkmc.combray.ui.MoreActions
+import ch.lkmc.combray.ui.ToolbarMenuButton
+import ch.lkmc.combray.ui.ToolbarMenuState
 import ch.lkmc.combray.ui.PageControlDialog
 import ch.lkmc.combray.ui.PageSaveStatus
 import ch.lkmc.combray.ui.QuickLinks
+import ch.lkmc.combray.ui.ReportDraftState
+import ch.lkmc.combray.ui.ReportProblem
+import ch.lkmc.combray.ui.ReportProgress
+import ch.lkmc.combray.ui.ReportSheetContent
+import ch.lkmc.combray.ui.ReportShot
+import ch.lkmc.combray.ui.ReportSnapshot
 import ch.lkmc.combray.ui.TextSizeDialog
 import ch.lkmc.combray.ui.ScrollEdgeButton
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -92,24 +123,27 @@ class AccessibilityTest {
         }
 
         assertTargetsAreAccessible()
-        for (label in listOf("Back", "Saving to Karakeep", "Share", "New tab", "Recent, 3 open tabs", "More")) {
+        // The page is loading: the chip's inline control is Stop, not the Reader toggle.
+        for (label in listOf("Back", "Saving to Karakeep", "Close tab", "New tab", "Recent, 3 open tabs", "Menu", "Stop loading")) {
             compose.onNodeWithContentDescription(label).assertIsDisplayed()
         }
+        compose.onNodeWithContentDescription("Reader view").assertDoesNotExist()
         compose.onNodeWithContentDescription("example.org", substring = true).assertIsDisplayed()
     }
 
     @Test
     fun aNarrowBarGivesTheAddressARowAboveTheActions() {
         show(DEFAULT_FONT) {
-            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved)
+            Bar(PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved)
         }
 
         val address = compose.onNodeWithContentDescription("example.org", substring = true).getUnclippedBoundsInRoot()
         val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
-        val more = compose.onNodeWithContentDescription("More").getUnclippedBoundsInRoot()
+        val more = compose.onNodeWithContentDescription("Menu").getUnclippedBoundsInRoot()
+        val reader = compose.onNodeWithContentDescription("Reader view").getUnclippedBoundsInRoot()
         assertTrue(address.bottom <= back.top)
         // The chip spans the actions under it.
-        assertTrue(address.left <= back.left && address.right >= more.right)
+        assertTrue(address.left <= back.left && reader.right >= more.right)
     }
 
     @Test
@@ -122,6 +156,18 @@ class AccessibilityTest {
         val back = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot()
         assertTrue(address.top < back.bottom && address.bottom > back.top)
         assertTrue(address.left >= back.right)
+    }
+
+    /** The page's media keeps a labeled Play in the address field, beside Reader, at full size. */
+    @Test
+    fun playInTheAddressIsAccessible() {
+        show(LARGE_FONT) {
+            Bar(PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved, onPlayMedia = {})
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Play audio or video").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Reader view").assertIsDisplayed()
     }
 
     @Test
@@ -180,6 +226,51 @@ class AccessibilityTest {
         assertEquals(0, copies)
     }
 
+    /** Stopping is its own target: it must not edit or copy the address under it. */
+    @Test
+    fun stoppingALoadDoesNotEditOrCopyTheAddress() {
+        var stops = 0
+        var edits = 0
+        var copies = 0
+        show(LARGE_FONT) {
+            Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, onAddress = { edits++ }, onCopyAddress = { copies++ }, onStop = { stops++ })
+        }
+
+        compose.onNodeWithContentDescription("Stop loading").assertIsDisplayed().performClick()
+        assertEquals(1, stops)
+        assertEquals(0, edits)
+        assertEquals(0, copies)
+    }
+
+    /** The inline toggle tracks the display: unchecked as a page, checked as an article. */
+    @Test
+    fun theReaderToggleFollowsReaderDisplay() {
+        var display by mutableStateOf(ReaderDisplay.PAGE)
+        var readers = 0
+        var edits = 0
+        var copies = 0
+        show(LARGE_FONT) {
+            Bar(
+                PAGE.copy(loading = false), openTabs = 1, SaveStatus.Unsaved,
+                onAddress = { edits++ }, onCopyAddress = { copies++ },
+                readerDisplay = display, onReader = { readers++; display = ReaderDisplay.ARTICLE },
+            )
+        }
+
+        assertTargetsAreAccessible()
+        compose.onNodeWithContentDescription("Stop loading").assertDoesNotExist()
+        val enter = compose.onNodeWithContentDescription("Reader view").assertIsDisplayed()
+        assertEquals(ToggleableState.Off, enter.fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
+
+        enter.performClick()
+        assertEquals(1, readers)
+        assertEquals(0, edits)
+        assertEquals(0, copies)
+
+        val leave = compose.onNodeWithContentDescription("Leave reader view").assertIsDisplayed()
+        assertEquals(ToggleableState.On, leave.fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
+    }
+
     @Test
     fun aSaveWaitingForKarakeepIsLabeledAsSuch() {
         show(LARGE_FONT) {
@@ -199,7 +290,7 @@ class AccessibilityTest {
         // The home dock: one search affordance and labeled actions, reflowed at 200% font.
         assertTargetsAreAccessible()
         compose.onNodeWithText("Search with Kagi or enter address").assertIsDisplayed()
-        for (label in listOf("Hister", "Karakeep", "Recent", "More")) {
+        for (label in listOf("Hister", "Karakeep", "Recent", "Menu")) {
             compose.onNodeWithText(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("New tab").assertIsDisplayed()
@@ -209,17 +300,18 @@ class AccessibilityTest {
     fun theMoreActionsAreAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), {}, {}, {}, {}, {}, readerOpen = false, {}, {}, {}, {})
+                MoreActions(PAGE.copy(canGoForward = true, media = MEDIA, mediaPage = MEDIA_PAGE), readerDisplay = ReaderDisplay.PAGE, onSelect = {})
             }
         }
 
         assertTargetsAreAccessible()
         // The rows scroll when they outgrow the window: bring each into view before checking it.
-        for (label in listOf("Close tab", "Play audio or video", "Settings")) {
+        for (label in listOf("Share", "Play audio or video", "Report this site", "Settings")) {
             compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
-        // New tab is the bar's +, no longer a More row.
+        // New tab and Close tab belong to the bar, not the menu.
         compose.onNodeWithText("New tab").assertDoesNotExist()
+        compose.onNodeWithText("Close tab").assertDoesNotExist()
         compose.onNodeWithText("Pause history capture").assertDoesNotExist()
     }
 
@@ -238,10 +330,39 @@ class AccessibilityTest {
         compose.onNodeWithText("Audio and video on this page").assertIsDisplayed()
     }
 
+    /** The report preview with a screenshot, at the narrow width and the largest font. */
+    @Test
+    fun theReportSheetIsAccessible() {
+        val preview = Bitmap.createBitmap(PREVIEW_WIDTH, PREVIEW_HEIGHT, Bitmap.Config.ARGB_8888).asImageBitmap()
+        val shot = ReportShot.Ready(preview, EncodedScreenshot(ByteArray(8), PREVIEW_WIDTH, PREVIEW_HEIGHT, scaled = false))
+        showReport(reportDraft(REPORT_SNAPSHOT, shot))
+
+        assertScrollingTargetsAreAccessible()
+        for (label in listOf("Include screenshot", "Keep only the site and path", "Address", "Page title", "What went wrong? (optional)", "Cancel", "Send")) {
+            compose.onNode(hasClickAction() and hasText(label)).performScrollTo().assertIsDisplayed()
+        }
+        compose.onNodeWithContentDescription("Screenshot of the page").performScrollTo().assertIsDisplayed()
+    }
+
+    /** Without a screenshot (reader view) and with a problem that offers Settings. */
+    @Test
+    fun theReportSheetWithoutAScreenshotIsAccessible() {
+        val draft = reportDraft(REPORT_SNAPSHOT.copy(display = ReportDisplay.READER), ReportShot.Omitted(ScreenshotOmission.READER_VIEW))
+        draft.progress.value = ReportProgress(problem = ReportProblem.TOO_MANY)
+        showReport(draft)
+
+        assertScrollingTargetsAreAccessible()
+        compose.onNodeWithText("Include screenshot").assertDoesNotExist()
+        compose.onNodeWithText("No screenshot: reader view covers the page. Leave reader view to include one.").performScrollTo().assertIsDisplayed()
+        for (label in listOf("Settings", "Cancel", "Send")) {
+            compose.onNode(hasClickAction() and hasText(label)).performScrollTo().assertIsDisplayed()
+        }
+    }
+
     @Test
     fun theTextSizeDialogIsAccessible() {
         // A middle step, so smaller, larger and reset are all enabled.
-        show(LARGE_FONT) { TextSizeDialog(TextSize.PERCENT_110, {}, {}) }
+        show(LARGE_FONT) { TextSizeDialog({ TextSize.PERCENT_110 }, {}, {}) }
 
         assertTargetsAreAccessible()
         for (label in listOf("Smaller text", "Larger text")) {
@@ -301,7 +422,7 @@ class AccessibilityTest {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 CombrayTheme(ThemeMode.DARK) {
                     HomeContent(
-                        links, RecentItem.OpenTab("exact-tab", "https://example.org/", "A remembered page", System.currentTimeMillis(), false),
+                        links, RecentItem.OpenTab("exact-tab", "https://example.org/", "A remembered page", System.currentTimeMillis(), false, createdAt = 0),
                         {}, { selected = it }, {}, {}, {}, Modifier.width(NARROW_WIDTH),
                     )
                 }
@@ -343,6 +464,9 @@ class AccessibilityTest {
     fun aLeavePageQuestionIsAccessible() = assertControlIsAccessible(PageControlContent.LeavePage)
 
     @Test
+    fun aPagePasteMenuIsAccessible() = assertControlIsAccessible(PageControlContent.PasteMenu)
+
+    @Test
     fun aSelectIsAccessible() = assertControlIsAccessible(
         PageControlContent.Select(
             listOf(
@@ -364,7 +488,10 @@ class AccessibilityTest {
     }
 
     @Test
-    fun anImageMenuIsAccessible() = assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+    fun anImageMenuIsAccessible() {
+        assertControlIsAccessible(PageControlContent.LinkMenu(link = null, "https://example.org/a.png"))
+        compose.onNodeWithText("Download image").assertIsDisplayed()
+    }
 
     /**
      * A linked image lists both menus. At the largest font they can need to scroll on the
@@ -399,6 +526,29 @@ class AccessibilityTest {
         assertThrows(AssertionError::class.java) { assertTargetsAreAccessible() }
     }
 
+    /**
+     * The scrolling check itself: full-size targets that overlap fail it, reported once, though
+     * they are on screen together only partway down, neither at the start nor after the last
+     * scroll.
+     */
+    @Test
+    fun targetsCrowdedOnlyMidScrollFail() {
+        show(DEFAULT_FONT) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                Spacer(Modifier.height(PAST_THE_SCREEN))
+                Box {
+                    Box(Modifier.size(MIN_TARGET).clickable {}.semantics { contentDescription = "One" })
+                    Box(Modifier.offset(x = MIN_TARGET / 2).size(MIN_TARGET).clickable {}.semantics { contentDescription = "Two" })
+                }
+                Spacer(Modifier.height(PAST_THE_SCREEN))
+                Box(Modifier.size(MIN_TARGET).clickable {}.semantics { contentDescription = "Last" })
+            }
+        }
+
+        val error = assertThrows(AssertionError::class.java) { assertScrollingTargetsAreAccessible() }
+        assertEquals("\"One\" and \"Two\" share touch area", error.message)
+    }
+
     /** A page's dialog, as the browser shows it, at the largest font size unless [fontScale] says otherwise. */
     private fun assertControlIsAccessible(content: PageControlContent, offerBlocking: Boolean = false, fontScale: Float = LARGE_FONT) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -415,12 +565,24 @@ class AccessibilityTest {
                 onOpenInNewTab = {},
                 onOpenInBackground = {},
                 onSaveLink = {},
+                onDownloadImage = {},
                 onShare = {},
                 onNotify = {},
             )
         }
 
         assertTargetsAreAccessible()
+    }
+
+    private fun reportDraft(snapshot: ReportSnapshot, shot: ReportShot) =
+        ReportDraftState(REPORT_ID, createdAt = 0, snapshot, "reports.example.org", MutableStateFlow(shot), preparation = null)
+
+    private fun showReport(draft: ReportDraftState) {
+        show(LARGE_FONT) {
+            Column(Modifier.width(NARROW_WIDTH)) {
+                ReportSheetContent(draft, REPORT_ENVIRONMENT, onSend = {}, onCancel = {}, onOpenSettings = {})
+            }
+        }
     }
 
     private fun show(fontScale: Float, content: @Composable () -> Unit) {
@@ -435,14 +597,52 @@ class AccessibilityTest {
     private fun assertTargetsAreAccessible() {
         val targets = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
         if (targets.isEmpty()) throw AssertionError("nothing to tap")
-        val crowded = targets.flatMapIndexed { index, target ->
-            targets.drop(index + 1)
-                .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
-                .map { "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
-        }
-        val problems = targets.mapNotNull(::problem) + crowded
+        val problems = targets.mapNotNull(::problem) + crowded(targets).values
         if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
     }
+
+    /**
+     * As [assertTargetsAreAccessible], for content taller than the screen: a target scrolled out
+     * of view has no touch area to measure, so each is scrolled into view before it is measured,
+     * and the targets on screen at that scroll position are checked for crowding. A crowded pair
+     * seen at several positions is reported once.
+     */
+    private fun assertScrollingTargetsAreAccessible() {
+        val targets = compose.onAllNodes(hasClickAction())
+        val count = targets.fetchSemanticsNodes().size
+        if (count == 0) throw AssertionError("nothing to tap")
+        val problems = mutableListOf<String>()
+        val crowding = mutableMapOf<Pair<Int, Int>, String>()
+        for (index in 0 until count) {
+            problem(targets[index].performScrollTo().fetchSemanticsNode())?.let(problems::add)
+            val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            crowding.putAll(crowded(targets.fetchSemanticsNodes().filter { isOnScreen(it, root) }))
+        }
+        problems += crowding.values
+        if (problems.isNotEmpty()) throw AssertionError(problems.joinToString("\n"))
+    }
+
+    /**
+     * Whether [node] can be touched at the current scroll position: its touch bounds are not empty
+     * and overlap [root], the bounds of the Compose root. A scrolling container clips its content,
+     * so a target scrolled out of view reports an empty rectangle (`Rect.Zero`, which would still
+     * overlap a touch area that crosses the origin). The root does not clip touch bounds, so a
+     * target laid out past it is left out as well.
+     */
+    private fun isOnScreen(node: SemanticsNode, root: Rect): Boolean {
+        val bounds = node.touchBoundsInRoot
+        return !bounds.isEmpty && bounds.overlaps(root)
+    }
+
+    /**
+     * Targets whose touch areas overlap, so neither gets its 48dp to itself, keyed by the pair's
+     * semantics ids (smaller first) so a pair found again is recognized.
+     */
+    private fun crowded(targets: List<SemanticsNode>): Map<Pair<Int, Int>, String> = targets.flatMapIndexed { index, target ->
+        targets.drop(index + 1)
+            .filter { it.touchBoundsInRoot.overlaps(target.touchBoundsInRoot) }
+            .map { (minOf(target.id, it.id) to maxOf(target.id, it.id)) to "\"${name(target) ?: UNLABELED}\" and \"${name(it) ?: UNLABELED}\" share touch area" }
+    }.toMap()
 
     /**
      * What is wrong with one tappable element, or null. Its touch bounds count, not its drawing:
@@ -476,6 +676,10 @@ class AccessibilityTest {
         histerStored: Boolean = false,
         onAddress: () -> Unit = {},
         onCopyAddress: () -> Unit = {},
+        readerDisplay: ReaderDisplay = ReaderDisplay.PAGE,
+        onStop: () -> Unit = {},
+        onReader: () -> Unit = {},
+        onPlayMedia: (() -> Unit)? = null,
         width: Dp = NARROW_WIDTH,
     ) = BottomBar(
         tab = tab,
@@ -487,13 +691,22 @@ class AccessibilityTest {
         onBack = {},
         onAddress = onAddress,
         onSave = {},
-        onShare = {},
+        onCloseTab = {},
+        readerDisplay = readerDisplay,
+        onStop = onStop,
+        onReader = onReader,
+        onPlayMedia = onPlayMedia,
         onHister = {},
         onKarakeep = {},
         onNewTab = {},
         onRecent = {},
         onRecentLongPress = {},
-        onMore = {},
+        menuButton = {
+            ToolbarMenuButton(
+                remember { ToolbarMenuState() }, {},
+                if (tab?.url == null) MenuButtonDisplay.LABEL else MenuButtonDisplay.ICON,
+            )
+        },
         onCopyAddress = onCopyAddress,
         onSwipeTab = {},
         // Required, not just preferred: the reference emulator is 360dp wide, and a wider bar must
@@ -513,7 +726,7 @@ class AccessibilityTest {
         val NARROW_WIDTH = 320.dp
 
         /** Wide enough for the single-row bar: six 48dp actions plus a usable address field. */
-        val WIDE_WIDTH = 440.dp
+        val WIDE_WIDTH = 520.dp
 
         /** Android's and Material's minimum touch target. */
         val MIN_TARGET = 48.dp
@@ -524,7 +737,24 @@ class AccessibilityTest {
         )
         val MEDIA_PAGE = MediaPageRef("tab", 1)
 
+        const val REPORT_ID = "6f1c2b9e-1d2a-4a5b-9c3d-2e1f0a9b8c7d"
+        const val PREVIEW_WIDTH = 108
+        const val PREVIEW_HEIGHT = 208
+        val REPORT_SNAPSHOT = ReportSnapshot(
+            url = "https://example.org/article?x=1#part",
+            title = "Article",
+            display = ReportDisplay.PAGE,
+            loadFailed = false,
+            crashed = false,
+            zoomPercent = 100,
+            density = 2.625f,
+        )
+        val REPORT_ENVIRONMENT = ReportEnvironment("0.1.0", 1, "debug", "0.7.0", "6fbfc3d70ad83df5443445d3ff4c43871aae41dd", "15", 35)
+
         val SMALL_TARGET = 40.dp
+
+        /** Taller than the reference emulator's 720dp screen. */
+        val PAST_THE_SCREEN = 1000.dp
 
         val PAGE = ActiveTab(
             id = "tab",

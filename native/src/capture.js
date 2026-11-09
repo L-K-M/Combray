@@ -89,8 +89,10 @@
 
   __STAND_IN__
 
-  // Servo's stand-in for a file it cannot show (a PDF) has no text of that file: read nothing.
-  var root = isServoStandIn() ? null : document.body || document.documentElement;
+  // Servo's stand-in for a file it cannot show has no text of that file, and Combray's PDF viewer
+  // shows only its own labels (PDF text is a later step): read nothing from either.
+  var skipped = isServoStandIn() || isCombrayPdfViewer();
+  var root = skipped ? null : document.body || document.documentElement;
   // Explicit stack: [node, closing] where closing marks the end of a block element.
   var stack = root ? [[root, false]] : [];
   // No time at all (a hidden page whose deadline leaves none): read nothing.
@@ -117,7 +119,12 @@
     }
     if (node.nodeType === 3) {
       var data = String(node.data).replace(/\s+/g, " ");
-      if (data !== " " && data !== "" && !append(data)) break;
+      // A whitespace-only node separates inline words. Collapse across node boundaries too,
+      // without inventing a separator where markup splits a word or spending leading bytes.
+      var last = parts.length ? parts[parts.length - 1] : "";
+      var end = last.charAt(last.length - 1);
+      if (data.charAt(0) === " " && (end === "" || end === " " || end === "\n")) data = data.slice(1);
+      if (data !== "" && !append(data)) break;
       continue;
     }
     if (node.nodeType !== 1) continue;

@@ -21,6 +21,8 @@ import ch.lkmc.combray.engine.HistoryKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -33,7 +35,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -43,6 +47,8 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class HisterIntegrationTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    @get:Rule val reportFolder = TemporaryFolder()
     private lateinit var database: CombrayDatabase
     private lateinit var scope: CoroutineScope
     private lateinit var integrations: Integrations
@@ -50,12 +56,17 @@ class HisterIntegrationTest {
     private val secrets = MemorySecrets()
     private var now = 1_760_000_000_000L
     private var ids = 0
+    private val budgetTransactions = java.util.Collections.synchronizedList(mutableListOf<Boolean>())
 
     private val hister get() = integrations.hister
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java).build()
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ ->
+                if (sql.startsWith("SELECT COALESCE(SUM(payloadBytes)")) budgetTransactions += database.inTransaction()
+            }, java.util.concurrent.Executor { it.run() })
+            .build()
         // Background kicks never run here: only drain() sends, so queue states are deterministic.
         scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher())
         integrations = newIntegrations()
@@ -70,6 +81,8 @@ class HisterIntegrationTest {
         newId = { "job${ids++}" },
         scope = scope,
         scheduler = {},
+        reportDirectory = reportFolder.root,
+        reportEnvironment = FakeReports.ENVIRONMENT,
     )
 
     @After
@@ -90,6 +103,55 @@ class HisterIntegrationTest {
     private fun drain() = runBlocking { integrations.dispatcher.drain() }
 
     private fun jobs(): List<OutboxJobEntity> = (0 until ids).mapNotNull { runBlocking { database.integrations().job("job$it") } }
+
+    @Test
+    fun aQueuedCaptureRecordsItsUrl() {
+        enable()
+        capture("https://a.example/", "text")
+        assertEquals("https://a.example/", jobs().single().url)
+    }
+
+    /**
+     * A row written before schema 6 has its address only in the payload. The decoder reads the
+     * top-level member, so a page's own text or a nested object cannot pose as it.
+     */
+    @Test
+    fun theQueueRowUrlIgnoresAnUrlKeyInsideTheCapturedText() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text with \"url\":\"https://fake.example/\" inside")
+        val legacy = jobs().single().copy(url = null)
+        assertEquals("https://real.example/article", integrations.jobUrl(legacy))
+    }
+
+    @Test
+    fun theQueueRowUrlReadsTheTopLevelMemberOverANestedOne() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text")
+        val legacy = jobs().single()
+        val nested = """{"meta":{"url":"https://fake.example/"},"url":"https://real.example/article","text":"x"}"""
+        assertEquals("https://real.example/article", integrations.jobUrl(legacy.copy(url = null, payload = nested)))
+    }
+
+    @Test
+    fun theQueueRowUrlIsNullForAMalformedOrWronglyTypedPayload() = runBlocking {
+        enable()
+        capture("https://real.example/article", "text")
+        val legacy = jobs().single()
+        assertNull(integrations.jobUrl(legacy.copy(url = null, payload = "not json")))
+        assertNull(integrations.jobUrl(legacy.copy(url = null, payload = """{"url":{"nested":"https://fake.example/"}}""")))
+    }
+
+    /** Forgetting and exclusions run in a transaction, where decoding a legacy row is acceptable. */
+    @Test
+    fun anExclusionCancelsALegacyCaptureWhoseUrlIsOnlyInThePayload() = runBlocking {
+        enable()
+        capture("https://bank.example/account", "balance")
+        database.integrations().updateJob(jobs().single().copy(url = null))
+
+        hister.addExclusion("bank.example", includeSubdomains = true)
+
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+    }
 
     @Test
     fun captureIsOptInAndSendsRenderedText() {
@@ -128,6 +190,131 @@ class HisterIntegrationTest {
         drain()
         assertEquals(1, server.added.size)
         assertTrue(server.added.single().contains("\"text\":\"v2\""))
+    }
+
+    @Test
+    fun aDeliveredCaptureIsNotQueuedAgain() {
+        enable()
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.SUCCEEDED, jobs().single().state)
+
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        assertEquals(1, server.added.size)
+    }
+
+    @Test
+    fun anIdenticalCaptureIsNotQueuedAgainWhileItsJobIsStillInFlight() {
+        enable()
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        assertEquals(JobState.PENDING, jobs().single().state)
+
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        drain()
+        assertEquals(1, server.added.size)
+    }
+
+    @Test
+    fun identicalContentCanRecoverFromARejectedDelivery() = runBlocking {
+        enable()
+        capture("https://a.example/", "same text")
+        val claim = integrations.outbox.claim("worker", 60_000)!!
+        integrations.outbox.finish(claim, DispatchResult.Rejected("bad_response"))
+
+        capture("https://a.example/", "same text")
+
+        assertEquals(listOf(JobState.SUPERSEDED, JobState.PENDING), jobs().map { it.state })
+        drain()
+        assertEquals(1, server.added.size)
+    }
+
+    @Test
+    fun identicalContentAfterAFailedCaptureIsQueuedAgain() {
+        enable()
+        server.refusal = 400
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.FAILED, jobs().single().state)
+
+        server.refusal = null
+        capture("https://a.example/", "same text")
+        assertEquals(listOf(JobState.SUPERSEDED, JobState.PENDING), jobs().map { it.state })
+        drain()
+        assertEquals(1, server.added.size)
+        assertTrue(server.added.single().contains("same text"))
+    }
+
+    @Test
+    fun identicalContentCanBeCapturedAfterDiscard() = runBlocking {
+        enable()
+        capture("https://a.example/", "same text")
+        integrations.outbox.discard(jobs().single().id)
+
+        capture("https://a.example/", "same text")
+
+        assertEquals(listOf(JobState.CANCELLED, JobState.PENDING), jobs().map { it.state })
+    }
+
+    @Test
+    fun identicalContentCanBeCapturedAfterExpiry() = runBlocking {
+        enable()
+        capture("https://a.example/", "same text")
+        now += Outbox.CAPTURE_MAX_AGE_MS + 1
+        integrations.outbox.prune()
+
+        capture("https://a.example/", "same text")
+
+        assertEquals(listOf(JobState.EXPIRED, JobState.PENDING), jobs().map { it.state })
+    }
+
+    @Test
+    fun identicalContentIsNotQueuedAgainAfterADeliberateDecline() {
+        enable()
+        server.refusal = 406
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+
+        // Hister refused the content on purpose (406/422): the server has seen it, so unchanged
+        // text must not be sent again.
+        server.refusal = null
+        capture("https://a.example/", "same text")
+        assertEquals(1, jobs().size)
+        assertTrue(server.added.isEmpty())
+    }
+
+    @Test
+    fun changedContentIsQueuedAgainAfterADeliberateDecline() {
+        enable()
+        server.refusal = 422
+        capture("https://a.example/", "same text")
+        drain()
+        assertEquals(JobState.CANCELLED, jobs().single().state)
+
+        server.refusal = null
+        capture("https://a.example/", "new text")
+        assertEquals(2, jobs().size)
+        assertEquals(JobState.PENDING, jobs().last().state)
+    }
+
+    @Test
+    fun aCaptureWhoseJobFailedIsQueuedAgainButADeliveredOneIsNot() {
+        enable()
+        capture("https://a.example/", "same text")
+        runBlocking {
+            database.integrations().updateJob(jobs().single().copy(state = JobState.FAILED, error = "rejected"))
+        }
+
+        capture("https://a.example/", "same text")
+        assertEquals(listOf(JobState.SUPERSEDED, JobState.PENDING), jobs().map { it.state })
+
+        drain()
+        assertEquals(1, server.added.size)
+        capture("https://a.example/", "same text")
+        assertEquals(2, jobs().size)
     }
 
     @Test
@@ -270,6 +457,30 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun aPauseAfterClaimKeepsTheUnsentCaptureForResume() = runBlocking {
+        enable()
+        capture("https://a.example/", "retained text")
+        val claim = integrations.outbox.claim("worker", 60_000)!!
+        hister.setCaptureEnabled(false)
+
+        // The switch is rechecked immediately before sending: nothing reaches Hister.
+        val result = hister.dispatch(claim.job)
+        assertTrue("Pausing an unsent claim must not contact Hister", server.added.isEmpty())
+        assertTrue(integrations.outbox.finish(claim, result))
+        val held = jobs().single()
+        assertEquals(JobState.PENDING, held.state)
+        assertEquals(0, held.attempts)
+        assertTrue(held.payload.contains("retained text"))
+        assertNull(integrations.outbox.claim("while-paused", 60_000))
+        assertNull(integrations.outbox.nextWakeup())
+
+        enable()
+        drain()
+        assertEquals(1, server.added.size)
+        assertEquals(JobState.SUCCEEDED, jobs().single().state)
+    }
+
+    @Test
     fun unsentCapturesExpireAfterAWeek() {
         enable()
         capture("https://a.example/", "old text")
@@ -353,6 +564,80 @@ class HisterIntegrationTest {
     }
 
     @Test
+    fun admissionBudgetIsReadInsideTheEnqueueTransaction() {
+        enable()
+        capture("https://a.example/", "one capture")
+
+        assertTrue(budgetTransactions.isNotEmpty())
+        assertTrue("Budget admission must share enqueue's transaction", budgetTransactions.all { it })
+    }
+
+    @Test
+    fun concurrentAdmissionsCannotOverdrawTheCaptureBudget() = runBlocking {
+        enable()
+        val generation = wants("https://a.example/")!!
+        val text = "x".repeat(256 * 1024)
+        (0 until 84).map { index ->
+            async(Dispatchers.Default) {
+                hister.captured(CapturedPage("tab", "visit", "https://a.example/$index", "Title", text, "hash", false, generation))
+            }
+        }.awaitAll()
+
+        assertTrue(database.integrations().queuedCaptureBytes() <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+        assertEquals(79, jobs().count { it.state == JobState.PENDING })
+    }
+
+    @Test
+    fun replacementAdmissionCountsOnlyTheBodiesThatWillRemain() = runBlocking {
+        enable()
+        val body = "a".repeat(256 * 1024)
+        repeat(79) { capture("https://a.example/$it", body) }
+
+        capture("https://a.example/0", "c".repeat(256 * 1024))
+
+        assertEquals(80, jobs().size)
+        assertEquals(JobState.SUPERSEDED, jobs().first().state)
+        assertEquals(JobState.PENDING, jobs().last().state)
+        assertEquals(0, jobs().first().payloadBytes)
+        assertTrue(database.integrations().queuedCaptureBytes() <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+    }
+
+    @Test
+    fun aReplacementCaptureIsNotChargedTheBodyItReplaces() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        repeat(79) { capture("https://a.example/$it", "$text$it") }
+        assertTrue(runBlocking { database.integrations().queuedCaptureBytes() } > HisterIntegration.MAX_QUEUED_CAPTURE_BYTES - 300_000)
+
+        val key = HisterIntegration.documentKey("https://a.example/0")
+        capture("https://a.example/0", text)
+        assertTrue(jobs().any { it.dedupeKey == key && it.state == JobState.SUPERSEDED })
+        assertTrue(jobs().any { it.dedupeKey == key && it.state == JobState.PENDING })
+        assertTrue(runBlocking { database.integrations().queuedCaptureBytes() } <= HisterIntegration.MAX_QUEUED_CAPTURE_BYTES)
+    }
+
+    @Test
+    fun aReplacementThatWouldNotFitLeavesTheExistingJobAlone() {
+        enable()
+        val text = "x".repeat(256 * 1024)
+        repeat(79) { capture("https://a.example/$it", text) }
+        val smallUrl = "https://a.example/small"
+        capture(smallUrl, "tiny")
+        val small = jobs().first { it.dedupeKey == HisterIntegration.documentKey(smallUrl) }
+        val smallBytes = small.payloadBytes
+
+        // The replacement is larger than the small body plus the room left, so it is refused
+        // instead of superseding the existing valid job.
+        capture(smallUrl, text)
+
+        val existing = jobs().first { it.id == small.id }
+        assertEquals(JobState.PENDING, existing.state)
+        assertEquals(smallBytes, existing.payloadBytes)
+        assertTrue(existing.payload.contains("tiny"))
+        assertEquals(80, jobs().size)
+    }
+
+    @Test
     fun theBudgetWarningShowsWhileALargerThanEstimatedCaptureIsRefused() {
         enable()
         val text = "x".repeat(256 * 1024)
@@ -394,6 +679,7 @@ class HisterIntegrationTest {
             assertEquals(JobState.CANCELLED, job.state)
             assertEquals(category, job.error)
             assertEquals("", job.payload)
+            assertNull(job.url)
         }
         // Nothing left to retry, in the budget or in Settings' list of unfinished captures.
         assertEquals(0L, runBlocking { database.integrations().queuedCaptureBytes() })
@@ -446,6 +732,16 @@ class HisterIntegrationTest {
         runBlocking { assertEquals(Configured.Saved, hister.configure(server.root, FakeHister.TOKEN, "https://hister.tailnet.ts.net")) }
         enable()
         assertNull(wants("https://hister.tailnet.ts.net/settings"))
+        assertNotNull(wants("https://a.example/"))
+    }
+
+    @Test
+    fun theReportServicesPagesAreNeverCaptured() {
+        val reports = "https://reports.tailnet.ts.net:8443"
+        runBlocking { assertEquals(Configured.Saved, integrations.reports.configure(reports, FakeReports.TOKEN, "http://100.64.0.7:8787")) }
+        enable()
+        assertNull(wants("$reports/v1/whoami"))
+        assertNull(wants("http://100.64.0.7:8787/healthz"))
         assertNotNull(wants("https://a.example/"))
     }
 

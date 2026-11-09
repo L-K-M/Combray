@@ -15,17 +15,22 @@ class FakeEngine : EnginePort {
         /** Recorded in [selected] when the coordinator shows no view. */
         const val NONE = -1L
 
-        /** What `engine_ready` reports, as Servo 0.7.0 on Android sends it. */
-        const val USER_AGENT = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0"
+        /** What `engine_ready` reports: Servo 0.7.0's Android agent with Combray's Gecko token. */
+        const val USER_AGENT = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0"
     }
 
     private var listener: ((EngineEvent) -> Unit)? = null
     private var nextGeneration = 1L
     private val generations = HashMap<Long, Long>()
+
+    /** How many times [start] ran: the coordinator must start the engine once. */
+    var startCount = 0
+        private set
     val created = mutableListOf<Pair<Long, String>>()
     val selected = mutableListOf<Long>()
     val closed = mutableListOf<Long>()
     val navigated = mutableListOf<Triple<Long, Long, String>>()
+    var reportCreated = true
 
     /** (tab, throttled) throttle commands, in order. */
     val throttling = mutableListOf<Pair<Long, Boolean>>()
@@ -41,6 +46,7 @@ class FakeEngine : EnginePort {
     val appearances = mutableListOf<Pair<Appearance, Int>>()
 
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
+        startCount++
         this.listener = listener
         return EngineStart.STARTED
     }
@@ -56,7 +62,7 @@ class FakeEngine : EnginePort {
             return
         }
         generations[tab] = nextGeneration++
-        emit(EngineEvent.TabCreated(view(tab)))
+        if (reportCreated) emit(EngineEvent.TabCreated(view(tab)))
     }
 
     override fun selectView(tab: Long) {
@@ -81,7 +87,13 @@ class FakeEngine : EnginePort {
         emit(EngineEvent.TabOpened(view(tab), view(opener)))
     }
 
+    var closeFailure: Throwable? = null
+
     override fun closeView(tab: Long) {
+        closeFailure?.let { failure ->
+            closeFailure = null
+            throw failure
+        }
         closed += tab
     }
 
@@ -91,9 +103,24 @@ class FakeEngine : EnginePort {
 
     override fun goBack(tab: Long) = Unit
 
-    override fun goForward(tab: Long) = Unit
+    /** Thrown from the next [goForward] and consumed, to exercise the work queue's error handling. */
+    var forwardFailure: Throwable? = null
 
-    override fun reload(tab: Long) = Unit
+    override fun goForward(tab: Long) {
+        forwardFailure?.let { failure ->
+            forwardFailure = null
+            throw failure
+        }
+    }
+
+    data class Stop(val view: ViewRef, val request: Long)
+    val stopRequests = mutableListOf<Stop>()
+    override fun stopLoading(view: ViewRef, request: Long) { stopRequests += Stop(view, request) }
+
+    val reloaded = mutableListOf<Long>()
+    override fun reload(tab: Long) { reloaded += tab }
+    val reloadedPages = mutableListOf<PageRef>()
+    override fun reload(page: PageRef) { reloaded += page.view.tab; reloadedPages += page }
 
     val scrolled = mutableListOf<Pair<PageRef, ScrollEdge>>()
 

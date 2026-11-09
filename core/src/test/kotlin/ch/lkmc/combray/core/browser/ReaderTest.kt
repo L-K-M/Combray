@@ -8,6 +8,7 @@ import ch.lkmc.combray.engine.CaptureStatus
 import ch.lkmc.combray.engine.CapturedContent
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.HistoryKind
+import ch.lkmc.combray.engine.ViewRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -167,6 +168,31 @@ class ReaderTest {
 
         article(1, 10, capture, ARTICLE)
         assertTrue(state().reader is ReaderState.Unavailable)
+    }
+
+    @Test
+    fun aReadyReaderSurvivesACrash() {
+        openPage()
+        browser.openReader(); idle()
+        article(1, 10, engine.articleCaptures.single().second, ARTICLE)
+        val ready = state().reader as ReaderState.Ready
+
+        // A ready snapshot is immutable: a crashed renderer does not withdraw it.
+        engine.emit(EngineEvent.Crashed(engine.view(1), "oom")); idle()
+        assertEquals(ready, state().reader)
+    }
+
+    @Test
+    fun aStaleCrashDoesNotKillAPendingArticle() {
+        openPage()
+        browser.openReader(); idle()
+        val capture = engine.articleCaptures.single().second
+
+        // A crash carrying a generation this view never had is stale: the article is still pending.
+        engine.emit(EngineEvent.Crashed(ViewRef(1, -1), "stale")); idle()
+        assertTrue(state().reader is ReaderState.Loading)
+        article(1, 10, capture, ARTICLE)
+        assertTrue(state().reader is ReaderState.Ready)
     }
 
     @Test

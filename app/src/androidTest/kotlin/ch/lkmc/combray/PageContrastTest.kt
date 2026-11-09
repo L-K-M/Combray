@@ -31,12 +31,12 @@ class PageContrastTest {
         originalTheme = device.settings.themeMode.value
         device.awaitEngine()
         device.closeAllTabs()
-        device.settings.setThemeMode(ThemeMode.DARK)
+        device.setThemeMode(ThemeMode.DARK)
     }
 
     @After
     fun restoreTheme() {
-        device.settings.setThemeMode(originalTheme)
+        device.setThemeMode(originalTheme)
     }
 
     @Test
@@ -44,17 +44,19 @@ class PageContrastTest {
         open(CONTRAST)
         assertColors(Color.BLACK, Color.WHITE)
 
-        device.settings.setThemeMode(ThemeMode.LIGHT)
+        device.setThemeMode(ThemeMode.LIGHT)
         awaitScheme("light")
         assertColors(Color.BLACK, Color.WHITE)
 
-        device.settings.setThemeMode(ThemeMode.DARK)
+        device.setThemeMode(ThemeMode.DARK)
         awaitScheme("dark")
         assertColors(Color.BLACK, Color.WHITE)
         val previousPage = device.browser.browserState.value.activeTab!!.page
         device.browser.reload()
         device.awaitState { it.activeTab?.page != previousPage && it.activeTab?.loading == false }
         awaitScheme("dark")
+        // The title arrives before the reloaded page paints; sample only once its marker shows.
+        assertMarker(Device.GREEN)
         assertColors(Color.BLACK, Color.WHITE)
 
         open("$CONTRAST?new=1", Placement.NEW_TAB)
@@ -132,8 +134,9 @@ class PageContrastTest {
 
     private fun assertColors(expectedInk: Int, expectedCanvas: Int) {
         val (ink, canvas) = paintedColors()
-        assertTrue("text color %06x".format(ink), device.matches(ink, expectedInk))
-        assertTrue("canvas color %06x".format(canvas), device.matches(canvas, expectedCanvas))
+        val sampled = "text color %06x, canvas color %06x".format(ink, canvas)
+        assertTrue(sampled, device.matches(ink, expectedInk))
+        assertTrue(sampled, device.matches(canvas, expectedCanvas))
         assertContrast(ink, canvas)
     }
 

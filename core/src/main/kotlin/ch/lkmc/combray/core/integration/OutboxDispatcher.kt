@@ -35,6 +35,8 @@ class OutboxDispatcher(
     private val scheduler: WakeupScheduler,
     private val leaseMs: Long = LEASE_MS,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Runs after each prune, at the start and end of every drain (removes unused report files). */
+    private val housekeeping: suspend () -> Unit = {},
 ) {
     private val running = Mutex()
 
@@ -51,6 +53,7 @@ class OutboxDispatcher(
             // Claiming expires captures past their age limit first (Outbox.claim), so a prune
             // failure only delays housekeeping: it must not stall every job kind.
             step { outbox.prune() }
+            step { housekeeping() }
             while (processed < maxJobs) {
                 claimFailed = true
                 val claim = step { outbox.claim(owner, leaseMs).also { claimFailed = false } } ?: break
@@ -64,11 +67,13 @@ class OutboxDispatcher(
                 // instead, and the attempt limit hands it to the user. finish applies the
                 // state and the recorded result in one transaction, so a rollback retries
                 // the delivery; the service APIs dedupe (Karakeep answers 200 with the
-                // existing bookmark, Hister updates the document).
+                // existing bookmark, Hister updates the document, the report service answers
+                // 200 for a report id it has).
                 if (finished == null) step { outbox.finish(claim, DispatchResult.Retry("cycle_failed")) }
                 if (finished == true) sent++
             }
             step { outbox.prune() }
+            step { housekeeping() }
         } finally {
             // Booked even when this coroutine is cancelled or storage is down: a broken step
             // or a cancelled drain must not strand the jobs behind it until the next kick.
@@ -100,7 +105,8 @@ class OutboxDispatcher(
         if (!currentCoroutineContext().isActive) throw cancelled
         Log.e(LOG_TAG, "outbox step failed: ${cancelled.javaClass.name}")
         null
-    } catch (failure: Exception) {
+    } catch (failure: Throwable) {
+        // An Error from a handler or storage must not strand the queue behind the drain mutex.
         Log.e(LOG_TAG, "outbox step failed: ${failure.javaClass.name}")
         null
     }
@@ -112,7 +118,7 @@ class OutboxDispatcher(
             withContext(Dispatchers.IO) { handler.dispatch(claim.job) }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
             // The class only: an exception message can quote a request header or page content.
             Log.e(LOG_TAG, "dispatching job ${claim.job.id} failed: ${failure.javaClass.name}")
             DispatchResult.Rejected("internal_error")
@@ -131,7 +137,8 @@ class OutboxDispatcher(
          * cancelled drain blocks its key. Connect and read timeouts are per operation, not a
          * deadline, so finish()'s fence, not this value, protects job state; a reclaimed
          * request may arrive twice, which the services absorb (Karakeep answers 200 for an
-         * existing link, Hister updates the document).
+         * existing link, Hister updates the document, the report service answers 200 for a
+         * known report id).
          */
         const val LEASE_MS = 60_000L
         const val MAX_JOBS_PER_DRAIN = 50

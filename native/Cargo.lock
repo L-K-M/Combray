@@ -986,7 +986,9 @@ dependencies = [
  "android_logger",
  "dpi",
  "euclid",
+ "flate2",
  "gleam",
+ "http",
  "jni",
  "keyboard-types",
  "log",
@@ -996,6 +998,9 @@ dependencies = [
  "serde_json",
  "servo",
  "servo-allocator",
+ "servo-base",
+ "servo-media",
+ "servo-media-dummy",
  "sha2 0.10.9",
  "url",
 ]
@@ -3595,9 +3600,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.29"
+version = "1.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
 dependencies = [
  "cc",
  "libc",
@@ -6676,6 +6681,7 @@ dependencies = [
  "futures",
  "futures-core",
  "futures-util",
+ "h2",
  "headers",
  "http",
  "http-body-util",

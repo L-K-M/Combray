@@ -59,6 +59,7 @@ import ch.lkmc.combray.core.browser.HomeSectionVisibility
 import ch.lkmc.combray.core.browser.PinDirection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -82,15 +83,18 @@ internal fun HomeEditorSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         // Observe and edit state in the composition of the window that displays it.
-        val state by states.collectAsStateWithLifecycle(HomeLinksState(emptyList(), emptyList(), emptyList()))
-        val continuation by settings.homeContinue.collectAsStateWithLifecycle()
-        val frequent by settings.homeFrequentSites.collectAsStateWithLifecycle()
+        val state by states.collectAsStateWithLifecycle(HomeLinksState(emptyList(), emptyList(), emptyList()), context = Dispatchers.Main.immediate)
+        val continuation by settings.homeContinue.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+        val frequent by settings.homeFrequentSites.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
         var page by rememberSaveable { mutableStateOf(initialPage) }
         var id by rememberSaveable { mutableStateOf(initialLink?.pinId) }
         var address by rememberSaveable { mutableStateOf(initialLink?.url.orEmpty()) }
         var name by rememberSaveable { mutableStateOf(initialLink?.let { it.title ?: displayHost(it.url) }.orEmpty()) }
-        var error by remember { mutableStateOf<Int?>(null) }
+        var error by rememberSaveable { mutableStateOf<Int?>(null) }
         var saving by remember { mutableStateOf(false) }
+        // The visibility switches fence their feedback to the click-time request generation;
+        // pin operations keep the shared error and are out of scope here.
+        var preferenceGeneration by remember { mutableStateOf(0) }
         val scope = rememberCoroutineScope()
 
         val change: (suspend () -> Unit) -> Unit = { action ->
@@ -152,8 +156,26 @@ internal fun HomeEditorSheet(
                 error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
                 when (page) {
                     HomeEditPage.OVERVIEW -> {
-                        HomeVisibilityRow(R.string.home_show_continue, continuation, settings::setHomeContinue)
-                        HomeVisibilityRow(R.string.home_show_frequent, frequent, settings::setHomeFrequentSites)
+                        HomeVisibilityRow(R.string.home_show_continue, continuation) { choice ->
+                            preferenceGeneration += 1
+                            val admitted = preferenceGeneration
+                            change {
+                                val acknowledged = settings.setHomeContinue(choice).await()
+                                if (admitted == preferenceGeneration) {
+                                    error = if (acknowledged) null else R.string.home_change_failed
+                                }
+                            }
+                        }
+                        HomeVisibilityRow(R.string.home_show_frequent, frequent) { choice ->
+                            preferenceGeneration += 1
+                            val admitted = preferenceGeneration
+                            change {
+                                val acknowledged = settings.setHomeFrequentSites(choice).await()
+                                if (admitted == preferenceGeneration) {
+                                    error = if (acknowledged) null else R.string.home_change_failed
+                                }
+                            }
+                        }
                         HorizontalDivider()
                         HomeSectionTitle(R.string.home_pinned)
                         TextButton(onClick = { edit(null) }, modifier = Modifier.heightIn(min = HOME_EDITOR_ACTION_TARGET)) { Text(stringResource(R.string.home_add_link)) }

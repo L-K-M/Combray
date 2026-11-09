@@ -32,8 +32,9 @@
       nodes: 0,
       nodeBudgetExhausted: false
     };
-    // Servo's stand-in for a file it cannot show (a PDF) is no article.
-    if (isServoStandIn()) return result;
+    // Servo's stand-in for a file it cannot show is no article, and neither is Combray's PDF
+    // viewer until it reads the PDF's text (a later step).
+    if (isServoStandIn() || isCombrayPdfViewer()) return result;
     var article = new Readability(document.cloneNode(true), {
       maxElemsToParse: maxNodes,
       // The content element itself rather than its HTML: it is walked below, never serialized.

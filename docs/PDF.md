@@ -2,7 +2,7 @@
 
 Research date: 27 October 2026; probe results and the renderer decision added 28 October 2026. Engine: Servo v0.7.0, downstream `L-K-M/servo` `combray/0.7` at 6e49369. Sources: Servo and Combray source, pdf.js 6.4.299, `@embedpdf/pdfium` 2.15.1, Android and androidx.pdf documentation, and the PDF viewers of Firefox, Chromium, Ladybird and WebKit. A second pass re-checked the load-bearing claims; its corrections are folded in below.
 
-Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Next is phase 1 with PDFium-wasm. The renderer and the Hister rule for PDF text are owner decisions ([below](#owner-decisions)); the rest of the design is a proposal.
+Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Phase 1's viewer is implemented (30 October 2026, [below](#the-viewer-phase-1)) on the engine change, merged as [L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18) on 4 November 2026; CJK fonts (slice C2) and text (phase 2) are next. The renderer, the Hister rule for PDF text, and the phase 1 choices of 29 October 2026 are owner decisions ([below](#owner-decisions)); the rest of the design is a proposal.
 
 ## Owner decisions
 
@@ -10,10 +10,20 @@ Status: phase 0a and the probe (phase 0b) are done ([below](#phases)). Next is p
 - **PDF text in Hister** (27 October 2026): same opt-in and exclusions as pages, no separate switch.
 - **Next steps** (27 October 2026): fix the stand-in page capture (phase 0a), then run the probe (phase 0b). Both are done.
 - **Renderer** (28 October 2026, after the probe results): PDFium compiled to WebAssembly (`@embedpdf/pdfium` 2.15.1) inside the planned Servo viewer document, instead of pdf.js. pdf.js stays a later option if the Servo memory leak the probe found is located and fixed.
+- **Phase 1 choices** (29 October 2026):
+  - **Engine change:** push a branch to L-K-M/servo and open a PR against `combray/0.7`. The change is now estimated at 230 to 280 production lines and is never offered upstream. Its required independent review is Combray's GLM review workflow, added to L-K-M/servo in that PR; the owner adds its API key secret there.
+  - **Size cap:** 64 MiB. The engine cancels the download at the cap, and the viewer says the file is too large.
+  - **Packaging:** `pdfium.wasm` and `index.browser.js` gzip-compressed in the native library (about 2.2 MB), with the compressed files committed.
+  - **CJK text:** the phone's own CJK font, loaded only for PDFs that need it (up to about 20 MB of memory while one is open). If that route fails, bundle a CJK font.
+  - **Attachments:** PDFs sent with `Content-Disposition: attachment` open in the viewer until Combray has downloads.
+  - **Viewer address:** the private `combray-pdf:` scheme carries a random token chosen per app process, so sites cannot detect Combray or reach its font files.
+  - **Text extraction:** right after the first page is drawn, not on the first Find, Reader or Hister request.
+  - **Viewer defaults:** a PDF in a frame keeps the stand-in page; links work for http, https, mailto and tel only; the PDF's own title, when it has one, replaces the file name; a PDF reopened after Android ends the app starts on page 1; text extraction stops at 4 MiB per PDF; the viewer's labels are in English.
+  - **Phone run:** the owner runs the device checks on their phone once the viewer is ready, and the cap and memory budget follow from that measurement.
 
-## What happens today
+## What Servo does without the viewer
 
-Servo paths are relative to the Servo checkout.
+Servo paths are relative to the Servo checkout. This is upstream Servo's behaviour and Combray's before phase 1; PDFs in frames and PDFs sent as `application/octet-stream` still get it.
 
 - A top-level navigation to `application/pdf` becomes Servo's synthesized page "Unknown content type (application/pdf)." The same happens for `application/octet-stream` and any other type Servo has no viewer for (`components/script/dom/servoparser/mod.rs`, `load_document`). Servo ignores `Content-Disposition` when it navigates: a response sent as an attachment is shown by its type alone, so a PDF attachment also becomes the stand-in page.
   - The page commits at the PDF's URL with an opaque origin (`Document::mark_as_internal`).
@@ -21,6 +31,21 @@ Servo paths are relative to the Servo checkout.
   - There is no download API, `<a download>` is not implemented, and `<embed>`/`<object>` fetch nothing.
 - The embedder API carries no MIME type, and `WebResourceLoad` sees requests only.
 - Until phase 0a, capture sent Hister the sentence "Unknown content type (application/pdf)." as the PDF's text, and reader view offered it as an article.
+
+## The viewer (phase 1)
+
+Implemented 30 October 2026 on the engine change, merged on 4 November 2026 ([ENGINE_SPIKE.md section 44](ENGINE_SPIKE.md#44-pdf-viewer-document-30-october-2026)).
+
+- **Turning it on.** `native/src/engine.rs` sets the engine's three viewer preferences from `ViewerPreferences` in `native/src/pdf.rs`: the module `combray-pdf://viewer-<token>/viewer.mjs`, the viewer CSP and the 64 MiB cap. Without the per-process token (no random source) they stay empty and PDFs keep the stand-in page.
+- **Files.** `native/src/pdf/viewer.mjs` (the module the engine's markup loads), `viewer.css` and `worker.mjs`, served by the scheme with the viewer CSP like PDFium's two files. Nothing else under `native/src/pdf/` is served.
+- **Start.** The module creates the worker at once, so PDFium compiles while the PDF still downloads. It reads `data-pdf-state` before it watches the attribute, because a small PDF can be complete before the module runs. The title is the file name (the decoded last path segment, or "PDF" for `data:` and `blob:` addresses) until the PDF's metadata title replaces it.
+- **Pages.** The worker fetches `data-pdf-src`, copies it into the wasm heap and opens it; the page sizes of up to 10,000 pages come back. The page lays them out one under another at the screen's width (8 CSS px margins, a page at most 20,000 CSS px tall, the whole at most 8,000,000) and keeps elements only for pages within one screen above or below the visible ones. The worker renders a page to RGBA at CSS size × `devicePixelRatio` (at most 4 megapixels and 8,192 px a side; larger pages are drawn at a lower resolution), and the page draws it with `putImageData`. At most six pages hold a bitmap, or every page on screen when more fit on it; pages that leave that set give theirs up first by shrinking their canvas to 1 × 1, which makes Servo free the bitmap at once (a 0 × 0 canvas keeps it until garbage collection). Rotation keeps the page at the top of the screen; when a wider screen fits fewer pages under the height limit, the pages past it lose their elements.
+- **Links.** Link annotations (at most 500 per page) become `<a>` overlays: `http`, `https`, `mailto` and `tel` addresses of at most 8 KiB, resolved against the PDF's address, which then go through Combray's navigation rules like any page link; destinations in the PDF scroll to their page without changing the address. Launch, remote go-to and other actions, link annotations off the page, and addresses in the text without a link annotation, are not links.
+- **States.** `loading` shows a spinner and the size from `data-pdf-length`; `too-large` and `failed` come from the engine; the viewer adds `corrupt` (PDFium cannot open it), `protected` (a password or an unsupported security handler), `memory` and `viewer` (PDFium or its worker failed). Each shows a heading and one sentence in English (`role="alert"`). Pages are `<section>` landmarks labelled "Page N of M" with an image role on their canvas.
+- **Leaving.** `pagehide` ends the worker and drops every bitmap. Servo's `Worker.terminate()` only flags a worker that waits idle for a message, so the viewer also posts it an empty one: woken, the worker sees the flag, ends and drops its runtime with PDFium's wasm memory ([ENGINE_SPIKE.md section 44](ENGINE_SPIKE.md#44-pdf-viewer-document-30-october-2026); not measured on a device yet). `pageshow` from the back-forward cache starts a new worker on the same `blob:` address, draws no page until that worker has opened the PDF, and lays the pages out at the current width, because Servo fires no `resize` for a change made while the page was away. The viewer never revokes that address and adds no `unload` or `beforeunload` listener, which would keep the document out of that cache and make the engine free the PDF on leaving.
+- **Find, reader view and Hister.** `native/src/stand_in.js` recognises the viewer (an opaque origin, an `application/pdf` content type, `data-pdf-state` on the root): capture and reader view read nothing from it, and find answers `unavailable`, which the app shows as "This page cannot be searched" (until [phase 2](#phases)).
+- **Checks.** Host: `cargo test --lib` (the scheme serves exactly the viewer's files with the CSP; the preferences; the script guards) and `node --test native/src/pdf/test/viewer.test.mjs` (the worker against the vendored PDFium and the fixture PDFs: sizes, titles, RGBA colours, links, damaged and protected files; the layout, link and title rules; on a fake page, the return from the back-forward cache, released bitmaps, the worker's wake-up and a wider screen). Device: `PdfTest`, plus PDF checks in `HisterTest`, `ReaderTest`, `FindTest` and `ProcessDeathTest`, on the fixture server's generated PDFs (`testing/fixtures/server.py`, `/pdf/`). The Hister and reader view checks open a damaged PDF, whose message stays in the page, so only the viewer guard keeps it out. The device checks see screenshots, titles and the server's counts, not the viewer's text: the message a too-large or damaged PDF shows is checked on the host only.
+- **Limits.** No zoom, no text selection, no dark page colours, no scroll restore (owner decision); no text for Find, reader view or Hister (phase 2); non-embedded CJK text is not drawn (slice C2). Not measured yet: open time and memory on the owner's phone.
 
 ## Probe results (27 October 2026)
 
@@ -60,7 +85,7 @@ Firefox (desktop, and Android since version 111) and Ladybird (since April 2026)
    - It is committed at the PDF's own URL, so Back, Recent, titles and restore work unchanged.
    - It gets a fresh opaque origin, so the viewer never runs as the site. The response's CSP and its CSP-derived sandbox flags are replaced by Combray's strict viewer CSP.
    - It is fed the bytes of the original response, so there is no second request. Cookies (HttpOnly too), HTTP sign-in, POST results and one-time links all work, and nothing leaves Servo's profile.
-   - Size: about 130 to 180 production lines in `servoparser/mod.rs`, `document.rs` and `prefs.rs`, plus webview tests and a DOWNSTREAM.md row.
+   - Size: about 230 to 280 production lines, mostly in `servoparser/mod.rs`, `document.rs` and `prefs.rs`, plus webview tests and a DOWNSTREAM.md row (estimate of 29 October 2026, up from 130 to 180).
 2. **PDFium-wasm (`@embedpdf/pdfium` 2.15.1) as a library, in one module worker per viewer.** Only the engine package is used; Combray draws its own controls at the bottom.
    - Its files are served from a `combray-pdf:` scheme that Combray registers. The scheme serves static, allowlisted files only; PDF bytes never pass through it.
    - The worker renders each page to RGBA in wasm memory, and the page draws it with `putImageData`. `putImageData` is the only canvas call; the drawing calls pdf.js makes are not used.
@@ -85,9 +110,9 @@ Why this one, now that another renderer is allowed:
 - Push the viewer markup through the parser, as the JSON viewer does (`load_json_document`). A parser-created script appended through DOM calls never runs.
 - Clear the CSP-derived sandbox flags too. Otherwise a PDF sent with `Content-Security-Policy: sandbox` never runs its viewer, as with some raw-file hosts that send PDFs as octet-stream with `nosniff`.
 - When Content-Length is above the cap, refuse at the headers. Ideally stream chunks to the viewer as Ladybird does, rather than buffering them in Rust.
-- Memory peaks at several copies of the file during load: the net layer's copy, the buffer, the copy sent to the worker, and PDFium's copy in wasm memory, which it reads for the document's life. Start with a 32 MiB cap until it is measured on a phone.
-- Servo keeps up to 20 past documents per tab. On `pagehide` the viewer must close its PDFium document, end its worker and free its canvases. WebAssembly memory never shrinks while its instance lives, so ending the worker is what returns it.
-- Extract text lazily and within a budget (on capture, Find or Read as text), and return partial text marked as truncated. Capture then needs a new "pending/partial" status through Rust, JNI and Kotlin.
+- Memory peaks at several copies of the file during load: the net layer's copy, the buffer, the copy sent to the worker, and PDFium's copy in wasm memory, which it reads for the document's life. The cap is 64 MiB ([owner decision](#owner-decisions)); the phone run may adjust it.
+- Servo keeps up to 20 past documents per tab. On `pagehide` the viewer must close its PDFium document, end its worker and free its canvases. WebAssembly memory never shrinks while its instance lives, so ending the worker is what returns it. In Servo 0.7, `Worker.terminate()` ends a worker that waits idle for a message only when the next message arrives, so the viewer sends one.
+- Extract text right after the first page is drawn ([owner decision](#owner-decisions)), stopping at 4 MiB per PDF, and return partial text marked as truncated. A capture, Find or Read as text request can arrive before extraction ends, so capture needs a new "pending/partial" status through Rust, JNI and Kotlin.
 
 ## What the probe settled, and what is still unknown
 
@@ -110,15 +135,16 @@ Still unknown:
    - **0a:** pages Servo synthesizes for files it cannot show no longer reach Hister or Reader. `native/src/stand_in.js` recognises them, with device checks in `HisterTest` and `ReaderTest`. Merged as [L-K-M/Combray#141](https://github.com/L-K-M/Combray/pull/141). Failure first: on the checks-only commit d928753 (Engine run 40483083824, attempt 2) both new checks failed: the fake Hister received the PDF's address, and reader view was Ready with the stand-in sentence as its one paragraph. The other 127 checks passed. On the final head 739d66e all 129 device checks passed.
    - **0b:** the probe ([results](#probe-results-27-october-2026)).
 1. **"Tap a PDF link and read it" (about 1 to 1.5 weeks):**
+   - **Status (30 October 2026):** slice C1b is implemented on the engine change, pinned at its merge commit on `combray/0.7` ([L-K-M/servo#18](https://github.com/L-K-M/servo/pull/18), merged 4 November 2026): Combray sets the viewer preferences, the scheme serves the viewer, and a tapped PDF opens in it ([the viewer](#the-viewer-phase-1)). Its device checks run in the Engine workflow; this host has no emulator. Not in C1b: CJK fonts (slice C2) and text (phase 2). Slice C1a before it: `scripts/vendor-pdfium.py` vendors `@embedpdf/pdfium` 2.15.1 (checked against the registry's sha512 and pinned SHA-256s) as committed `gzip -9n` files in `native/src/pdf/vendor/`. `native/src/pdf.rs` serves them to Servo through the `combray-pdf:` scheme on `viewer-<token>`, a 128-bit token per app process, GET only, with the viewer's CSP on every response. Top-level navigations the engine asks about and the address field are refused. An `<iframe src>` load reaches the handler without the embedder being asked, so on plain-HTTP pages only the per-process token keeps the files out of a frame (secure pages are stopped by mixed content). The notices list PDFium and the libraries built into it.
    - the engine change in L-K-M/servo and a pin bump;
    - `native/src/pdf.rs` (the scheme handler) and vendored `@embedpdf/pdfium` 2.15.1 with a pinned hash;
    - `viewer.mjs`: pages, links, title, and the loading, error and too-large states;
    - the PDFium worker: one instance per document, pages rendered to RGBA, the document closed and the worker ended on `pagehide`;
    - font serving: the phone's Noto CJK font from `/system/fonts` through the scheme, with a device check that `cjk.pdf` draws its glyphs;
-   - notices: the package's own code is MIT (`LICENSE`). PDFium is BSD-3-Clause, and its licence file (`LICENSE.pdfium`) also carries the Apache License 2.0 text. `pdfium.wasm` also builds in FreeType, OpenJPEG, libpng and zlib (their strings are in the binary), whose notices the package does not ship;
-   - APK size: about 4.9 MB if the files are embedded in the native library, as Combray's other vendored scripts are, because the APK stores native libraries uncompressed (`pdfium.wasm` is 4,646,932 bytes, `index.browser.js` 293,211); about 2.2 MB if they are stored compressed (`gzip -9` gives about 2.1 MB and 63 KB), in the binary or as deflated APK assets;
+   - notices: the package's own code is MIT (`LICENSE`). PDFium is BSD-3-Clause, and its licence file (`LICENSE.pdfium`) also carries the Apache License 2.0 text. `pdfium.wasm` also builds in FreeType, OpenJPEG, libpng, zlib, Little CMS, Anti-Grain Geometry, libjpeg-turbo, ICU, fast_float, Abseil and Emscripten's musl, libc++, libc++abi and compiler-rt, and `index.browser.js` is Emscripten's runtime; the package ships none of their notices, so the notices carry them ([provenance](../native/licenses/README.md));
+   - APK size: about 2.2 MB, with the files gzip-compressed in the native library (owner decision, 29 October 2026; `pdfium.wasm` is 4,646,932 bytes and `index.browser.js` 293,211, which `gzip -9` makes about 2.1 MB and 63 KB). Uncompressed they would add about 4.9 MB, because the APK stores native libraries uncompressed;
    - `PdfTest`: cookie-gated and HTTP-sign-in PDFs, one request only, a CSP-sandbox PDF, a corrupt PDF, one that is too large, Back, and restore after process death.
-2. **Text (about 1 week):** Hister capture of PDF text, Find across pages, and Read as text, each through PDFium's text API and with a device check.
+2. **Text (about 1 week):** Hister capture of PDF text, Find across pages, and Read as text, each through PDFium's text API and with a device check. The viewer extracts the text right after the first page is drawn (owner decision, 29 October 2026).
 3. **Polish:**
    - zoom (Servo pinch or viewer pinch) and the text size mapping;
    - password PDFs (a native sheet);
@@ -130,13 +156,10 @@ Still unknown:
 
 ## Open questions for the owner
 
-1. **The downstream engine change:** about 130 to 180 lines, never offered upstream.
-2. **Size cap:** 32 MiB to start. Above it, "too large to show here", with Save to Karakeep.
-3. **APK contents:** about 4.9 MB for PDFium-wasm embedded uncompressed in the native library, or about 2.2 MB stored compressed. The earlier question about pdf.js's Liberation fonts no longer applies.
-4. **CJK fonts:** the plan uses the phone's own Noto CJK font. If that does not work, bundle a CJK font (a large addition to the APK), or leave such text undrawn while it stays searchable?
-5. **Attachments and octet-stream:** Servo ignores `Content-Disposition`, so the viewer would show PDFs sent as attachments inline, as Firefox for Android does. Keep that, or honour `attachment` once a download hook exists? Treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF?
-6. **Phase 4 scope.**
-7. **A run on the owner's arm64 phone** for speed and memory. The probe ran only on the emulator; phase 1's viewer can be measured on the phone instead.
+1. **Octet-stream PDFs:** treat `application/octet-stream` with a `.pdf` name and a `%PDF-` header as a PDF (phase 3)?
+2. **Phase 4 scope.**
+
+The other earlier questions (the engine change, size cap, APK contents, CJK fonts, attachments and the phone run) were answered on 29 October 2026 ([owner decisions](#owner-decisions)).
 
 ## Rejected options, with reasons
 

@@ -166,7 +166,7 @@ local servers (loopback or private hosts, non-default ports) are ever cached.
    resolves to a private address leave the selection (when most of a plan does, the run
    stops instead: a proxy in fake-IP mode answers for everything).
 2. **Per page, one engine at a time:** a fresh servoshell (`--headless`, 412×915 CSS px at
-   device pixel ratio 1, Servo's Android user agent, the preferences of Combray's
+   device pixel ratio 1, Combray's user agent, the preferences of Combray's
    `native/src/engine.rs` and the page script it injects (`native/src/animations.js`),
    an empty temporary profile) loads the page over WebDriver,
    waits until the page replaced the initial `about:blank` and finished loading (at most

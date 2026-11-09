@@ -5,6 +5,7 @@ import android.text.format.Formatter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -81,7 +82,10 @@ import ch.lkmc.combray.core.integration.SecretName
 import ch.lkmc.combray.core.integration.ServiceRootProblem
 import ch.lkmc.combray.core.integration.ServiceUrls
 import ch.lkmc.combray.core.policy.HostNames
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -131,6 +135,9 @@ fun SettingsSheet(
                     queue = R.string.queue_title,
                     queuePaused = R.string.queue_paused,
                     resume = R.string.action_resume_all,
+                    parked = R.plurals.queue_parked,
+                    discardParked = R.string.action_discard_parked,
+                    discardParkedTitle = R.string.discard_parked_title,
                 ),
                 kind = ServiceKind.KARAKEEP,
                 secret = SecretName.KARAKEEP_API_KEY,
@@ -158,6 +165,10 @@ fun SettingsSheet(
                     queue = R.string.hister_queue_title,
                     queuePaused = R.string.queue_paused_hister,
                     resume = R.string.action_resume_captures,
+                    // Never shown: captures are cancelled, not parked, by a main address change.
+                    parked = R.plurals.queue_parked,
+                    discardParked = R.string.action_discard_parked,
+                    discardParkedTitle = R.string.discard_parked_title,
                 ),
                 kind = ServiceKind.HISTER,
                 secret = SecretName.HISTER_TOKEN,
@@ -166,6 +177,37 @@ fun SettingsSheet(
                 check = integrations.hister::check,
                 remove = integrations.hister::remove,
             ) { service -> HisterCaptureSettings(integrations, service) }
+            ServiceSettings(
+                integrations = integrations,
+                labels = ServiceLabels(
+                    title = R.string.reports_title,
+                    explanation = R.string.reports_explanation,
+                    urlHint = R.string.reports_url_hint,
+                    secret = R.string.reports_token,
+                    secretSaved = R.string.reports_token_saved,
+                    secretMissing = R.string.reports_token_missing,
+                    secretInvalid = R.string.reports_token_invalid,
+                    secretNotStored = R.string.check_reports_token_not_stored,
+                    rootInvalid = R.string.settings_root_invalid_reports,
+                    cleartextWarning = R.string.settings_root_cleartext_reports,
+                    unauthorized = R.string.check_token_unauthorized_reports,
+                    wrongAddress = R.string.check_wrong_address_reports,
+                    removeBody = R.plurals.reports_remove_body,
+                    queue = R.string.reports_queue_title,
+                    queuePaused = R.string.queue_paused_reports,
+                    resume = R.string.action_resume_reports,
+                    parked = R.plurals.queue_parked_reports,
+                    discardParked = R.string.action_discard_parked_reports,
+                    discardParkedTitle = R.string.discard_parked_reports_title,
+                    name = R.string.reports_name,
+                ),
+                kind = ServiceKind.SITE_REPORTS,
+                secret = SecretName.SITE_REPORTS_TOKEN,
+                service = integrations.reports.service,
+                configure = integrations.reports::configure,
+                check = integrations.reports::check,
+                remove = integrations.reports::remove,
+            )
             SectionTitle(R.string.settings_history_title)
             val days = retention.closedHistoryDays
             Text(pluralStringResource(R.plurals.settings_history_body, days, days))
@@ -188,21 +230,24 @@ fun SettingsSheet(
 /** Opt-in: open tabs unused for the retention period close like history expires. */
 @Composable
 private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: () -> Unit) {
-    val choice by settings.unusedTabs.collectAsStateWithLifecycle()
+    val choice by settings.unusedTabs.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
     val closing = choice == UnusedTabs.CLOSE
     // One accessibility node per row: TalkBack reads the label with the switch state.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
             .toggleable(value = closing, role = Role.Switch) { enabled ->
-                settings.setUnusedTabs(if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP)
-                onChanged()
+                // Maintenance runs only after disk acknowledged the choice.
+                feedback.choose({ settings.setUnusedTabs(if (enabled) UnusedTabs.CLOSE else UnusedTabs.KEEP) }) { onChanged() }
             },
     ) {
         Text(pluralStringResource(R.plurals.settings_close_unused_tabs, days, days), modifier = Modifier.weight(1f))
         Switch(checked = closing, onCheckedChange = null)
     }
     Text(stringResource(R.string.settings_close_unused_tabs_body), style = MaterialTheme.typography.bodySmall)
+    if (feedback.failure) ChangeFailure()
 }
 
 /**
@@ -211,30 +256,48 @@ private fun UnusedTabsSetting(settings: BrowserSettings, days: Int, onChanged: (
  */
 @Composable
 private fun ThemeSetting(settings: BrowserSettings) {
-    val choice by settings.themeMode.collectAsStateWithLifecycle()
+    val choice by settings.themeMode.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
     Text(stringResource(R.string.settings_appearance), modifier = Modifier.semantics { heading() }.padding(top = 8.dp))
     Column(Modifier.selectableGroup()) {
         ThemeMode.entries.forEach { mode ->
-            ListOption(themeModeLabel(mode), selected = mode == choice) { settings.setThemeMode(mode) }
+            ListOption(themeModeLabel(mode), selected = mode == choice) {
+                feedback.choose(write = { settings.setThemeMode(mode) })
+            }
         }
     }
+    if (feedback.failure) ChangeFailure()
 }
 
 /** One labeled switch controls the badge; the button still opens Recent either way. */
 @Composable
 private fun TabCounterSetting(settings: BrowserSettings) {
-    val choice by settings.tabCounter.collectAsStateWithLifecycle()
+    val choice by settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
     val shown = choice == TabCounter.SHOWN
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
             .toggleable(value = shown, role = Role.Switch) { enabled ->
-                settings.setTabCounter(if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN)
+                feedback.choose(write = { settings.setTabCounter(if (enabled) TabCounter.SHOWN else TabCounter.HIDDEN) })
             },
     ) {
         Text(stringResource(R.string.settings_tab_counter), modifier = Modifier.weight(1f))
         Switch(checked = shown, onCheckedChange = null)
     }
+    if (feedback.failure) ChangeFailure()
+}
+
+/** A failed preference write: the control snaps back and the user can try again. */
+@Composable
+private fun ChangeFailure() {
+    Text(
+        stringResource(R.string.home_change_failed),
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 @Composable
@@ -246,7 +309,7 @@ private fun themeModeLabel(mode: ThemeMode): String = stringResource(
     },
 )
 
-/** Each service's own wording: an API key for Karakeep, an access token for Hister. */
+/** Each service's own wording: an API key for Karakeep, an access token for Hister, a reporter token for site reports. */
 private data class ServiceLabels(
     val title: Int,
     val explanation: Int,
@@ -264,7 +327,94 @@ private data class ServiceLabels(
     val queue: Int,
     val queuePaused: Int,
     val resume: Int,
+    /** Plurals: how many items wait for the previous main address. */
+    val parked: Int,
+    val discardParked: Int,
+    val discardParkedTitle: Int,
+    /** The service as a sentence names it; a product name is its [title]. */
+    val name: Int = title,
 )
+
+/**
+ * Save and Check connection for one service; each keeps a 48dp target. The row wraps instead of
+ * overflowing: at large font scales two wide labels must not push a button off the screen.
+ */
+@Composable
+internal fun ServiceActions(saveEnabled: Boolean, checkEnabled: Boolean, onSave: () -> Unit, onCheck: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+        Button(onClick = onSave, enabled = saveEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_save_settings))
+        }
+        OutlinedButton(onClick = onCheck, enabled = checkEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_check_connection))
+        }
+    }
+}
+
+/**
+ * One service form's configuration actions. A tap admits exactly one operation synchronously and
+ * captures the edit generation at that moment; the caller captures the payload. A second tap
+ * while it runs is ignored. A completion applies only while both generations are unchanged, so a
+ * delayed result cannot clear or describe a newer form.
+ */
+internal class ServiceFormActions {
+    private val lock = Any()
+    private var admitted = false
+    private var editGeneration = 0
+    private var operationGeneration = 0
+
+    /** Whether an operation is in flight; the form's action buttons wait for it. */
+    var isBusy by mutableStateOf(false)
+        private set
+
+    /** A field was edited: a completion that started before this no longer owns the form. */
+    fun edited() {
+        synchronized(lock) { editGeneration++ }
+    }
+
+    /**
+     * Admits the next operation at the click boundary, capturing the generations its completion
+     * must still match. Returns null when another operation is already in flight.
+     */
+    fun admit(): Admission? = synchronized(lock) {
+        if (admitted) return null
+        admitted = true
+        operationGeneration++
+        isBusy = true
+        Admission(operationGeneration, editGeneration)
+    }
+
+    /** Releases the admitted operation; a stale completion cannot release a newer one. */
+    fun release(admission: Admission) = synchronized(lock) {
+        if (operationGeneration == admission.operation) {
+            admitted = false
+            isBusy = false
+        }
+    }
+
+    /**
+     * Runs [action] and applies its result only while the form still has the edit generation and
+     * the operation still has the generation captured at admission. Releases the admission in a
+     * finally block, so a failure or cancellation leaves the form usable.
+     */
+    suspend fun <T> perform(admission: Admission, action: suspend () -> T, apply: (T) -> Unit) {
+        try {
+            complete(admission, action(), apply)
+        } finally {
+            release(admission)
+        }
+    }
+
+    /** Applies [result] only while [admission]'s operation and edit generations are current. */
+    fun <T> complete(admission: Admission, result: T, apply: (T) -> Unit) = synchronized(lock) {
+        if (operationGeneration == admission.operation && editGeneration == admission.edit) {
+            apply(result)
+        }
+    }
+
+    /** The generations an admitted operation must still match when it finishes. */
+    data class Admission(val operation: Int, val edit: Int)
+}
 
 /**
  * Server address and credential for one service. The credential is write-only: a saved one is
@@ -283,9 +433,15 @@ private fun ServiceSettings(
     remove: suspend () -> Unit,
     extra: @Composable (ServiceEntity) -> Unit = {},
 ) {
-    val current by service.collectAsStateWithLifecycle(null)
-    val jobs by remember(kind) { integrations.openJobs(kind) }.collectAsStateWithLifecycle(emptyList())
-    val parked by remember(kind) { integrations.parkedJobs(kind) }.collectAsStateWithLifecycle(emptyList())
+    val current by service.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
+    val jobs by remember(kind) {
+        integrations.openJobs(kind)
+            .map { open -> open.map { job -> QueueEntry(job, integrations.jobUrl(job)?.let(::displayHost)) } }
+            // A capture payload can hold hundreds of kilobytes of page text: decode a pre-schema-6
+            // row's address off the UI thread, once per job, never during composition.
+            .flowOn(Dispatchers.Default)
+    }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
+    val parked by remember(kind) { integrations.parkedJobs(kind) }.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
     // Null until edited: the field shows the stored address, and an edit survives rotation.
     var editedAddress by rememberSaveable { mutableStateOf<String?>(null) }
     val address = editedAddress ?: current?.baseUrl.orEmpty()
@@ -293,9 +449,11 @@ private fun ServiceSettings(
     val alternate = editedAlternate ?: current?.alternateUrl.orEmpty()
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    // One configuration action at a time; a completion describes only the form it started from.
+    val actions = remember { ServiceFormActions() }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
     LaunchedEffect(current) { credentialSaved = current?.let { integrations.hasCredential(secret, it) } == true }
@@ -304,7 +462,7 @@ private fun ServiceSettings(
     Text(stringResource(labels.explanation))
     OutlinedTextField(
         value = address,
-        onValueChange = { editedAddress = it },
+        onValueChange = { editedAddress = it; actions.edited(); message = null },
         label = { Text(stringResource(R.string.karakeep_url)) },
         placeholder = { Text(stringResource(labels.urlHint)) },
         singleLine = true,
@@ -313,7 +471,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = alternate,
-        onValueChange = { editedAlternate = it },
+        onValueChange = { editedAlternate = it; actions.edited(); message = null },
         label = { Text(stringResource(R.string.settings_alternate_url)) },
         placeholder = { Text(stringResource(R.string.settings_alternate_url_hint)) },
         supportingText = { Text(stringResource(R.string.settings_alternate_url_help)) },
@@ -323,7 +481,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = credential,
-        onValueChange = { credential = it },
+        onValueChange = { credential = it; actions.edited(); message = null },
         label = { Text(stringResource(labels.secret)) },
         supportingText = if (credentialSaved) ({ Text(stringResource(labels.secretSaved)) }) else null,
         singleLine = true,
@@ -331,45 +489,67 @@ private fun ServiceSettings(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        Button(
-            onClick = {
-                scope.launch {
-                    val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
-                    if (result == Configured.Saved) {
-                        editedAddress = null
-                        editedAlternate = null
-                    }
-                    credential = ""
-                }
-            },
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_save_settings)) }
-        OutlinedButton(
-            onClick = {
-                message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
-            },
-            enabled = current != null,
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_check_connection)) }
-    }
+    ServiceActions(
+        saveEnabled = !actions.isBusy,
+        checkEnabled = current != null && !actions.isBusy,
+        onSave = {
+            // A field edit can precede this tap without a recomposition in between.
+            // Read the live drafts, then keep this payload even if the user edits again.
+            val addressAtTap = editedAddress ?: address
+            val alternateAtTap = editedAlternate ?: alternate
+            val credentialAtTap = credential
+            val admission = actions.admit() ?: return@ServiceActions
+            scope.launch {
+                actions.perform(
+                    admission,
+                    action = { configure(addressAtTap, credentialAtTap.ifBlank { null }, alternateAtTap) },
+                    apply = { result ->
+                        message = describe(resources, labels, result)
+                        if (result == Configured.Saved) {
+                            editedAddress = null
+                            editedAlternate = null
+                            credential = ""
+                        }
+                    },
+                )
+            }.invokeOnCompletion { actions.release(admission) }
+        },
+        onCheck = {
+            val admission = actions.admit() ?: return@ServiceActions
+            message = resources.getString(R.string.check_running)
+            scope.launch {
+                actions.perform(
+                    admission,
+                    action = { check() },
+                    apply = { result -> message = result?.let { describe(resources, labels, it) } },
+                )
+            }.invokeOnCompletion { actions.release(admission) }
+        },
+    )
     if (current != null) {
-        TextButton(onClick = { confirmRemove = true }) { Text(stringResource(R.string.action_remove)) }
+        TextButton(onClick = { confirmRemove = true }, enabled = !actions.isBusy) {
+            Text(stringResource(R.string.action_remove))
+        }
     }
     // Removing cancels every unsent item for the service: say how many before doing it.
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.title))) },
+            title = { Text(stringResource(R.string.remove_service_title, stringResource(labels.name))) },
             text = { Text(pluralStringResource(labels.removeBody, jobs.size + parked.size, jobs.size + parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
+                    val admission = actions.admit() ?: return@TextButton
                     confirmRemove = false
                     editedAddress = null
                     editedAlternate = null
-                    scope.launch { remove(); message = null }
+                    scope.launch {
+                        actions.perform(
+                            admission,
+                            action = { remove() },
+                            apply = { message = null },
+                        )
+                    }.invokeOnCompletion { actions.release(admission) }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.action_cancel)) } },
@@ -383,17 +563,17 @@ private fun ServiceSettings(
 
     Text(stringResource(labels.queue), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
     if (jobs.isEmpty() && parked.isEmpty()) Text(stringResource(R.string.queue_empty))
-    jobs.forEach { job -> QueueRow(integrations, labels, job) }
-    if (jobs.any { it.state == JobState.AUTH_REQUIRED }) {
+    jobs.forEach { entry -> QueueRow(integrations, labels, entry) }
+    if (jobs.any { it.job.state == JobState.AUTH_REQUIRED }) {
         OutlinedButton(onClick = { integrations.resume(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(labels.resume))
         }
     }
-    // Only saves are parked by a main address change (captures are cancelled), hence the wording.
-    // They are never sent to the new address without this explicit choice.
+    // Saves and reports are parked by a main address change (captures are cancelled), each in its
+    // own wording. They are never sent to the new address without this explicit choice.
     if (parked.isNotEmpty()) {
-        val discardLabel = stringResource(R.string.action_discard_parked)
-        Text(pluralStringResource(R.plurals.queue_parked, parked.size, parked.size), modifier = Modifier.padding(top = 8.dp))
+        val discardLabel = stringResource(labels.discardParked)
+        Text(pluralStringResource(labels.parked, parked.size, parked.size), modifier = Modifier.padding(top = 8.dp))
         OutlinedButton(onClick = { integrations.sendParkedToCurrent(kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.action_send_to_current_address))
         }
@@ -402,12 +582,12 @@ private fun ServiceSettings(
             modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = discardLabel },
         ) { Text(stringResource(R.string.action_discard)) }
     }
-    // Discarding cannot be undone, and the saves were the user's own: confirm first.
+    // Discarding cannot be undone, and the saves or reports were the user's own: confirm first.
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
-            title = { Text(stringResource(R.string.discard_parked_title)) },
-            text = { Text(pluralStringResource(R.plurals.queue_parked, parked.size, parked.size)) },
+            title = { Text(stringResource(labels.discardParkedTitle)) },
+            text = { Text(pluralStringResource(labels.parked, parked.size, parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDiscard = false
@@ -499,9 +679,9 @@ private fun ListOption(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun HisterCaptureSettings(integrations: Integrations, service: ServiceEntity) {
     val hister = integrations.hister
-    val exclusions by hister.exclusions.collectAsStateWithLifecycle(emptyList())
-    val queued by hister.queuedBytes.collectAsStateWithLifecycle(0L)
-    val budgetReached by hister.captureBudgetReached.collectAsStateWithLifecycle(false)
+    val exclusions by hister.exclusions.collectAsStateWithLifecycle(emptyList(), context = Dispatchers.Main.immediate)
+    val queued by hister.queuedBytes.collectAsStateWithLifecycle(0L, context = Dispatchers.Main.immediate)
+    val budgetReached by hister.captureBudgetReached.collectAsStateWithLifecycle(false, context = Dispatchers.Main.immediate)
     var site by rememberSaveable { mutableStateOf("") }
     var includeSubdomains by rememberSaveable { mutableStateOf(true) }
     var problem by remember { mutableStateOf(false) }
@@ -562,8 +742,12 @@ private fun HisterCaptureSettings(integrations: Integrations, service: ServiceEn
     }
 }
 
+/** One queued job and the address shown for it; a legacy row's payload is decoded with the flow, off the UI thread. */
+private data class QueueEntry(val job: OutboxJobEntity, val address: String?)
+
 @Composable
-private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: OutboxJobEntity) {
+private fun QueueRow(integrations: Integrations, labels: ServiceLabels, entry: QueueEntry) {
+    val job = entry.job
     val error = job.error.orEmpty()
     val state = when (job.state) {
         JobState.PENDING, JobState.RUNNING -> stringResource(R.string.queue_pending)
@@ -572,7 +756,9 @@ private fun QueueRow(integrations: Integrations, labels: ServiceLabels, job: Out
         else -> stringResource(R.string.queue_failed, error)
     }
     Column(Modifier.padding(vertical = 4.dp)) {
-        Text(integrations.jobUrl(job)?.let(::displayHost) ?: job.dedupeKey, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // The row's url column, never a payload decode in composition; a row with no usable
+        // address is named explicitly rather than by its raw dedupe key or report id.
+        Text(entry.address ?: stringResource(R.string.queue_unknown_page), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(state, style = MaterialTheme.typography.bodySmall)
         // A paused item can be dropped on its own: "Resume all" is not the only way out.
         if (job.state in ACTIONABLE_STATES) {
@@ -603,6 +789,7 @@ private fun describe(resources: Resources, labels: ServiceLabels, check: Connect
     ConnectionCheck.Unauthorized -> resources.getString(labels.unauthorized)
     ConnectionCheck.CredentialMissing -> resources.getString(labels.secretNotStored)
     is ConnectionCheck.WrongAddress -> resources.getString(labels.wrongAddress, check.status)
+    is ConnectionCheck.ServerError -> resources.getString(R.string.check_server_error, check.status)
     is ConnectionCheck.Unreachable -> resources.getString(R.string.check_unreachable, check.category)
 }
 

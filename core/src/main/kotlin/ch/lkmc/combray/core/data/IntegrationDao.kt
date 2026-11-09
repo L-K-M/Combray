@@ -90,14 +90,20 @@ interface IntegrationDao {
     @Query("SELECT COALESCE(MAX(generation), 0) FROM outbox WHERE service = :service")
     suspend fun maxJobGeneration(service: ServiceKind): Long
 
-    /** Captured text is dropped as soon as a capture is finished (sent, replaced, cancelled, expired). */
+    /**
+     * Captured text and report contents (address, title, comment) are dropped as soon as their
+     * job is finished (sent, replaced, cancelled, expired), not after the finished-row retention.
+     * Saves keep theirs. The recorded address goes with the payload, so a finished report or
+     * capture leaves no address behind either; a failed one keeps both for its retry.
+     */
     @Query(
         """
-        UPDATE outbox SET payload = '', payloadBytes = 0
-        WHERE kind = 'HISTER_ADD' AND state IN ('SUCCEEDED', 'CANCELLED', 'SUPERSEDED', 'EXPIRED') AND payload != ''
+        UPDATE outbox SET payload = '', payloadBytes = 0, url = NULL
+        WHERE kind IN ('HISTER_ADD', 'SITE_REPORT') AND state IN ('SUCCEEDED', 'CANCELLED', 'SUPERSEDED', 'EXPIRED')
+          AND (payload != '' OR url IS NOT NULL)
         """,
     )
-    suspend fun dropFinishedCapturePayloads(): Int
+    suspend fun dropFinishedTransientPayloads(): Int
 
     @Query("SELECT * FROM outbox WHERE service = :service AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED') ORDER BY sequence")
     fun observeOpenJobs(service: ServiceKind): Flow<List<OutboxJobEntity>>
@@ -120,6 +126,28 @@ interface IntegrationDao {
 
     @Query("SELECT * FROM outbox WHERE kind = :kind AND fingerprint = :fingerprint AND dedupeKey = :dedupeKey AND state = 'FAILED'")
     suspend fun failedJobs(kind: JobKind, fingerprint: String, dedupeKey: String): List<OutboxJobEntity>
+
+    /**
+     * Report ids whose screenshot file must be kept: every report not finished yet, parked and
+     * failed ones included (they can still be sent). Any other file in the report directory is
+     * swept.
+     */
+    @Query(
+        """
+        SELECT dedupeKey FROM outbox WHERE kind = 'SITE_REPORT'
+          AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED', 'DESTINATION_CHANGED')
+        """,
+    )
+    suspend fun reportIdsHoldingFiles(): List<String>
+
+    /** Reports not finished yet, as in [reportIdsHoldingFiles]: the cap on unsent reports counts these. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM outbox WHERE kind = 'SITE_REPORT'
+          AND state IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'AUTH_REQUIRED', 'FAILED', 'DESTINATION_CHANGED')
+        """,
+    )
+    suspend fun unsentReports(): Int
 
     @Query("DELETE FROM outbox WHERE state IN ('SUCCEEDED', 'CANCELLED', 'SUPERSEDED', 'EXPIRED') AND updatedAt < :before")
     suspend fun deleteFinishedBefore(before: Long): Int

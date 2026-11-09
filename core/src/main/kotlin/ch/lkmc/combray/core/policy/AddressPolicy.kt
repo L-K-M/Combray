@@ -174,6 +174,9 @@ object AddressPolicy {
     private val BLOCKED_SCHEMES = setOf(
         "javascript", "data", "file", "content", "intent", "blob", "about", "chrome", "view-source",
         "filesystem", "ftp", "ws", "wss", "jar", "resource", "android-app",
+        // The engine's PDF viewer files (native/src/pdf.rs): never a page, and never a search,
+        // which would send the viewer's per-process token to Kagi.
+        "combray-pdf",
     )
 
     private val KNOWN_SCHEMES = WEB_SCHEMES + EXTERNAL_SCHEMES + BLOCKED_SCHEMES
@@ -505,8 +508,7 @@ object HostNames {
 
     /**
      * Whether [host] names this device or a home network: localhost, or a name under a home
-     * network suffix such as ".lan" or ".local". The address field's rule; the media player adds
-     * more names (ch.lkmc.combray.core.media.MediaPolicy).
+     * network suffix such as ".lan" or ".local". The address field's rule.
      */
     fun isLocalHost(host: String): Boolean {
         val name = host.trimEnd('.')
@@ -522,10 +524,24 @@ object HostNames {
      * both spellings of one site count as it. Only that spelling merges: "www.sub.example.com"
      * keys to "sub.example.com", and "example.net" stays itself.
      */
-    fun mergedSite(host: String): String = host.removePrefix(WWW_PREFIX)
+    fun mergedSite(host: String): String = withoutWwwLabel(host)
 
-    /** The spellings stored visits of [site] may carry: the merged key and its "www." form. */
-    fun siteSpellings(site: String): List<String> = listOf(site, "$WWW_PREFIX$site")
+    /**
+     * [host] without a leading "www." label, but only when "www." is a spelling variant of a
+     * longer name: "www.example.com" becomes "example.com". "www.com" keeps its label — there
+     * "www" names the site itself, and stripping it would leave the bare suffix "com".
+     */
+    fun withoutWwwLabel(host: String): String {
+        val stripped = host.removePrefix(WWW_PREFIX)
+        return if (stripped != host && '.' in stripped) stripped else host
+    }
+
+    /**
+     * The spellings stored visits of [site] may carry: the merged key and its "www." form —
+     * but only when that form really merges back ("www.com" is its own site, not "com"'s).
+     */
+    fun siteSpellings(site: String): List<String> =
+        if (mergedSite("$WWW_PREFIX$site") == site) listOf(site, "$WWW_PREFIX$site") else listOf(site)
 
     fun isWeb(url: String): Boolean {
         val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase()

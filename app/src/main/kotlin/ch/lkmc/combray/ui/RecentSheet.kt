@@ -1,13 +1,17 @@
 package ch.lkmc.combray.ui
 
+import android.content.Intent
+import android.os.Build
 import android.text.format.DateFormat as AndroidDateFormat
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,10 +22,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -54,14 +59,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -71,6 +81,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -80,6 +91,7 @@ import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.HistoryDepth
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.matching
+import ch.lkmc.combray.core.browser.openTabsInCreationOrder
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.policy.HostNames
 import java.text.DateFormat
@@ -87,8 +99,10 @@ import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /** What Recent shows. Only [HISTER] and [KARAKEEP] contact a server. */
 enum class RecentScope(@StringRes val label: Int) {
@@ -119,8 +133,8 @@ internal fun recentEmpty(query: String, matching: List<RecentItem>, shown: List<
 }
 
 /**
- * Open tabs and recently visited pages in one most-recently-used list (R5), opening on
- * [initialScope] (normally the tabs); a new [restartKey] returns to it. Filtering them stays on
+ * Open tabs keep creation order; All shows tabs and history by last use in the same UI (R5).
+ * [initialScope] normally shows tabs; a new [restartKey] returns to it. Filtering stays on
  * the device; Hister and Karakeep are separate, labeled scopes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,20 +152,21 @@ fun RecentSheet(
 ) {
     var query by rememberSaveable(restartKey) { mutableStateOf("") }
     var scope by rememberSaveable(restartKey) { mutableStateOf(initialScope) }
+    val sheetScope = rememberCoroutineScope()
     // One subscription per depth: browsing reads the newest rows, a search the retained ones.
     // The filter runs in memory, so typing does not restart three Room observers per keystroke.
     val depth = HistoryDepth.forQuery(query)
     // Null until the first answer: an empty list before it would flash an empty-state message.
     // Tagged with its depth: the first keystroke filters the newest rows until the retained
     // ones arrive, and those must not report "no matches" for an older page.
-    val answer by remember(browser, depth) { browser.recent(depth).map { depth to it } }.collectAsStateWithLifecycle(null)
+    val answer by remember(browser, depth) { browser.recent(depth).map { depth to it } }.collectAsStateWithLifecycle(null, context = Dispatchers.Main.immediate)
     val items = answer?.second
     val rows = remember(items, query) { items?.let { LocalRows(query, it.matching(query)) } }
     val complete = answer?.first == depth
     var forgetting by rememberSaveable(restartKey) { mutableStateOf<String?>(null) }
     val shown = remember(rows, scope) {
         val items = rows?.items.orEmpty()
-        if (scope == RecentScope.OPEN) items.filterIsInstance<RecentItem.OpenTab>() else items
+        if (scope == RecentScope.OPEN) items.openTabsInCreationOrder() else items
     }
     // Relative times and day headers stay right while the sheet stays open.
     val now by produceState(System.currentTimeMillis()) {
@@ -164,6 +179,10 @@ fun RecentSheet(
     // A new filter or scope shows its best matches first, once its rows are there.
     val listState = rememberLazyListState()
     LaunchedEffect(rows?.query, scope) { listState.scrollToItem(0) }
+    // The Undo snackbar for a tab closed here overlays the list's bottom; reserve its height so
+    // the last row can scroll clear of it instead of sitting under the action.
+    var snackbarHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         // The sheet is its own window: the Undo for a tab closed here must be shown inside it.
@@ -189,26 +208,15 @@ fun RecentSheet(
                             Text(stringResource(R.string.action_new_tab), modifier = Modifier.padding(start = 8.dp))
                         }
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp).selectableGroup(),
-                    ) {
-                        RecentScope.entries.forEach { option ->
-                            FilterChip(
-                                selected = scope == option,
-                                onClick = { scope = option },
-                                label = { Text(stringResource(option.label)) },
-                                // One scope at a time: announced as tabs, not as checkboxes.
-                                modifier = Modifier.semantics { role = Role.Tab },
-                            )
-                        }
-                    }
+                    RecentScopeChips(
+                        selected = scope,
+                        onSelect = { scope = it },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    )
                     if (scope == RecentScope.OPEN || scope == RecentScope.ALL) {
-                        OutlinedTextField(
+                        RecentFilterField(
                             value = query,
                             onValueChange = { query = it },
-                            singleLine = true,
-                            placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         )
                     }
@@ -222,18 +230,25 @@ fun RecentSheet(
                         LocalRecent(
                             browser = browser,
                             shown = shown,
+                            scope = scope,
                             empty = if (complete) recentEmpty(answered.query, answered.items, shown) else null,
                             query = answered.query,
                             now = now,
                             listState = listState,
+                            listContentPadding = PaddingValues(bottom = snackbarHeight),
                             onShowAll = { scope = RecentScope.ALL },
                             onDismiss = onDismiss,
                             onForgetSite = { forgetting = it },
+                            onNotify = { message -> sheetScope.launch { snackbar.showSnackbar(message) } },
                         )
                     }
                 }
             }
-            NoticeHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+            NoticeHost(
+                snackbar,
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                    .onGloballyPositioned { info -> snackbarHeight = with(density) { info.size.height.toDp() } },
+            )
         }
     }
 
@@ -249,18 +264,69 @@ fun RecentSheet(
     }
 }
 
-/** Tabs and history on this device, grouped by day. [query] is the filter [shown] answers. */
+/**
+ * The scope chips. Flow, not a horizontal scroller: on a narrow phone or at a large font the
+ * last chips start off-screen with no cue that Hister and Karakeep exist.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun RecentScopeChips(
+    selected: RecentScope,
+    onSelect: (RecentScope) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.selectableGroup(),
+    ) {
+        RecentScope.entries.forEach { option ->
+            FilterChip(
+                selected = selected == option,
+                onClick = { onSelect(option) },
+                label = { Text(stringResource(option.label)) },
+                // One scope at a time: announced as tabs, not as checkboxes.
+                modifier = Modifier.semantics { role = Role.Tab },
+            )
+        }
+    }
+}
+
+/** The local Recent filter. It applies as you type; Search just puts the keyboard away. */
+@Composable
+internal fun RecentFilterField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        placeholder = { Text(stringResource(R.string.recent_filter_hint)) },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); keyboard?.hide() }),
+        modifier = modifier,
+    )
+}
+
+/** Only All groups by last-use day; fixed tab order can cross the same day more than once. */
 @Composable
 private fun LocalRecent(
     browser: BrowserCoordinator,
     shown: List<RecentItem>,
+    scope: RecentScope,
     empty: RecentEmpty?,
     query: String,
     now: Long,
     listState: LazyListState,
+    listContentPadding: PaddingValues = PaddingValues(0.dp),
     onShowAll: () -> Unit,
     onDismiss: () -> Unit,
     onForgetSite: (String) -> Unit,
+    onNotify: (String) -> Unit,
 ) {
     if (empty != null) {
         EmptyRecent(empty, onShowAll)
@@ -269,11 +335,11 @@ private fun LocalRecent(
 
     val days = remember(shown) { shown.map { calendarDay(it.time) } }
     val today = calendarDay(now)
-    LazyColumn(Modifier.fillMaxWidth(), state = listState) {
+    LazyColumn(Modifier.fillMaxWidth(), state = listState, contentPadding = listContentPadding) {
         var lastDay: Long? = null
         shown.forEachIndexed { index, item ->
             val day = days[index]
-            if (day != lastDay) {
+            if (scope == RecentScope.ALL && day != lastDay) {
                 lastDay = day
                 item(key = "day:$day") { DayHeader(day, today) }
             }
@@ -293,6 +359,7 @@ private fun LocalRecent(
                         onClose = { browser.closeTab((item as RecentItem.OpenTab).tabId) },
                         onRemove = { browser.forgetVisit((item as RecentItem.Visit).visitId) },
                         onForgetSite = { HostNames.of(item.url.orEmpty())?.let(onForgetSite) },
+                        onNotify = onNotify,
                     )
                 }
                 if (item is RecentItem.OpenTab) {
@@ -370,6 +437,7 @@ private fun RecentRow(
     onClose: () -> Unit,
     onRemove: () -> Unit,
     onForgetSite: () -> Unit,
+    onNotify: (String) -> Unit,
 ) {
     val title = item.title?.takeIf { it.isNotBlank() }
         ?: item.url?.let { displayHost(it) }
@@ -410,7 +478,7 @@ private fun RecentRow(
                 is RecentItem.OpenTab -> IconButton(onClick = onClose) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.recent_close_tab, title))
                 }
-                is RecentItem.Visit -> VisitMenu(title, site, onRemove, onForgetSite)
+                is RecentItem.Visit -> VisitMenu(title, site, item.url, onRemove, onForgetSite, onNotify)
             }
         },
         // Rows take the sheet's colour; only the current tab stands out.
@@ -446,13 +514,45 @@ private fun SiteTile(letter: String) {
 }
 
 @Composable
-private fun VisitMenu(title: String, host: String?, onRemove: () -> Unit, onForgetSite: () -> Unit) {
+internal fun VisitMenu(
+    title: String,
+    host: String?,
+    url: String?,
+    onRemove: () -> Unit,
+    onForgetSite: () -> Unit,
+    onNotify: (String) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val copied = stringResource(R.string.link_copied)
+    val addressLabel = stringResource(R.string.page_info_address)
+    val shareLabel = stringResource(R.string.share_chooser)
     Box {
         IconButton(onClick = { expanded = true }) {
             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.recent_row_actions, title))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (url != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.link_copy)) },
+                    onClick = {
+                        expanded = false
+                        copyAddressToClipboard(context, addressLabel, url)
+                        // Android 13+ confirms the copy itself; below it the app must.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onNotify(copied)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_share)) },
+                    onClick = {
+                        expanded = false
+                        val send = Intent(Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(Intent.EXTRA_TEXT, url)
+                        context.startActivity(Intent.createChooser(send, shareLabel))
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.recent_remove)) },
                 onClick = {

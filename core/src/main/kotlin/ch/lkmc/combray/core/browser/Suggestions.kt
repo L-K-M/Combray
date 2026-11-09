@@ -5,7 +5,7 @@ import ch.lkmc.combray.core.policy.AddressPolicy
 import ch.lkmc.combray.core.policy.HostNames
 
 /**
- * What the address sheet offers while you type: matches from local Recent only, so typing
+ * What the address editor offers while you type: matches from local Recent only, so typing
  * contacts no server. Rows rank by kind, then by how the text matches, then by recency:
  *
  * ```

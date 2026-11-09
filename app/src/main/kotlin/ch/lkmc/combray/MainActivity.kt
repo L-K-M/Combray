@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.combray.core.browser.SessionState
 import ch.lkmc.combray.ui.BrowserScreen
 import ch.lkmc.combray.ui.CombrayTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** The launcher icon's long-press shortcuts; each comes back through [MainActivity.handleIncoming]. */
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromRecents) handleIncoming(intent)
         setContent {
             // The owner's choice in Settings, or the system's.
-            val themeMode by graph.settings.themeMode.collectAsStateWithLifecycle()
+            val themeMode by graph.settings.themeMode.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
             CombrayTheme(themeMode) {
                 BrowserScreen(
                     graph,

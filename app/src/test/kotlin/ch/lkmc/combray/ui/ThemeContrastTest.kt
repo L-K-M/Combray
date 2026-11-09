@@ -41,6 +41,30 @@ class ThemeContrastTest {
         assertTrue("Roles still on Material's baseline:\n" + failures.joinToString("\n"), failures.isEmpty())
     }
 
+    /**
+     * Elevation must read on sheets, menus and fields: each container tier steps away from
+     * the one below, darkening upward in light and lightening upward in dark. An equal
+     * adjacent pair would be a duplicated rung, not a step. The endpoint roles (surface,
+     * bright, dim) are scheme-specific anchors and stay out of this ladder on purpose.
+     */
+    @Test
+    fun surfaceContainerTiersStepWithElevation() {
+        val failures = schemes.flatMap { (name, scheme) ->
+            val descending = name == "light"
+            containerTiers.zipWithNext().mapNotNull { (lower, higher) ->
+                val below = relativeLuminance(lower.get(scheme).toArgb())
+                val above = relativeLuminance(higher.get(scheme).toArgb())
+                if (if (descending) below > above else below < above) {
+                    null
+                } else {
+                    "$name ${lower.name} then ${higher.name}: luminance $below vs $above"
+                }
+            }
+        }
+
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     /** The WCAG check itself, against published reference ratios. */
     @Test
     fun contrastFormulaMatchesWcagReferenceValues() {
@@ -62,15 +86,17 @@ class ThemeContrastTest {
 
         val schemes = listOf("light" to LightColors, "dark" to DarkColors)
 
-        val surfaces = listOf(
-            ColorScheme::background,
-            ColorScheme::surface,
+        // The elevation ladder sheets, menus and filled fields pick their fill from,
+        // lowest elevation first.
+        val containerTiers = listOf(
             ColorScheme::surfaceContainerLowest,
             ColorScheme::surfaceContainerLow,
             ColorScheme::surfaceContainer,
             ColorScheme::surfaceContainerHigh,
             ColorScheme::surfaceContainerHighest,
         )
+
+        val surfaces = listOf(ColorScheme::background, ColorScheme::surface) + containerTiers
 
         // Each on-X role on its X role, as Material pairs them.
         val onRolePairs = listOf(

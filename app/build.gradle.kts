@@ -54,6 +54,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SERVO_VERSION", "\"$servoVersion\"")
         buildConfigField("String", "SERVO_SOURCE_URL", "\"$servoSourceUrl\"")
+        // The exact engine commit, sent with every site report.
+        buildConfigField("String", "SERVO_REVISION", "\"${servoPinValue("COMBRAY_SERVO_GIT_REVISION")}\"")
     }
 
     signingConfigs {
@@ -127,6 +129,7 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.datasource.okhttp)
+    implementation(libs.androidx.media3.exoplayer.hls)
     constraints {
         implementation(libs.guava) {
             because(
@@ -140,6 +143,10 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    // Queue and search-panel checks compose real in-memory Room data over fixture transports.
+    testImplementation(libs.androidx.room.runtime)
+    testImplementation(libs.androidx.room.ktx)
+    testImplementation(libs.androidx.test.core)
 
     // Device checks against the real engine (scripts/check-app.sh).
     androidTestImplementation(platform(libs.androidx.compose.bom))

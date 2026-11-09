@@ -6,6 +6,7 @@
 //!
 //! Integer codes are shared with `NativeEngine.kt`; keep both sides in sync.
 
+use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +29,7 @@ use crate::commands::{
 use crate::engine::{self, EngineConfig, EventSink};
 use crate::events::EngineEvent;
 use crate::native_window::NativeWindow;
-use crate::panic_policy::{self, PanicAction, ThreadRole};
+use crate::panic_policy::{self, PanicAction, ServoRecovery, ThreadRole};
 
 /// Servo writes its profile while shutting down. Under software emulation a shutdown took
 /// 157 s; callers must not block Android's main thread on it.
@@ -136,13 +137,32 @@ fn init_logging() {
         } else {
             ThreadRole::Other
         };
-        if !servo::should_panic_hook_suppress_termination()
-            && panic_policy::action(role) == PanicAction::Abort
-        {
-            error!("engine thread panicked outside a recoverable operation; aborting");
-            std::process::abort();
+        let recovery = if servo::should_panic_hook_suppress_termination() {
+            ServoRecovery::Recovers
+        } else {
+            ServoRecovery::DoesNotRecover
+        };
+        match panic_policy::action(role, recovery) {
+            PanicAction::Unwind => {},
+            // A script thread's pages would otherwise stay on screen without script or input.
+            PanicAction::ReportAndUnwind => engine::report_panic(panic_message(info)),
+            PanicAction::Abort => {
+                error!("engine thread panicked outside a recoverable operation; aborting");
+                std::process::abort();
+            },
         }
     }));
+}
+
+/// The panic's message, as servoshell's panic hook reports it.
+fn panic_message<'a>(info: &'a PanicHookInfo<'_>) -> &'a str {
+    if let Some(message) = info.payload().downcast_ref::<&'static str>() {
+        return message;
+    }
+    if let Some(message) = info.payload().downcast_ref::<String>() {
+        return message;
+    }
+    "Box<Any>"
 }
 
 fn java_string(env: &mut Env<'_>, value: JString<'_>) -> jni::errors::Result<String> {
@@ -237,6 +257,19 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_surfaceChanged<'local
     });
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setViewportInset<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    inset: jint,
+    request: jlong,
+) {
+    send(Command::SetViewportInset {
+        inset: inset.max(0) as u32,
+        request: request.max(0) as u64,
+    });
+}
+
 /// Stops rendering into the surface and waits for the engine to unbind it, as Android requires.
 /// Rendering stops immediately through [`SURFACE_EPOCH`], even if the wait times out.
 #[unsafe(no_mangle)]
@@ -322,6 +355,41 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_reload<'local>(
     tab: jlong,
 ) {
     send(Command::Reload { tab });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_stopLoading<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    request: jlong,
+) {
+    let Ok(generation) = u64::try_from(generation) else {
+        return;
+    };
+    send(Command::StopLoading {
+        view: crate::events::ViewKey { tab, generation },
+        request,
+    });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_reloadPage<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    tab: jlong,
+    generation: jlong,
+    document: jlong,
+) {
+    let (Ok(generation), Ok(document)) = (u64::try_from(generation), u64::try_from(document))
+    else {
+        return;
+    };
+    send(Command::ReloadPage {
+        view: crate::events::ViewKey { tab, generation },
+        document,
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -437,13 +505,29 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_touch<'local>(
     });
 }
 
+/// Compatibility entry point for the M0 harness, which has no modifier/context channel.
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_key<'local>(
+    env: EnvUnowned<'local>,
+    class: JClass<'local>,
+    action: jint,
+    key_code: jint,
+    unicode: jint,
+) {
+    Java_ch_lkmc_combray_engine_NativeEngine_keyInContext(
+        env, class, action, key_code, unicode, 0, 0,
+    );
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_keyInContext<'local>(
     _env: EnvUnowned<'local>,
     _class: JClass<'local>,
     action: jint,
     key_code: jint,
     unicode: jint,
+    meta_state: jint,
+    context: jlong,
 ) {
     let action = match action {
         KEY_PRESS => KeyAction::Press,
@@ -456,6 +540,8 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_key<'local>(
     let key = KeyInput {
         unicode: unicode as u32,
         key_code,
+        modifiers: crate::keyboard::KeyModifiers::from_android(meta_state),
+        context: (context != 0).then_some(context as u64),
     };
     send(Command::Key { action, key });
 }
@@ -468,7 +554,59 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommit<'local>(
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         let text = java_string(env, text)?;
-        send(Command::ImeCommit { text });
+        send(Command::ImeCommit {
+            context: None,
+            text,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// A commit from a particular InputConnection cannot be retargeted to the next page field.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeCommitInContext<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    context: jlong,
+    text: JString<'local>,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let text = java_string(env, text)?;
+        send(Command::ImeCommit {
+            context: Some(context as u64),
+            text,
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_imeComposition<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: jlong,
+    context: jlong,
+    phase: jint,
+    text: JString<'local>,
+) {
+    let Some(phase) = crate::composition::Phase::from_android(phase) else {
+        error!("unknown composition phase");
+        return;
+    };
+    if id <= 0 {
+        error!("invalid composition identity");
+        return;
+    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let text = java_string(env, text)?;
+        send(Command::ImeComposition {
+            id: id as u64,
+            context: context as u64,
+            phase,
+            text,
+        });
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>()

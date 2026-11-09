@@ -2,14 +2,20 @@ package ch.lkmc.combray.ui
 
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -47,8 +55,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.PopupProperties
 import ch.lkmc.combray.R
 import ch.lkmc.combray.UploadStaging
+import ch.lkmc.combray.readPagePaste
 import ch.lkmc.combray.core.browser.DialogBlocking
 import ch.lkmc.combray.core.browser.PageControl
 import ch.lkmc.combray.engine.ControlResponse
@@ -79,6 +89,7 @@ fun PageControlDialog(
     onOpenInNewTab: (String) -> Unit,
     onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
+    onDownloadImage: (String) -> Unit,
     onShare: (String) -> Unit,
     /** Shows a short message, such as a copy confirmation where Android shows none. */
     onNotify: (String) -> Unit,
@@ -87,12 +98,47 @@ fun PageControlDialog(
     when (val content = control.content) {
         is PageControlContent.Select -> SelectDialog(control.id, content, answer)
         is PageControlContent.Files -> FilePicker(control.id, content, staging, uploadScope, answer, onUploadFailed)
-        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onShare, onNotify) {
+        is PageControlContent.LinkMenu -> LinkMenu(content, isWebAddress, onOpenInNewTab, onOpenInBackground, onSaveLink, onDownloadImage, onShare, onNotify) {
             answer(ControlResponse.Dismiss)
         }
         is PageControlContent.SignIn -> SignInDialog(control.id, content, answer)
+        PageControlContent.PasteMenu -> PasteMenu(answer, onNotify)
         PageControlContent.LeavePage -> LeavePageDialog(control.site) { answer(it.response) }
         else -> ScriptDialog(control, content, onAnswer)
+    }
+}
+
+/** Clipboard contents are read on the action, never while a page opens its menu. */
+@Composable
+private fun PasteMenu(onAnswer: (ControlResponse) -> Unit, onNotify: (String) -> Unit) {
+    val context = LocalContext.current
+    val unavailable = stringResource(R.string.page_paste_unavailable)
+    BackHandler { onAnswer(ControlResponse.Dismiss) }
+
+    // Keep the page's IME and focus: a dialog's keyboard dismissal blurs the field and withdraws its menu.
+    // Anchored just above the keyboard at the bottom, near the thumb. Unanchored at the screen's
+    // root the popup opens at the window's top-left corner, nowhere near the page's field.
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Box(Modifier.imePadding().navigationBarsPadding().size(1.dp)) {
+            DropdownMenu(
+                expanded = true,
+                onDismissRequest = { onAnswer(ControlResponse.Dismiss) },
+                properties = PopupProperties(focusable = false),
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(android.R.string.paste)) },
+                    onClick = {
+                        val text = readPagePaste(context)
+                        onAnswer(text?.let(ControlResponse::Paste) ?: ControlResponse.Dismiss)
+                        if (text == null) onNotify(unavailable)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_cancel)) },
+                    onClick = { onAnswer(ControlResponse.Dismiss) },
+                )
+            }
+        }
     }
 }
 
@@ -104,6 +150,7 @@ private fun LinkMenu(
     onOpenInNewTab: (String) -> Unit,
     onOpenInBackground: (String) -> Unit,
     onSaveLink: (String) -> Unit,
+    onDownloadImage: (String) -> Unit,
     onShare: (String) -> Unit,
     onNotify: (String) -> Unit,
     onDone: () -> Unit,
@@ -131,7 +178,10 @@ private fun LinkMenu(
             add(R.string.link_share to { onShare(link) })
         }
         content.image?.let { image ->
-            if (isWebAddress(image)) add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+            if (isWebAddress(image)) {
+                add(R.string.image_open_new_tab to { onOpenInNewTab(image) })
+                add(R.string.image_download to { onDownloadImage(image) })
+            }
             add(R.string.image_copy to { copy(image, imageCopied) })
         }
     }
@@ -341,7 +391,9 @@ private fun SelectDialog(id: Long, content: PageControlContent.Select, onAnswer:
         },
         confirmButton = {
             if (content.multiple) {
-                TextButton(onClick = { onAnswer(ControlResponse.Select(chosen.toList())) }) { Text(stringResource(R.string.action_ok)) }
+                // Sorted, not the set's iteration order: a page that reads the selection
+                // positionally sees the same order after a rotation as before it.
+                TextButton(onClick = { onAnswer(ControlResponse.Select(chosen.sorted())) }) { Text(stringResource(R.string.action_ok)) }
             }
         },
         dismissButton = { TextButton(onClick = { onAnswer(ControlResponse.Dismiss) }) { Text(stringResource(R.string.action_cancel)) } },

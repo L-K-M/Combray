@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.data.HomePinEntity
+import ch.lkmc.combray.core.data.SessionEntity
 import ch.lkmc.combray.core.data.TabEntity
 import ch.lkmc.combray.core.data.TabState
 import ch.lkmc.combray.core.data.VisitEntity
@@ -16,27 +17,37 @@ import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import ch.lkmc.combray.engine.ScrollEdge
+import ch.lkmc.combray.engine.ReloadPullPhase
+import ch.lkmc.combray.engine.ViewRef
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -44,6 +55,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -71,20 +83,43 @@ class BrowserCoordinatorTest {
 
     @After
     fun tearDown() {
-        scope.cancel()
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
         database.close()
     }
 
-    private fun newCoordinator(navigationTimeoutMs: Long = LONG_TIMEOUT_MS): BrowserCoordinator {
+    private fun newCoordinator(
+        navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
+        capture: CaptureSink? = null,
+        captureTiming: CaptureTiming = CaptureTiming(),
+    ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
+            capture = capture, captureTiming = captureTiming,
         ).also { it.start() }
     }
 
     private fun idle() = runBlocking { browser.awaitIdle() }
+
+    /** Records the pages a scheduled capture asks about. */
+    private class RecordingSink : CaptureSink {
+        val requests = mutableListOf<String>()
+        val firstRequest = CompletableDeferred<String>()
+
+        override suspend fun wantsCapture(url: String): Long? {
+            requests += url
+            firstRequest.complete(url)
+            return 1L
+        }
+
+        override suspend fun captured(page: CapturedPage) = Unit
+
+        override suspend fun forgetHost(host: String, includeSubdomains: Boolean) = Unit
+
+        override suspend fun forgetUrl(url: String) = Unit
+    }
 
     private fun ready() {
         engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
@@ -92,6 +127,12 @@ class BrowserCoordinatorTest {
     }
 
     private fun state() = browser.browserState.value
+
+    private fun keyboardContent(): KeyboardRequest? = when (val request = state().keyboard) {
+        is KeyboardRequest.Show -> request.copy(requestId = 0)
+        is KeyboardRequest.Prepare -> request.copy(requestId = 0)
+        else -> request
+    }
 
     /** What RecentSheet shows for [query]: the depth it subscribes to, filtered and capped. */
     private fun recent(query: String? = null) = runBlocking {
@@ -124,12 +165,7 @@ class BrowserCoordinatorTest {
      */
     @Test
     fun heartbeatsAndEchoesSkipThePublishReads() {
-        val reads = AtomicInteger()
-        database.close()
-        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
-            .setQueryCallback({ sql, _ -> if (sql.trimStart().startsWith("SELECT", ignoreCase = true)) reads.incrementAndGet() }, Runnable::run)
-            .build()
-        browser = newCoordinator()
+        val reads = countReads()
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
         idle()
@@ -145,6 +181,183 @@ class BrowserCoordinatorTest {
         engine.emit(EngineEvent.ImeHidden(engine.view(1)))
         idle()
         assertTrue(reads.get() > 0)
+    }
+
+    /**
+     * Rebuilds the database counting the coordinator's data reads. Room's invalidation tracker
+     * (`changes()` and `room_table_modification_log`) runs after writes and is not a read the
+     * coordinator chooses, so it stays out of the count.
+     */
+    private fun countReads(): AtomicInteger {
+        val reads = AtomicInteger()
+        runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.cancelAndJoin() } }
+        database.close()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        database = Room.inMemoryDatabaseBuilder(context, CombrayDatabase::class.java)
+            .setQueryCallback({ sql, _ ->
+                val query = sql.trimStart()
+                if (query.startsWith("SELECT", ignoreCase = true) &&
+                    !query.startsWith("SELECT changes()", ignoreCase = true) &&
+                    !query.contains("room_table_modification_log")
+                ) {
+                    reads.incrementAndGet()
+                }
+            }, Runnable::run)
+            .build()
+        browser = newCoordinator()
+        return reads
+    }
+
+    @Test
+    fun aTitleEventPublishesWithTwoQueries() {
+        val reads = countReads()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        idle() // the view's creation events are queued from inside the work queue
+        reads.set(0)
+
+        // A title for a document that never committed changes nothing, so only publish() reads.
+        engine.emit(EngineEvent.TitleChanged(engine.view(1), 10, "A title", Attribution.CURRENT))
+        idle()
+        // One joined active-tab query and one open-tab count.
+        assertEquals(2, reads.get())
+    }
+
+    @Test
+    fun aTitleEventForACommittedPagePublishesWithFourQueries() {
+        val reads = countReads()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        idle()
+        commit(1, 10, "https://a.test/")
+        reads.set(0)
+
+        engine.emit(EngineEvent.TitleChanged(engine.view(1), 10, "A title", Attribution.CURRENT))
+        idle()
+        // onTitle reads the visit and the tab; publish() adds the joined active-tab query and
+        // the open-tab count. The live view's document answers the failure check without a read.
+        assertEquals(4, reads.get())
+    }
+
+    @Test
+    fun releasingHiddenViewsReadsTheOpenTabsOnce() {
+        val reads = countReads()
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        now += 1_000
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        now += 1_000
+        browser.openUrl("https://c.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://c.test/")
+        reads.set(0)
+
+        browser.releaseHiddenViews()
+        idle()
+        // One open-tab snapshot serves the recency order and the URL check; the per-view
+        // primary-key lookups are gone.
+        assertEquals(1, reads.get())
+        assertEquals(listOf(1L, 2L), engine.closed)
+    }
+
+    @Test
+    fun forgettingASiteCancelsItsPendingCapture() {
+        val engine = FakeEngine()
+        val sink = RecordingSink()
+        val timing = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100)
+        val capturing = BrowserCoordinator(
+            database, engine, scope, clock = { now }, newId = { "id${ids++}" },
+            capture = sink, captureTiming = timing,
+        ).also { it.start() }
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { capturing.awaitIdle() }
+        capturing.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { capturing.awaitIdle() }
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 10, "https://a.test/", 0, 1))
+        runBlocking { capturing.awaitIdle() }
+        engine.emit(EngineEvent.LoadStatus(engine.view(1), 10, LoadPhase.COMPLETE, Attribution.CURRENT))
+        runBlocking { capturing.awaitIdle() }
+
+        capturing.forgetSite("a.test", includeSubdomains = false)
+        runBlocking { capturing.awaitIdle() }
+        // A surviving timer would ask the sink after its delay.
+        runBlocking { delay(400) }
+        runBlocking { capturing.awaitIdle() }
+        assertTrue(sink.requests.isEmpty())
+    }
+
+    @Test
+    fun aPendingCaptureStillRunsWithoutAForget() {
+        val engine = FakeEngine()
+        val sink = RecordingSink()
+        val timing = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100)
+        val capturing = BrowserCoordinator(
+            database, engine, scope, clock = { now }, newId = { "id${ids++}" },
+            capture = sink, captureTiming = timing,
+        ).also { it.start() }
+        engine.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { capturing.awaitIdle() }
+        capturing.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { capturing.awaitIdle() }
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 10, "https://a.test/", 0, 1))
+        runBlocking { capturing.awaitIdle() }
+
+        engine.emit(EngineEvent.LoadStatus(engine.view(1), 10, LoadPhase.COMPLETE, Attribution.CURRENT))
+        runBlocking { capturing.awaitIdle() }
+        runBlocking { delay(400) }
+        runBlocking { capturing.awaitIdle() }
+        assertEquals(listOf("https://a.test/"), sink.requests)
+    }
+
+    @Test
+    fun aFragmentAddressStillCapturesOnceWithoutAForget() {
+        idle()
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100))
+        ready()
+        browser.openUrl("https://a.test/#section", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/#section")
+        loaded(1, 10)
+        assertEquals("https://a.test/#section", runBlocking { withTimeout(5_000) { sink.firstRequest.await() } })
+        idle()
+        assertEquals(listOf("https://a.test/#section"), sink.requests)
+    }
+
+    @Test
+    fun forgettingASiteCancelsADueCaptureTimerForAPageWithoutAVisit() {
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 1_000, fallbackMs = 1_000, debounceMs = 1_000))
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val tab = runBlocking { database.browser().openTabs() }.single()
+        // Retention or a prior forget can remove the visit while its page is still live.
+        runBlocking { database.browser().deleteVisit(tab.currentVisitId!!) }
+        browser.forgetSite("a.test", includeSubdomains = false); idle()
+        runBlocking { delay(1_400) }; idle()
+        assertTrue(sink.requests.isEmpty())
+    }
+
+    @Test
+    fun forgettingAVisitCancelsAnotherTabsFragmentOfThatPage() {
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 1_000, fallbackMs = 1_000, debounceMs = 1_000))
+        ready()
+        browser.openUrl("https://a.test/#old", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/#old")
+        val oldVisit = runBlocking { database.browser().tab(state().activeTab!!.id) }!!.currentVisitId!!
+        browser.openUrl("https://b.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 11, "https://b.test/")
+        browser.openUrl("https://a.test/#new", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://a.test/#new")
+        loaded(2, 20)
+        browser.forgetVisit(oldVisit); idle()
+        runBlocking { delay(1_400) }; idle()
+        assertFalse(sink.requests.any { it.substringBefore('#') == "https://a.test/" })
+        assertTrue("The unrelated page's timer must still run", "https://b.test/" in sink.requests)
     }
 
     @Test
@@ -424,6 +637,72 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aReleasedPullReloadsItsPageOnceAndShowsLoading() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val page = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.PULLING, 0.5f)); idle()
+        assertEquals(ReloadPullState(page, 0.5f), state().reloadPull)
+        assertTrue(engine.reloaded.isEmpty())
+
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertEquals(listOf(1L), engine.reloaded)
+        assertEquals(listOf(page), engine.reloadedPages)
+        assertTrue(state().activeTab!!.loading)
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(page, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertEquals(listOf(1L), engine.reloaded)
+    }
+
+    @Test
+    fun cancelledPullsAndReplacedDocumentsCannotReload() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val oldPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.PULLING, 1f)); idle()
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.CANCELLED, 0f)); idle()
+        assertNull(state().reloadPull)
+        assertTrue(engine.reloaded.isEmpty())
+
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.PULLING, 1f)); idle()
+        commit(1, 11, "https://a.test/")
+        loaded(1, 11)
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(oldPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        val wrongGeneration = state().activeTab!!.page!!.let { it.copy(view = it.view.copy(generation = -1)) }
+        engine.emit(EngineEvent.ReloadPull(wrongGeneration, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertTrue(engine.reloaded.isEmpty())
+    }
+
+    @Test
+    fun pullsCannotReloadHiddenCrashedLoadingOrReaderPages() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        val firstTab = state().activeTab!!.id
+        val firstPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.PULLING, 1f)); idle()
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        assertNull(state().reloadPull)
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        commit(2, 20, "https://b.test/")
+        val secondPage = state().activeTab!!.page!!
+        engine.emit(EngineEvent.ReloadPull(secondPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        loaded(2, 20)
+        engine.emit(EngineEvent.Crashed(engine.view(2), "fixture")); idle()
+        engine.emit(EngineEvent.ReloadPull(secondPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        browser.selectTab(firstTab); idle()
+        browser.openReader(); idle()
+        engine.emit(EngineEvent.ReloadPull(firstPage, ReloadPullPhase.RELEASED, 1f)); idle()
+        assertTrue(engine.reloaded.isEmpty())
+    }
+
+    @Test
     fun edgeJumpsKeepTheirOriginalDocumentAndView() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB)
@@ -633,11 +912,11 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aRunOfBarSwipesWalksBackThroughRecentOrder() {
+    fun barSwipesWalkCreationOrderWithoutWrapping() {
         ready()
         val (a, b, c) = openThreeTabs()
 
-        // Each swipe focuses a tab and so reorders Recent; the run keeps walking the old order.
+        // Focusing changes recency, not the next tab's position.
         browser.stepTab(TabStep.OLDER); idle()
         assertEquals(b, state().activeTab?.id)
         browser.stepTab(TabStep.OLDER); idle()
@@ -654,16 +933,99 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aPauseBetweenSwipesStartsFromTheNewOrder() {
+    fun aPauseBetweenSwipesKeepsTheTabOrder() {
         ready()
-        val (_, b, c) = openThreeTabs()
+        val (a, b, _) = openThreeTabs()
         browser.stepTab(TabStep.OLDER); idle()
         assertEquals(b, state().activeTab?.id)
 
-        // After a pause b.test is the newest tab, so the next swipe goes back to c.test.
-        now += 4_000 // longer than a run's pause (SWIPE_RUN_MS)
+        now += TAB_ORDER_PAUSE_MS // Beyond the former swipe-run timeout.
         browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun selectionAndNavigationKeepTabOrderWhileHistoryStaysRecentFirst() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        val order = listOf(c, b, a)
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+
+        now += DAY
+        browser.selectTab(a); idle()
+        commit(1, 11, "https://a.test/next")
+        now += 1_000
+        browser.selectTab(b); idle()
+        commit(2, 21, "https://b.test/next")
+
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        assertEquals(b, recent().filterIsInstance<RecentItem.OpenTab>().first().tabId)
+        assertEquals(listOf("https://b.test/", "https://a.test/"), recent().filterIsInstance<RecentItem.Visit>().map { it.url })
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(a, state().activeTab?.id)
+    }
+
+    @Test
+    fun undoRestoresTheOriginalTabPositionWithEitherFocusMode() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        browser.selectTab(a); idle()
+        browser.closeTab(b); idle()
+        assertEquals(listOf(c, a), recent().openTabsInCreationOrder().map { it.tabId })
+
+        browser.reopenTab(b, ReopenFocus.KEEP_CURRENT); idle()
+        assertEquals(a, state().activeTab?.id)
+        assertEquals(listOf(c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+        browser.closeTab(b); idle()
+        browser.reopenTab(b, ReopenFocus.FOCUS); idle()
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(listOf(c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+    }
+
+    @Test
+    fun aNewBackgroundTabJoinsTheSwipeOrderImmediately() {
+        ready()
+        val (a, b, c) = openThreeTabs()
+        browser.stepTab(TabStep.OLDER); idle()
+        assertEquals(b, state().activeTab?.id)
+
+        now += 1_000
+        browser.openUrl("https://d.test/", Placement.BACKGROUND_TAB); idle()
+        val d = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://d.test/" }.tabId
+        assertEquals(b, state().activeTab?.id)
+        assertEquals(3, engine.created.size)
+        assertEquals(listOf(d, c, b, a), recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
         assertEquals(c, state().activeTab?.id)
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals(d, state().activeTab?.id)
+        assertEquals("https://d.test/", engine.created.last().second)
+    }
+
+    @Test
+    fun equalCreationTimesKeepTheSameOrderAcrossRestartAndSwipes() {
+        ready()
+        runBlocking {
+            val dao = database.browser()
+            database.withTransaction {
+                listOf("tab-z", "tab-a", "tab-m").forEachIndexed { index, id ->
+                    dao.insertTab(TabEntity(id, TabState.OPEN, null, "https://$id.test/", null, now, now + index, null))
+                }
+                dao.setSession(SessionEntity(activeTabId = "tab-z"))
+            }
+        }
+        browser = newCoordinator()
+        ready()
+        val order = listOf("tab-a", "tab-m", "tab-z")
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals("tab-m", state().activeTab?.id)
+
+        browser = newCoordinator()
+        ready()
+        assertEquals(order, recent().openTabsInCreationOrder().map { it.tabId })
+        browser.stepTab(TabStep.NEWER); idle()
+        assertEquals("tab-a", state().activeTab?.id)
     }
 
     @Test
@@ -1770,6 +2132,178 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun startingTwiceStartsTheEngineAndConsumerOnce() {
+        val counting = FakeEngine()
+        val twice = BrowserCoordinator(database, counting, scope, clock = { now }, newId = { "id${ids++}" })
+        twice.start()
+        twice.start()
+        assertEquals(1, counting.startCount)
+
+        // The ignored second start leaves a working browser.
+        counting.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { twice.awaitIdle() }
+        twice.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        runBlocking { twice.awaitIdle() }
+        assertEquals("https://a.test/", twice.browserState.value.activeTab?.url)
+    }
+
+    @Test
+    fun concurrentStartsStartTheEngineOnce() {
+        val counting = FakeEngine()
+        val coordinator = BrowserCoordinator(database, counting, scope, clock = { now }, newId = { "id${ids++}" })
+        val gate = CountDownLatch(1)
+        val callers = (1..4).map {
+            Thread {
+                gate.await()
+                coordinator.start()
+            }
+        }
+        callers.forEach(Thread::start)
+        gate.countDown()
+        callers.forEach { it.join(TEST_WAIT_MS) }
+        assertEquals(1, counting.startCount)
+    }
+
+    @Test
+    fun anErrorInMaintenanceStillPublishesTheStoredTabs() {
+        runBlocking {
+            database.browser().insertTab(TabEntity("tab1", TabState.OPEN, null, "https://a.test/", "A", START, START, null))
+            database.browser().setSession(SessionEntity(activeTabId = "tab1"))
+        }
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now }, newId = { "id${ids++}" },
+            unusedTabs = { throw AssertionError("boom") },
+        ).also { it.start() }
+        // Bounded: an Error that kills the consumer leaves awaitIdle unanswered.
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { failing.awaitIdle() } }
+        assertNotNull("the stored tabs must be published even when maintenance fails with an Error", answered)
+
+        assertEquals("tab1", failing.browserState.value.activeTab?.id)
+        assertTrue(failing.browserState.value.notice is Notice.Problem)
+    }
+
+    @Test
+    fun aThrowingJobDoesNotKillTheConsumer() {
+        val base = FakeEngine()
+        val failing = object : EnginePort by base {
+            var fail = true
+            override fun createView(tab: Long, url: String) {
+                if (fail) {
+                    fail = false
+                    throw AssertionError("boom")
+                }
+                base.createView(tab, url)
+            }
+        }
+        val resilient = BrowserCoordinator(database, failing, scope, clock = { now }, newId = { "id${ids++}" })
+            .also { it.start() }
+        base.emit(EngineEvent.EngineReady(720, 1280, FakeEngine.USER_AGENT))
+        runBlocking { resilient.awaitIdle() }
+
+        resilient.openUrl("https://a.test/", Placement.CURRENT_TAB)
+        val first = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { resilient.awaitIdle() } }
+        assertNotNull("the consumer must survive an Error in one job", first)
+        // The failed command is reported; the consumer goes on.
+        assertTrue(resilient.browserState.value.notice is Notice.Problem)
+
+        resilient.newTab()
+        runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { resilient.awaitIdle() } }
+        assertEquals(2, resilient.browserState.value.openTabCount)
+    }
+
+    @Test
+    fun aCommandFailingWithAnErrorDoesNotStopTheWorkQueue() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.forwardFailure = OutOfMemoryError("simulated")
+        browser.goForward()
+        // Bounded: a consumer killed by the Error would never answer again.
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { browser.awaitIdle() } }
+        assertNotNull("the work queue must survive an Error in one job", answered)
+
+        // The failing step is reported, and the queue keeps moving.
+        assertTrue(state().notice is Notice.Problem)
+        browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 20, "https://after.test/")
+        assertEquals("https://after.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCancelledDependencyDoesNotStopTheWorkQueue() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.forwardFailure = CancellationException("synthetic cancelled dependency")
+        browser.goForward()
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { browser.awaitIdle() } }
+        assertNotNull("Cancelling a dependency must not cancel the consumer", answered)
+        assertTrue(state().notice is Notice.Problem)
+
+        browser.openUrl("https://after.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 20, "https://after.test/")
+        assertEquals("https://after.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCancelledDependencyDuringMaintenanceStillPublishesStoredTabs() {
+        runBlocking {
+            database.browser().insertTab(TabEntity("tab1", TabState.OPEN, null, "https://a.test/", "A", START, START, null))
+            database.browser().setSession(SessionEntity(activeTabId = "tab1"))
+        }
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now },
+            unusedTabs = { throw CancellationException("synthetic cancelled dependency") },
+        ).also { it.start() }
+        val answered = runBlocking { withTimeoutOrNull(TEST_WAIT_MS) { failing.awaitIdle() } }
+        assertNotNull("A cancelled dependency must not strand restoration", answered)
+        assertEquals("tab1", failing.browserState.value.activeTab?.id)
+        assertTrue(failing.browserState.value.notice is Notice.Problem)
+    }
+
+    @Test
+    fun workQueueFailuresDoNotLogTheirMessageOrCause() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        ShadowLog.clear()
+        engine.forwardFailure = AssertionError("synthetic page text", IllegalArgumentException("synthetic credential"))
+        browser.goForward(); idle()
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("browser state update failed") }
+        assertNull("A throwable can carry private messages and causes", record.throwable)
+        assertTrue(record.msg.contains(AssertionError::class.java.name))
+        assertFalse(record.msg.contains("synthetic"))
+    }
+
+    @Test
+    fun restoreFailuresDoNotLogTheirMessageOrCause() {
+        ShadowLog.clear()
+        val failing = BrowserCoordinator(
+            database, FakeEngine(), scope, clock = { now },
+            unusedTabs = { throw AssertionError("synthetic page text", IllegalArgumentException("synthetic credential")) },
+        ).also { it.start() }
+        runBlocking { failing.awaitIdle() }
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("restoring the session failed") }
+        assertNull("A throwable can carry private messages and causes", record.throwable)
+        assertTrue(record.msg.contains(AssertionError::class.java.name))
+        assertFalse(record.msg.contains("synthetic"))
+    }
+
+    @Test
+    fun rendererCrashesDoNotLogTheNativeReason() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        ShadowLog.clear()
+        engine.emit(EngineEvent.Crashed(engine.view(1), "synthetic page text")); idle()
+
+        val record = ShadowLog.getLogs().single { it.msg.startsWith("renderer crashed") }
+        assertFalse(record.msg.contains("synthetic"))
+        assertNull(record.throwable)
+    }
+
+    @Test
     fun aCrashedViewIsReplacedOnReloadAndItsLateEventsAreIgnored() {
         ready()
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
@@ -1783,6 +2317,52 @@ class BrowserCoordinatorTest {
         assertEquals(2L to "https://a.test/", engine.created.last())
         commit(1, 11, "https://ghost.test/")
         assertEquals("https://a.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aCrashHidesTheCrashedViewsKeyboard() {
+        keyboardOnFirstPage()
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun aCrashLeavesAnotherTabsFindAlone() {
+        ready()
+        // Two tabs at the same address: a crash in one must not touch the other's pending work.
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://a.test/")
+        val firstTab = recent().filterIsInstance<RecentItem.OpenTab>().first { it.url == "https://a.test/" && it.tabId != state().activeTab!!.id }.tabId
+        browser.selectTab(firstTab); idle()
+        browser.openFind(); idle()
+        browser.find("needle", FindStep.NEXT); idle()
+        val finds = engine.finds.size
+
+        engine.emit(EngineEvent.Crashed(engine.view(2), "test")); idle()
+        assertNotNull(state().find)
+        browser.find("other", FindStep.NEXT); idle()
+        assertEquals(finds + 1, engine.finds.size)
+    }
+
+    @Test
+    fun aStaleCrashForAReplacedGenerationDropsNothing() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openFind(); idle()
+        browser.find("needle", FindStep.NEXT); idle()
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = true)); idle()
+        browser.keyboardHandled(state().keyboard!!)
+        val finds = engine.finds.size
+
+        // A crash carrying a generation this view never had is stale: nothing is dropped.
+        engine.emit(EngineEvent.Crashed(ViewRef(1, -1), "stale")); idle()
+        assertNotNull(state().find)
+        assertNull(state().keyboard)
+        browser.find("other", FindStep.NEXT); idle()
+        assertEquals(finds + 1, engine.finds.size)
     }
 
     @Test
@@ -1988,6 +2568,39 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun aLogicallyClosedViewCanBeReleasedAfterItsFirstCloseFails() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val firstTab = state().activeTab!!.id
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+
+        engine.closeFailure = IllegalStateException("synthetic close failure")
+        browser.closeTab(firstTab); idle()
+        assertEquals(TabState.CLOSED, runBlocking { database.browser().tab(firstTab) }!!.state)
+        assertTrue(engine.closed.isEmpty())
+
+        browser.releaseHiddenViews(); idle()
+        assertEquals(listOf(1L), engine.closed)
+        assertEquals("https://b.test/", state().activeTab?.url)
+    }
+
+    @Test
+    fun aPageOpenedWindowWithoutAnAddressKeepsItsRenderer() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        // A window a page opened has a renderer before its first commit, so its tab has no
+        // recovery address yet: releasing it would leave nothing to restore.
+        engine.openWindow(opener = 1, tab = PAGE_TAB); idle()
+        browser.releaseHiddenViews(); idle()
+        assertEquals(listOf(1L), engine.closed)
+        assertTrue(PAGE_TAB !in engine.closed)
+    }
+
+    @Test
     fun newTabReusesAnUnusedBlankTab() {
         ready()
         browser.newTab(); idle()
@@ -2021,6 +2634,19 @@ class BrowserCoordinatorTest {
 
     private fun mediaNames() = state().activeTab!!.media.map { it.name }
 
+    /** The engine says the user tapped a media element of [document]. */
+    private fun tapped(native: Long, document: Long) {
+        engine.emit(EngineEvent.MediaTapped(engine.view(native), document))
+        idle()
+    }
+
+    /** The page shown offers its media: the offer names that page's media. */
+    private fun offer(): MediaPageRef {
+        val offer = checkNotNull(state().mediaOffer) { "no media offer" }
+        assertEquals(state().activeTab!!.mediaPage, offer)
+        return offer
+    }
+
     @Test
     fun theFirstMediaAddressOfThePageShownOffersItAtOnce() {
         ready()
@@ -2029,8 +2655,7 @@ class BrowserCoordinatorTest {
 
         // While the page still loads.
         media(1, 10, "https://cdn.example.org/videos/Caf%C3%A9+clip.mp4?sig=1", referrer = "https://example.org")
-        val notice = state().notice as Notice.MediaPlayable
-        assertEquals(state().activeTab!!.id, notice.page.tabId)
+        assertEquals(state().activeTab!!.id, offer().tabId)
         val entry = state().activeTab!!.media.single()
         assertEquals(MediaKind.VIDEO, entry.kind)
         assertEquals("Café+clip.mp4", entry.name)
@@ -2040,21 +2665,25 @@ class BrowserCoordinatorTest {
     }
 
     @Test
-    fun aPageGetsOneNoticeHoweverMuchMediaItHas() {
+    fun aPageGetsOneOfferHoweverMuchMediaItHas() {
         ready()
         browser.openUrl("https://example.org/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://example.org/")
 
         media(1, 10, "https://example.org/a.mp4")
-        val first = state().notice
-        assertTrue(first is Notice.MediaPlayable)
-        shown(first)
+        val first = offer()
+        // Later media joins the offer shown.
         media(1, 10, "https://example.org/b.mp3", MediaKind.AUDIO)
+        assertEquals(first, offer())
+        // Closed, it does not come back with more media.
+        browser.dismissMediaOffer(first)
+        media(1, 10, "https://example.org/c.mp4")
         media(1, 10, null, MediaKind.TRACK)
         loaded(1, 10)
         assertNull(state().notice)
-        assertEquals(listOf("b.mp3", "a.mp4"), mediaNames())
-        assertEquals(listOf(MediaKind.AUDIO, MediaKind.VIDEO), state().activeTab!!.media.map { it.kind })
+        assertNull(state().mediaOffer)
+        assertEquals(listOf("c.mp4", "b.mp3", "a.mp4"), mediaNames())
+        assertEquals(listOf(MediaKind.VIDEO, MediaKind.AUDIO, MediaKind.VIDEO), state().activeTab!!.media.map { it.kind })
     }
 
     @Test
@@ -2096,9 +2725,7 @@ class BrowserCoordinatorTest {
         media(1, 10, null, MediaKind.TRACK)
         assertNull(state().notice)
         media(1, 10, "https://example.org/a.mp4")
-        val notice = state().notice
-        assertTrue(notice is Notice.MediaPlayable)
-        shown(notice)
+        offer()
         loaded(1, 10)
         assertNull(state().notice)
     }
@@ -2126,10 +2753,49 @@ class BrowserCoordinatorTest {
 
         // The engine credits the load to the page still committed; its referrer names the pending one.
         media(1, 10, "https://cdn.b.example/clip.mp4", referrer = "https://b.example")
-        assertNull(state().notice)
+        assertNull(state().mediaOffer)
         commit(1, 11, "https://b.example/watch")
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
+    }
+
+    @Test
+    fun aSameOriginPagesMediaThatOvertakesItsCommitGetsItsOwnNotice() {
+        ready()
+        browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/one")
+        media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
+        val first = offer()
+        browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
+
+        // Credited to the page still committed, which already has its offer, and held for the next.
+        media(1, 10, "https://example.org/two.mp4", referrer = "https://example.org")
+        assertEquals(first, state().mediaOffer)
+        commit(1, 11, "https://example.org/two", index = 1, length = 2)
+        assertNotEquals(first, offer())
+        assertEquals(listOf("two.mp4"), mediaNames())
+    }
+
+    @Test
+    fun mediaHeldForAPageThatNeverCommitsGoesToThePageShown() {
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        browser = newCoordinator(navigationTimeoutMs = SHORT_TIMEOUT_MS)
+        ready()
+        browser.openUrl("https://example.org/one", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/one")
+        browser.openUrl("https://example.org/two", Placement.CURRENT_TAB); idle()
+
+        media(1, 10, "https://example.org/one.mp4", referrer = "https://example.org")
+        assertNull(state().mediaOffer)
+        // A 204 answer commits nothing: once the app stops waiting, the report is the shown page's.
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TEST_WAIT_MS)
+        while (state().activeTab!!.loading && System.nanoTime() < deadline) {
+            Thread.sleep(50)
+            idle()
+        }
+        offer()
+        assertEquals(listOf("one.mp4"), mediaNames())
     }
 
     @Test
@@ -2142,6 +2808,7 @@ class BrowserCoordinatorTest {
         media(1, 10, "https://cdn.c.example/clip.mp4", referrer = "https://c.example")
         commit(1, 11, "https://b.example/")
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
     }
 
@@ -2153,7 +2820,7 @@ class BrowserCoordinatorTest {
 
         // An embedded player's frame is another origin; nothing is pending, so it is this page's.
         media(1, 10, "https://video.embed.example/clip.mp4", referrer = "https://embed.example")
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("clip.mp4"), state().activeTab!!.media.map { it.name })
     }
 
@@ -2166,16 +2833,17 @@ class BrowserCoordinatorTest {
 
         media(1, 10, null)
         assertEquals(Notice.MediaUnplayable, state().notice)
-        // The playable notice replaces the plain one, shown or not.
+        // The offer replaces the plain notice the UI has not taken yet (the UI drops a shown one).
         media(1, 10, "https://example.org/a.mp4")
-        val notice = state().notice
-        assertTrue(notice is Notice.MediaPlayable)
-        shown(notice)
+        val offer = offer()
+        assertNull(state().notice)
+        browser.dismissMediaOffer(offer)
 
         // Two notices at most for the page.
         media(1, 10, "https://example.org/b.mp4")
         media(1, 10, null)
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2191,12 +2859,14 @@ class BrowserCoordinatorTest {
         media(1, 10, "https://a.test/a.mp4")
         media(1, 10, null)
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
 
         val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
         browser.selectTab(tabA); idle()
         assertEquals(listOf("a.mp4"), mediaNames())
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2208,6 +2878,7 @@ class BrowserCoordinatorTest {
 
         media(1, 10, "https://a.test/a.mp4")
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
     }
 
@@ -2217,18 +2888,21 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://a.test/")
         media(1, 10, "https://a.test/a.mp4")
-        shown(state().notice)
+        val first = offer()
 
+        // The offer ends with its page.
         commit(1, 11, "https://b.test/", index = 1, length = 2)
+        assertNull(state().mediaOffer)
         assertTrue(state().activeTab!!.media.isEmpty())
         media(1, 11, "https://a.test/a.mp4")
-        assertTrue(state().notice is Notice.MediaPlayable)
-        shown(state().notice)
+        assertNotEquals(first, offer())
 
         // Back to the cached first document: its elements failed already and will not report again.
+        // Its media is found again, without an offer: the address field and More still play it.
         commit(1, 10, "https://a.test/", index = 0, length = 2)
         assertEquals(listOf("a.mp4"), mediaNames())
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
 
         // The same address in a new document (a reload) is a new page.
         commit(1, 12, "https://a.test/", index = 0, length = 2)
@@ -2241,21 +2915,24 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://app.test/feed", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://app.test/feed")
         media(1, 10, "https://cdn.test/1.mp4")
-        shown(state().notice)
+        val first = offer()
 
+        // Another fragment is the same page, and keeps its offer.
         commit(1, 10, "https://app.test/feed#top", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
         assertEquals(listOf("1.mp4"), mediaNames())
+        assertEquals(first, offer())
 
-        // A route change in a single-page app is a new page, with its own notice.
+        // A route change in a single-page app is a new page, with its own offer.
         commit(1, 10, "https://app.test/post/2", HistoryKind.SAME_DOCUMENT, index = 2, length = 3)
         assertTrue(state().activeTab!!.media.isEmpty())
+        assertNull(state().mediaOffer)
         media(1, 10, "https://cdn.test/2.mp4")
-        assertTrue(state().notice is Notice.MediaPlayable)
-        shown(state().notice)
+        assertNotEquals(first, offer())
 
         commit(1, 10, "https://app.test/feed", HistoryKind.SAME_DOCUMENT, index = 0, length = 3)
         assertEquals(listOf("1.mp4"), mediaNames())
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2370,6 +3047,7 @@ class BrowserCoordinatorTest {
         assertTrue(state().activeTab!!.media.isEmpty())
         assertNull(state().activeTab!!.mediaPage)
         assertNull(state().notice)
+        assertNull(state().mediaOffer)
         loaded(1, 10)
         assertEquals(Notice.MediaUnplayable, state().notice)
     }
@@ -2381,7 +3059,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "http://192.168.1.10:8096/web/")
 
         media(1, 10, "http://192.168.1.10:8096/videos/1/stream.mp4", referrer = "http://192.168.1.10:8096")
-        assertTrue(state().notice is Notice.MediaPlayable)
+        offer()
         assertEquals(listOf("stream.mp4"), mediaNames())
     }
 
@@ -2391,8 +3069,7 @@ class BrowserCoordinatorTest {
         browser.openUrl("https://example.org/watch", Placement.CURRENT_TAB); idle()
         commit(1, 10, "https://example.org/watch")
         media(1, 10, "https://cdn.example.org/v/clip.mp4?sig=1", referrer = "https://example.org")
-        val page = (state().notice as Notice.MediaPlayable).page
-        assertEquals(page, state().activeTab!!.mediaPage)
+        val page = offer()
         val entry = state().activeTab!!.media.single()
 
         val request = runBlocking { browser.playbackRequest(page, entry.id) }!!
@@ -2400,8 +3077,8 @@ class BrowserCoordinatorTest {
         assertEquals(MediaKind.VIDEO, request.kind)
         assertEquals(FakeEngine.USER_AGENT, request.userAgent)
         assertEquals("https://example.org", request.origin.referrer)
-        assertEquals("example.org", request.origin.pageHost)
         assertTrue(request.origin.secure)
+        assertFalse(request.origin.onDevice)
         assertEquals("clip.mp4", request.name)
         assertEquals("cdn.example.org", request.site)
         // An entry the page does not have.
@@ -2431,6 +3108,124 @@ class BrowserCoordinatorTest {
         assertNull(runBlocking { browser.playbackRequest(page, entry) })
         // So does another tab's reference.
         assertNull(runBlocking { browser.playbackRequest(page.copy(tabId = "another tab"), entry) })
+    }
+
+    @Test
+    fun theOfferStaysUntilClosedAndATapOnThePagesMediaOffersItAgain() {
+        ready()
+        browser.openUrl("https://example.org/watch", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.org/watch")
+        media(1, 10, "https://cdn.example.org/a.mp4")
+        val offer = offer()
+
+        // Loading ends and other notices come and go: the offer stays.
+        loaded(1, 10)
+        engine.emit(EngineEvent.PopupBlocked(engine.view(1))); idle()
+        assertEquals(Notice.PopupBlocked, state().notice)
+        assertEquals(offer, state().mediaOffer)
+        // Closing another page's offer leaves this one.
+        browser.dismissMediaOffer(offer.copy(pageId = offer.pageId + 1_000))
+        assertEquals(offer, state().mediaOffer)
+
+        browser.dismissMediaOffer(offer)
+        assertNull(state().mediaOffer)
+        // The player's own error is where the user taps: that offers the page's media again.
+        tapped(1, 10)
+        assertEquals(offer, offer())
+        // A tap while it shows changes nothing.
+        tapped(1, 10)
+        assertEquals(offer, offer())
+    }
+
+    @Test
+    fun aTapOffersOnlyThePageShownWithMediaToPlay() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        media(1, 10, "https://a.test/a.mp4")
+        browser.dismissMediaOffer(offer())
+
+        // A tap reported for a document the tab no longer shows.
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+        tapped(1, 10)
+        assertNull(state().mediaOffer)
+        // A page whose media has no address the player may fetch.
+        media(1, 11, "data:video/mp4;base64,AAAA")
+        tapped(1, 11)
+        assertNull(state().mediaOffer)
+
+        // A tab behind another one.
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        commit(1, 10, "https://a.test/", index = 0, length = 2)
+        tapped(1, 10)
+        assertNull(state().mediaOffer)
+
+        // A crashed page.
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
+        browser.selectTab(tabA); idle()
+        assertEquals(listOf("a.mp4"), mediaNames())
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        tapped(1, 10)
+        assertNull(state().mediaOffer)
+    }
+
+    @Test
+    fun aCrashedPagesLateMediaIsNeitherOfferedNorTold() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        loaded(1, 10)
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+
+        // Loads the engine held for the page come after its crash.
+        media(1, 10, "https://a.test/a.mp4")
+        media(1, 10, null)
+        assertNull(state().mediaOffer)
+        assertNull(state().notice)
+        assertNull(state().activeTab!!.mediaPage)
+    }
+
+    @Test
+    fun aTapAfterARouteReturnOffersThatRoutesMedia() {
+        ready()
+        browser.openUrl("https://app.test/feed", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://app.test/feed")
+        media(1, 10, "https://cdn.test/1.mp4")
+        val feed = offer()
+        browser.dismissMediaOffer(feed)
+
+        // Away and back within the document: the feed's player loads nothing again.
+        commit(1, 10, "https://app.test/post/2", HistoryKind.SAME_DOCUMENT, index = 1, length = 2)
+        tapped(1, 10)
+        assertNull("a route without media offers nothing", state().mediaOffer)
+        commit(1, 10, "https://app.test/feed", HistoryKind.SAME_DOCUMENT, index = 0, length = 2)
+        tapped(1, 10)
+        assertEquals(feed, offer())
+    }
+
+    @Test
+    fun theOfferEndsWhenItsPageLeavesTheScreen() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        media(1, 10, "https://a.test/a.mp4")
+        val offer = offer()
+
+        browser.newTab(); idle()
+        assertTrue(state().activeTab!!.isHome)
+        assertNull(state().mediaOffer)
+
+        // Back on the page, its media is a tap away in the address field; the offer is not repeated.
+        val tabA = recent().filterIsInstance<RecentItem.OpenTab>().single { it.url == "https://a.test/" }.tabId
+        browser.selectTab(tabA); idle()
+        assertEquals(offer, state().activeTab!!.mediaPage)
+        assertNull(state().mediaOffer)
+
+        tapped(1, 10)
+        assertEquals(offer, offer())
+        engine.emit(EngineEvent.Crashed(engine.view(1), "test")); idle()
+        assertNull(state().mediaOffer)
     }
 
     @Test
@@ -2569,7 +3364,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
 
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
-        assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("password"), keyboardContent())
         browser.keyboardHandled(state().keyboard!!)
         assertNull(state().keyboard)
         engine.emit(EngineEvent.ImeHidden(engine.view(1))); idle()
@@ -2587,7 +3382,36 @@ class BrowserCoordinatorTest {
         val handling = state().keyboard!!
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "password", showKeyboard = true)); idle()
         browser.keyboardHandled(handling)
-        assertEquals(KeyboardRequest.Show("password"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("password"), keyboardContent())
+    }
+
+    @Test
+    fun handlingAPrecommitKeyboardRequestCannotClearItsReplayForTheSameField() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 20, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val beforeCommit = state().keyboard!!
+        browser.keyboardHandled(beforeCommit)
+        commit(1, 20, "https://b.test/", index = 1, length = 2)
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 20, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val replay = state().keyboard!!
+        browser.keyboardHandled(beforeCommit)
+        assertEquals("A late UI acknowledgement must not consume the post-commit delivery", replay, state().keyboard)
+    }
+
+    @Test
+    fun multilineAndEditingContextIdentityReachTheKeyboardWithoutRetargetingAnOldRequest() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = false, context = 7)); idle()
+        assertEquals(KeyboardRequest.Prepare("text", multiline = true, context = 7), keyboardContent())
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 7)); idle()
+        val oldRequest = state().keyboard!!
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = true, context = 8)); idle()
+        browser.keyboardHandled(oldRequest)
+        assertEquals(KeyboardRequest.Show("text", multiline = true, context = 8), keyboardContent())
     }
 
     /** Opens a page in tab 1 and gives one of its fields the keyboard; the UI has shown it. */
@@ -2606,7 +3430,7 @@ class BrowserCoordinatorTest {
         commit(1, 10, "https://a.test/")
 
         engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false)); idle()
-        assertEquals(KeyboardRequest.Prepare("search"), state().keyboard)
+        assertEquals(KeyboardRequest.Prepare("search"), keyboardContent())
     }
 
     @Test
@@ -2627,7 +3451,7 @@ class BrowserCoordinatorTest {
         // Servo can report the new document's focused field before the document's commit.
         engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "text", showKeyboard = true)); idle()
         commit(1, 11, "https://a.test/next", index = 1, length = 2)
-        assertEquals(KeyboardRequest.Show("text"), state().keyboard)
+        assertEquals(KeyboardRequest.Show("text"), keyboardContent())
     }
 
     @Test
@@ -2970,6 +3794,7 @@ class BrowserCoordinatorTest {
         const val GATE_TIMEOUT_SECONDS = 10L
         const val TEST_WAIT_MS = 5_000L
         const val SHORT_TIMEOUT_MS = 1_000L
+        const val TAB_ORDER_PAUSE_MS = 4_000L
         /** Longer than any test: a request does not time out unless the test means it to. */
         const val LONG_TIMEOUT_MS = 10L * 60 * 1000
     }

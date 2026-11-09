@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Integration credentials. Never shown again after saving, never in logs or page scripts. */
-enum class SecretName { KARAKEEP_API_KEY, HISTER_TOKEN }
+enum class SecretName { KARAKEEP_API_KEY, HISTER_TOKEN, SITE_REPORTS_TOKEN }
 
 interface SecretStore {
     /** The secret, or null when unset or unreadable (for example after a Keystore key loss). */
@@ -67,8 +67,16 @@ internal class ServiceCredentials(private val secrets: SecretStore) {
  * key (device reset of the Keystore) makes secrets unreadable: callers then ask for them again,
  * without touching history or other data.
  */
-class KeystoreSecretStore(context: Context) : SecretStore {
-    private val directory = File(context.noBackupFilesDir, "secrets").apply { mkdirs() }
+class KeystoreSecretStore(
+    context: Context,
+    private val keyAlias: String = KEY_ALIAS,
+) : SecretStore {
+    // The production alias keeps the directory existing installs already use; any other alias (a
+    // device test) gets its own, so a test store can never write ciphertext over the app's.
+    private val directory = File(
+        context.noBackupFilesDir,
+        if (keyAlias == KEY_ALIAS) "secrets" else "secrets-$keyAlias",
+    ).apply { mkdirs() }
 
     override fun read(name: SecretName): String? {
         val file = file(name)
@@ -111,21 +119,31 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     private fun file(name: SecretName) = File(directory, "${name.name}.bin")
 
-    private fun key(): SecretKey {
+    /**
+     * The check-then-generate below is a critical section. Two services configuring for the first
+     * time at once (Karakeep, Hister and site reports hold different mutexes) would otherwise both
+     * see no key and both generate one for the same alias: the second can replace the first, leaving
+     * the first's just-written ciphertext unreadable. The lock is process-wide because the alias is
+     * fixed, and the key is not cached: key loss must still make old ciphertext unreadable.
+     */
+    private fun key(): SecretKey = synchronized(KEY_LOCK) {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
-        generator.init(
-            KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(KEY_BITS)
-                .build(),
-        )
-        return generator.generateKey()
+        (keyStore.getKey(keyAlias, null) as? SecretKey) ?: run {
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
+            generator.init(
+                KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(KEY_BITS)
+                    .build(),
+            )
+            generator.generateKey()
+        }
     }
 
     private companion object {
+        /** Serializes [key]; see its comment. */
+        private val KEY_LOCK = Any()
         const val LOG_TAG = "CombraySecrets"
         const val KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "combray-integration-secrets"

@@ -6,18 +6,32 @@
 Exits with status 1 when a test failed or errored, there was no run or a run reported no test,
 or a run stopped early (its process crashed or was killed as not responding): the test in
 progress shows as crashed and the tests it never reached are counted as not run.
+
+From the run's logcat.txt it also lists every failed report-only check (a `REPORT <name>:
+failed` line) and every check slower than SLOW_SECONDS. Neither changes the exit status: a
+report-only check passes as a test even when it timed out, so it must not pass unseen.
 """
 
+import datetime
 import pathlib
 import re
 import sys
 
 # INSTRUMENTATION_STATUS_CODE values of AndroidJUnitRunner.
 STATUS = {"0": "passed", "-1": "error", "-2": "failed", "-3": "ignored", "-4": "assumption failed"}
-SKIP = {"fixtures.txt", "device.txt", "logcat.txt"}
+LOGCAT = "logcat.txt"
+SKIP = {"fixtures.txt", "device.txt", LOGCAT}
 STARTED = "1"
 CRASHED = "crashed"
 NOT_RUN = "not run"
+# A check that waits out one of its timeouts takes longer than this.
+SLOW_SECONDS = 30
+# `logcat -v threadtime`: date, time, pid, tid, level, tag padded before ": ", message.
+LOGCAT_LINE = re.compile(r"^(\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\s+\d+\s+\d+\s+[VDIWEFA]\s+(.*?)\s*: (.*)$")
+# AndroidJUnitRunner's own lines around each test; JUnit's method name may hold spaces or a
+# parameter index (`check[1]`).
+TEST_EVENT = re.compile(r"^(started|finished): (.+?)\((?:[\w$]+\.)*([\w$]+)\)$")
+REPORT_FAILED = re.compile(r"^REPORT .+?: failed\b")
 
 
 def parse(text):
@@ -52,6 +66,43 @@ def parse(text):
     return results, announced, stopped.group(1) if stopped else None
 
 
+def logcat_time(stamp):
+    """A threadtime timestamp; it has no year, and a leap year accepts 02-29."""
+    return datetime.datetime.strptime(f"2000-{stamp}", "%Y-%m-%d %H:%M:%S.%f")
+
+
+def logcat_findings(text):
+    """The failed report-only checks' log lines, and (class, check, seconds) for each check
+    slower than SLOW_SECONDS, in log order."""
+    reports, slow, started = [], [], {}
+    for line in text.splitlines():
+        match = LOGCAT_LINE.match(line)
+        if not match:
+            continue
+        stamp, tag, message = match.groups()
+        if REPORT_FAILED.match(message):
+            reports.append(f"{stamp} {tag}: {message}")
+            continue
+        event = TEST_EVENT.match(message) if tag == "TestRunner" else None
+        if event is None:
+            continue
+        kind, test, test_class = event.groups()
+        if kind == "started":
+            started[(test_class, test)] = logcat_time(stamp)
+            continue
+        began = started.pop((test_class, test), None)
+        if began is None:
+            continue
+        ended = logcat_time(stamp)
+        # A check that ran across New Year.
+        if ended < began:
+            ended = ended.replace(year=began.year + 1)
+        seconds = (ended - began).total_seconds()
+        if seconds > SLOW_SECONDS:
+            slow.append((test_class, test, seconds))
+    return reports, slow
+
+
 def main():
     directory = pathlib.Path(sys.argv[1])
     rows, empty, stopped, not_run = [], [], [], 0
@@ -82,6 +133,17 @@ def main():
         print(f"runs without results: {', '.join(empty)}")
     if stopped:
         print(f"runs that stopped early: {', '.join(stopped)}")
+    logcat = directory / LOGCAT
+    if logcat.is_file():
+        reports, slow = logcat_findings(logcat.read_text(errors="replace"))
+        print()
+        print("Report-only checks that failed:" if reports else "Report-only checks that failed: none")
+        for report in reports:
+            print(f"- {report}")
+        print()
+        print(f"Checks slower than {SLOW_SECONDS} s:" if slow else f"Checks slower than {SLOW_SECONDS} s: none")
+        for test_class, test, seconds in slow:
+            print(f"- {test_class} `{test}`: {seconds:.1f} s")
     bad = any(status in ("failed", "error", CRASHED) for *_, status in rows)
     return 1 if bad or empty or stopped or not_run or not rows else 0
 

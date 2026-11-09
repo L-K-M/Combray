@@ -1,5 +1,7 @@
 package ch.lkmc.combray.core.integration
 
+import android.icu.text.IDNA
+import java.net.IDN
 import java.net.URI
 import java.net.URISyntaxException
 import java.security.MessageDigest
@@ -42,17 +44,96 @@ object ServiceUrls {
         } catch (malformed: URISyntaxException) {
             return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         }
-        val host = uri.host?.lowercase() ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
-        if (uri.scheme?.lowercase() !in WEB_SCHEMES) return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
-        if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) {
+        val scheme = uri.scheme?.lowercase() ?: return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
+        if (scheme !in WEB_SCHEMES) return ServiceRoot.Invalid(ServiceRootProblem.UNSUPPORTED_SCHEME)
+        val authority = uri.rawAuthority ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
+        // java.net.URI does not read a non-ASCII (IDN) or trailing-dot authority as server-based:
+        // its host, userinfo and port then come back null even when they are present. The '@' is
+        // checked here for the same reason, so credentials cannot hide behind an IDN host.
+        if (uri.rawUserInfo != null || '@' in authority || uri.rawQuery != null || uri.rawFragment != null) {
             return ServiceRoot.Invalid(ServiceRootProblem.HAS_CREDENTIALS_OR_QUERY)
         }
+        val parsed = parseAuthority(authority) ?: return ServiceRoot.Invalid(ServiceRootProblem.NOT_A_URL)
         var path = (uri.rawPath ?: "").trimEnd('/')
         apiSuffixes.firstOrNull { path.endsWith(it) }?.let { path = path.removeSuffix(it).trimEnd('/') }
-        val port = if (uri.port >= 0) ":${uri.port}" else ""
-        // java.net.URI already returns IPv6 literals in brackets.
-        val hostPart = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
-        return ServiceRoot.Valid("${uri.scheme.lowercase()}://$hostPart$port$path")
+        // A default port and a trailing dot are the same server as without them, so they do not
+        // change the destination identity or force queued work to be re-bound.
+        val port = parsed.port?.takeUnless { it == defaultPort(scheme) }
+        return ServiceRoot.Valid("$scheme://${parsed.host}${port?.let { ":$it" } ?: ""}$path")
+    }
+
+    /** The authority's ASCII host (IPv6 in brackets) and optional port, or null when unusable. */
+    internal data class Authority(val host: String, val port: Int?)
+
+    /**
+     * Parses a URL authority strictly. An explicit port must be decimal digits in 1..65535;
+     * a colon with no digits after it, or any other malformed port text, is refused rather than
+     * read as the scheme default. The HTTP transport applies the same check before connecting.
+     */
+    internal fun parseAuthority(authority: String): Authority? {
+        if ('@' in authority) return null
+        if (authority.startsWith("[")) {
+            val end = authority.indexOf(']')
+            if (end < 0) return null
+            val host = authority.substring(0, end + 1).lowercase()
+            try {
+                if (URI("http://$host").host == null) return null
+            } catch (_: URISyntaxException) {
+                return null
+            }
+            // Only nothing or ":" + a valid port may follow the literal; anything else is not an
+            // authority, not a silently dropped suffix.
+            val rest = authority.substring(end + 1)
+            val port = when {
+                rest.isEmpty() -> null
+                rest.startsWith(":") -> explicitPort(rest.substring(1)) ?: return null
+                else -> return null
+            }
+            return Authority(host, port)
+        }
+        val written = authority.substringBefore(':').trimEnd('.')
+        // A percent-encoded reg-name is not a host the app can resolve; the old URI parse refused it.
+        if (written.isEmpty() || '%' in written) return null
+        val host = asciiHost(written) ?: return null
+        // A present but malformed or out-of-range port is refused, never read as the default port.
+        val port = if (authority.contains(':')) explicitPort(authority.substringAfter(':', "")) ?: return null else null
+        return Authority(host, port)
+    }
+
+    private fun asciiHost(written: String): String? {
+        val ascii = if (written.all { it.code < 128 }) {
+            // Already-ASCII names need no Unicode remapping. Preserve their label checks.
+            try {
+                IDN.toASCII(written)
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+        } else {
+            // IDNA2003 maps deviation characters such as ß to another domain. Android's ICU
+            // provides nontransitional UTS46 without bundling a second Unicode implementation.
+            val info = IDNA.Info()
+            val output = StringBuilder()
+            IDNA.getUTS46Instance(IDNA.NONTRANSITIONAL_TO_ASCII or IDNA.CHECK_BIDI or IDNA.CHECK_CONTEXTJ)
+                .nameToASCII(written, output, info)
+            if (info.hasErrors()) return null
+            output.toString()
+        }
+        return ascii.lowercase().trimEnd('.').takeIf { it.isNotEmpty() }
+    }
+
+    /** The port text after ":", or null when it is empty or malformed. */
+    private fun explicitPort(text: String): Int? =
+        text.takeIf { it.isNotEmpty() && it.all { character -> character in '0'..'9' } }
+            ?.toIntOrNull()
+            ?.takeIf { port -> isValidPort(port) }
+
+    /** -1 means the scheme's default; an explicit port must be a usable TCP destination. */
+    internal fun isValidPort(port: Int): Boolean = port == -1 || port in 1..65535
+
+    private fun defaultPort(scheme: String) = when (scheme) {
+        "https" -> 443
+        "http" -> 80
+        else -> error("not a web scheme: $scheme")
     }
 
     /** Checks both fields; a blank alternate, or one equal to the main address, is none. */
@@ -72,7 +153,18 @@ object ServiceUrls {
     /** `root` + `/path`, preserving the root's own path prefix. */
     fun endpoint(root: String, path: String): String = root.trimEnd('/') + "/" + path.trimStart('/')
 
-    /** Non-secret destination identity (the normalized root), safe to store next to jobs. */
+    /** Compares roots without changing any persisted credential or job fingerprint. */
+    internal fun sameDestination(left: String?, right: String?): Boolean {
+        if (left == null || right == null) return left == right
+        val first = normalizeRoot(left, emptyList()) as? ServiceRoot.Valid ?: return false
+        val second = normalizeRoot(right, emptyList()) as? ServiceRoot.Valid ?: return false
+        return first.root == second.root
+    }
+
+    /**
+     * Identity for a new, normalized root. Existing equivalent destinations keep their stored
+     * fingerprint: changing normalization must not orphan credentials, jobs or saved receipts.
+     */
     fun fingerprint(root: String): String =
         MessageDigest.getInstance("SHA-256").digest(root.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }

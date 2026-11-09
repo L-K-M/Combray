@@ -79,6 +79,19 @@ ENGINE_PREFS: Mapping[str, bool] = MappingProxyType(
         "dom_fontface_enabled": True,
         "dom_indexeddb_enabled": True,
         "dom_adoptedstylesheet_enabled": True,
+        "dom_exec_command_enabled": True,
+    }
+)
+
+# Preferences engine.rs sets that work only inside Combray: the PDF viewer loads its
+# files from the app's `combray-pdf:` scheme, which servoshell lacks, so the harness
+# leaves them at Servo's defaults and PDFs keep Servo's stand-in page. Every other
+# preference engine.rs sets belongs in ENGINE_PREFS.
+APP_ONLY_PREFS: frozenset[str] = frozenset(
+    {
+        "combray_pdf_viewer_module",
+        "combray_pdf_viewer_csp",
+        "combray_pdf_viewer_max_bytes",
     }
 )
 
@@ -113,11 +126,15 @@ _CHILD_ENV_NAMES = frozenset(
 )
 _CHILD_ENV_PREFIXES = ("LC_", "XDG_", "FONTCONFIG_")
 
-# Servo's own Android user agent: the `UserAgentPlatform::Android` branch of
-# `to_user_agent_string` in components/config/prefs.rs of the Servo checkout. Both
-# engines send it so servers return the same markup and differences come from the
-# engine. Update it when that branch changes (for example the Firefox version).
-USER_AGENT_TEMPLATE = "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/{version} Firefox/153.0"
+# Combray's user agent: Servo's Android one (the `UserAgentPlatform::Android` branch
+# of `to_user_agent_string` in components/config/prefs.rs of the Servo checkout) with
+# the `Gecko/` token native/src/user_agent.rs adds. Both engines send it so servers
+# return the same markup and differences come from the engine. Update it when that
+# branch changes (for example the Firefox version); tests/test_config.py fails when
+# it differs from the agent user_agent.rs's tests expect.
+USER_AGENT_TEMPLATE = (
+    "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/{version} Firefox/153.0"
+)
 
 # Cargo package versions are semver; anything else would end up verbatim in a header.
 _VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?")

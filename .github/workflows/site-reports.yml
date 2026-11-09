@@ -1,0 +1,126 @@
+# Site reports: the report service's container, for changes to
+# services/site-reports/ or this workflow. ci.yml runs the service's unit tests
+# on every push; this workflow pays for Docker only when the service changes,
+# and it is not a required check, so other PRs are never blocked by it.
+#
+#   - docker build of the service image (base image pinned by digest)
+#   - the unit tests inside that image, so a base image bump is tested on the
+#     Python and SQLite it ships
+#   - the setup the service README documents: .env from .env.example, one token
+#     per role from the image's `token` command, `docker compose config` and
+#     `docker compose up` with the committed docker-compose.yml, then a check
+#     that the container runs as uid 10001 on a read-only root
+#   - tests/smoke.py: the golden phone report through the published port
+#   - logs free of tokens and report text, and a clean stop on SIGTERM
+#
+# Hardening (family contract): least-privilege token, cancel superseded PR runs
+# but never an in-progress main run, a timeout, actions pinned by SHA, no
+# secrets: the tokens are generated for each run and thrown away.
+
+name: Site reports
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/site-reports/**
+      - .github/workflows/site-reports.yml
+  pull_request:
+    paths:
+      - services/site-reports/**
+      - .github/workflows/site-reports.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-reports-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  container:
+    name: Image and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/site-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The tag docker-compose.yml names, so Compose uses this image.
+      - name: Build the image
+        run: docker build --tag combray-site-reports:local .
+
+      # .dockerignore keeps the tests out of the image; mount them read-only.
+      - name: Unit tests in the image
+        run: >-
+          docker run --rm --network none --read-only --tmpfs /tmp
+          --volume "$PWD:/src:ro" --workdir /src --entrypoint python
+          combray-site-reports:local -I -B -m unittest discover -s tests -t .
+
+      - name: Configure two test tokens
+        run: |
+          cp .env.example .env
+          for role in reporter agent; do
+            output="$(docker compose run --rm --no-deps -T site-reports token)"
+            token="$(printf '%s\n' "$output" | sed -n 's/^token=//p')"
+            hash="$(printf '%s\n' "$output" | sed -n 's/^sha256=//p')"
+            if [ -z "$token" ] || [ -z "$hash" ]; then
+              echo "::error::the token command printed no token or hash"
+              exit 1
+            fi
+            echo "::add-mask::$token"
+            upper="$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]')"
+            variable="REPORTS_${upper}_TOKEN_SHA256"
+            sed -i "s/^$variable=\$/$variable=$hash/" .env
+            if ! grep -qx "$variable=$hash" .env; then
+              echo "::error::.env.example has no empty $variable= line"
+              exit 1
+            fi
+            echo "SMOKE_${upper}_TOKEN=$token" >> "$GITHUB_ENV"
+          done
+
+      - name: Check the Compose file
+        run: docker compose config --quiet
+
+      # --wait returns once the image's HEALTHCHECK passes (about 30 s).
+      - name: Start the service
+        run: docker compose up --detach --wait --wait-timeout 120
+
+      - name: Check the container's user and root filesystem
+        run: |
+          container="$(docker compose ps --quiet site-reports)"
+          uid="$(docker compose exec -T site-reports id -u)"
+          readonly_root="$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$container")"
+          echo "uid=$uid read-only root=$readonly_root"
+          [ "$uid" = 10001 ] && [ "$readonly_root" = true ]
+
+      - name: Smoke test
+        run: python3 -I tests/smoke.py --root http://127.0.0.1:8787
+
+      # The log has one line per request: never a token or report text.
+      - name: Check the log
+        run: |
+          docker compose logs --no-color > "$RUNNER_TEMP/site-reports.log"
+          if grep -qF -e "$SMOKE_REPORTER_TOKEN" -e "$SMOKE_AGENT_TOKEN" \
+              -e "example.org" -e "The menu covers" -e "smoke:" "$RUNNER_TEMP/site-reports.log"; then
+            echo "::error::the service log contains a token or report text"
+            exit 1
+          fi
+
+      # Without its SIGTERM handler, PID 1 would be killed after the timeout (137).
+      - name: Stop on SIGTERM
+        run: |
+          container="$(docker compose ps --quiet site-reports)"
+          docker compose stop --timeout 10
+          code="$(docker inspect --format '{{.State.ExitCode}}' "$container")"
+          echo "exit code $code"
+          [ "$code" = 0 ]
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps

@@ -11,8 +11,9 @@ use std::rc::Rc;
 use servo::AllowOrDenyRequest;
 use servo::{
     AuthenticationRequest, CreateNewWebViewRequest, DeviceIntRect, EmbedderControl,
-    EmbedderControlId, InputMethodType, LoadStatus, NavigationRequest, PermissionRequest,
-    PipelineId, ScreenGeometry, WebResourceLoad, WebResourceResponse, WebView, WebViewDelegate,
+    EmbedderControlId, InputEventId, InputEventResult, InputMethodType, LoadStatus,
+    NavigationRequest, PermissionRequest, PipelineId, ScreenGeometry, WebResourceLoad,
+    WebResourceResponse, WebView, WebViewDelegate,
 };
 use url::Url;
 
@@ -53,6 +54,11 @@ pub enum DelegateEvent {
     },
     FrameReady {
         view: ViewKey,
+    },
+    InputHandled {
+        view: ViewKey,
+        id: InputEventId,
+        result: InputEventResult,
     },
     ImeShown {
         view: ViewKey,
@@ -125,6 +131,19 @@ impl TabDelegate {
 }
 
 impl WebViewDelegate for TabDelegate {
+    fn notify_input_event_handled(
+        &self,
+        _webview: WebView,
+        id: InputEventId,
+        result: InputEventResult,
+    ) {
+        self.push(DelegateEvent::InputHandled {
+            view: self.view,
+            id,
+            result,
+        });
+    }
+
     /// Answers `screen.width`/`availWidth` and `outerWidth`, which Servo 0.6.0 reports as 0 when
     /// this returns `None`. As in servoshell's Android port, the screen is the page area (the
     /// shared rendering context), with the window filling it at the origin. Servo asks

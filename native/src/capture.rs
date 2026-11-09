@@ -63,9 +63,10 @@ pub const MAX_DEFERRAL: Duration = Duration::from_secs(10);
 
 const SCRIPT_TEMPLATE: &str = include_str!("capture.js");
 const READER_TEMPLATE: &str = include_str!("reader.js");
-/// Recognises Servo's stand-in page for a file it cannot show, such as a PDF: both scripts read
-/// nothing from it, so its "Unknown content type" sentence never passes for the file's text.
-const STAND_IN: &str = include_str!("stand_in.js");
+/// Recognises Servo's stand-in page for a file it cannot show, and Combray's PDF viewer: both
+/// scripts read nothing from either, so the stand-in's "Unknown content type" sentence and the
+/// viewer's labels never pass for the file's text. `find.js` uses it too.
+pub(crate) const STAND_IN: &str = include_str!("stand_in.js");
 /// Mozilla Readability 0.6.0 (Apache-2.0), from the npm package `@mozilla/readability`.
 const READABILITY: &str = include_str!("vendor/Readability.js");
 
@@ -376,6 +377,42 @@ mod tests {
         assert!(!script.contains("__MAX_"));
         assert!(!script.contains("__STAND_IN__"));
         assert!(script.trim_end().ends_with("})(262144, 50000, 400)"));
+    }
+
+    #[test]
+    fn both_scripts_check_for_the_pdf_viewer_inside_their_function() {
+        for (kind, wrapper, skip) in [
+            (
+                CaptureKind::PageText,
+                "(function (maxTextBytes, maxNodes, maxMillis) {",
+                "var skipped = isServoStandIn() || isCombrayPdfViewer();",
+            ),
+            (
+                CaptureKind::Article,
+                "(function (maxBytes, maxNodes) {",
+                "if (isServoStandIn() || isCombrayPdfViewer()) return result;",
+            ),
+        ] {
+            let script = script(kind, DEFAULT_MAX_TEXT_BYTES, VISIBLE_SCRIPT_BUDGET);
+            let declared = script.find("function isCombrayPdfViewer()").unwrap();
+            // Declared inside the wrapping function, not as a page global, and used after it.
+            assert!(script.find(wrapper).unwrap() < declared, "{kind:?}");
+            assert!(script[declared..].contains(skip), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn the_pdf_viewer_check_matches_the_engines_viewer_document() {
+        // The engine's viewer document: opaque origin, the PDF's Content-Type, data-pdf-state.
+        for needle in [
+            "String(window.origin) === \"null\"",
+            "=== \"application/pdf\"",
+            "hasAttribute(\"data-pdf-state\")",
+            // Content-Type keeps its parameters.
+            ".split(\";\")[0]",
+        ] {
+            assert!(STAND_IN.contains(needle), "{needle}");
+        }
     }
 
     #[test]

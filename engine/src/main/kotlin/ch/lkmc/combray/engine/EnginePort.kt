@@ -27,6 +27,12 @@ interface EnginePort {
 
     fun reload(tab: Long)
 
+    /** Stops this exact view; completion is LoadingStopped or LoadingStopFailed. */
+    fun stopLoading(view: ViewRef, request: Long)
+
+    /** Reloads only while this exact document remains selected and current. */
+    fun reload(page: PageRef)
+
     /** Scrolls the whole page, only while [page] remains selected and current. */
     fun scrollToEdge(page: PageRef, edge: ScrollEdge)
 

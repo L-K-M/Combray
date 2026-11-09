@@ -94,7 +94,7 @@ class HomeTest {
         open(Device.GREEN)
 
         device.dismissSystemDialogs()
-        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithContentDescription("Menu").performClick()
         awaitText("Settings")
         compose.onNodeWithText("New tab").assertDoesNotExist()
         back()
@@ -144,8 +144,10 @@ class HomeTest {
         open(Device.GREEN)
         val original = device.browser.browserState.value.activeTab!!.id
         compose.onNodeWithContentDescription("Edit address", substring = true).performClick()
-        compose.waitUntilAtLeastOneExists(EDIT_FIELD and isFocused(), Device.LOAD_TIMEOUT_MS)
-        val field = compose.onNode(EDIT_FIELD and isFocused())
+        // The address opens in the bar itself, not in a sheet's window.
+        compose.waitUntilAtLeastOneExists(hasSetTextAction() and isFocused(), Device.LOAD_TIMEOUT_MS)
+        compose.onNode(isDialog()).assertDoesNotExist()
+        val field = compose.onNode(hasSetTextAction() and isFocused())
         assertEquals(Fixtures.solid(Device.GREEN), field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         val url = Fixtures.solid(Device.BLUE)
         field.performTextReplacement(url)
@@ -168,7 +170,7 @@ class HomeTest {
 
     @Test
     fun anEmptyHomeAddsALinkDirectlyAndCancelWritesNothing() {
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        device.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
         openHome()
         awaitText(compose.activity.getString(R.string.home_add_link))
         compose.onNodeWithText(compose.activity.getString(R.string.home_add_link)).performClick()
@@ -195,21 +197,21 @@ class HomeTest {
     fun hidingAutomaticSectionsKeepsDeliberatePins() {
         runBlocking { home.savePin(null, "http://127.0.0.1:8766/solid/715f2e.html", "Pin") }
         open(Device.GREEN)
-        device.settings.setHomeContinue(HomeSectionVisibility.HIDDEN)
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        device.setHomeContinue(HomeSectionVisibility.HIDDEN)
+        device.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
         openHome()
         awaitTile("Pin").assertIsDisplayed()
         compose.onNodeWithContentDescription("Open localhost").assertDoesNotExist()
         compose.onNodeWithText("Continue").assertDoesNotExist()
 
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        device.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
         awaitTile("localhost").assertIsDisplayed()
         awaitTile("Pin").assertIsDisplayed()
     }
 
     @Test
     fun anAcceptedSaveFinishesAfterTheEditorIsDismissed() {
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        device.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
         openHome()
         awaitText("Add link")
         compose.onNodeWithText("Add link").performClick()

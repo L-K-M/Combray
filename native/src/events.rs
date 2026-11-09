@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::controls::ControlDescription;
 use crate::find::FindCounts;
+use crate::reload_pull::PullUpdate;
 use crate::userinfo::strip_userinfo;
 
 /// One native incarnation of a logical tab.
@@ -200,6 +201,12 @@ pub enum EngineEvent {
         height: u32,
     },
     SurfaceUnbound,
+    /// A presented frame shows the page above the `inset` rows the app's request `request`
+    /// said its controls cover, the newly uncovered rows included.
+    ViewportPainted {
+        request: u64,
+        inset: u32,
+    },
     TabCreated {
         view: ViewKey,
         webview: String,
@@ -224,6 +231,15 @@ pub enum EngineEvent {
     PageNavigationRequested {
         view: ViewKey,
         url: String,
+    },
+    LoadingStopped {
+        view: ViewKey,
+        request: i64,
+        document: u64,
+    },
+    LoadingStopFailed {
+        view: ViewKey,
+        request: i64,
     },
     /// The user tapped a link for another app (`mailto:`, `tel:`, `intent:` ...); the page stayed.
     ExternalLink {
@@ -278,6 +294,11 @@ pub enum EngineEvent {
         request: i64,
         status: FindStatus,
     },
+    ReloadPull {
+        view: ViewKey,
+        document: u64,
+        update: PullUpdate,
+    },
     Painted {
         view: ViewKey,
         frames: u64,
@@ -287,6 +308,8 @@ pub enum EngineEvent {
         /// The field's document: Servo's pipeline ID of its frame (the top-level document's ID
         /// unless the field is in a frame).
         document: u64,
+        /// Unique native editing context, including moves between equal-typed fields.
+        context: u64,
         multiline: bool,
         /// Field type: "text", "password", "email", "url", "number", "tel" or "search".
         kind: &'static str,
@@ -317,6 +340,13 @@ pub enum EngineEvent {
         url: Option<String>,
         /// The origin of the referrer Servo computed for the load, when http(s).
         referrer: Option<String>,
+    },
+    /// The user tapped a media element of `document` that has no data (its load was cancelled),
+    /// or controls the page laid over one, after the page reported a media URL
+    /// (`media::tap_hits_media_script`). The application offers the page's media again.
+    MediaTapped {
+        view: ViewKey,
+        document: u64,
     },
     /// A page control waits for an answer; `control` names it in `respondToControl`.
     ControlShown {
@@ -360,6 +390,9 @@ impl EngineEvent {
                 json!({ "type": "surface_bound", "width": width, "height": height })
             },
             EngineEvent::SurfaceUnbound => json!({ "type": "surface_unbound" }),
+            EngineEvent::ViewportPainted { request, inset } => {
+                json!({ "type": "viewport_painted", "request": request, "inset": inset })
+            },
             EngineEvent::TabCreated { view, webview } => {
                 with_view(view, json!({ "type": "tab_created", "webview": webview }))
             },
@@ -380,6 +413,18 @@ impl EngineEvent {
                     "request": request,
                     "url": strip_userinfo(url),
                 }),
+            ),
+            EngineEvent::LoadingStopped {
+                view,
+                request,
+                document,
+            } => with_view(
+                view,
+                json!({ "type": "loading_stopped", "request": request, "document": document }),
+            ),
+            EngineEvent::LoadingStopFailed { view, request } => with_view(
+                view,
+                json!({ "type": "loading_stop_failed", "request": request }),
             ),
             EngineEvent::PageNavigationRequested { view, url } => with_view(
                 view,
@@ -495,12 +540,28 @@ impl EngineEvent {
                     }),
                 )
             },
+            EngineEvent::ReloadPull {
+                view,
+                document,
+                update,
+            } => {
+                let (phase, progress) = match update {
+                    PullUpdate::Pulling(progress) => ("pulling", *progress),
+                    PullUpdate::Released => ("released", 1.0),
+                    PullUpdate::Cancelled => ("cancelled", 0.0),
+                };
+                with_view(
+                    view,
+                    json!({ "type": "reload_pull", "document": document, "phase": phase, "progress": progress }),
+                )
+            },
             EngineEvent::Painted { view, frames } => {
                 with_view(view, json!({ "type": "painted", "frames": frames }))
             },
             EngineEvent::ImeShown {
                 view,
                 document,
+                context,
                 multiline,
                 kind,
                 show_keyboard,
@@ -509,6 +570,7 @@ impl EngineEvent {
                 json!({
                     "type": "ime_shown",
                     "document": document,
+                    "context": context,
                     "multiline": multiline,
                     "kind": kind,
                     "show_keyboard": show_keyboard,
@@ -537,6 +599,10 @@ impl EngineEvent {
                     "url": url,
                     "referrer": referrer,
                 }),
+            ),
+            EngineEvent::MediaTapped { view, document } => with_view(
+                view,
+                json!({ "type": "media_tapped", "document": document }),
             ),
             EngineEvent::ControlShown {
                 view,
@@ -611,6 +677,40 @@ fn capture_json(report: &CaptureReport) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_painted_names_the_request_and_its_inset() {
+        let painted = EngineEvent::ViewportPainted {
+            request: 41,
+            inset: 290,
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&painted.to_json()).unwrap(),
+            json!({ "schema": 1, "type": "viewport_painted", "request": 41, "inset": 290 }),
+        );
+    }
+
+    #[test]
+    fn stop_loading_keeps_the_view_request_and_retained_document() {
+        let view = ViewKey {
+            tab: 3,
+            generation: 4,
+        };
+        let stopped = EngineEvent::LoadingStopped {
+            view,
+            request: 11,
+            document: 7,
+        };
+        let failed = EngineEvent::LoadingStopFailed { view, request: 11 };
+        assert_eq!(
+            serde_json::from_str::<Value>(&stopped.to_json()).unwrap(),
+            json!({ "schema": 1, "type": "loading_stopped", "tab": 3, "generation": 4, "request": 11, "document": 7 }),
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&failed.to_json()).unwrap(),
+            json!({ "schema": 1, "type": "loading_stop_failed", "tab": 3, "generation": 4, "request": 11 }),
+        );
+    }
 
     #[test]
     fn find_result_carries_view_document_and_bounded_counts() {
@@ -746,6 +846,29 @@ mod tests {
     }
 
     #[test]
+    fn media_tapped_names_its_document() {
+        let event = EngineEvent::MediaTapped {
+            view: ViewKey {
+                tab: 2,
+                generation: 5,
+            },
+            document: 4294967331,
+        };
+        let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "schema": 1,
+                "type": "media_tapped",
+                "document": 4294967331u64,
+                "tab": 2,
+                "generation": 5,
+            })
+        );
+    }
+
+    #[test]
     fn engine_ready_carries_the_user_agent() {
         let event = EngineEvent::EngineReady {
             width: 720,
@@ -775,6 +898,7 @@ mod tests {
                 generation: 9,
             },
             document: 42,
+            context: 17,
             multiline: false,
             kind: "search",
             show_keyboard: false,
@@ -787,6 +911,7 @@ mod tests {
                 "schema": 1,
                 "type": "ime_shown",
                 "document": 42,
+                "context": 17,
                 "multiline": false,
                 "kind": "search",
                 "show_keyboard": false,

@@ -1,0 +1,325 @@
+package ch.lkmc.combray.ui
+
+import android.app.Application
+import android.content.Context
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.AnnotatedString
+import androidx.test.core.app.ApplicationProvider
+import ch.lkmc.combray.ThirdPartyNotices
+import ch.lkmc.combray.core.browser.BrowserSettings
+import ch.lkmc.combray.core.browser.Clock
+import ch.lkmc.combray.core.browser.Retention
+import ch.lkmc.combray.core.data.CombrayDatabase
+import ch.lkmc.combray.core.integration.HttpOutcome
+import ch.lkmc.combray.core.integration.HttpRequest
+import ch.lkmc.combray.core.integration.HttpTransport
+import ch.lkmc.combray.core.integration.Integrations
+import ch.lkmc.combray.core.integration.ReportEnvironment
+import ch.lkmc.combray.core.integration.SecretName
+import ch.lkmc.combray.core.integration.SecretStore
+import ch.lkmc.combray.core.integration.WakeupScheduler
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * The Settings service form's configuration actions: a tap admits one operation, the address and
+ * key tapped stay bound while it runs, and a delayed result cannot clear a newer edit. The fake
+ * key store and transport block on latches so the tests control when an operation is in flight.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30], application = Application::class, qualifiers = "w320dp-h640dp")
+class SettingsSheetTest {
+    @get:Rule val compose = createComposeRule()
+
+    private val context = ApplicationProvider.getApplicationContext<Context>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private lateinit var integrations: Integrations
+
+    @Volatile private var blockWrites = false
+    @Volatile private var blockChecks = false
+    @Volatile private var checkStatus = 200
+    private val writeEntered = CountDownLatch(1)
+    private val writeRelease = CountDownLatch(1)
+    private val writeReturned = CountDownLatch(1)
+    private val writeCount = AtomicInteger(0)
+    private val checkEntered = CountDownLatch(1)
+    private val checkRelease = CountDownLatch(1)
+    private var initialGeneration = 0L
+    private var savedGeneration: CompletableDeferred<Long>? = null
+
+    private val secrets = object : SecretStore {
+        private val stored = java.util.concurrent.ConcurrentHashMap<SecretName, String>()
+        override fun read(name: SecretName): String? = stored[name]
+        override fun write(name: SecretName, value: String) {
+            if (blockWrites) {
+                writeCount.incrementAndGet()
+                writeEntered.countDown()
+                writeRelease.await(5, TimeUnit.SECONDS)
+            }
+            stored[name] = value
+            if (blockWrites) writeReturned.countDown()
+        }
+
+        override fun delete(name: SecretName) {
+            stored.remove(name)
+        }
+    }
+
+    private val transport = HttpTransport { _: HttpRequest ->
+        if (blockChecks) {
+            checkEntered.countDown()
+            checkRelease.await(5, TimeUnit.SECONDS)
+        }
+        HttpOutcome.Response(checkStatus, emptyMap(), """{"bookmarks":[],"nextCursor":null}""".toByteArray())
+    }
+
+    @Before
+    fun setUp() {
+        File(context.filesDir, CombrayDatabase.FILE_NAME).delete()
+        integrations = Integrations(
+            database = CombrayDatabase.open(context),
+            secrets = secrets,
+            transport = transport,
+            clock = Clock { 0L },
+            newId = { "job" },
+            scope = scope,
+            scheduler = WakeupScheduler { },
+            reportDirectory = File(context.cacheDir, "reports"),
+            reportEnvironment = ReportEnvironment("0", 0, "debug", "0", "rev", "1", 30),
+        )
+        runBlocking { integrations.configureKarakeep("http://127.0.0.1:1/keep", "token") }
+        initialGeneration = runBlocking { integrations.karakeepService.first() }!!.generation
+        savedGeneration = CompletableDeferred()
+        scope.launch {
+            integrations.karakeepService.collect { service ->
+                val target = savedGeneration
+                if (target != null && !target.isCompleted && service != null && service.generation > initialGeneration) {
+                    target.complete(service.generation)
+                }
+            }
+        }
+    }
+
+    @After
+    fun tearDown() {
+        scope.cancel()
+    }
+
+    @Test
+    fun twoSaveTapsBeforeTheCoroutineStartsAdmitOneOperation() {
+        show()
+        field("API key").performTextInput("new-key")
+        blockWrites = true
+        compose.mainClock.autoAdvance = false
+        try {
+            // Invoke the click action directly, without waiting for idle: the coroutine must not
+            // start between the two taps.
+            saveButton().performSemanticsAction(SemanticsActions.OnClick) { click ->
+                click()
+                assertEquals("the first save started before the second tap", 1L, writeEntered.count)
+                click()
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.waitForIdle()
+        awaitAdmission(writeEntered)
+        assertEquals("a second tap launched a second save", 1, writeCount.get())
+        writeRelease.countDown()
+        assertTrue(writeReturned.await(5, TimeUnit.SECONDS))
+        compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
+        compose.waitForIdle()
+        assertEquals(1, writeCount.get())
+        compose.onAllNodesWithText("Settings saved.").onFirst().assertExists()
+    }
+
+    @Test
+    fun anEditAfterTheTapBeforeTheCoroutineStartsKeepsTheDraftAndTheTappedAddress() {
+        show()
+        field("API key").performTextInput("new-key")
+        lateinit var editAddress: (AnnotatedString) -> Boolean
+        field("Server address").performSemanticsAction(SemanticsActions.SetText) { editAddress = it }
+        blockWrites = true
+        compose.mainClock.autoAdvance = false
+        try {
+            // Query semantics before admission: a second test interaction can synchronize the
+            // queued coroutine even with a paused frame clock. Both callbacks share one UI turn.
+            saveButton().performSemanticsAction(SemanticsActions.OnClick) { click ->
+                click()
+                editAddress(AnnotatedString("http://127.0.0.1:1/keep2"))
+                assertEquals("the save started before the edit", 1L, writeEntered.count)
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.waitForIdle()
+        awaitAdmission(writeEntered)
+        writeRelease.countDown()
+        assertTrue(writeReturned.await(5, TimeUnit.SECONDS))
+        compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
+        compose.waitForIdle()
+        // The tapped address was saved, not the edited draft.
+        assertEquals("http://127.0.0.1:1/keep", storedAddress())
+        // The edit survived the delayed result, and no success message describes the newer form.
+        field("Server address").assert(hasText("http://127.0.0.1:1/keep2"))
+        assertEquals(0, compose.onAllNodesWithText("Settings saved.").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun editsBeforeTheTapAreCapturedWithoutWaitingForRecomposition() {
+        show()
+        field("API key").performTextInput("new-key")
+        blockWrites = true
+        compose.mainClock.autoAdvance = false
+        try {
+            field("Server address").performSemanticsAction(SemanticsActions.SetText) {
+                it.invoke(AnnotatedString("http://127.0.0.1:1/keep2"))
+            }
+            field("Other address (optional)").performSemanticsAction(SemanticsActions.SetText) {
+                it.invoke(AnnotatedString("http://127.0.0.1:2/keep"))
+            }
+            saveButton().performSemanticsAction(SemanticsActions.OnClick) { it.invoke() }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.waitForIdle()
+        awaitAdmission(writeEntered)
+        writeRelease.countDown()
+        compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
+        val saved = runBlocking { integrations.karakeepService.first() }!!
+        assertEquals("http://127.0.0.1:1/keep2", saved.baseUrl)
+        assertEquals("http://127.0.0.1:2/keep", saved.alternateUrl)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h480dp")
+    fun aCheckAndARemoveWhileASaveIsPendingAdmitOnlyTheSave() {
+        show()
+        field("API key").performTextInput("new-key")
+        blockWrites = true
+        saveButton().performScrollTo().assertIsDisplayed().performClick()
+        awaitAdmission(writeEntered)
+        checkButton().assertIsNotEnabled()
+        removeButton().assertIsNotEnabled()
+
+        writeRelease.countDown()
+        compose.waitUntil(5_000) { savedGeneration!!.isCompleted }
+        compose.waitForIdle()
+        saveButton().assertIsEnabled()
+        checkButton().assertIsEnabled()
+        removeButton().assertIsEnabled()
+
+        checkButton().performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Connected.").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun aSaveAndARemoveWhileACheckIsPendingAdmitOnlyTheCheck() {
+        show()
+        blockChecks = true
+        checkButton().performScrollTo().assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithText("Checking…").onFirst().assertExists()
+        awaitAdmission(checkEntered)
+        saveButton().assertIsNotEnabled()
+        removeButton().assertIsNotEnabled()
+
+        checkRelease.countDown()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Connected.").fetchSemanticsNodes().isNotEmpty()
+        }
+        saveButton().assertIsEnabled()
+        removeButton().assertIsEnabled()
+
+        removeButton().performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("Remove Karakeep?").assertExists()
+        compose.onAllNodesWithText("Remove").onLast().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun aBusyServerSaysTryAgainLaterInsteadOfCheckTheAddress() {
+        checkStatus = 503
+        show()
+        checkButton().performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("The server answered with an error (HTTP 503). Try again later.")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(0, compose.onAllNodesWithText("Check the address", substring = true).fetchSemanticsNodes().size)
+    }
+
+    private fun awaitAdmission(latch: CountDownLatch) {
+        // Room can resume the action on main before it reaches the IO fake. Blocking this
+        // thread on the admission latch can prevent that continuation from ever running.
+        compose.waitUntil(5_000) { latch.count == 0L }
+    }
+
+    private fun show() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        compose.setContent {
+            CombrayTheme {
+                SettingsSheet(
+                    integrations = integrations,
+                    settings = BrowserSettings(context.getSharedPreferences("settings-form-test", Context.MODE_PRIVATE), scope),
+                    retention = Retention(),
+                    onUnusedTabsChanged = {},
+                    notices = ThirdPartyNotices(application.assets),
+                    onDismiss = {},
+                )
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun storedAddress(): String = runBlocking { integrations.karakeepService.first() }!!.baseUrl
+
+    private fun saveButton() = compose.onAllNodesWithText("Save settings").onFirst()
+
+    private fun checkButton() = compose.onAllNodesWithText("Check connection").onFirst()
+
+    private fun removeButton() = compose.onAllNodesWithText("Remove").onFirst()
+
+    private fun field(label: String) = compose.onAllNodes(hasSetTextAction() and hasText(label)).onFirst()
+}

@@ -35,7 +35,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
             EngineEvent.parse(json)
         } catch (malformed: IllegalArgumentException) {
             // A schema mismatch between native and Kotlin is a bug; never guess at the event.
-            Log.e(LOG_TAG, "unparseable engine event (${json.length} chars)", malformed)
+            // Syntax and semantic failures can both quote input-derived fields or page content.
+            // Keep only the class and size, never the message, cause or stack trace.
+            Log.e(LOG_TAG, "unparseable engine event (${json.length} chars): ${malformed.javaClass.name}")
             return
         }
         listener(event)
@@ -60,6 +62,10 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
     override fun goForward(tab: Long) = NativeEngine.goForward(tab)
 
     override fun reload(tab: Long) = NativeEngine.reload(tab)
+
+    override fun stopLoading(view: ViewRef, request: Long) = NativeEngine.stopLoading(view.tab, view.generation, request)
+
+    override fun reload(page: PageRef) = NativeEngine.reloadPage(page.view.tab, page.view.generation, page.document)
 
     override fun scrollToEdge(page: PageRef, edge: ScrollEdge) =
         NativeEngine.scrollToEdge(page.view.tab, page.view.generation, page.document, edge.nativeCode)

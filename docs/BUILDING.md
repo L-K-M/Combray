@@ -18,15 +18,22 @@ scripts/m0/                   env.sh, fetch-servo.sh, build-*.sh, emulator.sh, r
 
 | Input | Version | Source of truth |
 | --- | --- | --- |
-| Downstream Servo | `L-K-M/servo`, git `634843fca29ba6ce05e8249073d790a4ecb08dca` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
+| Downstream Servo | `L-K-M/servo`, git `5813399954091a7efd7f736ea6fe14cb1ed523b9` (`combray/0.7`) | `scripts/m0/servo-pin.sh`; the newest `combray/0.N` branch is the downstream line, not a moving build input |
 | Upstream base | v0.7.0, git `aac43a3f31a259f04a574f5ec4e959c943ad7cc7` | `COMBRAY_SERVO_UPSTREAM_REVISION` in the same pin file; also fetched from our repository |
-| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, error reporting for modules with top-level `await` | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Engine changes | Document identity and guarded evaluation, render-error logging, profile persistence, DOM-only `:has()` queries, fixed-layer scroll chaining, readable default colors, loopback-only WebDriver, patched TLS, crypto and zstd crates, a backported timer GC fix, the `xmlns` attribute prefix, `console.table` and `console.dirxml`, every PerformanceTiming name in `performance.measure()`, backported flex layout reuse, SVG `getTotalLength()` and `getPointAtLength()`, resolved styles and `var()` in rasterized SVG subtrees, nonce-property authorization for inline blocks, empty origins on port and dedicated-worker messages, console formatting without page script, and WebDriver helpers only under WebDriver, HTTP/2 header lists up to 256 KiB, the PDF viewer document ([ENGINE_SPIKE.md section 44](ENGINE_SPIKE.md#44-pdf-viewer-document-30-october-2026)), Web-compatible min-content sizes of single-line flex rows, a backported fix that counts flex gaps once in multi-line containers, `close()` on transferred message ports without a crash or a broken channel, panic reports from an embedder's own panic hook, and zooming out to content wider than the viewport ([ENGINE_SPIKE.md section 46](ENGINE_SPIKE.md#46-pages-wider-than-the-screen-5-november-2026)), `SVGAnimatedString` and SVG `className`, a backported libz-sys 1.1.31 ([ENGINE_SPIKE.md section 48](ENGINE_SPIKE.md#48-svganimatedstring-and-libz-sys-6-november-2026)), SVG `getBBox()`, `isPointInFill()` and `createSVGPoint()`, and reloads with the referrer of the document's request ([ENGINE_SPIKE.md section 52](ENGINE_SPIKE.md#52-bot-check-device-verification-6-november-2026)) | Downstream commits; the old patch directory is retired. Git source needs no vendor workaround |
+| Page crashes | A panic on one of Servo's script threads reaches Servo, which crashes the page instead of leaving it frozen; the app offers Reload | [Reproduction and checks](ENGINE_SPIKE.md#42-frozen-pages-after-a-script-thread-panic-4-november-2026) |
+| Reload pull | Synchronous compositor top-edge query, including nested/frame scroll chains and pinch panning | [Behavior and checks](ENGINE_SPIKE.md#35-pull-to-reload-31-october-2026) |
+| Stop loading | Cancel pending and committed loads while retaining a usable document; owner-thread completion supports reentry | [Candidate and checks](ENGINE_SPIKE.md#39-toolbar-recovery-1-november-2026); Android gates pending |
+| Page input | Shadow-field focus defaults and context-bound paste; focused text/empty carets, live composition, visual caret keys and Shift selection, multiline Android newline input and stale-connection guards | [Focus and paste](ENGINE_SPIKE.md#33-shadow-root-fields-and-paste-30-october-2026); [rich-editor validation and limits](ENGINE_SPIKE.md#56-rich-editor-carets-composition-and-navigation-7-november-2026) |
+| Scroll repaint fix | Restore scroll offsets when iframe pipelines start or exit and when a shared-context view closes | [Regression and validation](ENGINE_SPIKE.md#32-scroll-position-flicker-30-october-2026) |
+| Flex sizing | Single-line flex rows take the sum of their items' min-content contributions; multi-line rows count gaps once | [Reproduction and checks](ENGINE_SPIKE.md#41-flex-rows-wider-than-the-screen-4-november-2026) |
 | Rust | 1.97.1 with `aarch64-linux-android`, `x86_64-linux-android` | `native/rust-toolchain.toml` (same as Servo) |
 | Crates | Servo's release `Cargo.lock`, plus this crate | `native/Cargo.lock` (exact versions, crates.io checksums) |
+| PDFium-wasm | `@embedpdf/pdfium` 2.15.1: `pdfium.wasm` and `index.browser.js`, committed `gzip -9n` in `native/src/pdf/vendor/` | `scripts/vendor-pdfium.py` (npm integrity and SHA-256 pins), the same SHA-256s in `native/src/pdf.rs` tests ([Updating PDFium](#updating-pdfium)) |
 | SpiderMonkey | prebuilt `libmozjs-<target>.tar.gz` for `mozjs_sys 153.3.0-1`, downloaded by its build script | Servo's lockfile |
 | Android NDK | r29, `29.0.14206865` | `env.sh`, which also rejects a `PATH` where the linker wrapper named in `native/.cargo/config.toml` resolves outside it; Servo's build rejects other majors |
 | Android SDK | platform `android-37` (compileSdk), build-tools 36.0.0 | `app/build.gradle.kts`, `spike/android/app/build.gradle.kts` |
-| App: Gradle / AGP / Kotlin | Gradle 9.8.1 (distribution SHA-256 pinned), AGP 9.4.1, Kotlin 2.4.21, KSP 2.3.12 | `gradle/wrapper/`, `gradle/libs.versions.toml` |
+| App: Gradle / AGP / Kotlin | Gradle 9.8.2 (distribution SHA-256 pinned), AGP 9.5.1, Kotlin 2.4.21, KSP 2.3.13 | `gradle/wrapper/`, `gradle/libs.versions.toml` |
 | App libraries | Compose BOM 2026.09.00 (Material 3 1.4.0), Room 2.8.5, WorkManager 2.12.0, Lifecycle 2.11.0, kotlinx coroutines/serialization 1.11.0; tests: Robolectric 4.17, JUnit 4.13.2 | `gradle/libs.versions.toml` |
 | Harness: Gradle / AGP | Gradle 9.5.1 (distribution SHA-256 pinned), Android Gradle Plugin 9.2.1 | `spike/android/gradle/wrapper/`, `spike/android/build.gradle.kts` |
 | Maven artifacts | By version only: no Gradle dependency verification or lockfile yet | Google Maven, Maven Central. Checksum verification should be generated on each supported host OS before a release (M4) |
@@ -52,6 +59,8 @@ scripts/build.sh --debug                       # arm64 (phones) → dist/combray
 COMBRAY_ABI=x86_64 scripts/build.sh --debug    # for the emulator
 scripts/build.sh --debug --install             # then install and launch on the connected device
 ```
+
+With `--install`, the build first asks adb for a usable device (`scripts/install.sh --device-check`) and stops at once if there is none, naming the likely cause: USB debugging off, the phone's "Allow USB debugging?" prompt not accepted, an offline connection, or a second adb version on `PATH`. `scripts/install.sh` runs the same check before Gradle and uses the SDK's adb, as Gradle does.
 
 `scripts/build.sh` prepares and builds the engine first through `scripts/build-native.sh`. That script installs the pinned NDK and Rust toolchain when missing and checks out the exact downstream commit with `scripts/m0/fetch-servo.sh`. Every build restores and verifies the pinned source. It then compiles the engine and stages it in `engine/jniLibs/<abi>/`. The first run downloads several gigabytes and compiles Servo, which takes an hour or more; later runs rebuild only what changed. The steps also run on their own:
 
@@ -95,7 +104,7 @@ Settings › About lists the APK's third-party components with their license tex
 | --- | --- | --- |
 | Rust crates linked into the engine | `cargo about` (0.9.2) with `native/about.toml` | Regenerate after changing `native/Cargo.lock` |
 | C/C++ code compiled into the engine (SpiderMonkey and its ICU, ANGLE, FreeType, HarfBuzz, …), libc++, libunwind and compiler-rt | `native/bundled-notices.toml`, read from the crates' sources and the pinned NDK | Recheck the list after changing the Servo pin; it was found by listing the linked archives' members and symbols |
-| Vendored JavaScript and Servo's baked-in data files (Public Suffix List, HSTS preload list, GATT blocklist) | `native/bundled-notices.toml`, with `native/src/vendor/*.LICENSE.md` and `native/licenses/` | Recheck after updating a vendored script or changing the Servo pin (`components/default-resources`) |
+| Vendored JavaScript, PDFium-wasm and the libraries built into it, and Servo's baked-in data files (Public Suffix List, HSTS preload list, GATT blocklist) | `native/bundled-notices.toml`, with `native/src/vendor/*.LICENSE.md`, `native/src/pdf/vendor/*.LICENSE` and `native/licenses/` | Recheck after updating a vendored script or PDFium ([Updating PDFium](#updating-pdfium)) or changing the Servo pin (`components/default-resources`) |
 | Crates cargo-about shows without their own copyright line | `[[crate]]` entries in `native/bundled-notices.toml`, texts from the crate, `native/licenses/` or the Servo checkout | The generator fails on an SPDX template (`<year> <owner>`) or a `[[crate]]` version that no longer matches |
 | Rust standard library | The pinned toolchain's `COPYRIGHT-library.html`, as text and verbatim `Rust-Licenses.html` | Regenerate after changing `native/rust-toolchain.toml` |
 | Java/Kotlin libraries | Licensee Gradle plugin, at build time | Automatic; the build fails on a license other than Apache-2.0 |
@@ -189,6 +198,27 @@ In a Combray PR, set the full candidate SHA and its upstream base in `scripts/m0
 
 Rollback: revert the Combray pin change to the previous tested SHA and rebuild. Keep the downstream commits available; no force-push or source deletion is needed.
 
+## Updating PDFium
+
+The PDF viewer's renderer is `@embedpdf/pdfium` from the npm registry. Its two runtime files are committed gzip-compressed (owner decision, 29 October 2026), so builds need no network for them and the native library embeds them with `include_bytes!` (`native/src/pdf.rs`, about 2.2 MB of the APK instead of 4.9 MB raw).
+
+```sh
+python3 -I scripts/vendor-pdfium.py                 # download, check, write native/src/pdf/vendor/
+python3 -I scripts/vendor-pdfium.py --tarball <tgz> # the same from a tarball already downloaded
+```
+
+The script reads the tarball into memory, checks the registry's `sha512` integrity and the SHA-256 of `pdfium.wasm`, `index.browser.js`, `LICENSE` and `LICENSE.pdfium`, and writes the first two with GNU `gzip -9n` from `PATH` (no name or time, so the output is reproducible with the same gzip; Python's zlib would give other bytes) next to the two licence files.
+
+To move to another version:
+
+1. Read the new version's `dist.integrity` from `https://registry.npmjs.org/@embedpdf/pdfium` and set `VERSION` and `INTEGRITY` in `scripts/vendor-pdfium.py`.
+2. Download the tarball once, compute the four files' SHA-256, review the package's changes, and set the pins in the script and the two runtime files' pins in the `native/src/pdf.rs` tests.
+3. Run the script, then `python3 -I -m unittest discover -s scripts/tests`, `cd native && cargo test --lib` and `node --test native/src/pdf/test/viewer.test.mjs` (the viewer's worker against the new PDFium).
+4. Recheck the libraries built into `pdfium.wasm` and `index.browser.js` against `native/bundled-notices.toml` and [native/licenses](../native/licenses/README.md), and regenerate the notices ([Third-party notices](#third-party-notices)). Strings reveal only some of them (libpng and zlib versions, FreeType, OpenJPEG, Little CMS, libc++, musl). Read the package's build recipe (`packages/pdfium` on embed-pdf-viewer's release branch: GN arguments, the PDFium fork's `DEPS` and the `deps` of `core/fxcrt`, `core/fxcodec` and `core/fxge`, and the Emscripten image) and look for the data tables of libraries without strings, such as ICU's case-mapping tables, fast_float's power-of-five table and libjpeg's `jpeg_natural_order`.
+5. Record the version in `docs/PDF.md` and this table. Run `PdfTest` on a device (`scripts/check-app.sh <serial> ch.lkmc.combray.PdfTest`).
+
+Rollback: revert the commit that changed the files and pins.
+
 ## Emulator and checks
 
 App checks (instrumented tests against the real engine and `testing/fixtures/server.py`, then a process-death check across a killed process):
@@ -220,6 +250,7 @@ For an arm64 device: `COMBRAY_ABI=arm64 scripts/m0/build-harness.sh`, then `scri
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| `installDebug`: `No connected devices!` although the phone is plugged in | adb does not list the phone as a usable `device`: USB debugging off, the authorization prompt not accepted, a charge-only cable, or two adb versions restarting each other's server | `scripts/install.sh` checks with the SDK's adb before Gradle and names the cause; run `<sdk>/platform-tools/adb devices -l` to see the state |
 | `Servo currently only supports NDK r29.` | The Servo book still mentions NDK 28.2; v0.6.0's mach requires r29 | Install `ndk;29.0.14206865` |
 | `current package believes it's in a workspace when it's not` in `mozjs_*_glue` | Their build scripts run `cbindgen`, which runs `cargo metadata` inside `vendor/` | Patch 0001: no `vendor/`, crates from crates.io at the locked versions |
 | `failed to select a version ... encoding_rs (locked to 0.8.41)` | The same glue crates carry their own `Cargo.lock`; `vendor/` only has 0.8.35 | Patch 0001 |
@@ -235,6 +266,7 @@ For an arm64 device: `COMBRAY_ABI=arm64 scripts/m0/build-harness.sh`, then `scri
 | `Injecting to another application requires INJECT_EVENTS` | A System UI ANR dialog has input focus | The tests close system dialogs before taps |
 | A check ends with `keyDispatchingTimedOut` (`Waited 5000ms for FocusEvent`) when it opens a sheet or dialog in the browser | Under software emulation and host load, the main thread needs over 5 s to take a new window's focus (ANR traces showed it busy in Compose layout, not blocked). A bottom sheet on a plain Compose activity timed out the same way (run `a11y1`) | `AboutTest` hosts the notices dialog on a plain Compose activity, and `AccessibilityTest` checks the More sheet's rows without the sheet; retry when the host is less loaded. Device checks still do not open the browser's bottom sheets |
 | `Failed to inject touch input. Reason: Expected exactly '1' node ...` | Not an input problem: Compose prefixes a failed node lookup with this text. App data persists across the checks of one run, so a page an earlier check saved has "Saved to Karakeep" instead of a "Save" button | Each check that taps Save uses a page no earlier check saved |
+| A check fails now and then with `Method removeObserver must be called on the main thread` (or `addObserver`), thrown in `TestMonotonicFrameClock.performFrame` on a `DefaultDispatcher` worker | A composable collected a flow without a context. Under a Compose test rule the collector resumes on the publishing thread, wakes the recomposer there, and in a narrow race that thread runs the frame; a `BackHandler`'s `LifecycleStartEffect` then fails off the main thread. The app recomposes on the main thread, so only checks see it | Collect UI flows with `collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)`, and write UI state computed on another dispatcher from the main thread; `MainThreadStateTest` fails on the snapshot changes that precede the race |
 | Lint `NewApi`: `URLEncoder.encode(String, Charset)` | That overload is API 33; minSdk is 30 (it would crash on Android 11) | `URLEncoder.encode(value, "UTF-8")` |
 
 ## Cleaning up

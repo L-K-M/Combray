@@ -105,6 +105,11 @@ if [ "$VARIANT" = "release" ]; then
     done
 fi
 
+# Find a missing or unauthorized phone now, not after the engine build.
+if [ "$INSTALL" -eq 1 ]; then
+    "$(dirname "$SELF")/install.sh" --device-check
+fi
+
 echo "==> scripts/build-native.sh ($ABI)"
 COMBRAY_ABI="$ABI" "$(dirname "$SELF")/build-native.sh"
 

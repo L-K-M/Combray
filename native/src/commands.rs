@@ -8,6 +8,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
+use servo::StopLoadingError;
+
 use crate::capture::CaptureKind;
 use crate::events::ViewKey;
 use crate::native_window::NativeWindow;
@@ -75,6 +77,8 @@ pub enum LocalDocumentCheck {
 pub struct KeyInput {
     pub unicode: u32,
     pub key_code: i32,
+    pub modifiers: crate::keyboard::KeyModifiers,
+    pub context: Option<u64>,
 }
 
 pub struct CaptureRequest {
@@ -103,6 +107,12 @@ pub enum Command {
         width: u32,
         height: u32,
     },
+    /// The app's bottom controls cover this many bottom rows of the surface; pages lay out
+    /// above them. Outcome: `viewport_painted` with `request` once a frame shows that page.
+    SetViewportInset {
+        inset: u32,
+        request: u64,
+    },
     /// Must complete before `SurfaceHolder.Callback.surfaceDestroyed` returns.
     SurfaceDestroyed {
         done: Done,
@@ -130,6 +140,19 @@ pub enum Command {
     },
     Reload {
         tab: i64,
+    },
+    StopLoading {
+        view: ViewKey,
+        request: i64,
+    },
+    LoadingStopped {
+        view: ViewKey,
+        request: i64,
+        result: Result<u64, StopLoadingError>,
+    },
+    ReloadPage {
+        view: ViewKey,
+        document: u64,
     },
     ScrollToEdge {
         view: ViewKey,
@@ -163,6 +186,13 @@ pub enum Command {
         key: KeyInput,
     },
     ImeCommit {
+        context: Option<u64>,
+        text: String,
+    },
+    ImeComposition {
+        id: u64,
+        context: u64,
+        phase: crate::composition::Phase,
         text: String,
     },
     /// The user hid the keyboard while a page field had it.

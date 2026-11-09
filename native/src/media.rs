@@ -11,19 +11,32 @@
 //! its fallback. Script fetches (`fetch()`, `XMLHttpRequest`) have the empty destination and are
 //! not affected.
 //!
+//! `canPlayType` and `<source type>` ask Servo's media backend what plays; they are the only
+//! callers (this engine has no MSE `isTypeSupported` for a page to reach the same answer
+//! through). The dummy answers nothing, which hides media from the player too: a site that
+//! asks first attaches no source, and a `<source>` with a `type` is skipped before its fetch,
+//! so nothing is cancelled and nothing is reported. `media_backend` answers instead with the
+//! types the player can fetch and decode ([`claimed_support`]); every other type keeps the
+//! `No` it had, so a page never picks a format the player cannot play.
+//!
 //! The application may offer a cancelled `audio` or `video` load to a player outside Servo, so
 //! the engine reports its URL when the URL is one the player could fetch as the page asked
 //! ([`reportable_url`]). Reports are per page ([`PageMedia`]): a URL already reported for the
 //! page is not reported again, and a page whose media has no reportable URL is reported once. A
 //! budget per tab and document ([`MediaBudget`]) bounds the reports of a page that keeps changing
 //! its media URL or its address. A load names no document, so the engine credits it to the
-//! committed one, except while a new document is about to commit ([`PendingMedia`]).
+//! committed one, except while a new document is awaited ([`PendingMedia`]).
+//!
+//! Once a document has reported a URL, a tap on one of its media elements, or on controls the
+//! page laid over one, has the application offer the page's media again
+//! ([`tap_hits_media_script`]): sites draw their own player with their own error message, and
+//! that is where you tap.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 use std::collections::VecDeque;
 
-use log::debug;
+use log::{debug, info};
 
 /// Longest media URL the engine reports. Signed CDN URLs are typically under 2 KiB.
 pub(crate) const MAX_MEDIA_URL_BYTES: usize = 8192;
@@ -38,8 +51,16 @@ const MEDIA_REFILL_INTERVAL_MS: u64 = 1000 / MEDIA_REPORTS_PER_SECOND;
 /// for it. Servo reports the start and asks for the commit at the same moment, so a commit later
 /// than this means the document will not commit (another navigation replaced it).
 const PENDING_COMMIT_MS: u64 = 5_000;
+/// How long the application's request for a page may take to start or commit a document before
+/// loads stop waiting for it: as long as the application itself waits for that commit
+/// (`NAVIGATION_TIMEOUT_MS` in `BrowserCoordinator.kt`).
+const REQUESTED_DOCUMENT_MS: u64 = 30_000;
 /// Loads held per tab for a document about to commit.
 const MAX_HELD_MEDIA: usize = 16;
+/// Documents per tab whose taps are checked against their media elements ([`MediaDocuments`]):
+/// as many as the pages a view keeps media for in the application (`MAX_MEDIA_PAGES` in
+/// `BrowserCoordinator.kt`), since a document has at least one page.
+const MAX_MEDIA_DOCUMENTS: usize = 16;
 
 /// What a cancelled load was for, from its fetch destination.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +92,101 @@ pub(crate) fn cancelled_kind(destination: &str) -> Option<MediaKind> {
     }
 }
 
+/// What `canPlayType` reports, as `SupportsMediaType` spells it, so the table and its tests
+/// build without Servo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaSupport {
+    No,
+    Maybe,
+    Probably,
+}
+
+/// What `canPlayType` answers for `media_type` (as `video/mp4; codecs="avc1.42E01E, mp4a.40.2"`):
+/// `Maybe` for a MIME type the player outside the engine reads, `Probably` when its `codecs`
+/// names only codecs a device decoder plays, and `No` for anything else.
+///
+/// The claim is what Media3's progressive and HLS sources read through the decoders Android
+/// requires: H.264 video and AAC/MP3 audio in MP4, AAC, MP3, WAV, FLAC and Vorbis/Opus/FLAC
+/// audio on their own, and HLS playlists carrying the same codecs in TS or fMP4. Nothing else
+/// is claimed: a codec a device may lack (HEVC, VP9, AV1) or a source the player does not read
+/// (DASH, WebM, MSE) must stay `No`, or a site chooses it and fails.
+pub(crate) fn claimed_support(media_type: &str) -> MediaSupport {
+    let media_type = media_type.to_ascii_lowercase();
+    let mut parts = media_type.split(';');
+    let mime = parts.next().unwrap_or_default().trim();
+    let codecs = parts.find_map(|part| {
+        let (name, value) = part.split_once('=')?;
+        (name.trim() == "codecs").then(|| value.trim().trim_matches('"').trim())
+    });
+    match mime {
+        "video/mp4" | "audio/mp4" | "audio/x-m4a" => support(codecs, mp4_codec),
+        // ADTS carries AAC only, so a named codec must be one (`mp4a.40.*` or a bare `mp4a`).
+        "audio/aac" | "audio/x-aac" => support(codecs, |codec| {
+            codec == "mp4a" || codec.starts_with("mp4a.40")
+        }),
+        "audio/mpeg" | "audio/mp3" | "audio/x-mp3" | "audio/mpeg3" | "audio/x-mpeg3" => {
+            support(codecs, mp3_codec)
+        },
+        "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/vnd.wave" => support(codecs, wav_codec),
+        "audio/flac" | "audio/x-flac" => support(codecs, |codec| codec == "flac"),
+        "audio/ogg" | "application/ogg" => support(codecs, ogg_codec),
+        // HLS playlists: the `codecs` parameter names the segments' codecs, which the same
+        // MP4-family decoders play (`application/vnd.apple.mpegurl` is the registered type;
+        // `audio/mpegurl` is common for audio-only playlists).
+        "application/vnd.apple.mpegurl"
+        | "application/x-mpegurl"
+        | "audio/mpegurl"
+        | "audio/x-mpegurl" => support(codecs, mp4_codec),
+        _ => MediaSupport::No,
+    }
+}
+
+/// `Probably` when `codecs` names codecs and every one is `supported`, `Maybe` for a bare
+/// type (or an empty `codecs=""`, which says nothing), `No` when a named codec is not.
+fn support(codecs: Option<&str>, supported: impl Fn(&str) -> bool) -> MediaSupport {
+    let Some(codecs) = codecs else {
+        return MediaSupport::Maybe;
+    };
+    let codecs: Vec<&str> = codecs
+        .split(',')
+        .map(str::trim)
+        .filter(|codec| !codec.is_empty())
+        .collect();
+    if codecs.is_empty() {
+        MediaSupport::Maybe
+    } else if codecs.iter().all(|codec| supported(codec)) {
+        MediaSupport::Probably
+    } else {
+        MediaSupport::No
+    }
+}
+
+/// The MP4 codecs a device decoder plays: H.264 (`avc1`, `avc3`), AAC (`mp4a.40.*`), MP3 in
+/// MP4 (`mp4a.69`, `mp4a.6b`) and a bare `mp4a` that names none. Not AC-3/E-AC-3 (`mp4a.a5`,
+/// `mp4a.a6`) and no video codec a device may lack.
+fn mp4_codec(codec: &str) -> bool {
+    codec.starts_with("avc1")
+        || codec.starts_with("avc3")
+        || codec == "mp4a"
+        || codec.starts_with("mp4a.40")
+        || codec.starts_with("mp4a.69")
+        || codec.starts_with("mp4a.6b")
+}
+
+fn mp3_codec(codec: &str) -> bool {
+    codec == "mp3" || codec.starts_with("mp4a.69") || codec.starts_with("mp4a.6b")
+}
+
+/// The WAV encodings Media3 reads: PCM, float PCM, A-law and mu-law.
+fn wav_codec(codec: &str) -> bool {
+    matches!(codec, "1" | "3" | "6" | "7")
+}
+
+/// The Ogg audio a device decoder plays: Vorbis, Opus and FLAC.
+fn ogg_codec(codec: &str) -> bool {
+    matches!(codec, "vorbis" | "opus" | "flac")
+}
+
 /// The URL of a cancelled load, if the engine reports it: http(s) only, without sign-in
 /// credentials, and at most [`MAX_MEDIA_URL_BYTES`]. A URL with credentials is not stripped,
 /// because the player would then fetch something other than what the page asked for, and
@@ -97,6 +213,56 @@ pub(crate) fn reportable_url(kind: MediaKind, url: &str) -> Option<&str> {
 /// the page; the application uses the same rule.
 pub(crate) fn page_key(url: &str) -> &str {
     url.split_once('#').map_or(url, |(page, _)| page)
+}
+
+/// Says whether a tap landed on a media element with no data (`media_tap.js`).
+const TAP_TEMPLATE: &str = include_str!("media_tap.js");
+
+/// The script for the current document that says whether a tap at (`x`, `y`), in CSS pixels of
+/// the viewport, landed on a media element whose load was cancelled, or on controls the page laid
+/// over it (`media_tap.js`). None for a point that is not finite.
+pub(crate) fn tap_hits_media_script(x: f32, y: f32) -> Option<String> {
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    Some(
+        TAP_TEMPLATE
+            .replace("__X__", &x.to_string())
+            .replace("__Y__", &y.to_string()),
+    )
+}
+
+/// A tab's documents that reported a media URL on any of their pages, most recent first, at
+/// most [`MAX_MEDIA_DOCUMENTS`]. A tap on one of them is checked against its media elements,
+/// also after a route change or a return to it that loads nothing again. The bound follows the
+/// application's, which keeps the media of a view's most recently shown pages; the two orders
+/// differ (reports here, visits there), so a document revisited often without loading media
+/// again can drop out here while the application still offers its media in the address field.
+pub(crate) struct MediaDocuments<T> {
+    recent: VecDeque<T>,
+}
+
+impl<T> Default for MediaDocuments<T> {
+    fn default() -> Self {
+        Self {
+            recent: VecDeque::new(),
+        }
+    }
+}
+
+impl<T: Copy + PartialEq> MediaDocuments<T> {
+    /// `document` reported a media URL: it becomes the most recent.
+    pub(crate) fn note(&mut self, document: T) {
+        if let Some(position) = self.recent.iter().position(|known| *known == document) {
+            self.recent.remove(position);
+        }
+        self.recent.push_front(document);
+        self.recent.truncate(MAX_MEDIA_DOCUMENTS);
+    }
+
+    pub(crate) fn contains(&self, document: T) -> bool {
+        self.recent.contains(&document)
+    }
 }
 
 /// What to tell the application about one cancelled load.
@@ -210,64 +376,113 @@ pub(crate) struct UnattributedMedia {
     pub(crate) referrer: Option<String>,
 }
 
-/// Loads that arrive while a tab's next document is about to commit. Servo delivers a load
-/// (network), a document's start (script) and its commit (constellation) on three channels and
-/// takes from them in no fixed order, so a new document's first loads can arrive before its
-/// commit and would be credited to the page it replaces. Its start, though, is sent when the
-/// document is created, before it parses anything that loads media. Loads arriving between a
-/// document's start and its commit are held and given to that document when it commits. A
-/// document that reported its start commits even when a traversal commits another document
-/// first (Servo sends its activation before its start and does not override a pending change),
-/// so another commit leaves the hold in place; loads held for a document that never commits go
-/// to the committed one after [`PENDING_COMMIT_MS`]. A late load of the replaced page in that
-/// window is credited to the new one.
+/// Loads that arrive while a tab's next document is awaited. Servo delivers a load (network), a
+/// document's start (script) and its commit (constellation) on three channels and takes from them
+/// in no fixed order, so a new document's first loads can arrive before its start and its commit,
+/// and would be credited to the page it replaces, or dropped in a new tab where nothing has
+/// committed. Loads are held from the moment the application asks for a page (a new tab, an
+/// address, a reload) or a document reports its start, and given to the next document that
+/// commits: the started one, or, before any start, whichever commits first (a requested page's
+/// commit can overtake its start too). A document that reported its start commits even when a
+/// traversal commits another document first (Servo sends its activation before its start and
+/// does not override a pending change), so another commit leaves the hold in place. A hold ends
+/// without a commit after [`REQUESTED_DOCUMENT_MS`] for a request and [`PENDING_COMMIT_MS`] for
+/// a start ([`PendingMedia::expire`]); what it held is then the committed document's. A late
+/// load of the replaced page during a hold is credited to the new one, and a page's own loads
+/// wait while a request that commits nothing (a 204 answer, a download) is pending.
 #[derive(Default)]
 pub(crate) struct PendingMedia {
+    /// When the application asked for a page no document has started for yet.
+    requested: Option<u64>,
     /// The document that reported its start but has not committed, and when.
-    pending: Option<(u64, u64)>,
+    started: Option<(u64, u64)>,
     held: VecDeque<UnattributedMedia>,
 }
 
 impl PendingMedia {
-    /// `document`, not committed yet, reported its start. A document started later replaces it:
-    /// the loads held for the earlier one are dropped with it.
-    pub(crate) fn document_started(&mut self, document: u64, now_ms: u64) {
-        if self.pending.is_some_and(|(pending, _)| pending != document) {
-            self.held.clear();
-        }
-        self.pending = Some((document, now_ms));
+    /// The application asked for a page: its document's loads may arrive before anything else
+    /// about it, so loads wait for a commit from now on.
+    pub(crate) fn navigation_requested(&mut self, now_ms: u64) {
+        self.requested = Some(now_ms);
     }
 
-    /// Holds `media` for the document about to commit, or returns the loads to credit to the
-    /// committed document now: `media`, after any held for a document that did not commit.
+    /// `document`, not committed yet, reported its start. It answers a pending request, whose
+    /// held loads are its own. Without one, a document started later replaces an earlier one:
+    /// the loads held for that one are dropped with it.
+    pub(crate) fn document_started(&mut self, document: u64, now_ms: u64) {
+        let answers_request = self.requested.take().is_some();
+        let replaced = self.started.is_some_and(|(started, _)| started != document);
+        if !answers_request && replaced && !self.held.is_empty() {
+            info!(
+                "{} held media loads dropped: another document started",
+                self.held.len()
+            );
+            self.held.clear();
+        }
+        self.started = Some((document, now_ms));
+    }
+
+    /// Holds `media` while a document is awaited, or gives it back to credit to the committed
+    /// document now. Call [`PendingMedia::expire`] first, so loads keep their order.
     pub(crate) fn admit(
         &mut self,
         media: UnattributedMedia,
         now_ms: u64,
-    ) -> Vec<UnattributedMedia> {
-        if let Some((_, since)) = self.pending {
-            if now_ms.saturating_sub(since) <= PENDING_COMMIT_MS {
-                if self.held.len() == MAX_HELD_MEDIA {
-                    self.held.pop_front();
-                }
-                self.held.push_back(media);
-                return Vec::new();
-            }
-            self.pending = None;
+    ) -> Option<UnattributedMedia> {
+        if !self.awaiting(now_ms) {
+            return Some(media);
         }
-        let mut admitted: Vec<_> = self.held.drain(..).collect();
-        admitted.push(media);
-        admitted
+        if self.held.len() == MAX_HELD_MEDIA {
+            self.held.pop_front();
+            info!("a held media load was dropped: {MAX_HELD_MEDIA} are held");
+        }
+        self.held.push_back(media);
+        None
     }
 
     /// `document` committed: the loads held for it, in arrival order. Another document's commit
-    /// keeps them for the pending one.
+    /// keeps them for the started one.
     pub(crate) fn committed(&mut self, document: u64) -> Vec<UnattributedMedia> {
-        if self.pending.is_none_or(|(pending, _)| pending != document) {
+        match self.started {
+            Some((started, _)) if started == document => self.started = None,
+            Some(_) => return Vec::new(),
+            None if self.requested.take().is_some() => {},
+            None => return Vec::new(),
+        }
+        std::mem::take(&mut self.held).into()
+    }
+
+    /// Ends a hold whose document did not come in time: the loads it held, in arrival order, to
+    /// credit to the committed document.
+    pub(crate) fn expire(&mut self, now_ms: u64) -> Vec<UnattributedMedia> {
+        if self.awaiting(now_ms) {
             return Vec::new();
         }
-        self.pending = None;
+        self.requested = None;
+        self.started = None;
         std::mem::take(&mut self.held).into()
+    }
+
+    /// Both holds are inclusive; wake just after the last one stops awaiting its document.
+    pub(crate) fn next_expiry_ms(&self) -> Option<u64> {
+        let after_window = |since: u64, window: u64| since.saturating_add(window).saturating_add(1);
+        self.requested
+            .map(|since| after_window(since, REQUESTED_DOCUMENT_MS))
+            .into_iter()
+            .chain(
+                self.started
+                    .map(|(_, since)| after_window(since, PENDING_COMMIT_MS)),
+            )
+            .max()
+    }
+
+    fn awaiting(&self, now_ms: u64) -> bool {
+        let within = |since: u64, window: u64| now_ms.saturating_sub(since) <= window;
+        self.requested
+            .is_some_and(|since| within(since, REQUESTED_DOCUMENT_MS))
+            || self
+                .started
+                .is_some_and(|(_, since)| within(since, PENDING_COMMIT_MS))
     }
 }
 
@@ -286,19 +501,71 @@ mod tests {
     #[test]
     fn loads_without_a_pending_document_are_credited_now() {
         let mut pending = PendingMedia::default();
-        assert_eq!(pending.admit(load("a"), 1_000), vec![load("a")]);
+        assert_eq!(pending.admit(load("a"), 1_000), Some(load("a")));
         assert_eq!(pending.committed(7), Vec::new());
+        assert_eq!(pending.expire(1_000), Vec::new());
     }
 
     #[test]
     fn loads_that_overtake_a_commit_go_to_the_document_that_commits() {
         let mut pending = PendingMedia::default();
         pending.document_started(7, 1_000);
-        assert_eq!(pending.admit(load("a"), 1_010), Vec::new());
-        assert_eq!(pending.admit(load("b"), 1_020), Vec::new());
+        assert_eq!(pending.admit(load("a"), 1_010), None);
+        assert_eq!(pending.admit(load("b"), 1_020), None);
         assert_eq!(pending.committed(7), vec![load("a"), load("b")]);
         // Committed: later loads are the new page's at once.
-        assert_eq!(pending.admit(load("c"), 1_030), vec![load("c")]);
+        assert_eq!(pending.admit(load("c"), 1_030), Some(load("c")));
+    }
+
+    #[test]
+    fn loads_that_overtake_a_requested_pages_start_go_to_the_document_that_commits() {
+        let mut pending = PendingMedia::default();
+        // The previous page (document 6) is committed; the application asks for another.
+        pending.navigation_requested(1_000);
+        // The new document's load arrives before its start and its commit.
+        assert_eq!(pending.admit(load("a"), 1_010), None);
+        pending.document_started(7, 1_020);
+        assert_eq!(pending.admit(load("b"), 1_030), None);
+        assert_eq!(pending.committed(7), vec![load("a"), load("b")]);
+        assert_eq!(pending.admit(load("c"), 1_040), Some(load("c")));
+
+        // A new tab: its first document's commit can overtake its start as well.
+        let mut pending = PendingMedia::default();
+        pending.navigation_requested(2_000);
+        assert_eq!(pending.admit(load("d"), 2_010), None);
+        assert_eq!(pending.committed(8), vec![load("d")]);
+        assert_eq!(pending.admit(load("e"), 2_020), Some(load("e")));
+    }
+
+    #[test]
+    fn a_request_after_a_start_keeps_waiting_once_the_started_document_commits() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        pending.navigation_requested(1_010);
+        assert_eq!(pending.admit(load("a"), 1_020), None);
+        // The document that started first commits and takes what was held.
+        assert_eq!(pending.committed(7), vec![load("a")]);
+        // The requested page has not started: its loads still wait for it.
+        assert_eq!(pending.admit(load("b"), 1_030), None);
+        pending.document_started(8, 1_040);
+        assert_eq!(pending.committed(8), vec![load("b")]);
+    }
+
+    #[test]
+    fn a_request_that_commits_nothing_gives_its_loads_back_after_the_window() {
+        let mut pending = PendingMedia::default();
+        pending.navigation_requested(1_000);
+        assert_eq!(pending.admit(load("a"), 1_010), None);
+        // A slow server: still waiting well past a started document's window.
+        let slow = 1_000 + PENDING_COMMIT_MS + 1;
+        assert_eq!(pending.expire(slow), Vec::new());
+        assert_eq!(pending.admit(load("b"), slow), None);
+
+        // A 204 answer or a download: the loads were the committed page's.
+        let late = 1_000 + REQUESTED_DOCUMENT_MS + 1;
+        assert_eq!(pending.expire(late), vec![load("a"), load("b")]);
+        assert_eq!(pending.admit(load("c"), late), Some(load("c")));
+        assert_eq!(pending.committed(9), Vec::new());
     }
 
     #[test]
@@ -319,12 +586,62 @@ mod tests {
         // A start that never commits stops holding loads after the window, and gives back
         // what it held to the committed document.
         pending.document_started(11, 3_000);
-        assert_eq!(pending.admit(load("c"), 3_100), Vec::new());
-        assert_eq!(
-            pending.admit(load("d"), 3_000 + PENDING_COMMIT_MS + 1),
-            vec![load("c"), load("d")]
-        );
+        assert_eq!(pending.admit(load("c"), 3_100), None);
+        assert_eq!(pending.expire(3_000 + PENDING_COMMIT_MS), Vec::new());
+        let late = 3_000 + PENDING_COMMIT_MS + 1;
+        assert_eq!(pending.expire(late), vec![load("c")]);
+        assert_eq!(pending.admit(load("d"), late), Some(load("d")));
         assert_eq!(pending.committed(11), Vec::new());
+    }
+
+    #[test]
+    fn a_media_hold_wakes_just_after_its_inclusive_window() {
+        let mut pending = PendingMedia::default();
+        assert_eq!(pending.next_expiry_ms(), None);
+
+        pending.navigation_requested(1_000);
+        pending.admit(load("a"), 1_010);
+        let requested = 1_000 + REQUESTED_DOCUMENT_MS;
+        assert_eq!(pending.next_expiry_ms(), Some(requested + 1));
+        assert!(pending.expire(requested).is_empty());
+        assert_eq!(pending.expire(requested + 1), vec![load("a")]);
+        assert_eq!(pending.next_expiry_ms(), None);
+
+        pending.document_started(7, 2_000);
+        assert_eq!(
+            pending.next_expiry_ms(),
+            Some(2_000 + PENDING_COMMIT_MS + 1)
+        );
+        pending.committed(7);
+        assert_eq!(pending.next_expiry_ms(), None);
+    }
+
+    #[test]
+    fn the_last_of_two_media_holds_bounds_sleep() {
+        let mut pending = PendingMedia::default();
+        pending.document_started(7, 1_000);
+        pending.navigation_requested(1_010);
+        pending.admit(load("a"), 1_020);
+
+        // The earlier start can expire while the later request still holds the loads.
+        let expiry = 1_010 + REQUESTED_DOCUMENT_MS + 1;
+        assert_eq!(pending.next_expiry_ms(), Some(expiry));
+        assert!(pending.expire(1_000 + PENDING_COMMIT_MS + 1).is_empty());
+        assert_eq!(pending.next_expiry_ms(), Some(expiry));
+        assert_eq!(pending.expire(expiry), vec![load("a")]);
+        assert_eq!(pending.next_expiry_ms(), None);
+    }
+
+    #[test]
+    fn a_start_replaces_the_requested_media_deadline() {
+        let mut pending = PendingMedia::default();
+        pending.navigation_requested(1_000);
+        pending.document_started(7, 1_020);
+
+        assert_eq!(
+            pending.next_expiry_ms(),
+            Some(1_020 + PENDING_COMMIT_MS + 1)
+        );
     }
 
     #[test]
@@ -472,6 +789,34 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_keeps_its_most_recent_media_documents() {
+        let mut documents = MediaDocuments::default();
+        assert!(!documents.contains(0));
+        for document in 0..MAX_MEDIA_DOCUMENTS {
+            documents.note(document);
+        }
+        // Noted again, the first document becomes the most recent; the second is now the oldest.
+        documents.note(0);
+        documents.note(MAX_MEDIA_DOCUMENTS);
+
+        assert!(documents.contains(0));
+        assert!(!documents.contains(1));
+        assert!(documents.contains(2));
+        assert!(documents.contains(MAX_MEDIA_DOCUMENTS));
+        assert_eq!(documents.recent.len(), MAX_MEDIA_DOCUMENTS);
+    }
+
+    #[test]
+    fn the_media_tap_script_gets_the_point_in_css_pixels() {
+        let script = tap_hits_media_script(12.5, 40.0).unwrap();
+        assert!(script.trim_end().ends_with("})(12.5, 40)"), "{script}");
+        assert!(!script.contains("__X__") && !script.contains("__Y__"));
+        assert!(script.contains("elementsFromPoint(x, y)"));
+        assert_eq!(tap_hits_media_script(f32::NAN, 1.0), None);
+        assert_eq!(tap_hits_media_script(1.0, f32::INFINITY), None);
+    }
+
+    #[test]
     fn a_page_remembers_its_most_recent_urls() {
         let mut page = PageMedia::default();
         let url = |n: usize| format!("https://example.org/{n}.mp4");
@@ -552,5 +897,101 @@ mod tests {
             page.note(Some(&url(300)), &mut budget, start + 60_000),
             MediaReport::Nothing
         );
+    }
+
+    #[test]
+    fn mp4_claims_cover_h264_and_aac() {
+        use MediaSupport::*;
+        assert_eq!(Maybe, claimed_support("video/mp4"));
+        assert_eq!(Maybe, claimed_support("audio/mp4"));
+        assert_eq!(
+            Probably,
+            claimed_support("video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"")
+        );
+        assert_eq!(Probably, claimed_support("video/mp4;codecs=avc1.4d401f"));
+        assert_eq!(
+            Probably,
+            claimed_support("video/mp4; codecs=\"avc3.640028\"")
+        );
+        assert_eq!(Probably, claimed_support("audio/mp4; codecs=\"mp4a.40.2\""));
+        assert_eq!(Probably, claimed_support("audio/mp4; codecs=\"mp4a.69\""));
+        assert_eq!(Maybe, claimed_support("audio/x-m4a"));
+        assert_eq!(Maybe, claimed_support("audio/aac"));
+        assert_eq!(Maybe, claimed_support("audio/x-aac"));
+        assert_eq!(Probably, claimed_support("audio/aac; codecs=\"mp4a.40.5\""));
+        assert_eq!(No, claimed_support("audio/aac; codecs=\"avc1.42E01E\""));
+        // Case and spacing are the page's, not the table's.
+        assert_eq!(
+            Probably,
+            claimed_support("VIDEO/MP4;  CODECS = \"AVC1.42E01E\"")
+        );
+    }
+
+    #[test]
+    fn mp4_claims_reject_codecs_a_device_may_lack() {
+        use MediaSupport::*;
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"hvc1.1.6.L93\""));
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"hev1.1.6.L93\""));
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"av01.0.04M\""));
+        assert_eq!(No, claimed_support("video/mp4; codecs=\"vp09.00.10.08\""));
+        assert_eq!(No, claimed_support("audio/mp4; codecs=\"mp4a.a5\""));
+        // One unknown codec sinks the whole list.
+        assert_eq!(
+            No,
+            claimed_support("video/mp4; codecs=\"avc1.42E01E, ac-3\"")
+        );
+    }
+
+    #[test]
+    fn audio_claims_cover_what_the_player_reads() {
+        use MediaSupport::*;
+        assert_eq!(Maybe, claimed_support("audio/mpeg"));
+        assert_eq!(Probably, claimed_support("audio/mpeg; codecs=\"mp3\""));
+        assert_eq!(Maybe, claimed_support("audio/wav"));
+        assert_eq!(Probably, claimed_support("audio/wav; codecs=\"1\""));
+        assert_eq!(No, claimed_support("audio/wav; codecs=\"85\""));
+        assert_eq!(Maybe, claimed_support("audio/flac"));
+        assert_eq!(Probably, claimed_support("audio/ogg; codecs=\"vorbis\""));
+        assert_eq!(Probably, claimed_support("audio/ogg; codecs=\"opus\""));
+        assert_eq!(No, claimed_support("audio/ogg; codecs=\"theora\""));
+    }
+
+    #[test]
+    fn hls_claims_follow_the_playlists_codecs() {
+        use MediaSupport::*;
+        for mime in [
+            "application/vnd.apple.mpegurl",
+            "application/x-mpegurl",
+            "audio/mpegurl",
+            "audio/x-mpegurl",
+        ] {
+            assert_eq!(Maybe, claimed_support(mime), "{mime:?}");
+            assert_eq!(
+                Probably,
+                claimed_support(&format!("{mime}; codecs=\"avc1.42E01E, mp4a.40.2\"")),
+                "{mime:?} with supported codecs"
+            );
+            assert_eq!(
+                No,
+                claimed_support(&format!("{mime}; codecs=\"hvc1.1.6.L93\"")),
+                "{mime:?} with an unbacked codec"
+            );
+        }
+    }
+
+    #[test]
+    fn unbacked_types_stay_unclaimed() {
+        use MediaSupport::*;
+        // DASH and MSE never had a player.
+        for media_type in [
+            "application/dash+xml",
+            "video/webm",
+            "audio/webm",
+            "video/webm; codecs=\"vp8, vorbis\"",
+            "application/octet-stream",
+            "",
+        ] {
+            assert_eq!(No, claimed_support(media_type), "{media_type:?}");
+        }
     }
 }
