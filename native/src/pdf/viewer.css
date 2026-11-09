@@ -74,7 +74,8 @@ body {
 }
 
 .page-error:hover {
-  color: var(--text);
+  /* This message sits on white paper even when the surrounding viewer is dark. */
+  color: #1c1c1e;
 }
 
 .more {

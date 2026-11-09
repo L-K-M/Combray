@@ -673,6 +673,25 @@ test("a problem releases every page's bitmap", async () => {
   });
 });
 
+test("the retry button's hover text stays readable on white paper in dark mode", () => {
+  const css = readFileSync(new URL("../viewer.css", import.meta.url), "utf8");
+  const paper = css.match(/\.page\s*\{[^}]*background:\s*(#[0-9a-f]{6})/i);
+  const darkText = css.match(/@media\s*\(prefers-color-scheme:\s*dark\)[\s\S]*?--text:\s*(#[0-9a-f]{6})/i);
+  const hover = css.match(/\.page-error:hover\s*\{[^}]*color:\s*(#[0-9a-f]{6}|var\(--text\))/i);
+  assert.ok(paper && darkText && hover, "paper and hover declarations must be covered");
+  const ink = hover[1] === "var(--text)" ? darkText[1] : hover[1];
+  const luminance = (hex) => {
+    const channels = [1, 3, 5].map((offset) => {
+      const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  const values = [luminance(ink), luminance(paper[1])].sort((a, b) => b - a);
+  const ratio = (values[0] + 0.05) / (values[1] + 0.05);
+  assert.ok(ratio >= 4.5, `retry hover contrast ${ratio} is below 4.5:1`);
+});
+
 test("after the PDF fails to open again, no blank page or note comes back under the problem", async () => {
   await onFakePage(async (page) => {
     const sizes = Array.from({ length: MAX_PAGES }, () => LETTER);
