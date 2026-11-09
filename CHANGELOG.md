@@ -543,6 +543,9 @@ All notable changes to this project are documented here. The format follows
 - Proxy sign-ins Servo saved in its profile are deleted when the engine
   starts instead of being sent again after a restart. They still reach
   the disk while the app runs until a Servo patch change.
+- Large Hister requests retain the longest text prefix that fits the JSON
+  byte limit, without splitting Unicode characters or over-trimming escaped
+  text. Multibyte titles and Karakeep search queries stay bounded too.
 - With Hister capture on, a large page could stop responding for seconds
   after it loaded while Combray read its text. Reading now stops in time
   and keeps what it has, and waits while you scroll or tap.
