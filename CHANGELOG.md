@@ -814,3 +814,7 @@ All notable changes to this project are documented here. The format follows
   white band where the bar had been. The page area now keeps its size
   under the bar, pages lay out above the bar, and a hiding bar leaves
   only once the page under it is drawn.
+- A page's file upload no longer copies a file that would fill the phone's
+  storage. Combray refuses a pick that would leave less than 512 MB free
+  and says so, instead of copying until storage runs out and then
+  reporting the file as unreadable.

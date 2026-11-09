@@ -13,7 +13,6 @@ import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -51,9 +50,7 @@ class UploadStagingIoTest {
 
     @Test
     fun aPickSurvivesStartupCleanupThatRunsLate() = runBlocking {
-        val paths = staging.stage(listOf(uri))
-        assertNotNull(paths)
-        val picked = File(paths!!.single())
+        val picked = File(stagedPaths(listOf(uri)).single())
         assertEquals("Synthetic attachment", picked.readText())
 
         // The Application's IO startup task was delayed until after the picker returned.
@@ -65,17 +62,16 @@ class UploadStagingIoTest {
     @Test
     fun stagingRemovesPreviousProcessFilesEvenBeforeTheStartupTaskRuns() = runBlocking {
         val stale = File(root, "old-process.txt").apply { writeText("Unused old copy") }
-        val paths = staging.stage(listOf(uri))
-        assertNotNull(paths)
+        val paths = stagedPaths(listOf(uri))
         assertFalse("Staging did not finish its one-time startup cleanup", stale.exists())
-        assertEquals("Synthetic attachment", File(paths!!.single()).readText())
+        assertEquals("Synthetic attachment", File(paths.single()).readText())
     }
 
     @Test
     fun duplicateNamesAndLaterPicksKeepIndependentCopies() = runBlocking {
         staging.clear()
-        val first = staging.stage(listOf(uri, uri))!!
-        val second = staging.stage(listOf(uri))!!
+        val first = stagedPaths(listOf(uri, uri))
+        val second = stagedPaths(listOf(uri))
         staging.clear()
         val paths = first + second
         assertEquals(paths.size, paths.distinct().size)
@@ -84,7 +80,7 @@ class UploadStagingIoTest {
 
     @Test
     fun anotherInstanceInThisProcessKeepsTheExistingPick() = runBlocking {
-        val picked = File(staging.stage(listOf(uri))!!.single())
+        val picked = File(stagedPaths(listOf(uri)).single())
         // Constructing another wrapper is not a process restart and must not invalidate Servo's path.
         UploadStaging(root, RuntimeEnvironment.getApplication().contentResolver).clear()
         assertTrue(picked.exists())
@@ -93,11 +89,11 @@ class UploadStagingIoTest {
     @Test
     fun aProviderFailureIsRedactedAndDoesNotDeleteAnEarlierPick() = runBlocking {
         staging.clear()
-        val earlier = File(staging.stage(listOf(uri))!!.single())
+        val earlier = File(stagedPaths(listOf(uri)).single())
         provider.failure = IllegalStateException(PRIVATE_DETAIL, IllegalArgumentException(PRIVATE_CAUSE))
         ShadowLog.clear()
 
-        assertNull(staging.stage(listOf(uri)))
+        assertEquals(UploadStaging.Staged.Unreadable, staging.stage(listOf(uri)))
         assertEquals("Synthetic attachment", earlier.readText())
         assertEquals(1, root.listFiles()!!.size)
         val logs = ShadowLog.getLogsForTag("CombrayUpload")
@@ -109,6 +105,9 @@ class UploadStagingIoTest {
         }
     }
 
+    private suspend fun stagedPaths(uris: List<Uri>): List<String> =
+        (staging.stage(uris) as UploadStaging.Staged.Files).paths
+
     private class PickedFileProvider(private val source: File) : ContentProvider() {
         var failure: RuntimeException? = null
 
@@ -117,7 +116,16 @@ class UploadStagingIoTest {
 
         override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
             failure?.let { throw it }
-            return MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply { addRow(arrayOf("attachment.txt")) }
+            val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            return MatrixCursor(columns).apply {
+                addRow(columns.map { column ->
+                    when (column) {
+                        OpenableColumns.DISPLAY_NAME -> "attachment.txt"
+                        OpenableColumns.SIZE -> null
+                        else -> throw IllegalArgumentException(column)
+                    }
+                })
+            }
         }
 
         override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =

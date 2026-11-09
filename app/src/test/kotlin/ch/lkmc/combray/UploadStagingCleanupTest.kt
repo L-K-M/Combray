@@ -20,7 +20,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -60,16 +59,15 @@ class UploadStagingCleanupTest {
     fun cleanupRunsBeforeTheFirstPick() = runBlocking {
         val stale = staleCopy(root, "previous-process/0/attachment.txt")
 
-        val paths = staging.stage(listOf(uri))
+        val paths = staging.stagedPaths(listOf(uri))
 
-        assertNotNull(paths)
         assertFalse("Staging did not finish its one-time startup cleanup", stale.exists())
-        assertEquals(CONTENT, File(paths!!.single()).readText())
+        assertEquals(CONTENT, File(paths.single()).readText())
     }
 
     @Test
     fun aDelayedCleanupKeepsACompletedPick() = runBlocking {
-        val paths = staging.stage(listOf(uri))!!
+        val paths = staging.stagedPaths(listOf(uri))
         val picked = File(paths.single())
 
         // The process-start cleanup was delayed until after the pick was staged and answered.
@@ -81,7 +79,7 @@ class UploadStagingCleanupTest {
 
     @Test
     fun repeatedCleanupDoesNotDeleteTheCurrentPick() = runBlocking {
-        val paths = staging.stage(listOf(uri))!!
+        val paths = staging.stagedPaths(listOf(uri))
 
         staging.clear()
         staging.clear()
@@ -92,14 +90,14 @@ class UploadStagingCleanupTest {
     @Test
     fun twoConcurrentPicksSurviveCleanup() = runBlocking {
         val picks = coroutineScope {
-            val first = async(Dispatchers.IO) { staging.stage(listOf(uri, uri)) }
-            val second = async(Dispatchers.IO) { staging.stage(listOf(uri)) }
+            val first = async(Dispatchers.IO) { staging.stagedPaths(listOf(uri, uri)) }
+            val second = async(Dispatchers.IO) { staging.stagedPaths(listOf(uri)) }
             awaitAll(first, second)
         }
 
         staging.clear()
 
-        val paths = picks.mapNotNull { it }.flatten()
+        val paths = picks.flatten()
         assertEquals(3, paths.size)
         assertEquals(3, paths.distinct().size)
         paths.forEach { assertEquals(CONTENT, File(it).readText()) }
@@ -109,8 +107,8 @@ class UploadStagingCleanupTest {
     fun twoInstancesDoNotDeleteEachOtherPicks() = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         val other = UploadStaging(root, application.contentResolver)
-        val first = staging.stage(listOf(uri))!!
-        val second = other.stage(listOf(uri))!!
+        val first = staging.stagedPaths(listOf(uri))
+        val second = other.stagedPaths(listOf(uri))
 
         other.clear()
         staging.clear()
@@ -125,7 +123,7 @@ class UploadStagingCleanupTest {
         val release = CountDownLatch(1)
         provider.reading = reading
         provider.release = release
-        val copying = async(Dispatchers.IO) { staging.stage(listOf(uri)) }
+        val copying = async(Dispatchers.IO) { staging.stagedPaths(listOf(uri)) }
 
         try {
             assertTrue(reading.await(5, TimeUnit.SECONDS))
@@ -135,18 +133,17 @@ class UploadStagingCleanupTest {
         }
 
         val paths = copying.await()
-        assertNotNull(paths)
-        assertEquals(CONTENT, File(paths!!.single()).readText())
+        assertEquals(CONTENT, File(paths.single()).readText())
     }
 
     @Test
     fun aProviderFailureIsRedactedAndKeepsAnEarlierPick() = runBlocking {
         staging.clear()
-        val earlier = staging.stage(listOf(uri))!!
+        val earlier = staging.stagedPaths(listOf(uri))
         provider.failure = IllegalStateException(PRIVATE_DETAIL, IllegalArgumentException(PRIVATE_CAUSE))
         ShadowLog.clear()
 
-        assertNull(staging.stage(listOf(uri)))
+        assertEquals(UploadStaging.Staged.Unreadable, staging.stage(listOf(uri)))
 
         assertEquals(CONTENT, File(earlier.single()).readText())
         assertEquals(1, root.listFiles()!!.size)
@@ -190,6 +187,9 @@ class UploadStagingCleanupTest {
         assertFalse(stale.exists())
     }
 
+    private suspend fun UploadStaging.stagedPaths(uris: List<Uri>): List<String> =
+        (stage(uris) as UploadStaging.Staged.Files).paths
+
     private fun staleCopy(folder: File, relative: String): File {
         val file = File(folder, relative)
         file.parentFile!!.mkdirs()
@@ -213,8 +213,15 @@ class UploadStagingCleanupTest {
             sortOrder: String?,
         ): Cursor {
             failure?.let { throw it }
-            return MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply {
-                addRow(arrayOf("synthetic-attachment.txt"))
+            val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            return MatrixCursor(columns).apply {
+                addRow(columns.map { column ->
+                    when (column) {
+                        OpenableColumns.DISPLAY_NAME -> "synthetic-attachment.txt"
+                        OpenableColumns.SIZE -> null
+                        else -> throw IllegalArgumentException(column)
+                    }
+                })
             }
         }
 
