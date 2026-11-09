@@ -297,6 +297,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages whose scripts load from a shared CDN no longer fail module
+  scripts after an earlier plain request for the same file: the engine
+  no longer reuses a cached response that varies on a header the new
+  request sends.
+
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
   their address at enqueue in a `url` column (schema 6, auto-migrated);

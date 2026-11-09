@@ -3624,3 +3624,25 @@ committed/composed text was invented; no supported bridge limit is established.
 Current-head Android native builds, full emulator fixtures and hosted review remain
 pending. The historical arm64 checks above do not validate these newer changes or a
 physical keyboard/IME.
+
+## 57. HTTP cache Vary matching (9 November 2026)
+
+The pin moves to `combray/0.7` tip
+`8e097e4bdb5990262296a11a825b49baeccb5207` (upstream base still v0.7.0),
+the merge of [Servo PR #41](https://github.com/L-K-M/servo/pull/41).
+It backports upstream `44deea18cfa`: Servo's HTTP cache treated a header
+that the stored response's `Vary` names as matching when the new request
+sent it but the stored request did not (RFC 9111 section 4.1 forbids
+that), so a CORS request could reuse a response stored for a no-cors
+request and fail its CORS check. Revalidation now also replaces every
+matching stored response. A downstream follow-up makes a revalidated
+range request take its headers and body from one stored response; the
+backport could mix them. The PR adds a `fetch/http-cache/vary.any.js`
+case that fails before, a net unit test for the range refresh, and
+passed the fetch WPT directories and a servoshell site-check sweep
+without regressions, with two rounds of independent review.
+
+No embedder API, lockfile or resource change; the notices were
+regenerated for the new pin. This host has no Android SDK: both native
+ABI builds, packaging and the emulator checks are the Engine workflow's
+evidence, recorded in the pin PR.
