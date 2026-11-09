@@ -291,6 +291,39 @@ class SiteReportsTest {
     }
 
     @Test
+    fun aRepeatedTapOnAFailedReportQueuesItAgain() {
+        configure()
+        server.fault = FakeReports.Fault.CONFLICT
+        server.faultCount = 1
+        val report = draft()
+        submit(report)
+        drain()
+        assertEquals(JobState.FAILED, job(report).state)
+        val originalJobId = job(report).id
+        val originalPayload = job(report).payload
+
+        // Retry is an intent to deliver the original report, not to overwrite its payload.
+        offline = true
+        assertEquals(ReportRequest.Queued, submit(report.copy(url = "https://other.synthetic.example/", comment = "a later edit")))
+        drain()
+        assertEquals(JobState.RETRY_WAIT, job(report).state)
+        assertEquals(0, job(report).attempts)
+        assertEquals(originalJobId, job(report).id)
+        assertEquals(originalPayload, job(report).payload)
+        assertEquals(1, jobs().size)
+
+        offline = false
+        makeDue()
+        drain()
+        assertEquals(JobState.SUCCEEDED, job(report).state)
+        assertEquals(2, posts().size)
+        val stored = checkNotNull(server.reports[report.id])
+        assertEquals(report.url, stored.getValue("url").jsonPrimitive.content)
+        assertEquals(report.comment, stored.getValue("comment").jsonPrimitive.content)
+        assertArrayEquals(FakeReports.PNG, server.screenshots[report.id])
+    }
+
+    @Test
     fun aNewMainAddressParksReportsUntilTheUserSendsThemThere() {
         configure()
         offline = true
