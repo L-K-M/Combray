@@ -3654,6 +3654,27 @@ The complete `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 gate, `cargo fmt --check` and 185 native host tests pass locally after these changes.
 The host build does not compile the Android-only engine module. No local cap on
 committed/composed text was invented; no supported bridge limit is established.
-Current-head Android native builds, full emulator fixtures and hosted review remain
-pending. The historical arm64 checks above do not validate these newer changes or a
-physical keyboard/IME.
+The historical arm64 checks above do not validate these newer changes or a physical
+keyboard/IME.
+
+### Paired-head CI evidence (8 November 2026)
+
+[Engine run 42518553585](https://github.com/L-K-M/Combray/actions/runs/42518553585)
+validated paired PR #317 head `8805846d9ba7c1a7ba7fa9df8180f330af71e8cb`
+through merge ref `5490e8b61dc0ca1f2aa28677bdd99f844fb8a87f`. The downstream pin
+is `5813399954091a7efd7f736ea6fe14cb1ed523b9`. The host job, both Android native
+ABI builds and the full fixture job passed; these builds compile the Android-only
+engine module the local host crate excludes. The device was an Android 11/API 30
+x86_64 emulator, not a physical phone.
+
+`scripts/check-app.sh` recorded 214 passed checks, no failed or failed report-only
+checks, including process-death prepare/verify and all three `EditorImeTest` cases:
+composition preview/update/final replacement, Shift+Arrow selection replacement,
+and stale connection/invalid-context rejection after document replacement. The
+full hosted review was assessed against the source and pinned artifacts; its
+hypothetical missing-definition/global-counter claims did not apply. No Servo
+upstream contact was made.
+
+This evidence applies to the exact paired head above. It is not runtime proof of
+later capture-rollback fences in this branch, real third-party IMEs, physical
+phones or the remaining unsupported editing APIs.
