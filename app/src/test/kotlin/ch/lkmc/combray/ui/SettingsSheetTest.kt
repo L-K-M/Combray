@@ -72,6 +72,7 @@ class SettingsSheetTest {
 
     @Volatile private var blockWrites = false
     @Volatile private var blockChecks = false
+    @Volatile private var checkStatus = 200
     private val writeEntered = CountDownLatch(1)
     private val writeRelease = CountDownLatch(1)
     private val writeReturned = CountDownLatch(1)
@@ -104,7 +105,7 @@ class SettingsSheetTest {
             checkEntered.countDown()
             checkRelease.await(5, TimeUnit.SECONDS)
         }
-        HttpOutcome.Response(200, emptyMap(), """{"bookmarks":[],"nextCursor":null}""".toByteArray())
+        HttpOutcome.Response(checkStatus, emptyMap(), """{"bookmarks":[],"nextCursor":null}""".toByteArray())
     }
 
     @Before
@@ -273,6 +274,18 @@ class SettingsSheetTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isEmpty()
         }
+    }
+
+    @Test
+    fun aBusyServerSaysTryAgainLaterInsteadOfCheckTheAddress() {
+        checkStatus = 503
+        show()
+        checkButton().performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("The server answered with an error (HTTP 503). Try again later.")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(0, compose.onAllNodesWithText("Check the address", substring = true).fetchSemanticsNodes().size)
     }
 
     private fun awaitAdmission(latch: CountDownLatch) {

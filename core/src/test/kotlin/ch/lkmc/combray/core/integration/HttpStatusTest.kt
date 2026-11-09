@@ -6,6 +6,25 @@ import org.junit.Test
 
 class HttpStatusTest {
     @Test
+    fun aConnectionCheckCallsExactlyTheStatusesTheOutboxRetriesAServerError() {
+        for (status in 100..699) {
+            val dispatch = HttpStatus.classifyFailure(HttpOutcome.Response(status, emptyMap(), ByteArray(0)))
+            val expected = when (dispatch) {
+                is DispatchResult.AuthRequired -> ConnectionCheck.Unauthorized
+                is DispatchResult.Retry -> ConnectionCheck.ServerError(status)
+                else -> ConnectionCheck.WrongAddress(status)
+            }
+            assertEquals("HTTP $status", expected, HttpStatus.classifyCheckFailure(status))
+        }
+        assertEquals(ConnectionCheck.ServerError(408), HttpStatus.classifyCheckFailure(408))
+        assertEquals(ConnectionCheck.ServerError(429), HttpStatus.classifyCheckFailure(429))
+        assertEquals(ConnectionCheck.ServerError(500), HttpStatus.classifyCheckFailure(500))
+        assertEquals(ConnectionCheck.ServerError(599), HttpStatus.classifyCheckFailure(599))
+        assertEquals(ConnectionCheck.WrongAddress(404), HttpStatus.classifyCheckFailure(404))
+        assertEquals(ConnectionCheck.WrongAddress(600), HttpStatus.classifyCheckFailure(600))
+    }
+
+    @Test
     fun retryAfterSecondsBecomeMilliseconds() {
         assertEquals(30_000L, HttpStatus.retryAfterMs(mapOf("Retry-After" to "30")))
     }

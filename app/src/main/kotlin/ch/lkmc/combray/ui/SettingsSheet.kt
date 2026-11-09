@@ -789,6 +789,7 @@ private fun describe(resources: Resources, labels: ServiceLabels, check: Connect
     ConnectionCheck.Unauthorized -> resources.getString(labels.unauthorized)
     ConnectionCheck.CredentialMissing -> resources.getString(labels.secretNotStored)
     is ConnectionCheck.WrongAddress -> resources.getString(labels.wrongAddress, check.status)
+    is ConnectionCheck.ServerError -> resources.getString(R.string.check_server_error, check.status)
     is ConnectionCheck.Unreachable -> resources.getString(R.string.check_unreachable, check.category)
 }
 

@@ -69,6 +69,11 @@ class EngineDiagnosticLifecycleTest(unittest.TestCase):
             else:
                 self.assertIn("::warning::host diagnostics", completed.stdout)
 
+    def test_device_runtime_host_is_pinned_to_the_lts_baseline(self):
+        workflow = (ROOT / ".github/workflows/engine.yml").read_text()
+        device = workflow.split("\n  device:\n", 1)[1].split("\n  cleanup:\n", 1)[0]
+        self.assertIn("\n    runs-on: ubuntu-24.04\n", device)
+
     def test_boot_failure_is_preserved_and_monitor_stops(self):
         self.run_fixture(17, 0)
 

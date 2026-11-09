@@ -156,6 +156,21 @@ class HisterClientTest {
     }
 
     @Test
+    fun theConnectionCheckTellsAFailingOrBusyServerFromAWrongAddress() {
+        for (status in listOf(408, 429, 500, 502, 503, 504)) {
+            val checked = HisterClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.ServerError(status), checked.checkConnection(server.root, FakeHister.TOKEN))
+        }
+        for (status in listOf(302, 400, 404, 405)) {
+            val checked = HisterClient(HttpTransport { HttpOutcome.Response(status, emptyMap(), "{}".toByteArray()) })
+            assertEquals("HTTP $status", ConnectionCheck.WrongAddress(status), checked.checkConnection(server.root, FakeHister.TOKEN))
+        }
+        // A 200 that is not Hister's search JSON is still another server.
+        server.searchBody = "<html>login</html>"
+        assertEquals(ConnectionCheck.WrongAddress(200), client.checkConnection(server.root, FakeHister.TOKEN))
+    }
+
+    @Test
     fun thePinnedServersShapesAreResults() {
         // The pinned server sends "history": null when nothing is promoted, and "page_key": "".
         server.searchBody = """{"documents":[{"url":"https://a.example/"}],"history":null,"total":1,"page_key":""}"""

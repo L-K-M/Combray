@@ -17,6 +17,7 @@ WRAPPER = ROOT / "scripts/m0/emulator_process.py"
 POSIX_ONLY = unittest.skipIf(os.name == "nt", "POSIX signal semantics")
 
 
+@POSIX_ONLY
 class SupervisorTest(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="emulator process ")
