@@ -80,7 +80,7 @@ class SettingsSheetTest {
     private var savedGeneration: CompletableDeferred<Long>? = null
 
     private val secrets = object : SecretStore {
-        private val stored = mutableMapOf<SecretName, String>()
+        private val stored = java.util.concurrent.ConcurrentHashMap<SecretName, String>()
         override fun read(name: SecretName): String? = stored[name]
         override fun write(name: SecretName, value: String) {
             if (blockWrites) {
@@ -274,7 +274,7 @@ class SettingsSheetTest {
             CombrayTheme {
                 SettingsSheet(
                     integrations = integrations,
-                    settings = BrowserSettings(context.getSharedPreferences("settings-form-test", Context.MODE_PRIVATE)),
+                    settings = BrowserSettings(context.getSharedPreferences("settings-form-test", Context.MODE_PRIVATE), scope),
                     retention = Retention(),
                     onUnusedTabsChanged = {},
                     notices = ThirdPartyNotices(application.assets),
