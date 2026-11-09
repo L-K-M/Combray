@@ -28,6 +28,9 @@ class EngineEventTest {
         assertThrows(IllegalArgumentException::class.java) {
             EngineEvent.parse("""{"type":"viewport_painted","inset":290,"schema":1}""")
         }
+        assertThrows(IllegalArgumentException::class.java) {
+            EngineEvent.parse("""{"type":"viewport_painted","request":41,"schema":1}""")
+        }
     }
 
     @Test

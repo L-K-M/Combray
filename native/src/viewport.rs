@@ -9,8 +9,8 @@
 //! When the controls go away, the app keeps them on screen until the engine has painted the rows
 //! they covered ([ViewportAck]). Servo's first frames after a resize can come from a WebRender
 //! frame built for the smaller page, which leaves the new rows in Servo's clear color, so a grown
-//! page counts as shown only once those rows show something else, a row just above them is that
-//! color too, or enough frames have followed.
+//! page counts as shown only once those rows show something else, any whole row among the
+//! [ROWS_ABOVE] shown rows just above them is that color too, or enough frames have followed.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
@@ -68,8 +68,9 @@ pub(crate) struct StripCheck {
 pub(crate) enum Strip {
     /// Something other than the clear color: a frame laid out for the new size.
     Painted,
-    /// Only the clear color, as is a whole row just above: the page is that color there (a white
-    /// page has such rows between its lines), so the frame looks right either way.
+    /// Only the clear color, as is any whole row among the shown rows read above them (up to
+    /// [ROWS_ABOVE]): the page is that color there (a white page has such rows between its lines),
+    /// so the frame looks right either way.
     MatchesAbove,
     /// Only the clear color, though no row just above is: possibly a frame for the smaller page.
     ClearOnly,
