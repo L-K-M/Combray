@@ -484,6 +484,13 @@ All notable changes to this project are documented here. The format follows
   twice could have re-sent a request that may already have reached the
   server after failover to the alternate address; the attempt fails loudly
   instead, and the queue does not retry the violation.
+- Settings service forms admit one configuration action at a time. A second
+  tap while a save or check runs is ignored, and a delayed result no longer
+  clears or describes a newer edit: the address and key tapped are the ones
+  saved, and the draft stays.
+- Save settings and Check connection in Settings wrap to two lines
+  instead of running off the screen when large font settings make them
+  too wide for one row.
 - Changing Karakeep's server address cancelled every unsent save without
   a word. Those saves now wait in Settings, which offers to send them to
   the current address or discard them.
