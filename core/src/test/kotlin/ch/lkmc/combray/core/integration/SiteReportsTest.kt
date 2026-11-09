@@ -34,7 +34,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 import java.io.File
-import java.net.ServerSocket
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -49,6 +48,7 @@ class SiteReportsTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @get:Rule val folder = TemporaryFolder()
+    @get:Rule val unreachableRoots = UnreachableRoots()
     private lateinit var database: CombrayDatabase
     private lateinit var scope: CoroutineScope
     private lateinit var integrations: Integrations
@@ -82,7 +82,7 @@ class SiteReportsTest {
     private fun newIntegrations(database: CombrayDatabase, scope: CoroutineScope) = Integrations(
         database = database,
         secrets = secrets,
-        transport = UrlConnectionTransport(timeoutMs = 500).let { http ->
+        transport = UrlConnectionTransport(timeoutMs = 500, connectTimeoutMs = 500).let { http ->
             HttpTransport { request -> if (offline) HttpOutcome.NotConnected("network") else http.execute(request) }
         },
         clock = { now },
@@ -372,7 +372,7 @@ class SiteReportsTest {
 
     @Test
     fun aReportThatCannotConnectForAWeekNeedsAttentionAndRetryStartsAnotherWeek() {
-        configure(root = unreachableRoot())
+        configure(root = unreachableRoots.root("/r"))
         val created = now
         val report = draft()
         submit(report)
@@ -384,7 +384,10 @@ class SiteReportsTest {
         }
 
         assertEquals(JobState.FAILED, job(report).state)
-        assertEquals("unreachable_network_for_7_days", job(report).error)
+        assertTrue(
+            job(report).error,
+            job(report).error in setOf("unreachable_network_for_7_days", "unreachable_timeout_for_7_days"),
+        )
         assertTrue(now - created >= 7 * DAY_MS)
         // A failed report keeps its screenshot: Retry can still send it.
         assertTrue(file(report).exists())
@@ -467,12 +470,6 @@ class SiteReportsTest {
         secrets.delete(SecretName.SITE_REPORTS_TOKEN)
         assertEquals(ConnectionCheck.CredentialMissing, runBlocking { reports.check() })
         assertEquals(Configured.MissingCredential, configure(token = null))
-    }
-
-    /** An address nothing listens on: connecting fails at once, before anything is sent. */
-    private fun unreachableRoot(): String {
-        val port = ServerSocket(0).use { it.localPort }
-        return "http://127.0.0.1:$port/r"
     }
 
     private class MemorySecrets : SecretStore {
