@@ -547,14 +547,17 @@ class BrowserCoordinator(
 
     /** Removes one history row. The page an open tab shows is not history and stays. */
     fun forgetVisit(visitId: String) = submit {
+        var forgottenUrl: String? = null
         database.withTransaction {
             val visit = dao.visit(visitId) ?: return@withTransaction
             val tab = dao.tab(visit.tabId)
             if (tab?.state == TabState.OPEN && tab.currentVisitId == visit.id) return@withTransaction
+            forgottenUrl = visit.url
             dao.deleteVisit(visit.id)
             dao.deleteEmptyClosedTabs()
             capture?.forgetUrl(visit.url)
         }
+        forgottenUrl?.let { url -> cancelPendingCapture { it == url.substringBefore('#') } }
     }
 
     /**
@@ -582,6 +585,10 @@ class BrowserCoordinator(
             }
             spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
         }
+        cancelPendingCapture { url ->
+            val candidate = HostNames.of(url) ?: return@cancelPendingCapture false
+            spellings.any { HostNames.matches(candidate, it, includeSubdomains) }
+        }
     }
 
     /**
@@ -600,8 +607,8 @@ class BrowserCoordinator(
     }
 
     /** The text size setting changed: every page, open or opened later, lays out at it. */
-    fun applyTextSize() = submit {
-        if (engineReady) engine.setPageZoom(textSize().zoom)
+    fun applyTextSize(size: TextSize = textSize()) = submit {
+        if (engineReady) engine.setPageZoom(size.zoom)
     }
 
     private fun onLoadingStopped(view: LiveView, event: EngineEvent.LoadingStopped) {
@@ -625,7 +632,7 @@ class BrowserCoordinator(
         stopAwaitingCommit(view)
         view.awaitedRequest = null
         view.awaitedUrl = null
-        if (view.currentDocument == event.document) scheduleCapture(view, event.document, captureTiming.debounceMs)
+        if (view.currentDocument == event.document) scheduleCapture(view, event.document, view.currentPage?.address, captureTiming.debounceMs)
     }
 
     /**
@@ -748,7 +755,7 @@ class BrowserCoordinator(
     /** The user played or closed [offer]; a later offer of the same page shows again. */
     fun dismissMediaOffer(offer: MediaPageRef) = state.update { if (it.mediaOffer == offer) it.copy(mediaOffer = null) else it }
 
-    /** Clears [request] (or an equal duplicate); focus moving to the next field posts a different one meanwhile. */
+    /** Clears only this delivery; a commit replay or a different field may have posted a newer one. */
     fun keyboardHandled(request: KeyboardRequest) = state.update { if (it.keyboard == request) it.copy(keyboard = null) else it }
 
     /** Clears [link] once the UI handed it to Android; a newer tap's link is kept. */
@@ -798,7 +805,7 @@ class BrowserCoordinator(
                 if (event.document == it.currentDocument && event.document != it.stoppedDocument && event.attribution != Attribution.STALE) {
                     it.loading = event.phase != LoadPhase.COMPLETE
                     if (event.phase == LoadPhase.COMPLETE) {
-                        scheduleCapture(it, event.document, captureTiming.settleMs)
+                        scheduleCapture(it, event.document, it.currentPage?.address, captureTiming.settleMs)
                         showPendingMediaNotice(it, event.document)
                     }
                 }
@@ -823,7 +830,11 @@ class BrowserCoordinator(
                 // Only a field that opens the keyboard owns it: one the next document focuses on
                 // load must not keep the previous document's keyboard through the navigation.
                 if (event.showKeyboard) keyboardOwner = KeyboardOwner(view.nativeTab, event.document)
-                val request = if (event.showKeyboard) KeyboardRequest.Show(event.kind) else KeyboardRequest.Prepare(event.kind)
+                val request = if (event.showKeyboard) {
+                    KeyboardRequest.Show(event.kind, event.multiline, event.context, requestId = nextRequest++)
+                } else {
+                    KeyboardRequest.Prepare(event.kind, event.multiline, event.context, requestId = nextRequest++)
+                }
                 state.update { it.copy(keyboard = request) }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
@@ -1078,14 +1089,14 @@ class BrowserCoordinator(
                     if (findSession?.tabId == view.tabId) findSession = null
                     // A cached document (back/forward) reports no load progress: it is loaded.
                     view.loading = event.document != view.stoppedDocument && event.document !in view.documentVisits
-                    scheduleCapture(view, event.document, captureTiming.fallbackMs)
+                    scheduleCapture(view, event.document, event.url, captureTiming.fallbackMs)
                     if (forgotten) null else committedVisit(view, tab, current, event, now)
                 }
                 HistoryKind.SAME_DOCUMENT -> {
                     // Only an awaited address within this page (a typed "#part") commits this way:
                     // the old page rewriting its own address does not answer the request.
                     if (view.awaitedUrl?.let { isSameDocumentTarget(it, event.url) } == true) stopAwaitingCommit(view)
-                    scheduleCapture(view, event.document, captureTiming.debounceMs)
+                    scheduleCapture(view, event.document, event.url, captureTiming.debounceMs)
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
@@ -1221,13 +1232,36 @@ class BrowserCoordinator(
 
     // --- Capture ----------------------------------------------------------------------------------
 
-    /** (Re)starts the capture timer of [view] for [document]; a newer trigger replaces it. */
-    private fun scheduleCapture(view: LiveView, document: Long, delayMs: Long) {
+    /** Arms a page-bound timer; no known address means there is no safe capture target yet. */
+    private fun scheduleCapture(view: LiveView, document: Long, url: String?, delayMs: Long) {
         if (capture == null) return
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
+        val page = PageKey(document, url?.substringBefore('#') ?: return)
+        view.pendingCapturePage = page
         view.captureTimer = scope.launch {
             delay(delayMs)
-            submit { requestCapture(view, document) }
+            submit {
+                // Cancellation can arrive after this work was queued. A new timer for even the
+                // same page gets a distinct token; it must not be cleared by an older callback.
+                if (view.pendingCapturePage !== page) return@submit
+                view.captureTimer = null
+                view.pendingCapturePage = null
+                if (view.currentPage == page) requestCapture(view, document)
+            }
+        }
+    }
+
+    private fun cancelCaptureTimer(view: LiveView) {
+        view.captureTimer?.cancel()
+        view.captureTimer = null
+        view.pendingCapturePage = null
+    }
+
+    /** Cancels the scheduled capture of a page [matches], so a timer cannot enqueue erased content. */
+    private fun cancelPendingCapture(matches: (String) -> Boolean) {
+        liveByTab.values.forEach { view ->
+            val page = view.pendingCapturePage
+            if (page != null && matches(page.address)) cancelCaptureTimer(view)
         }
     }
 
@@ -1252,6 +1286,14 @@ class BrowserCoordinator(
         }
     }
 
+    /** A Room rollback does not roll back view bookkeeping: only committed identity may leave the process. */
+    private suspend fun visitForCapture(view: LiveView, document: Long, tab: TabEntity): VisitEntity? {
+        val url = tab.url ?: return null
+        if (view.currentPage != PageKey(document, url.substringBefore('#'))) return null
+        val visit = tab.currentVisitId?.let { dao.visit(it) } ?: return null
+        return visit.takeIf { it.tabId == tab.id && it.url == url && it.documentKey == documentKey(view, document) }
+    }
+
     private suspend fun requestCapture(view: LiveView, document: Long) {
         val sink = capture ?: return
         // Only the document still current in a live, healthy view: anything else is stale.
@@ -1261,10 +1303,11 @@ class BrowserCoordinator(
         val generation = view.generation ?: return
         // A forgotten page is not sent again while its tab shows it ([TabEntity.pageForgotten]).
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && !it.pageForgotten } ?: return
-        val url = tab.url ?: return
+        val visit = visitForCapture(view, document, tab) ?: return
+        val url = visit.url
         val policy = sink.wantsCapture(url) ?: return
         val id = nextRequest++
-        pendingCaptures[id] = PendingCapture(view.tabId, ViewRef(view.nativeTab, generation), document, url, tab.currentVisitId, policy)
+        pendingCaptures[id] = PendingCapture(view.tabId, ViewRef(view.nativeTab, generation), document, url, visit.id, policy)
         engine.capture(view.nativeTab, document, id, captureTiming.maxTextBytes, captureTiming.timeoutMs)
     }
 
@@ -1281,10 +1324,11 @@ class BrowserCoordinator(
         val view = view(event.view)?.takeIf { it.currentDocument == pending.document && pending.document !in it.errorDocuments } ?: return
         // A capture that was on its way when the site was forgotten is dropped with it.
         val tab = dao.tab(view.tabId)?.takeIf { it.state == TabState.OPEN && it.url == pending.url && !it.pageForgotten } ?: return
+        val visit = visitForCapture(view, pending.document, tab)?.takeIf { it.id == pending.visitId } ?: return
         capture?.captured(
             CapturedPage(
                 tabId = tab.id,
-                visitId = pending.visitId,
+                visitId = visit.id,
                 url = pending.url,
                 title = content.title.takeIf { it.isNotBlank() },
                 text = content.text,
@@ -1370,8 +1414,7 @@ class BrowserCoordinator(
         state.update { it.copy(engine = status) }
     }
 
-    private suspend fun activeTab(): TabEntity? =
-        dao.session()?.activeTabId?.let { dao.tab(it) }?.takeIf { it.state == TabState.OPEN }
+    private suspend fun activeTab(): TabEntity? = dao.activeTab()
 
     private suspend fun createTab(url: String?, openerTabId: String? = null): String {
         val now = clock.now()
@@ -1500,7 +1543,7 @@ class BrowserCoordinator(
 
     /** Drops the bookkeeping for a renderer the engine no longer has. */
     private fun forgetView(view: LiveView) {
-        view.captureTimer?.cancel()
+        cancelCaptureTimer(view)
         liveByTab.remove(view.tabId)
         liveByNative.remove(view.nativeTab)
         releaseKeyboard(view.nativeTab)
@@ -1612,10 +1655,18 @@ class BrowserCoordinator(
      */
     private suspend fun releaseViewsBeyond(keep: Int) {
         if (liveByTab.size <= keep) return
-        val recency = dao.openTabs().mapIndexed { index, tab -> tab.id to index }.toMap()
+        // One open-tab snapshot serves recency and protects windows without a recovery URL.
+        // A logical close can commit before engine.closeView throws: a view absent from this
+        // snapshot is orphaned and remains eligible for a later close attempt.
+        val open = dao.openTabs()
+        val recency = open.mapIndexed { index, tab -> tab.id to index }.toMap()
+        val urls = open.associate { it.id to it.url }
         liveByTab.values
             // A page waiting for an answer would lose it: keep its renderer.
-            .filter { it.nativeTab != selectedNative && it.controls.isEmpty() && dao.tab(it.tabId)?.url != null }
+            .filter {
+                it.nativeTab != selectedNative && it.controls.isEmpty() &&
+                    (urls[it.tabId] != null || it.tabId !in recency)
+            }
             .sortedByDescending { recency[it.tabId] ?: Int.MAX_VALUE }
             .take(liveByTab.size - keep)
             .forEach { closeView(it) }
@@ -1742,6 +1793,9 @@ class BrowserCoordinator(
         val documentVisits = HashMap<Long, String>()
 
         var captureTimer: Job? = null
+
+        /** A distinct token for each schedule, including successive timers for the same page. */
+        var pendingCapturePage: PageKey? = null
 
         /** Documents that are Servo's error pages (network or certificate failure). */
         val errorDocuments = HashSet<Long>()

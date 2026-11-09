@@ -354,7 +354,7 @@ class AccessibilityTest {
     @Test
     fun theTextSizeDialogIsAccessible() {
         // A middle step, so smaller, larger and reset are all enabled.
-        show(LARGE_FONT) { TextSizeDialog(TextSize.PERCENT_110, {}, {}) }
+        show(LARGE_FONT) { TextSizeDialog({ TextSize.PERCENT_110 }, {}, {}) }
 
         assertTargetsAreAccessible()
         for (label in listOf("Smaller text", "Larger text")) {
