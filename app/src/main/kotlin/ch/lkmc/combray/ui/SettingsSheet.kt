@@ -5,6 +5,7 @@ import android.text.format.Formatter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -335,6 +336,87 @@ private data class ServiceLabels(
 )
 
 /**
+ * Save and Check connection for one service; each keeps a 48dp target. The row wraps instead of
+ * overflowing: at large font scales two wide labels must not push a button off the screen.
+ */
+@Composable
+internal fun ServiceActions(saveEnabled: Boolean, checkEnabled: Boolean, onSave: () -> Unit, onCheck: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+        Button(onClick = onSave, enabled = saveEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_save_settings))
+        }
+        OutlinedButton(onClick = onCheck, enabled = checkEnabled, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.action_check_connection))
+        }
+    }
+}
+
+/**
+ * One service form's configuration actions. A tap admits exactly one operation synchronously and
+ * captures the edit generation at that moment; the caller captures the payload. A second tap
+ * while it runs is ignored. A completion applies only while both generations are unchanged, so a
+ * delayed result cannot clear or describe a newer form.
+ */
+internal class ServiceFormActions {
+    private val lock = Any()
+    private var admitted = false
+    private var editGeneration = 0
+    private var operationGeneration = 0
+
+    /** Whether an operation is in flight; the form's action buttons wait for it. */
+    var isBusy by mutableStateOf(false)
+        private set
+
+    /** A field was edited: a completion that started before this no longer owns the form. */
+    fun edited() {
+        synchronized(lock) { editGeneration++ }
+    }
+
+    /**
+     * Admits the next operation at the click boundary, capturing the generations its completion
+     * must still match. Returns null when another operation is already in flight.
+     */
+    fun admit(): Admission? = synchronized(lock) {
+        if (admitted) return null
+        admitted = true
+        operationGeneration++
+        isBusy = true
+        Admission(operationGeneration, editGeneration)
+    }
+
+    /** Releases the admitted operation; a stale completion cannot release a newer one. */
+    fun release(admission: Admission) = synchronized(lock) {
+        if (operationGeneration == admission.operation) {
+            admitted = false
+            isBusy = false
+        }
+    }
+
+    /**
+     * Runs [action] and applies its result only while the form still has the edit generation and
+     * the operation still has the generation captured at admission. Releases the admission in a
+     * finally block, so a failure or cancellation leaves the form usable.
+     */
+    suspend fun <T> perform(admission: Admission, action: suspend () -> T, apply: (T) -> Unit) {
+        try {
+            complete(admission, action(), apply)
+        } finally {
+            release(admission)
+        }
+    }
+
+    /** Applies [result] only while [admission]'s operation and edit generations are current. */
+    fun <T> complete(admission: Admission, result: T, apply: (T) -> Unit) = synchronized(lock) {
+        if (operationGeneration == admission.operation && editGeneration == admission.edit) {
+            apply(result)
+        }
+    }
+
+    /** The generations an admitted operation must still match when it finishes. */
+    data class Admission(val operation: Int, val edit: Int)
+}
+
+/**
  * Server address and credential for one service. The credential is write-only: a saved one is
  * never shown again, only replaced. Checking the connection is read-only.
  */
@@ -367,9 +449,11 @@ private fun ServiceSettings(
     val alternate = editedAlternate ?: current?.alternateUrl.orEmpty()
     var credential by remember { mutableStateOf("") }
     var credentialSaved by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    // One configuration action at a time; a completion describes only the form it started from.
+    val actions = remember { ServiceFormActions() }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
     LaunchedEffect(current) { credentialSaved = current?.let { integrations.hasCredential(secret, it) } == true }
@@ -378,7 +462,7 @@ private fun ServiceSettings(
     Text(stringResource(labels.explanation))
     OutlinedTextField(
         value = address,
-        onValueChange = { editedAddress = it },
+        onValueChange = { editedAddress = it; actions.edited(); message = null },
         label = { Text(stringResource(R.string.karakeep_url)) },
         placeholder = { Text(stringResource(labels.urlHint)) },
         singleLine = true,
@@ -387,7 +471,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = alternate,
-        onValueChange = { editedAlternate = it },
+        onValueChange = { editedAlternate = it; actions.edited(); message = null },
         label = { Text(stringResource(R.string.settings_alternate_url)) },
         placeholder = { Text(stringResource(R.string.settings_alternate_url_hint)) },
         supportingText = { Text(stringResource(R.string.settings_alternate_url_help)) },
@@ -397,7 +481,7 @@ private fun ServiceSettings(
     )
     OutlinedTextField(
         value = credential,
-        onValueChange = { credential = it },
+        onValueChange = { credential = it; actions.edited(); message = null },
         label = { Text(stringResource(labels.secret)) },
         supportingText = if (credentialSaved) ({ Text(stringResource(labels.secretSaved)) }) else null,
         singleLine = true,
@@ -405,32 +489,47 @@ private fun ServiceSettings(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        Button(
-            onClick = {
-                scope.launch {
-                    val result = configure(address, credential.ifBlank { null }, alternate)
-                    message = describe(resources, labels, result)
-                    if (result == Configured.Saved) {
-                        editedAddress = null
-                        editedAlternate = null
-                    }
-                    credential = ""
-                }
-            },
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_save_settings)) }
-        OutlinedButton(
-            onClick = {
-                message = resources.getString(R.string.check_running)
-                scope.launch { message = check()?.let { describe(resources, labels, it) } }
-            },
-            enabled = current != null,
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) { Text(stringResource(R.string.action_check_connection)) }
-    }
+    ServiceActions(
+        saveEnabled = !actions.isBusy,
+        checkEnabled = current != null && !actions.isBusy,
+        onSave = {
+            // A field edit can precede this tap without a recomposition in between.
+            // Read the live drafts, then keep this payload even if the user edits again.
+            val addressAtTap = editedAddress ?: address
+            val alternateAtTap = editedAlternate ?: alternate
+            val credentialAtTap = credential
+            val admission = actions.admit() ?: return@ServiceActions
+            scope.launch {
+                actions.perform(
+                    admission,
+                    action = { configure(addressAtTap, credentialAtTap.ifBlank { null }, alternateAtTap) },
+                    apply = { result ->
+                        message = describe(resources, labels, result)
+                        if (result == Configured.Saved) {
+                            editedAddress = null
+                            editedAlternate = null
+                            credential = ""
+                        }
+                    },
+                )
+            }.invokeOnCompletion { actions.release(admission) }
+        },
+        onCheck = {
+            val admission = actions.admit() ?: return@ServiceActions
+            message = resources.getString(R.string.check_running)
+            scope.launch {
+                actions.perform(
+                    admission,
+                    action = { check() },
+                    apply = { result -> message = result?.let { describe(resources, labels, it) } },
+                )
+            }.invokeOnCompletion { actions.release(admission) }
+        },
+    )
     if (current != null) {
-        TextButton(onClick = { confirmRemove = true }) { Text(stringResource(R.string.action_remove)) }
+        TextButton(onClick = { confirmRemove = true }, enabled = !actions.isBusy) {
+            Text(stringResource(R.string.action_remove))
+        }
     }
     // Removing cancels every unsent item for the service: say how many before doing it.
     if (confirmRemove) {
@@ -440,10 +539,17 @@ private fun ServiceSettings(
             text = { Text(pluralStringResource(labels.removeBody, jobs.size + parked.size, jobs.size + parked.size)) },
             confirmButton = {
                 TextButton(onClick = {
+                    val admission = actions.admit() ?: return@TextButton
                     confirmRemove = false
                     editedAddress = null
                     editedAlternate = null
-                    scope.launch { remove(); message = null }
+                    scope.launch {
+                        actions.perform(
+                            admission,
+                            action = { remove() },
+                            apply = { message = null },
+                        )
+                    }.invokeOnCompletion { actions.release(admission) }
                 }) { Text(stringResource(R.string.action_remove)) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.action_cancel)) } },
@@ -683,6 +789,7 @@ private fun describe(resources: Resources, labels: ServiceLabels, check: Connect
     ConnectionCheck.Unauthorized -> resources.getString(labels.unauthorized)
     ConnectionCheck.CredentialMissing -> resources.getString(labels.secretNotStored)
     is ConnectionCheck.WrongAddress -> resources.getString(labels.wrongAddress, check.status)
+    is ConnectionCheck.ServerError -> resources.getString(R.string.check_server_error, check.status)
     is ConnectionCheck.Unreachable -> resources.getString(R.string.check_unreachable, check.category)
 }
 

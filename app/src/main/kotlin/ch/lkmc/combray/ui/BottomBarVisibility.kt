@@ -16,6 +16,27 @@ internal enum class BottomBarBehavior { PINNED, SCROLLING }
 internal fun bottomBarVisible(direction: ScrollEdge?, behavior: BottomBarBehavior): Boolean =
     behavior == BottomBarBehavior.PINNED || direction != ScrollEdge.BOTTOM
 
+/**
+ * A viewport request sent to the engine: the bottom [inset] pixels of its surface are covered.
+ * [id] is null when no engine ran to take it.
+ */
+internal data class ViewportRequest(val id: Long?, val inset: Int)
+
+/**
+ * Whether a bar the user's scroll hid stays drawn: until the engine has painted the page in the
+ * pixels the bar covered, where it had laid out nothing, so taking the bar away never shows
+ * pixels the engine has not drawn. [sent] is the latest request (it asks for an uncovered
+ * surface once the hide has reached the engine), [painted] the latest request the engine
+ * answered, and [expired] ends the wait whatever the engine does.
+ */
+internal fun bottomBarHeld(sent: ViewportRequest?, painted: Long?, expired: Boolean): Boolean {
+    if (expired || sent == null) return false
+    // The hide has not reached the engine yet: the request still covers the bar's pixels.
+    if (sent.inset != 0) return true
+    val id = sent.id ?: return false
+    return painted == null || painted < id
+}
+
 @Composable
 internal fun rememberAccessibleControlsRequired(): Boolean {
     val context = LocalContext.current

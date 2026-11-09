@@ -143,9 +143,10 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
-    // SettingsQueueTest composes the Settings sheet over a real in-memory queue.
+    // Queue and search-panel checks compose real in-memory Room data over fixture transports.
     testImplementation(libs.androidx.room.runtime)
     testImplementation(libs.androidx.room.ktx)
+    testImplementation(libs.androidx.test.core)
 
     // Device checks against the real engine (scripts/check-app.sh).
     androidTestImplementation(platform(libs.androidx.compose.bom))
