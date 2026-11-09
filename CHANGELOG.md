@@ -234,6 +234,8 @@ All notable changes to this project are documented here. The format follows
 - Native checks keep host memory, process and cgroup samples and host and
   guest kernel logs to investigate intermittent ADB loss. Tests, VM
   resources, renderer and timeouts stay unchanged; no cause is claimed.
+  Launch supervision records the owned emulator child's exit or signal
+  and reaps it. Old pid files are evidence, never permission to stop a process.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
