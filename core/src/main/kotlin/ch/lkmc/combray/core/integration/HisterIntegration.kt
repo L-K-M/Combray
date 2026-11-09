@@ -194,9 +194,16 @@ class HisterIntegration(
         }
     }
 
-    /** Explicit long-term search. Null when Hister is not configured. */
-    suspend fun search(query: String, pageKey: String? = null): HisterSearch? {
+    /**
+     * Explicit long-term search. Null when Hister is not configured, or when [expected] names a
+     * destination the current configuration no longer matches: a page request bound to an older
+     * server must not reach a newer one.
+     */
+    suspend fun search(query: String, pageKey: String? = null, expected: ServiceEntity? = null): HisterSearch? {
         val (service, token) = snapshot()
+        if (expected != null && (service == null || service.fingerprint != expected.fingerprint || service.generation != expected.generation)) {
+            return null
+        }
         service ?: return null
         token ?: return HisterSearch.Unauthorized
         return withContext(Dispatchers.IO) {

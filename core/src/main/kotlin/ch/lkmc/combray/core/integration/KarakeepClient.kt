@@ -134,8 +134,7 @@ class KarakeepClient(private val transport: HttpTransport) {
                 } else {
                     ConnectionCheck.WrongAddress(outcome.status)
                 }
-                401, 403 -> ConnectionCheck.Unauthorized
-                else -> ConnectionCheck.WrongAddress(outcome.status)
+                else -> HttpStatus.classifyCheckFailure(outcome.status)
             }
         }
     }

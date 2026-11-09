@@ -71,8 +71,7 @@ internal class SiteReportsClient(private val transport: HttpTransport) {
                         else -> ConnectionCheck.Unauthorized
                     }
                 }
-                401, 403 -> ConnectionCheck.Unauthorized
-                else -> ConnectionCheck.WrongAddress(outcome.status)
+                else -> HttpStatus.classifyCheckFailure(outcome.status)
             }
         }
     }
