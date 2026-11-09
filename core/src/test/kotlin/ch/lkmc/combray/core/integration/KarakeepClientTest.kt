@@ -119,4 +119,28 @@ class KarakeepClientTest {
         val result = create()
         assertTrue(result is DispatchResult.Retry)
     }
+
+    @Test
+    fun aQueryBoundaryDoesNotSplitASupplementaryCharacter() {
+        var sent = ""
+        val bounded = KarakeepClient(HttpTransport {
+            sent = it.url
+            HttpOutcome.Response(200, emptyMap(), "{\"bookmarks\":[]}".toByteArray())
+        })
+        val prefix = "a".repeat(1_999)
+        bounded.bookmarks(server.root, FakeKarakeep.KEY, "$prefix😀tail")
+        val query = java.net.URLDecoder.decode(sent.substringAfter("q=").substringBefore('&'), "UTF-8")
+        assertEquals(prefix, query)
+    }
+
+    @Test
+    fun aLongSearchQueryIsCapped() {
+        create("https://a.example/", "Alpha")
+
+        client.bookmarks(server.root, FakeKarakeep.KEY, query = "a".repeat(5_000))
+
+        val uri = server.uris.last()
+        val query = uri.substringAfter("q=", "").substringBefore('&')
+        assertEquals(2_000, query.length)
+    }
 }
