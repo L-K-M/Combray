@@ -315,7 +315,8 @@ All notable changes to this project are documented here. The format follows
   response now reports the wrong address instead of a false success.
 - A search typed into the new-tab page's field survives switching to a page
   tab and back. Before, the draft was dropped with the field and you typed
-  it again.
+  it again. Starting a new entry clears the earlier draft and shared prefill
+  instead of restoring them into a different tab or entry.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
