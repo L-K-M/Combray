@@ -753,6 +753,12 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 
 ## 12. Next implementation session
 
+Overlay consolidation (8 November 2026, #284 with #315): status messages
+scroll at large font sizes; the address sheet has a pane title and status
+messages expose polite live-region semantics. The full Kotlin tests, lint,
+debug assembly and device-test compilation pass locally. The reachability
+and semantics tests are JVM checks, not a new TalkBack or device run.
+
 Capture-timer consolidation (8 November 2026, PR #249 with #314's missing-visit
 case): timers carry their scheduled page identity and a distinct schedule token.
 Forget cancels matching fragments even after a timer has queued work; completion

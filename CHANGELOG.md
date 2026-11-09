@@ -312,6 +312,10 @@ All notable changes to this project are documented here. The format follows
 - The site-report service refuses JSON nested deeper than 32 levels on
   every Python. It used to rely on Python's recursion limit, which
   Python 3.15 no longer reaches, so CI on the new runner image failed.
+- The messages shown when the engine is missing, failed or starting, and the
+  page-crashed message with its Reload button, can no longer run off a small
+  screen at large font sizes: they scroll instead. Address sheets identify
+  their pane, and status messages expose polite accessibility updates.
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
