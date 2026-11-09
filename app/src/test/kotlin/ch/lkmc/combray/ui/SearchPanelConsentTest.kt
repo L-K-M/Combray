@@ -84,7 +84,7 @@ class SearchPanelConsentTest {
         }
         integrations = Integrations(
             database = database,
-            secrets = MemorySecrets(),
+            secrets = SearchPanelConsentSecrets(),
             transport = transport,
             clock = clock,
             newId = { "job" },
@@ -267,7 +267,7 @@ class SearchPanelConsentTest {
     }
 }
 
-private class MemorySecrets : SecretStore {
+private class SearchPanelConsentSecrets : SecretStore {
     private val values = HashMap<SecretName, String>()
 
     override fun read(name: SecretName) = values[name]
