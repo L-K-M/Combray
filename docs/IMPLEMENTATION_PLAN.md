@@ -376,6 +376,15 @@ Bind every job to a non-secret destination/account fingerprint and configuration
 
 For exclusions/forgetting, update policy and invalidate matching pending jobs in a transaction. Maintain tombstones or generation checks so a delayed capture cannot enqueue erased content. Workers recheck policy and destination immediately before sending, and recheck before persisting results. Cancellation cannot retract bytes already delivered to a server: stop further retries and explain remote cleanup separately. Do not rebuild deleted local history from a late worker success or Hister search response.
 
+Integration request bounds (8 November 2026, #256 with #291): Hister trimming
+counts escaped UTF-8 bytes in a suffix scan, then rebuilds the retained prefix
+once. A byte excess is not treated as a code-point count. Titles keep their
+UTF-8 byte cap; Karakeep queries do not split supplementary characters at the
+length cap. Requests whose address alone cannot fit are refused before HTTP.
+The longest-prefix and query-boundary regressions failed before correction and
+pass afterward. These are JVM/HTTP-fixture checks, not device or live-service
+acceptance; current-head CI and review gate the consolidation.
+
 ## 7. Privacy, security, and platform behavior
 
 Capture is initially off until the user configures Hister and explicitly enables it with a clear explanation. Apply exclusions before extraction, before storing a body, and before upload. Proposed defaults exclude the integration services' account/settings pages and known authentication flows. Let the owner exclude exact hosts and, explicitly, subdomains. Do not claim that a short generic exclusion list detects every sensitive site. Support pausing all indexing from Settings without closing tabs.
