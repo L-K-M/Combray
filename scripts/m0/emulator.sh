@@ -65,11 +65,15 @@ if [ "${COMBRAY_EMULATOR_DIAGNOSTICS:-0}" = "1" ]; then
 fi
 
 echo "==> booting $AVD on port $PORT (accel=$accel); log: $LOG"
-nohup "$EMULATOR" "@$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
+nohup python3 -I "$(dirname "${BASH_SOURCE[0]}")/emulator_process.py" \
+    --pid-file "$(dirname "$LOG")/emulator.pid" \
+    --exit-file "$(dirname "$LOG")/emulator-exit.json" -- \
+    "$EMULATOR" "@$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
     -gpu swiftshader_indirect -camera-back none -camera-front none -accel "$accel" ${diagnostic_arg:+"$diagnostic_arg"} \
     > "$LOG" 2>&1 &
+# Control our live supervisor, which owns and reaps its emulator child. The recorded
+# child PID is evidence only, never authority to signal an old process from a pid file.
 emulator_pid=$!
-printf '%s\n' "$emulator_pid" > "$(dirname "$LOG")/emulator.pid"
 
 started=$(date +%s)
 until [ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do

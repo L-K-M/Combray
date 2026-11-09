@@ -119,7 +119,12 @@
     }
     if (node.nodeType === 3) {
       var data = String(node.data).replace(/\s+/g, " ");
-      if (data !== " " && data !== "" && !append(data)) break;
+      // A whitespace-only node separates inline words. Collapse across node boundaries too,
+      // without inventing a separator where markup splits a word or spending leading bytes.
+      var last = parts.length ? parts[parts.length - 1] : "";
+      var end = last.charAt(last.length - 1);
+      if (data.charAt(0) === " " && (end === "" || end === " " || end === "\n")) data = data.slice(1);
+      if (data !== "" && !append(data)) break;
       continue;
     }
     if (node.nodeType !== 1) continue;

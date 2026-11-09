@@ -234,6 +234,8 @@ All notable changes to this project are documented here. The format follows
 - Native checks keep host memory, process and cgroup samples and host and
   guest kernel logs to investigate intermittent ADB loss. Tests, VM
   resources, renderer and timeouts stay unchanged; no cause is claimed.
+  Launch supervision records the owned emulator child's exit or signal
+  and reaps it. Old pid files are evidence, never permission to stop a process.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native
@@ -694,6 +696,8 @@ All notable changes to this project are documented here. The format follows
   now covers every device-check class, and `--list` prints them.
 - Forgetting a page or site cancels its scheduled capture, including other
   fragments of the same page and timers already queued for execution.
+- Hister capture keeps spaces between inline pieces of a sentence, so
+  adjacent links no longer turn into a single search word.
 - Forgetting a page or site commits local deletion and queued Hister
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch
