@@ -26,6 +26,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 
 /** Capture attribution: text only ever reaches the sink for the document it came from. */
 @RunWith(RobolectricTestRunner::class)
@@ -272,6 +273,137 @@ class CaptureTest {
         assertTrue(engine.captures.isEmpty())
     }
 
+    // --- Rolled-back commits ------------------------------------------------------------------------
+
+    /**
+     * The commit transaction failed after [BrowserCoordinator.onHistory] had already made document
+     * 20 current and scheduled its capture. The tab row still names document 10's address and visit,
+     * so no capture request may be made for the uncommitted document under them.
+     */
+    @Test
+    fun aRolledBackCommitCannotCaptureTheUncommittedDocumentAtAnotherAddress() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/")
+        settle()
+        assertEquals(listOf(10L), engine.captures.map { it.first })
+
+        failTabUpdates()
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 20, "https://b.test/", 0, 1))
+        idle()
+
+        // The transaction rolled back: the tab and its visit still name document 10's page.
+        assertEquals(listOf("https://a.test/"), storedTabUrls())
+        assertEquals(listOf("https://a.test/"), storedVisitUrls())
+        assertNoCaptureFor(20)
+        // Even a request that was made must not queue the uncommitted document's text under it.
+        engine.captures.filter { it.first == 20L }.forEach { (_, capture) ->
+            result(1, 20, capture, "B text")
+        }
+        assertTrue(
+            "uncommitted document 20's text must not be queued under the rolled-back address",
+            sink.pages.none { it.url == "https://a.test/" && it.text == "B text" },
+        )
+    }
+
+    /**
+     * A reload at the same address is still a different document. When its commit rolls back, the
+     * uncommitted document must not be captured under the committed document's address and visit:
+     * URL equality is not document identity.
+     */
+    @Test
+    fun aRolledBackReloadAtTheSameAddressCannotCaptureTheUncommittedDocument() {
+        browser.openUrl("https://a.test/page", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/page")
+        settle()
+        assertEquals(listOf(10L), engine.captures.map { it.first })
+
+        failTabUpdates()
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 20, "https://a.test/page", 0, 1))
+        idle()
+
+        assertEquals(listOf("https://a.test/page"), storedTabUrls())
+        assertEquals(listOf("https://a.test/page"), storedVisitUrls())
+        assertNoCaptureFor(20)
+        engine.captures.filter { it.first == 20L }.forEach { (_, capture) ->
+            result(1, 20, capture, "B text")
+        }
+        assertTrue(
+            "uncommitted document 20's text must not be queued under the committed address",
+            sink.pages.none { it.url == "https://a.test/page" && it.text == "B text" },
+        )
+    }
+
+    /** The fixture's failure is not permanent: after the trigger is gone, a committed document captures normally. */
+    @Test
+    fun aDocumentCommittingAfterTheTriggerIsRemovedIsCapturedNormally() {
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        load(1, 10, "https://a.test/")
+        settle()
+
+        failTabUpdates()
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 20, "https://b.test/", 0, 1))
+        idle()
+        allowTabUpdates()
+
+        engine.emit(EngineEvent.HistoryChanged(engine.view(1), HistoryKind.DOCUMENT_COMMITTED, 30, "https://c.test/", 0, 1))
+        idle()
+        assertTrue(
+            "the committed document's fallback capture fired; engine saw ${engine.captures}",
+            awaitUntil(FALLBACK_WINDOW_MS) { engine.captures.any { it.first == 30L } },
+        )
+        val (_, capture) = engine.captures.last()
+        result(1, 30, capture, "C text")
+        val page = sink.pages.single()
+        assertEquals("https://c.test/", page.url)
+        assertEquals("C text", page.text)
+    }
+
+    /**
+     * Fails the final `UPDATE tabs` of a commit transaction with SQLite's ABORT: the runtime
+     * mutation and capture scheduling [BrowserCoordinator.onHistory] already did stay, and the
+     * transaction rolls back. [allowTabUpdates] ends the failure for the recovery guard.
+     */
+    private fun failTabUpdates() {
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER $SYNTHETIC_TRIGGER BEFORE UPDATE ON tabs " +
+                "BEGIN SELECT RAISE(ABORT, 'synthetic'); END",
+        )
+    }
+
+    private fun allowTabUpdates() {
+        database.openHelper.writableDatabase.execSQL("DROP TRIGGER $SYNTHETIC_TRIGGER")
+    }
+
+    /** Waits out the fallback window for a capture request naming [document], then asserts none was made. */
+    private fun assertNoCaptureFor(document: Long) {
+        awaitUntil(FALLBACK_WINDOW_MS) { engine.captures.any { it.first == document } }
+        assertTrue(
+            "no capture request may be made for uncommitted document $document under the rolled-back tab; " +
+                "engine saw ${engine.captures}",
+            engine.captures.none { it.first == document },
+        )
+    }
+
+    /** Polls [condition] in bounded slices until it holds or [timeoutMs] passes. */
+    private fun awaitUntil(timeoutMs: Long, condition: () -> Boolean): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        while (System.nanoTime() < deadline) {
+            idle()
+            if (condition()) return true
+            Thread.sleep(POLL_MS)
+        }
+        idle()
+        return condition()
+    }
+
+    private fun storedTabUrls() = database.openHelper.readableDatabase.query("SELECT url FROM tabs").use { rows ->
+        generateSequence { if (rows.moveToNext()) rows.getString(0) else null }.toList()
+    }
+
+    private fun storedVisitUrls() = database.openHelper.readableDatabase.query("SELECT url FROM visits").use { rows ->
+        generateSequence { if (rows.moveToNext()) rows.getString(0) else null }.toList()
+    }
+
     private class RecordingSink : CaptureSink {
         val pages = CopyOnWriteArrayList<CapturedPage>()
         @Volatile var allow = true
@@ -285,5 +417,12 @@ class CaptureTest {
         override suspend fun forgetHost(host: String, includeSubdomains: Boolean) = Unit
 
         override suspend fun forgetUrl(url: String) = Unit
+    }
+
+    private companion object {
+        /** Longer than the fallback capture delay (400 ms), so a scheduled request has its window. */
+        const val FALLBACK_WINDOW_MS = 1_500L
+        const val POLL_MS = 20L
+        const val SYNTHETIC_TRIGGER = "synthetic_tab_update_rollback"
     }
 }
