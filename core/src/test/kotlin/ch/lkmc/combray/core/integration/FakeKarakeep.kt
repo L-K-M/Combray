@@ -23,6 +23,8 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
     /** List id -> bookmark ids in it. Lists that are not here answer 404. */
     val lists = LinkedHashMap<String, MutableSet<String>>()
     val requests = CopyOnWriteArrayList<String>()
+    /** Every request's method and full URI, query included; `requests` holds bodies and paths. */
+    val uris = CopyOnWriteArrayList<String>()
     @Volatile var fault = Fault.NONE
     @Volatile var faultCount = 0
     @Volatile var acceptedKey = apiKey
@@ -39,6 +41,7 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
     private fun handle(exchange: HttpExchange) {
         val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
         requests += "${exchange.requestMethod} $body"
+        uris += "${exchange.requestMethod} ${exchange.requestURI}"
         if (exchange.requestHeaders.getFirst("Authorization") != "Bearer $acceptedKey") return reply(exchange, 401, "{}")
         if (exchange.requestMethod == "GET") return reply(exchange, 200, listing(exchange))
 
@@ -86,6 +89,7 @@ class FakeKarakeep(private val apiKey: String = KEY) : AutoCloseable {
 
     private fun handleLists(exchange: HttpExchange) {
         requests += "${exchange.requestMethod} ${exchange.requestURI.path}"
+        uris += "${exchange.requestMethod} ${exchange.requestURI}"
         if (exchange.requestHeaders.getFirst("Authorization") != "Bearer $acceptedKey") return reply(exchange, 401, "{}")
         if (exchange.requestMethod == "GET") {
             val manual = lists.keys.map { """{"id":"$it","name":"List $it","icon":"📚","parentId":null,"type":"manual"}""" }

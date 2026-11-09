@@ -105,7 +105,7 @@ class HisterTest {
         // viewer check keeps it out of Hister. The PDF's text reaches Hister in a later step
         // (docs/PDF.md).
         val theme = device.settings.themeMode.value
-        device.settings.setThemeMode(ThemeMode.LIGHT)
+        device.setThemeMode(ThemeMode.LIGHT)
         try {
             val pdf = Fixtures.pdf("corrupt.pdf", "hister${System.currentTimeMillis()}")
             device.browser.openUrl(pdf, Placement.CURRENT_TAB)
@@ -118,7 +118,7 @@ class HisterTest {
             awaitDocument(later)
             assertFalse(documents().has(pdf))
         } finally {
-            device.settings.setThemeMode(theme)
+            device.setThemeMode(theme)
         }
     }
 

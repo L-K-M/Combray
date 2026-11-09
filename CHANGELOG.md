@@ -194,6 +194,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Browser preferences (appearance, tab count, closing unused tabs, Home
+  sections and text size) commit to disk off the main thread before the
+  choice is published. A failed write shows a generic failure and leaves
+  the previous choice; text size's immediate preview rolls back, and rapid
+  steps keep their order.
 - Refresh the verified Gradle and Java setup actions, AGP, KSP and Android
   Guava pins together so CI tests the combined build dependency set.
 - Play stays within reach on pages whose own video player shows an error:
@@ -234,6 +239,9 @@ All notable changes to this project are documented here. The format follows
   stop running three database reads on the command queue, and the open
   tab count is a COUNT query instead of loading every open row; taps
   and page events share that queue, so it stays short.
+- The active tab is one joined query instead of a session read plus a tab
+  read, and releasing hidden renderers reads the open tabs once instead of
+  once per live view.
 - A complete pine and ivory palette in light and dark mode: sheets,
   dialogs, menus, snackbars and the tab count no longer show Material's
   default purple or red, and the bottom bar's color reaches the screen
@@ -389,6 +397,9 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Preference feedback tests dispose Compose before closing their fixture scope
+  and Room, and release a failed test's scripted commit latch before the
+  bounded cancel-and-join, so cleanup cannot hang on an admitted write.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -406,6 +417,9 @@ All notable changes to this project are documented here. The format follows
   `local.properties`.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
+- A failed history commit no longer lets a capture label the new page's
+  text with the old address. Capture requests and replies check the
+  persisted visit and document identity, including same-address reloads.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
   the sentence "Unknown content type (application/pdf).", and reader view
   no longer offers that sentence as an article. Servo shows such a file as
@@ -497,6 +511,12 @@ All notable changes to this project are documented here. The format follows
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Two services configured for the first time at the same time could race the
+  device's first Keystore key creation, and one could replace the key the
+  other's credential had just been sealed with, silently losing it. Key
+  creation is now serialized process-wide across store instances. The device
+  check uses its own Keystore alias and directory, so it never deletes or
+  overwrites the app's real credential.
 - Addresses with common credential parameters (`auth_token`, `accessToken`,
   `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
   `code` with its `state`, session IDs) could be saved to Karakeep or captured
@@ -543,6 +563,9 @@ All notable changes to this project are documented here. The format follows
 - Proxy sign-ins Servo saved in its profile are deleted when the engine
   starts instead of being sent again after a restart. They still reach
   the disk while the app runs until a Servo patch change.
+- Large Hister requests retain the longest text prefix that fits the JSON
+  byte limit, without splitting Unicode characters or over-trimming escaped
+  text. Multibyte titles and Karakeep search queries stay bounded too.
 - With Hister capture on, a large page could stop responding for seconds
   after it loaded while Combray read its text. Reading now stops in time
   and keeps what it has, and waits while you scroll or tap.
@@ -573,6 +596,9 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- A screenshot encoder Error no longer leaves a site report preparing
+  forever. The draft continues without a screenshot; cancellation still
+  stops preparation rather than being reported as a copy failure.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
@@ -593,6 +619,9 @@ All notable changes to this project are documented here. The format follows
   encrypted just because the URL starts with `https`. Cleartext HTTP is
   still called not encrypted. Page info no longer claims a verified
   connection the engine has not reported.
+- System Back and the bottom bar's Back now answer an open page question
+  (a script dialog, a `<select>`, sign-in, or the leave-page prompt, where
+  Back answers Stay) instead of navigating the page behind it.
 - The bottom Back button now does what system Back does: it leaves
   Reader view first, and on the first page of a link another app opened
   it closes that tab and returns to that app.
@@ -627,6 +656,8 @@ All notable changes to this project are documented here. The format follows
   reporting timeouts.
 - `scripts/check-app.sh` skipped the reader view checks: its default run
   now covers every device-check class, and `--list` prints them.
+- Forgetting a page or site cancels its scheduled capture, including other
+  fragments of the same page and timers already queued for execution.
 - Forgetting a page or site commits local deletion and queued Hister
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch
@@ -668,6 +699,11 @@ All notable changes to this project are documented here. The format follows
   credentials, also as one word of a longer text, so a search such as
   `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
   image digest (`nginx:1.25@sha256:…`) is still searched.
+- Service setup accepts Unicode (IDN) names without mapping deviation
+  characters to a different server. A trailing dot or default port keeps
+  existing credential, queue and saved-page bindings. Explicit ports must
+  be 1–65535: zero, negative, overflowing, empty or malformed ports are
+  refused before a connection, and unsupported addresses report failure.
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.

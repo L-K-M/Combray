@@ -15,6 +15,8 @@ import ch.lkmc.combray.core.browser.HomeLink
 import ch.lkmc.combray.core.browser.HomeLinksState
 import ch.lkmc.combray.ui.CombrayTheme
 import ch.lkmc.combray.ui.HomeScreen
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertTrue
@@ -34,7 +36,7 @@ class HomeOrderingTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val preferences = context.getSharedPreferences("home-order-check", Context.MODE_PRIVATE)
         preferences.edit().clear().commit()
-        val settings = BrowserSettings(preferences)
+        val settings = BrowserSettings(preferences, CoroutineScope(Dispatchers.Unconfined))
         val links = MutableStateFlow(state("a.test", "b.test"))
         compose.setContent {
             CombrayTheme {
