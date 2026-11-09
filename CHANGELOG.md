@@ -411,6 +411,8 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Service-form tests run tightly ordered callbacks in one UI turn, so test
+  synchronization cannot start a save before the edit they mean to exercise.
 - Preference feedback tests dispose Compose before closing their fixture scope
   and Room, and release a failed test's scripted commit latch before the
   bounded cancel-and-join, so cleanup cannot hang on an admitted write.
