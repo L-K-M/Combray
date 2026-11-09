@@ -60,6 +60,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -204,12 +205,16 @@ fun BottomBar(
                 // affordance; labeled actions for the two services, +, Recent and More. The
                 // browsing bar's disabled Back/Save/Share have no place here.
                 val home = tab?.url == null
+                // Home's search editor shares the address editor, which leaves composition with
+                // the bar's home slot on a tab switch: its draft would be dropped with it. The
+                // holder keeps the editor's saveable state for when home returns.
+                val homeSearchState = rememberSaveableStateHolder()
                 // Six 48dp actions leave a narrow phone's chip too little room for a site name, so
                 // the address takes a row of its own above them (owner decision, 22 October 2026).
                 val stacked = maxWidth < STACKED_BAR_BELOW
                 Column(Modifier.graphicsLayer { translationX = swipeOffset }) {
                     if (home && homeSearch != null) {
-                        homeSearch()
+                        homeSearchState.SaveableStateProvider("home_search") { homeSearch() }
                     } else if (stacked || home) {
                         AddressChip(
                              tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia,
