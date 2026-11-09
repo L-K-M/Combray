@@ -98,7 +98,7 @@ class HomeSearchDraftTest {
      * wins over the fresh entry's empty prefill.
      */
     @Test
-    fun aHeldHomeSlotResurrectsTheDraftInANewHomeEntry() {
+    fun aHeldHomeSlotStartsEmptyInANewHomeEntry() {
         showBar(hold = true)
         typeDraft("madeleine")
 
@@ -110,7 +110,7 @@ class HomeSearchDraftTest {
 
     /** The same blocker when no blank tab is available and `newTab()` creates a new identity. */
     @Test
-    fun aHeldHomeSlotResurrectsTheDraftWhenANewTabIsCreated() {
+    fun aHeldHomeSlotDoesNotResurrectADraftForANewTab() {
         showBar(hold = true)
         typeDraft("madeleine")
 
@@ -126,7 +126,7 @@ class HomeSearchDraftTest {
      * restores the saved field over the fresh entry's empty prefill.
      */
     @Test
-    fun aHeldHomeSlotResurrectsTheSharedPrefillInANewHomeEntry() {
+    fun aHeldHomeSlotDoesNotResurrectASharedPrefillInANewEntry() {
         homeText = SHARED
         showBar(hold = true)
         assertEquals(SHARED, fieldText())

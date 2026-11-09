@@ -36,11 +36,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -124,11 +126,13 @@ internal fun AddressEditor(
     modifier: Modifier = Modifier,
 ) {
     val initial = initialText.orEmpty()
-    var field by rememberSaveable(target, restartKey, stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
+    val saver = remember(target, restartKey) { addressDraftSaver(target, restartKey) }
+    var draft by rememberSaveable(target, restartKey, saver = saver) {
+        mutableStateOf(AddressEditorDraft(TextFieldValue(initial, TextRange(0, initial.length)), initial))
     }
-    // Text another app sent is the prefill too: suggestions wait until it is edited.
-    val prefilled = rememberSaveable(target, restartKey) { initial }
+    val field = draft.field
+    // Keep the prefill with its draft: suggestions wait until that entry's text is edited.
+    val prefilled = draft.prefilled
 
     // Matches come from this device only: typing contacts no server. One subscription for the
     // sheet's life; ranking parses every candidate's host, so it waits for a pause in typing and
@@ -151,10 +155,31 @@ internal fun AddressEditor(
     }
 
     AddressSheetContent(
-        field, { field = it }, matches, target, onDecision, onSelectTab, onNewTab, onDismiss,
+        field, { draft = draft.copy(field = it) }, matches, target, onDecision, onSelectTab, onNewTab, onDismiss,
         mode, focusKey, onFocused, placeholder, modifier,
     )
 }
+
+private data class AddressEditorDraft(val field: TextFieldValue, val prefilled: String)
+
+// Save the state itself: rejecting a snapshot must run the initializer, not restore a null value.
+private fun addressDraftSaver(target: String?, restartKey: Int) = Saver<MutableState<AddressEditorDraft>, Any>(
+    save = { state ->
+        val draft = state.value
+        with(TextFieldValue.Saver) { save(draft.field) }?.let { field ->
+            listOf(target, restartKey, draft.prefilled, field)
+        }
+    },
+    restore = restore@{ raw ->
+        // rememberSaveable inputs reset live state, but are not checked against a restored
+        // provider snapshot. A new Home entry must not resurrect an earlier draft or prefill.
+        val values = raw as? List<*> ?: return@restore null
+        if (values.size != 4 || values[0] != target || values[1] != restartKey) return@restore null
+        val prefilled = values[2] as? String ?: return@restore null
+        val field = values[3] ?: return@restore null
+        TextFieldValue.Saver.restore(field)?.let { mutableStateOf(AddressEditorDraft(it, prefilled)) }
+    },
+)
 
 /**
  * The editor's layout, apart from the sheet so a device test can check it without the sheet's
