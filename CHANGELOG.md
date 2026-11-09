@@ -814,3 +814,7 @@ All notable changes to this project are documented here. The format follows
   white band where the bar had been. The page area now keeps its size
   under the bar, pages lay out above the bar, and a hiding bar leaves
   only once the page under it is drawn.
+- Setting the phone's date far ahead (or a bad network time) no longer
+  deletes browsing history or closes unused tabs. Until the phone
+  reboots, retention ignores a clock that runs ahead of the time that
+  actually passed; after a reboot the clock is trusted again.
