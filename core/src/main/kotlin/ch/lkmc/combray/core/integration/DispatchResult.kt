@@ -51,6 +51,12 @@ sealed interface ConnectionCheck {
     /** Reachable, but the root does not look like this service (404, redirect, other answer). */
     data class WrongAddress(val status: Int) : ConnectionCheck
 
+    /**
+     * Reachable, and probably the right address, but failing or busy right now: a status the
+     * outbox retries (408, 429, 5xx), so the user should try again later, not change the address.
+     */
+    data class ServerError(val status: Int) : ConnectionCheck
+
     data class Unreachable(val category: String) : ConnectionCheck
 }
 
@@ -61,11 +67,26 @@ internal object HttpStatus {
 
     fun classifyFailure(outcome: HttpOutcome.Response): DispatchResult = when (val status = outcome.status) {
         401, 403 -> DispatchResult.AuthRequired("http_$status")
-        408, 429 -> DispatchResult.Retry("http_$status", retryAfterMs(outcome.headers))
-        in 500..599 -> DispatchResult.Retry("http_$status", retryAfterMs(outcome.headers))
         in 300..399 -> DispatchResult.Rejected("redirect")
-        else -> DispatchResult.Rejected("http_$status")
+        else -> if (isTransient(status)) {
+            DispatchResult.Retry("http_$status", retryAfterMs(outcome.headers))
+        } else {
+            DispatchResult.Rejected("http_$status")
+        }
     }
+
+    /**
+     * A connection check's unexpected answer. The statuses the outbox retries say the server is
+     * failing or busy, not that the address is wrong: a busy service answers 503 at its usual root.
+     */
+    fun classifyCheckFailure(status: Int): ConnectionCheck = when {
+        status == 401 || status == 403 -> ConnectionCheck.Unauthorized
+        isTransient(status) -> ConnectionCheck.ServerError(status)
+        else -> ConnectionCheck.WrongAddress(status)
+    }
+
+    /** Request timeout, rate limit or server error: worth trying again later, unchanged. */
+    private fun isTransient(status: Int): Boolean = status == 408 || status == 429 || status in 500..599
 
     /**
      * `Retry-After` in seconds, bounded; HTTP-date values are ignored (the backoff applies).

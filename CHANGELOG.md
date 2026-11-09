@@ -330,6 +330,11 @@ All notable changes to this project are documented here. The format follows
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
+- Check connection in Settings no longer tells you to check the address
+  when Karakeep, Hister or the report service is failing or busy. A
+  request timeout (HTTP 408), rate limit (429) or server error (5xx) now
+  says the server answered with an error and to try again later, matching
+  the statuses queued saves, captures and reports retry.
 - A search typed into the new-tab page's field survives switching to a page
   tab and back. Before, the draft was dropped with the field and you typed
   it again. Starting a new entry clears the earlier draft and shared prefill
@@ -707,6 +712,8 @@ All notable changes to this project are documented here. The format follows
   now covers every device-check class, and `--list` prints them.
 - Forgetting a page or site cancels its scheduled capture, including other
   fragments of the same page and timers already queued for execution.
+- Hister capture keeps spaces between inline pieces of a sentence, so
+  adjacent links no longer turn into a single search word.
 - Forgetting a page or site commits local deletion and queued Hister
   cancellation together, so a crash cannot leave forgotten text queued.
 - Volume, media, headset, camera and call keys work again after you touch
