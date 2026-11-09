@@ -238,6 +238,8 @@ All notable changes to this project are documented here. The format follows
   and reaps it. Old pid files are evidence, never permission to stop a process.
   Bounded crash classification runs on the test runner and exports only known
   SDK module names and exception codes, never raw dumps or private payloads.
+  The device job uses a pinned Ubuntu 24.04 LTS host for a bounded environment
+  trial after host-emulator SIGSEGVs, not a claimed root-cause fix.
 - Build Servo from an exact commit in `L-K-M/servo`, preserving upstream
   history and keeping all changes and review downstream. Retire the local
   patch stack; treat the source checkout as disposable build input. Add native

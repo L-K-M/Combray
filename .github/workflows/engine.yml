@@ -216,7 +216,9 @@ jobs:
   device:
     name: Emulator fixture checks (x86_64)
     needs: engine
-    runs-on: ubuntu-latest
+    # Keep the device host stable while investigating owned qemu SIGSEGVs.
+    # Android images, emulator resources, renderer and fixture deadlines stay unchanged.
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     # An arm64 failure must not forfeit the x86_64 device evidence.
     # The artifact download below is the real gate — when the x86_64 leg did not
