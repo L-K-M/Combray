@@ -90,7 +90,7 @@ internal fun HomeEditorSheet(
         var id by rememberSaveable { mutableStateOf(initialLink?.pinId) }
         var address by rememberSaveable { mutableStateOf(initialLink?.url.orEmpty()) }
         var name by rememberSaveable { mutableStateOf(initialLink?.let { it.title ?: displayHost(it.url) }.orEmpty()) }
-        var error by remember { mutableStateOf<Int?>(null) }
+        var error by rememberSaveable { mutableStateOf<Int?>(null) }
         var saving by remember { mutableStateOf(false) }
         // The visibility switches fence their feedback to the click-time request generation;
         // pin operations keep the shared error and are out of scope here.

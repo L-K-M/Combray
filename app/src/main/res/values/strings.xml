@@ -94,6 +94,7 @@
 
     <!-- Address -->
     <string name="address_placeholder">Search or enter address</string>
+    <string name="address_title">Address or search</string>
     <string name="address_edit">Edit address</string>
     <string name="address_insecure">Not encrypted (HTTP)</string>
     <string name="address_go">Go to %1$s</string>
@@ -121,6 +122,7 @@
     <string name="save_needs_attention">Saving this page is paused. Check Karakeep in Settings.</string>
     <string name="save_failed">Not saved: Combray could not store the link.</string>
     <string name="save_state_saved">Saved to Karakeep</string>
+    <string name="save_state_saved_list_failed">Saved to Karakeep (list failed)</string>
     <string name="save_state_pending">Saving to Karakeep</string>
     <string name="save_state_waiting">Waiting for Karakeep</string>
     <string name="save_state_attention">Saving needs attention</string>
