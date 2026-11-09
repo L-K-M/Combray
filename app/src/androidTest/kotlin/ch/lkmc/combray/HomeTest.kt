@@ -168,7 +168,7 @@ class HomeTest {
 
     @Test
     fun anEmptyHomeAddsALinkDirectlyAndCancelWritesNothing() {
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        device.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
         openHome()
         awaitText(compose.activity.getString(R.string.home_add_link))
         compose.onNodeWithText(compose.activity.getString(R.string.home_add_link)).performClick()
@@ -195,21 +195,21 @@ class HomeTest {
     fun hidingAutomaticSectionsKeepsDeliberatePins() {
         runBlocking { home.savePin(null, "http://127.0.0.1:8766/solid/715f2e.html", "Pin") }
         open(Device.GREEN)
-        device.settings.setHomeContinue(HomeSectionVisibility.HIDDEN)
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        device.setHomeContinue(HomeSectionVisibility.HIDDEN)
+        device.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
         openHome()
         awaitTile("Pin").assertIsDisplayed()
         compose.onNodeWithContentDescription("Open localhost").assertDoesNotExist()
         compose.onNodeWithText("Continue").assertDoesNotExist()
 
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
+        device.setHomeFrequentSites(HomeSectionVisibility.SHOWN)
         awaitTile("localhost").assertIsDisplayed()
         awaitTile("Pin").assertIsDisplayed()
     }
 
     @Test
     fun anAcceptedSaveFinishesAfterTheEditorIsDismissed() {
-        device.settings.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
+        device.setHomeFrequentSites(HomeSectionVisibility.HIDDEN)
         openHome()
         awaitText("Add link")
         compose.onNodeWithText("Add link").performClick()
