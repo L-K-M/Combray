@@ -28,14 +28,14 @@ use servo::AllowOrDenyRequest;
 use servo::CreateNewWebViewRequest;
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    AuthenticationRequest, ContextMenuAction, ContextMenuItem, DevicePoint, EmbedderControl,
-    EmbedderControlId, EventLoopWaker, ImeEvent, InputEvent, InputEventId, InputEventResult,
-    JSValue, JavaScriptEvaluationError, Key, KeyState, KeyboardEvent, MouseButton,
-    MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest, Opts, PanicReporter,
-    PipelineId, PrefValue, Preferences, RenderingContext, SelectElementOption,
-    SelectElementOptionOrOptgroup, Servo, ServoBuilder, SimpleDialog, StopLoadingError, Theme,
-    TouchEvent, TouchEventType, TouchId, TouchPointerType, UserContentManager, UserScript, WebView,
-    WebViewBuilder, WebViewPoint, WindowRenderingContext,
+    AuthenticationRequest, ContextMenuAction, ContextMenuItem, DeviceIntPoint, DeviceIntRect,
+    DeviceIntSize, DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, ImeEvent,
+    InputEvent, InputEventId, InputEventResult, JSValue, JavaScriptEvaluationError, Key, KeyState,
+    KeyboardEvent, MouseButton, MouseButtonAction, MouseButtonEvent, NamedKey, NavigationRequest,
+    OffscreenRenderingContext, Opts, PanicReporter, PipelineId, PrefValue, Preferences,
+    RenderingContext, SelectElementOption, SelectElementOptionOrOptgroup, Servo, ServoBuilder,
+    SimpleDialog, StopLoadingError, Theme, TouchEvent, TouchEventType, TouchId, TouchPointerType,
+    UserContentManager, UserScript, WebView, WebViewBuilder, WebViewPoint, WindowRenderingContext,
 };
 use url::Url;
 
@@ -71,6 +71,7 @@ use crate::reload_pull::{
     StartPosition,
 };
 use crate::user_agent;
+use crate::viewport::{self, GlRect, Strip, StripCheck, ViewportAck};
 use crate::wakeup::{self, PaintRetry};
 
 /// Receives engine events on the engine thread.
@@ -188,7 +189,12 @@ impl EventLoopWaker for ChannelWaker {
 /// Servo and its rendering context exist once the first surface arrives.
 struct Runtime {
     servo: Servo,
+    /// The Android surface. Pages do not render into it directly: see `page_context`.
     rendering_context: Rc<WindowRenderingContext>,
+    /// What every view renders into: the surface's rows above the app's bottom controls, copied
+    /// to the top of the surface by `paint`. The controls showing or hiding then changes this
+    /// size, not the surface's (see `viewport`).
+    page_context: Rc<OffscreenRenderingContext>,
     /// Scripts every view's documents run before their own (see `animations.js`).
     user_content: Rc<UserContentManager>,
 }
@@ -462,6 +468,10 @@ struct Engine {
     runtime: Option<Runtime>,
     surface: Surface,
     size: PhysicalSize<u32>,
+    /// Bottom rows of the surface the app's controls cover; pages lay out above them.
+    viewport_inset: u32,
+    /// Which rows of the page a presented frame shows, for the app's viewport requests.
+    viewport: ViewportAck,
     tabs: BTreeMap<i64, Tab>,
     active: Option<i64>,
     next_generation: u64,
@@ -516,6 +526,8 @@ impl Engine {
             runtime: None,
             surface: Surface::Unbound,
             size: PhysicalSize::new(1, 1),
+            viewport_inset: 0,
+            viewport: ViewportAck::default(),
             tabs: BTreeMap::new(),
             active: None,
             next_generation: 1,
@@ -627,6 +639,7 @@ impl Engine {
             Command::SurfaceChanged { width, height } => {
                 self.resize(PhysicalSize::new(width, height))
             },
+            Command::SetViewportInset { inset, request } => self.set_viewport_inset(inset, request),
             Command::SurfaceDestroyed { done } => {
                 self.surface_destroyed();
                 let _ = done.send(());
@@ -816,6 +829,8 @@ impl Engine {
             epoch,
         };
         self.resize(size);
+        self.viewport
+            .surface_bound(viewport::page_size(to_size(size), self.viewport_inset));
         self.needs_paint = true;
         // Report the first paint on the new surface even if the last report was recent.
         for tab in self.tabs.values_mut() {
@@ -837,6 +852,8 @@ impl Engine {
                 return false;
             },
         };
+        let page = viewport::page_size(to_size(size), self.viewport_inset);
+        let page_context = Rc::new(rendering_context.offscreen_context(to_physical(page)));
 
         if let Err(error) = std::fs::create_dir_all(&self.config.profile_dir) {
             self.error(format!("creating the profile directory failed: {error}"));
@@ -874,6 +891,10 @@ impl Engine {
         // pages document.execCommand, as other browsers do.
         preferences.set_value("dom_exec_command_enabled", PrefValue::Bool(true));
         set_pdf_viewer_preferences(&mut preferences);
+        // Servo's default, set here because `paint` reads rows back expecting this color where a
+        // frame has no content.
+        preferences.shell_background_color_rgba =
+            viewport::CLEAR_RGBA.map(|c| f64::from(c) / 255.0);
         // Firefox for Android's Gecko token, or firewalls that take a Firefox agent without one
         // for a forged one refuse every page (see `user_agent`).
         match user_agent::with_gecko_token(&preferences.user_agent) {
@@ -906,6 +927,7 @@ impl Engine {
         self.runtime = Some(Runtime {
             servo,
             rendering_context,
+            page_context,
             user_content,
         });
         self.emit(EngineEvent::EngineReady {
@@ -946,14 +968,53 @@ impl Engine {
         let Some(runtime) = &self.runtime else {
             return;
         };
-        if !self.surface.usable() || runtime.rendering_context.size() == size {
+        if !self.surface.usable() {
+            return;
+        }
+        let context = &runtime.rendering_context;
+        if context.size() != size {
+            if let Err(error) = context.make_current() {
+                warn!("making the GL context current failed: {error:?}");
+            }
+            context.resize(size);
+            self.needs_paint = true;
+        }
+        self.apply_viewport();
+    }
+
+    /// The app's bottom controls now cover `inset` rows of the surface. Acknowledged with
+    /// `viewport_painted` once a presented frame shows the page above them in full.
+    fn set_viewport_inset(&mut self, inset: u32, request: u64) {
+        self.viewport_inset = inset;
+        self.viewport.requested(request, inset);
+        self.apply_viewport();
+        // Even an unchanged page is acknowledged after a frame, not before.
+        self.needs_paint = true;
+    }
+
+    /// Lays every view out in the surface's rows above the app's controls.
+    fn apply_viewport(&mut self) {
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        if !self.surface.usable() {
+            return;
+        }
+        let page = viewport::page_size(to_size(self.size), self.viewport_inset);
+        if runtime.page_context.size() == to_physical(page) {
             return;
         }
         // All views share the context; resizing through one resizes it for every view.
         match self.tabs.values().next() {
-            Some(tab) => tab.webview.resize(size),
-            None => runtime.rendering_context.resize(size),
+            Some(tab) => tab.webview.resize(to_physical(page)),
+            None => {
+                if let Err(error) = runtime.page_context.make_current() {
+                    warn!("making the GL context current failed: {error:?}");
+                }
+                runtime.page_context.resize(to_physical(page));
+            },
         }
+        self.viewport.page_resized(page);
         self.needs_paint = true;
     }
 
@@ -994,7 +1055,7 @@ impl Engine {
         };
         self.next_generation += 1;
 
-        let rendering_context: Rc<dyn RenderingContext> = runtime.rendering_context.clone();
+        let rendering_context: Rc<dyn RenderingContext> = runtime.page_context.clone();
         let webview = WebViewBuilder::new(&runtime.servo, rendering_context)
             .url(url)
             .hidpi_scale_factor(Scale::new(self.config.density))
@@ -1084,7 +1145,7 @@ impl Engine {
         self.next_page_tab += 1;
         self.next_generation += 1;
 
-        let rendering_context: Rc<dyn RenderingContext> = runtime.rendering_context.clone();
+        let rendering_context: Rc<dyn RenderingContext> = runtime.page_context.clone();
         let webview = request
             .builder(rendering_context)
             .hidpi_scale_factor(Scale::new(self.config.density))
@@ -2218,6 +2279,7 @@ impl Engine {
             DelegateEvent::FrameReady { view } => {
                 if self.live_tab(view).is_some() && self.active == Some(view.tab) {
                     self.needs_paint = true;
+                    self.viewport.frame_ready();
                 }
             },
             DelegateEvent::ImeShown {
@@ -2891,16 +2953,30 @@ impl Engine {
         self.needs_paint = false;
 
         let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) else {
-            // No selected view: clear, so a closed page never stays on screen.
-            let gl = context.gleam_gl_api();
+            // No selected view: clear, so a closed page never stays on screen. Nothing else is
+            // meant to be there, so the whole page counts as shown.
             context.prepare_for_rendering();
-            gl.clear_color(1.0, 1.0, 1.0, 1.0);
-            gl.clear(gleam::gl::COLOR_BUFFER_BIT);
+            clear(&*context.gleam_gl_api());
             context.present();
+            self.acknowledge_viewport(Strip::Painted);
             return;
         };
 
         tab.webview.paint();
+        let strip = self.viewport.check().map_or(Strip::Painted, |check| {
+            read_strip(&runtime.page_context, check)
+        });
+        // The page goes at the top of the surface; the rows below it lie under the app's
+        // controls and get the clear color.
+        context.prepare_for_rendering();
+        clear(&*context.gleam_gl_api());
+        if let Some(copy) = runtime.page_context.render_to_parent_callback() {
+            let target = viewport::page_target(
+                to_size(context.size()),
+                to_size(runtime.page_context.size()),
+            );
+            copy(&context.glow_gl_api(), gl_rect(target));
+        }
         context.present();
         tab.frames_painted += 1;
 
@@ -2912,6 +2988,17 @@ impl Engine {
             tab.last_paint_report = Some(now);
             let (view, frames) = (tab.view, tab.frames_painted);
             self.emit(EngineEvent::Painted { view, frames });
+        }
+        self.acknowledge_viewport(strip);
+    }
+
+    /// After a frame was presented: tells the app once it shows the page it last asked for.
+    fn acknowledge_viewport(&mut self, strip: Strip) {
+        if let Some(shown) = self.viewport.presented(strip) {
+            self.emit(EngineEvent::ViewportPainted {
+                request: shown.request,
+                inset: shown.inset,
+            });
         }
     }
 
@@ -2928,6 +3015,7 @@ impl Engine {
             let Runtime {
                 servo,
                 rendering_context,
+                page_context,
                 user_content,
             } = runtime;
             set_panic_reporter(None);
@@ -2936,6 +3024,11 @@ impl Engine {
             // Dropping the last handle asks the constellation to exit and spins until it has;
             // this is when Servo writes cookies and HSTS state to the profile directory.
             drop(servo);
+            // Its framebuffer is deleted in the context it was made in.
+            if let Err(error) = rendering_context.make_current() {
+                warn!("making the GL context current for shutdown failed: {error:?}");
+            }
+            drop(page_context);
             if let Surface::Bound { .. } = self.surface {
                 if let Err(error) = surface_operation(|| rendering_context.take_window()) {
                     warn!("unbinding the surface during shutdown failed: {error}");
@@ -2952,6 +3045,49 @@ impl Engine {
         self.surface = Surface::Unbound;
         self.emit(EngineEvent::ShutdownComplete);
     }
+}
+
+fn to_size(size: PhysicalSize<u32>) -> viewport::Size {
+    viewport::Size {
+        width: size.width,
+        height: size.height,
+    }
+}
+
+fn to_physical(size: viewport::Size) -> PhysicalSize<u32> {
+    PhysicalSize::new(size.width, size.height)
+}
+
+fn gl_rect(rect: GlRect) -> euclid::Rect<i32, euclid::UnknownUnit> {
+    euclid::Rect::new(
+        euclid::Point2D::new(rect.x, rect.y),
+        euclid::Size2D::new(rect.width, rect.height),
+    )
+}
+
+/// Clears the bound framebuffer to the color Servo leaves where a frame has no content.
+fn clear(gl: &dyn gleam::gl::Gl) {
+    let [red, green, blue, alpha] = viewport::CLEAR_RGBA.map(|c| f32::from(c) / 255.0);
+    gl.disable(gleam::gl::SCISSOR_TEST);
+    gl.clear_color(red, green, blue, alpha);
+    gl.clear(gleam::gl::COLOR_BUFFER_BIT);
+}
+
+/// Reads the page rows `check` names back from the frame just rendered into `page`.
+fn read_strip(page: &OffscreenRenderingContext, check: StripCheck) -> Strip {
+    let read = |rect: GlRect| {
+        page.read_to_image(DeviceIntRect::from_origin_and_size(
+            DeviceIntPoint::new(rect.x, rect.y),
+            DeviceIntSize::new(rect.width, rect.height),
+        ))
+    };
+    let strip = read(check.strip);
+    let above = check.above.and_then(read);
+    viewport::classify(
+        strip.as_ref().map(|image| image.as_raw().as_slice()),
+        above.as_ref().map(|image| image.as_raw().as_slice()),
+        usize::try_from(check.strip.width).unwrap_or(0),
+    )
 }
 
 /// Turns on the PDF viewer (docs/PDF.md): the engine then shows a top-level PDF in a viewer

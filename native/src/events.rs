@@ -201,6 +201,12 @@ pub enum EngineEvent {
         height: u32,
     },
     SurfaceUnbound,
+    /// A presented frame shows the page above the `inset` rows the app's request `request`
+    /// said its controls cover, the newly uncovered rows included.
+    ViewportPainted {
+        request: u64,
+        inset: u32,
+    },
     TabCreated {
         view: ViewKey,
         webview: String,
@@ -384,6 +390,9 @@ impl EngineEvent {
                 json!({ "type": "surface_bound", "width": width, "height": height })
             },
             EngineEvent::SurfaceUnbound => json!({ "type": "surface_unbound" }),
+            EngineEvent::ViewportPainted { request, inset } => {
+                json!({ "type": "viewport_painted", "request": request, "inset": inset })
+            },
             EngineEvent::TabCreated { view, webview } => {
                 with_view(view, json!({ "type": "tab_created", "webview": webview }))
             },
@@ -668,6 +677,18 @@ fn capture_json(report: &CaptureReport) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_painted_names_the_request_and_its_inset() {
+        let painted = EngineEvent::ViewportPainted {
+            request: 41,
+            inset: 290,
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&painted.to_json()).unwrap(),
+            json!({ "schema": 1, "type": "viewport_painted", "request": 41, "inset": 290 }),
+        );
+    }
 
     #[test]
     fn stop_loading_keeps_the_view_request_and_retained_document() {

@@ -320,6 +320,10 @@ All notable changes to this project are documented here. The format follows
 - Karakeep's connection check verifies a bookmarks-list response before
   reporting a working connection. A proxy login page or unrelated HTTP 200
   response now reports the wrong address instead of a false success.
+- A search typed into the new-tab page's field survives switching to a page
+  tab and back. Before, the draft was dropped with the field and you typed
+  it again. Starting a new entry clears the earlier draft and shared prefill
+  instead of restoring them into a different tab or entry.
 - Sites whose firewall refused Combray with only "Access denied" open again.
   Such firewalls take a browser that calls itself Firefox without the
   `Gecko/` token Firefox sends for a forged one, and Servo's user agent had
@@ -561,6 +565,11 @@ All notable changes to this project are documented here. The format follows
   another app at device data (`file:`, `content:`). The page stays on screen, but
   Servo still stops what it was loading: a link tapped before the page
   finished loading leaves it unfinished.
+- A share or "Search with Kagi" selection of any size is handled without
+  copying and scanning all of it on the main thread, which could jank or
+  freeze the app for a multi-megabyte share. A link is now found up to the
+  first mebibyte of the share, past the old 64 KiB scan point; a link that
+  runs past the limit is refused rather than cut.
 - After an HTTP sign-in, the page's address carried the username and
   password (Servo 0.6.0 puts them in the URL), so the address bar,
   Recent, Share and restore after a restart showed or kept them. The
@@ -745,3 +754,8 @@ All notable changes to this project are documented here. The format follows
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped
   only when a longer name follows it.
+- The page no longer flickers when the bottom bar hides or shows as you
+  scroll. For one frame, the page appeared stretched and shifted, with a
+  white band where the bar had been. The page area now keeps its size
+  under the bar, pages lay out above the bar, and a hiding bar leaves
+  only once the page under it is drawn.

@@ -257,6 +257,19 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_surfaceChanged<'local
     });
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setViewportInset<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    inset: jint,
+    request: jlong,
+) {
+    send(Command::SetViewportInset {
+        inset: inset.max(0) as u32,
+        request: request.max(0) as u64,
+    });
+}
+
 /// Stops rendering into the surface and waits for the engine to unbind it, as Android requires.
 /// Rendering stops immediately through [`SURFACE_EPOCH`], even if the wait times out.
 #[unsafe(no_mangle)]
