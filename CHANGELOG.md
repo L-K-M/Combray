@@ -491,6 +491,12 @@ All notable changes to this project are documented here. The format follows
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Two services configured for the first time at the same time could race the
+  device's first Keystore key creation, and one could replace the key the
+  other's credential had just been sealed with, silently losing it. Key
+  creation is now serialized process-wide across store instances. The device
+  check uses its own Keystore alias and directory, so it never deletes or
+  overwrites the app's real credential.
 - Addresses with common credential parameters (`auth_token`, `accessToken`,
   `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
   `code` with its `state`, session IDs) could be saved to Karakeep or captured
