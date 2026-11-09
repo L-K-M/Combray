@@ -105,12 +105,13 @@ class KarakeepClient(private val transport: HttpTransport) {
 
     /** Newest bookmarks first when [query] is null, otherwise Karakeep's search for it. */
     fun bookmarks(root: String, apiKey: String, query: String?, cursor: String? = null): KarakeepRead<KarakeepPage> {
+        val search = boundedQuery(query)
         val parameters = buildString {
-            query?.let { append("q=").append(encode(it)).append('&') }
+            search?.let { append("q=").append(encode(it)).append('&') }
             append("limit=").append(PAGE_SIZE).append("&includeContent=false")
             cursor?.let { append("&cursor=").append(encode(it)) }
         }
-        val path = if (query == null) "api/v1/bookmarks?$parameters" else "api/v1/bookmarks/search?$parameters"
+        val path = if (search == null) "api/v1/bookmarks?$parameters" else "api/v1/bookmarks/search?$parameters"
         return read(root, apiKey, path) { body ->
             val bookmarks = body["bookmarks"] as? JsonArray ?: return@read null
             KarakeepPage(bookmarks.mapNotNull { bookmark(it) }, body.string("nextCursor"))
@@ -179,6 +180,15 @@ class KarakeepClient(private val transport: HttpTransport) {
         null
     }
 
+    /** [query] trimmed and bounded, or null when it is blank: a huge query would become a huge URL. */
+    private fun boundedQuery(query: String?): String? {
+        val trimmed = query?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
+        var end = minOf(trimmed.length, MAX_QUERY_CHARS)
+        if (end > 0 && end < trimmed.length && trimmed[end - 1].isHighSurrogate() && trimmed[end].isLowSurrogate()) end--
+        return trimmed.substring(0, end)
+    }
+
     private fun JsonObject.string(key: String): String? =
         (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
 
@@ -204,6 +214,9 @@ class KarakeepClient(private val transport: HttpTransport) {
 
         /** Bookmarks per page in Recent's Karakeep scope. */
         const val PAGE_SIZE = 20
+
+        /** Longest search query, in characters. A longer one is cut rather than sent as a huge URL. */
+        const val MAX_QUERY_CHARS = 2_000
 
         const val LINK = "link"
         const val MANUAL_LIST = "manual"
