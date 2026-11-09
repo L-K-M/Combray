@@ -21,6 +21,19 @@ class EngineEventTest {
     }
 
     @Test
+    fun parsesAViewportPaintedForItsRequest() {
+        val event = EngineEvent.parse("""{"type":"viewport_painted","request":41,"inset":290,"schema":1}""")
+
+        assertEquals(EngineEvent.ViewportPainted(request = 41, inset = 290), event)
+        assertThrows(IllegalArgumentException::class.java) {
+            EngineEvent.parse("""{"type":"viewport_painted","inset":290,"schema":1}""")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            EngineEvent.parse("""{"type":"viewport_painted","request":41,"schema":1}""")
+        }
+    }
+
+    @Test
     fun parsesDocumentBoundReloadPullsAndRejectsInvalidProgress() {
         val event = EngineEvent.parse(
             """{"schema":1,"type":"reload_pull","tab":3,"generation":4,"document":7,"phase":"pulling","progress":0.5}""",

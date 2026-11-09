@@ -150,6 +150,14 @@ class BrowserCoordinator(
 
     val browserState: StateFlow<BrowserState> = state.asStateFlow()
 
+    private val viewportPainted = MutableStateFlow<EngineEvent.ViewportPainted?>(null)
+
+    /**
+     * The engine's latest answer to a viewport request (`EngineSurfaceView.coverBottom`). Set as
+     * it arrives, never behind the queue: the bottom bar stays on screen until it comes.
+     */
+    val paintedViewport: StateFlow<EngineEvent.ViewportPainted?> = viewportPainted.asStateFlow()
+
     /**
      * Starts the engine (synchronously, so a surface created right after this can bind) and the
      * work queue, then restores the session. Call once per process: a second or concurrent call
@@ -774,7 +782,15 @@ class BrowserCoordinator(
 
     // --- Engine events ----------------------------------------------------------------------------
 
-    private fun onEngineEvent(event: EngineEvent) = submit {
+    private fun onEngineEvent(event: EngineEvent) {
+        if (event is EngineEvent.ViewportPainted) {
+            viewportPainted.value = event
+            return
+        }
+        handleEngineEvent(event)
+    }
+
+    private fun handleEngineEvent(event: EngineEvent) = submit {
         when (event) {
             is EngineEvent.EngineReady -> {
                 engineReady = true
@@ -887,6 +903,8 @@ class BrowserCoordinator(
             // tab projection, reader state, live views or any table publish() reads.
             is EngineEvent.Painted,
             is EngineEvent.TabSelected,
+            // Published by onEngineEvent, without the queue.
+            is EngineEvent.ViewportPainted,
             is EngineEvent.SurfaceBound,
             is EngineEvent.SurfaceUnbound,
             is EngineEvent.NavigationRequested,
