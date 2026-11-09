@@ -86,7 +86,15 @@ class SearchPanelResultsTest {
 
     @Test
     fun aStaleSearchDoesNotReplaceNewerState() {
-        showFirstSearch()
+        compose.setContent {
+            CombrayTheme {
+                Column(Modifier.fillMaxSize()) {
+                    HisterSearchPanelContent(service.value, "", ::search, {}, {})
+                }
+            }
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("one")
+        request(0)
         compose.onNode(hasSetTextAction()).performTextInput(" two")
         request(1)
         answer(1, results("Two", null))
@@ -187,7 +195,7 @@ class SearchPanelResultsTest {
 
     private fun answer(index: Int, result: HisterSearch) {
         val request = request(index)
-        compose.runOnIdle { request.answer.complete(result) }
+        compose.runOnIdle { check(request.answer.complete(result)) { "search read $index was already answered" } }
         compose.waitForIdle()
     }
 
