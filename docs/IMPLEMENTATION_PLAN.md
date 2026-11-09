@@ -141,6 +141,12 @@ A preview sheet shows everything the report sends: the service's host, the scree
 
 Proposed defaults, open questions to the owner (section 11): when `SensitiveUrls` thinks the address carries a sign-in or session code, the preview starts with only its site and path (user information, path parameters, query and fragment removed) and says why, and one tap restores the full address; otherwise it starts with the full address, and a warning shows whenever the address text looks sensitive. The sheet says "Your report service and the agents that read it get everything shown here." In reader view a report has no screenshot, because the copy would show the page under the reader, and the sheet says why. **Status:** implemented; evidence in section 9, M4.
 
+Report screenshot fallback (8 November 2026, #292): injected encoder
+`AssertionError`, `LinkageError` and `OutOfMemoryError` regressions exercise
+terminal screenshot omission, with cancellation kept separate. The non-OOM
+case failed before the fix. This does not establish late PixelCopy callback or
+physical-GPU bitmap lifetime safety; #259's recycling change remains separate.
+
 ### Recent: one mental model, several record types
 
 Recent combines open tabs and recent page visits. Show a small Open/active marker on live or restorable tab rows, title and domain, and relative time on every row (open tabs too, so duplicate tabs can be told apart). Closing an open tab is a distinct accessible action. Its row remains findable as history. A closed row offers reopening; it never appears to have a live renderer. Old page visits within a still-open tab remain recoverable even after that tab navigates elsewhere.
@@ -524,6 +530,8 @@ Not done: text selection, general downloads (beyond the image-menu action), perm
 3. Add ingestion jobs with per-effective-document ordering/coalescing, retention, auth/error states and deletion/account-switch invalidation. Document the server's ambiguity/latest-content limitation if conditional writes are unavailable.
 4. Build explicit Hister search scope, query generations, both result shapes, pagination, error states and safe URL opening. Keep local Recent usable when offline or unauthorized.
 5. Test realistic rendered text and an excluded/private fixture. Verify a unique fixture phrase is searchable after acceptance, then explicitly clean up the test document when authorized. Record whether accepted-but-skipped documents can be detected.
+
+**Capture consistency (8 November 2026):** requests and replies require the current persisted visit, document key and page address. A synthetic Room rollback regression failed for both another address and a same-address reload before this fence; all capture JVM tests pass after it. This is a capture-boundary mitigation, not adoption of a generic work-item timeout or complete transaction/runtime recovery. Current-candidate device evidence remains pending.
 
 **Gate:** search finds a distinctive phrase that exists only in the rendered content, not just the URL/title. Navigation, same-URL reloads, capture delay, forget/exclusion, offline restart and account switching cannot misattribute or redirect data. UI does not mistake auth errors for no history. Old jobs are not knowingly sent after newer acknowledged content for the same server key.
 

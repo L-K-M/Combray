@@ -397,6 +397,9 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Preference feedback tests dispose Compose before closing their fixture scope
+  and Room, and release a failed test's scripted commit latch before the
+  bounded cancel-and-join, so cleanup cannot hang on an admitted write.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -414,6 +417,9 @@ All notable changes to this project are documented here. The format follows
   `local.properties`.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
+- A failed history commit no longer lets a capture label the new page's
+  text with the old address. Capture requests and replies check the
+  persisted visit and document identity, including same-address reloads.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
   the sentence "Unknown content type (application/pdf).", and reader view
   no longer offers that sentence as an article. Servo shows such a file as
@@ -581,6 +587,9 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- A screenshot encoder Error no longer leaves a site report preparing
+  forever. The draft continues without a screenshot; cancellation still
+  stops preparation rather than being reported as a copy failure.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
