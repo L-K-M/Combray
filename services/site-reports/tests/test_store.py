@@ -106,6 +106,21 @@ class SchemaTest(StoreTestCase):
             with self.subTest(name=name):
                 self.assertEqual(stat.S_IMODE((self.data / name).stat().st_mode), 0o600)
 
+    def test_new_database_directory_entry_is_synced(self) -> None:
+        data = self.root / "durable"
+        with mock.patch.object(store_module, "_fsync_directory", wraps=store_module._fsync_directory) as sync:
+            support.open_store(self, data, self.clock)
+        sync.assert_called_once_with(data.resolve())
+
+    def test_unsupported_directory_sync_keeps_the_store_usable(self) -> None:
+        data = self.root / "unsupported"
+        with mock.patch.object(store_module, "_fsync_directory", side_effect=OSError(errno.EINVAL, "synthetic")) as sync:
+            store = support.open_store(self, data, self.clock)
+        sync.assert_called_once_with(data.resolve())
+        row, created = store.add(support.parse(support.without_screenshot(support.request())))
+        self.assertTrue(created)
+        self.assertEqual(store.get(row.id).id, row.id)
+
     def test_reopening_keeps_the_reports(self) -> None:
         report = self.add()
         self.store.close()

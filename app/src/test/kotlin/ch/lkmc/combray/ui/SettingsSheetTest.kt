@@ -148,9 +148,11 @@ class SettingsSheetTest {
         try {
             // Invoke the click action directly, without waiting for idle: the coroutine must not
             // start between the two taps.
-            saveButton().performSemanticsAction(SemanticsActions.OnClick) { it.invoke() }
-            assertEquals("the first save started before the second tap", 1L, writeEntered.count)
-            saveButton().performSemanticsAction(SemanticsActions.OnClick) { it.invoke() }
+            saveButton().performSemanticsAction(SemanticsActions.OnClick) { click ->
+                click()
+                assertEquals("the first save started before the second tap", 1L, writeEntered.count)
+                click()
+            }
         } finally {
             compose.mainClock.autoAdvance = true
         }
@@ -169,16 +171,18 @@ class SettingsSheetTest {
     fun anEditAfterTheTapBeforeTheCoroutineStartsKeepsTheDraftAndTheTappedAddress() {
         show()
         field("API key").performTextInput("new-key")
+        lateinit var editAddress: (AnnotatedString) -> Boolean
+        field("Server address").performSemanticsAction(SemanticsActions.SetText) { editAddress = it }
         blockWrites = true
         compose.mainClock.autoAdvance = false
         try {
-            saveButton().performSemanticsAction(SemanticsActions.OnClick) { it.invoke() }
-            // The user keeps editing before the coroutine runs. SetText invokes the field's
-            // onValueChange directly, without waiting for idle and starting the coroutine.
-            field("Server address").performSemanticsAction(SemanticsActions.SetText) {
-                it.invoke(AnnotatedString("http://127.0.0.1:1/keep2"))
+            // Query semantics before admission: a second test interaction can synchronize the
+            // queued coroutine even with a paused frame clock. Both callbacks share one UI turn.
+            saveButton().performSemanticsAction(SemanticsActions.OnClick) { click ->
+                click()
+                editAddress(AnnotatedString("http://127.0.0.1:1/keep2"))
+                assertEquals("the save started before the edit", 1L, writeEntered.count)
             }
-            assertEquals("the save started before the edit", 1L, writeEntered.count)
         } finally {
             compose.mainClock.autoAdvance = true
         }

@@ -656,6 +656,39 @@ class RateLimitTest(ApiTestCase):
 
         self.assertEqual(response.status, 201)
 
+    def test_old_hourly_windows_are_pruned(self) -> None:
+        self.created_id()
+        self.assertEqual(self.create(support.request(), token="reporter-token-synthetic-0002").status, 201)
+        limit = self.running.server.rate_limit
+        self.assertEqual(len(limit._counts), 2)
+
+        # Two hours later, a new report drops the old windows.
+        self.clock.advance(timedelta(hours=2))
+        self.created_id()
+
+        self.assertEqual(len(limit._counts), 1)
+        window = int(self.clock.now.timestamp() // 3600)
+        self.assertEqual(limit._counts[next(iter(limit._counts))][0], window)
+
+    def test_windows_are_scanned_only_when_the_clock_hour_changes(self) -> None:
+        class CountedWindows(dict):
+            scans = 0
+
+            def items(self):
+                self.scans += 1
+                return super().items()
+
+        windows = CountedWindows()
+        limit = self.running.server.rate_limit
+        limit._counts = windows
+        for index in range(20):
+            limit.record(str(index))
+        self.assertEqual(windows.scans, 1)
+        self.clock.advance(timedelta(hours=2))
+        limit.record("new")
+        self.assertEqual(windows.scans, 2)
+        self.assertEqual(set(windows), {"new"})
+
     def test_refused_reports_do_not_count(self) -> None:
         self.assertEqual(self.create(support.request(id="bad")).status, 400)
         self.created_id()

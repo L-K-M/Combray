@@ -368,6 +368,14 @@ Idempotency: the phone generates a UUIDv4 report id when the sheet opens. The se
 
 Durability: a report is an outbox job kind (`SITE_REPORT`) bound to the report service's fingerprint and generation, like a Karakeep save, with no Room schema change. Its payload holds the metadata and the screenshot's size and SHA-256, never a path or the token; the PNG is `noBackupFilesDir/reports/<report id>.png`, written and synced before the job row, and Send says the report is queued only once both are stored. The dispatcher sends only that file after checking its size and digest; a missing or changed file fails the report rather than sending anything else. At most 20 reports wait unsent. A main-address change parks unsent reports, as for saves, rather than cancelling them; a new token for the same address pauses them until resumed; removing the service cancels them. Retry restarts the seven-day limit for a service that cannot be reached. Sending the same draft again can retry one failed job, but never replace its original payload or destination. An already parked report or an unconfirmed retry is shown as previously stored with Settings offered, not falsely acknowledged as a new queued delivery; removing the service still cancels its reports. A delivered report's address, title and comment leave the phone's database right away, and a sweep at the start and end of every queue run deletes each screenshot file no unsent report refers to. The report service's own pages are never captured for Hister. Service-side retention (proposed default, section 11): open and claimed reports stay until resolved, resolved reports lose their contents and screenshot after 30 days, id records stay a year, and no backups are made by default.
 
+Report-service maintenance (8 November 2026, #289 with #301): old rate-limit
+windows are pruned once per changed clock hour, and database creation attempts
+to sync the containing directory, with an explicit best-effort fallback where
+directory sync is unsupported. The scan-count and directory-sync regressions
+failed before correction; all 213 service tests pass on macOS/Python 3.15.2.
+This is host fixture evidence, not a deployment or the exact container smoke
+check. Require the current-head image/CI checks after the Python image update.
+
 ### Durable queue and failure policy
 
 Store a user action and its initial outbox record in one transaction. Use job states such as `pending`, `running` with expiring lease, `retry_wait`, `auth_required`, `failed`, `succeeded`, `cancelled`, `expired`. A crashed worker's lease must become recoverable. WorkManager is a wakeup mechanism; the database is the source of truth. Foreground retry and background dispatch share the same claim mechanism. Do not require a continuously running Android service or promise exact execution times under Doze.
