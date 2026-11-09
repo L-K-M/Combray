@@ -322,6 +322,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A PDF page that failed to draw at the current size can recover: a resize
+  draws it again, and tapping its error note asks for the page again. A
+  problem that clears the viewer releases its page canvases before the
+  elements leave the page, rather than waiting for garbage collection.
 - Integration fixtures reserve unreachable loopback ports until test cleanup,
   so another listener cannot turn an offline test into a real HTTP request.
   Their connect waits are bounded separately from response reads.
