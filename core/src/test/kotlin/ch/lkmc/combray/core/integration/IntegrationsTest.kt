@@ -15,7 +15,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.net.HttpURLConnection
-import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -37,6 +36,7 @@ class IntegrationsTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @get:Rule val reportFolder = TemporaryFolder()
+    @get:Rule val unreachableRoots = UnreachableRoots()
     private lateinit var database: CombrayDatabase
     private lateinit var scope: CoroutineScope
     private lateinit var integrations: Integrations
@@ -63,7 +63,7 @@ class IntegrationsTest {
         integrations = Integrations(
             database = database,
             secrets = secrets,
-            transport = UrlConnectionTransport(timeoutMs = 500).let { http ->
+            transport = UrlConnectionTransport(timeoutMs = 500, connectTimeoutMs = 500).let { http ->
                 HttpTransport { request ->
                     if (offline) return@HttpTransport HttpOutcome.NotConnected("network")
                     if (listsOffline && request.method == "PUT") return@HttpTransport HttpOutcome.NotConnected("network")
@@ -315,7 +315,7 @@ class IntegrationsTest {
 
     @Test
     fun attemptsThatCannotConnectNeverUseUpTheAttemptLimit() {
-        configure(root = unreachableRoot())
+        configure(root = unreachableRoots.root("/keep"))
         runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
         repeat(15) {
             now = maxOf(now, job().nextAttemptAt)
@@ -330,7 +330,7 @@ class IntegrationsTest {
 
     @Test
     fun aSaveThatCannotConnectForAWeekNeedsAttention() {
-        configure(root = unreachableRoot())
+        configure(root = unreachableRoots.root("/keep"))
         val created = now
         runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
         while (now - created < WEEK_MS) {
@@ -342,13 +342,16 @@ class IntegrationsTest {
         drain()
 
         assertEquals(JobState.FAILED, job().state)
-        assertEquals("unreachable_network_for_7_days", job().error)
+        assertTrue(
+            job().error,
+            job().error in setOf("unreachable_network_for_7_days", "unreachable_timeout_for_7_days"),
+        )
         assertTrue(status() is SaveStatus.NeedsAttention)
     }
 
     @Test
     fun savingAgainStartsANewWeekOfWaiting() {
-        configure(root = unreachableRoot())
+        configure(root = unreachableRoots.root("/keep"))
         val created = now
         runBlocking { integrations.outbox.enqueue(JobKind.KARAKEEP_SAVE, service(), Binding.CURRENT, URL, payload(), supersede = false) }
         // A week of waiting takes about 50 drains; the bound turns a regression into a failure, not a hang.
@@ -610,7 +613,7 @@ class IntegrationsTest {
 
     @Test
     fun anUnreachableAddressFallsBackToTheAlternateWhichIsThenTriedFirst() {
-        val home = unreachableRoot()
+        val home = unreachableRoots.root("/keep")
         assertEquals(Configured.Saved, configure(root = home, alternate = alternateServer.root))
         save()
         drain()
@@ -639,7 +642,7 @@ class IntegrationsTest {
 
     @Test
     fun theConnectionCheckUsesTheAlternateToo() {
-        configure(root = unreachableRoot(), alternate = server.root)
+        configure(root = unreachableRoots.root("/keep"), alternate = server.root)
         assertEquals(ConnectionCheck.Connected(null), runBlocking { integrations.checkKarakeep() })
     }
 
@@ -841,12 +844,6 @@ class IntegrationsTest {
         assertEquals(listOf(URL), newest.value.bookmarks.map { it.url })
         val none = runBlocking { integrations.karakeepBookmarks("no such words") } as KarakeepRead.Ok
         assertTrue(none.value.bookmarks.isEmpty())
-    }
-
-    /** An address nothing listens on: connecting fails at once, before anything is sent. */
-    private fun unreachableRoot(): String {
-        val port = ServerSocket(0).use { it.localPort }
-        return "http://127.0.0.1:$port/keep"
     }
 
     private fun service() = runBlocking { database.integrations().service(ServiceKind.KARAKEEP) }!!
