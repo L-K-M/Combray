@@ -95,7 +95,8 @@ enum class ReaderDisplay { PAGE, ARTICLE }
  * labeled Hister, Karakeep, +, Recent and Menu actions ([onHister] and [onKarakeep] open the
  * Recent sheet on those scopes). A sideways swipe along the bar steps through open tabs
  * ([onSwipeTab]); the Recent sheet stays the visible way to switch, so nothing depends on the
- * gesture.
+ * gesture. [editor] is the address editor: Home's search field, and on a page the whole bar
+ * while [editorMode] is editing, so the address opens where it is instead of in a sheet.
  */
 @Composable
 fun BottomBar(
@@ -127,13 +128,13 @@ fun BottomBar(
     menuButton: @Composable () -> Unit,
     onCopyAddress: () -> Unit,
     onSwipeTab: (TabStep) -> Unit,
-    homeSearch: (@Composable () -> Unit)? = null,
-    homeMode: AddressEditorMode = AddressEditorMode.IDLE,
+    editor: (@Composable () -> Unit)? = null,
+    editorMode: AddressEditorMode = AddressEditorMode.IDLE,
     modifier: Modifier = Modifier,
 ) {
     val swipeDistance = with(LocalDensity.current) { TAB_SWIPE_DISTANCE.toPx() }
     // Editing keeps horizontal drags for the cursor. Otherwise the whole bar shares one gesture.
-    val swipeEnabled = tab?.url != null || homeMode == AddressEditorMode.IDLE
+    val swipeEnabled = editorMode == AddressEditorMode.IDLE
     val swipeTab by rememberUpdatedState(onSwipeTab)
     var swipeProgress by remember(tab?.id, swipeEnabled) { mutableFloatStateOf(0f) }
     val previewDistance = with(LocalDensity.current) { TAB_SWIPE_PREVIEW_DISTANCE.toPx() }
@@ -213,8 +214,14 @@ fun BottomBar(
                 // the address takes a row of its own above them (owner decision, 22 October 2026).
                 val stacked = maxWidth < STACKED_BAR_BELOW
                 Column(Modifier.graphicsLayer { translationX = swipeOffset }) {
-                    if (home && homeSearch != null) {
-                        homeSearchState.SaveableStateProvider("home_search") { homeSearch() }
+                    // A page's address opens in place: the editor takes the whole bar until you
+                    // leave it, and the page's actions come back with the address.
+                    if (!home && editor != null && editorMode == AddressEditorMode.EDITING) {
+                        editor()
+                        return@Column
+                    }
+                    if (home && editor != null) {
+                        homeSearchState.SaveableStateProvider("home_search") { editor() }
                     } else if (stacked || home) {
                         AddressChip(
                              tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia,
@@ -224,7 +231,7 @@ fun BottomBar(
                         )
                     }
                     if (home) {
-                        if (homeMode == AddressEditorMode.IDLE) {
+                        if (editorMode == AddressEditorMode.IDLE) {
                             HomeActions(openTabs, tabCounter, onHister, onKarakeep, onNewTab, onRecent, onRecentLongPress, menuButton)
                         }
                         return@Column
@@ -297,7 +304,7 @@ fun BottomBar(
                         modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.TopCenter).semantics { contentDescription = label },
                     )
                 }
-            } else if (tab?.loading == true) {
+            } else if (tab?.loading == true && editorMode == AddressEditorMode.IDLE) {
                 val loading = stringResource(R.string.loading)
                 LinearProgressIndicator(
                     Modifier.fillMaxWidth().height(2.dp).align(Alignment.TopCenter).semantics { contentDescription = loading },

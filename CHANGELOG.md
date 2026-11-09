@@ -190,13 +190,22 @@ All notable changes to this project are documented here. The format follows
 - A launch screen with the Combray icon, shown until your open tabs are
   restored (at most two seconds).
 - More › Close tab closes the current tab, with the same Undo as Recent.
-- The address sheet lists up to five open tabs and recent pages that match
-  what you type, under "On this device": a tab switches to that tab, and a
+- The address editor lists up to five open tabs and recent pages that match
+  what you type: a tab switches to that tab, and a
   page opens where the typed address would. The matches come from this
   device; nothing is sent while you type.
 
 ### Changed
 
+- Tapping the address no longer opens a sheet: the bar itself becomes the
+  field, rides up with the keyboard in one motion and dims the page, which
+  keeps its layout meanwhile. ← (or Back, or a tap on the page) leaves, ✕
+  clears the text, and + opens a new tab. Above the field, one list grows
+  upward: what Go will do, tinted, the other reading of the text, then up
+  to five matching tabs and recent pages, the best nearest your thumb.
+  Typing no longer makes the list blank and come back with every key, and
+  the page's own address offers no Go button until you change it. Home's
+  search field uses the same list.
 - Browser preferences (appearance, tab count, closing unused tabs, Home
   sections and text size) commit to disk off the main thread before the
   choice is published. A failed write shows a generic failure and leaves

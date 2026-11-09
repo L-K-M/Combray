@@ -11,12 +11,17 @@ import android.os.Build
 import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
@@ -24,6 +29,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -44,11 +51,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -59,6 +68,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -111,7 +121,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-private enum class Sheet { NONE, ADDRESS, RECENT, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA, REPORT }
+private enum class Sheet { NONE, RECENT, SETTINGS, PAGE_INFO, TEXT_SIZE, HOME_EDIT, MEDIA, REPORT }
 
 /**
  * The browser: page area on top, all routine actions in the bottom bar (R3). The engine
@@ -139,6 +149,16 @@ fun BrowserScreen(
     var homeMode by rememberSaveable { mutableStateOf(AddressEditorMode.IDLE) }
     var homeEntry by rememberSaveable { mutableIntStateOf(0) }
     var homeText by rememberSaveable { mutableStateOf("") }
+    // A page's address editor, in the bar: the tab it edits, a counter that starts each edit
+    // afresh, and the text it started with (taken at the tap, so a page that changes its
+    // address meanwhile does not change it).
+    var pageEditing by rememberSaveable { mutableStateOf(false) }
+    var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
+    var pageEntry by rememberSaveable { mutableIntStateOf(0) }
+    var pageText by rememberSaveable { mutableStateOf("") }
+    // While the address editor dims a page and owns the keyboard, the engine surface keeps its
+    // size and the page its layout, until that keyboard has gone (see the surface below).
+    var holdSurface by remember { mutableStateOf(false) }
     var homeEditLink by remember { mutableStateOf<HomeLink?>(null) }
     var homeEditPage by rememberSaveable { mutableStateOf(HomeEditPage.OVERVIEW) }
     var surfaceView by remember { mutableStateOf<EngineSurfaceView?>(null) }
@@ -169,6 +189,16 @@ fun BrowserScreen(
         focus.clearFocus(force = true)
         keyboard?.hide()
     }
+    // Only the tab it was opened for, and only on a page: another tab ends it (below).
+    val editingPage = pageEditing && !home && tab.id == addressTab && state.find == null
+    val stopPageInput: () -> Unit = {
+        pageEditing = false
+        focus.clearFocus(force = true)
+        keyboard?.hide()
+    }
+    // A sheet that opens meanwhile (Settings from a notice's action) ends the page's editor, as
+    // it replaced the old address sheet: the editor must not come back unfocused behind it.
+    LaunchedEffect(sheet) { if (sheet != Sheet.NONE && pageEditing) stopPageInput() }
     val notify: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
     // Text size's preview is provisional: rapid steps read the latest pending choice, and a
     // failed write rolls the engine back to the durable value.
@@ -275,6 +305,8 @@ fun BrowserScreen(
     // the new page focuses at once still gets the keyboard.
     var keyboardTab by remember { mutableStateOf(tab?.id) }
     LaunchedEffect(tab?.id) {
+        // A page's address editor belongs to its tab: showing another one ends it.
+        if (pageEditing && tab?.id != addressTab) stopPageInput()
         if (tab?.id == keyboardTab) return@LaunchedEffect
         keyboardTab = tab?.id
         surfaceView?.hideKeyboard()
@@ -284,11 +316,21 @@ fun BrowserScreen(
     LaunchedEffect(state.keyboard, surfaceView) {
         val request = state.keyboard ?: return@LaunchedEffect
         val view = surfaceView ?: return@LaunchedEffect
+        // Home's search field or a page's address editor is typing with the keyboard.
+        val editorTyping = editingPage || (home && homeMode == AddressEditorMode.EDITING)
         when (request) {
-            is KeyboardRequest.Show -> view.showKeyboard(request.kind, request.multiline, request.context)
+            // Not taken from the editor, which covers the page: keys meant for the address must
+            // not go into the page. The page's field lets go of its focus; a tap on it asks again.
+            is KeyboardRequest.Show -> if (editorTyping) {
+                view.declineKeyboard()
+            } else {
+                // The page's field needs the room above the keyboard: stop holding the surface.
+                holdSurface = false
+                view.showKeyboard(request.kind, request.multiline, request.context)
+            }
             is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind, request.multiline, request.context)
-            // A page's blur must not hide the keyboard now owned by Find or Home's search field.
-            KeyboardRequest.Hide -> if (state.find == null && !(home && homeMode == AddressEditorMode.EDITING)) view.hideKeyboard()
+            // A page's blur must not hide the keyboard now owned by Find or the address editor.
+            KeyboardRequest.Hide -> if (state.find == null && !editorTyping) view.hideKeyboard()
         }
         browser.keyboardHandled(request)
     }
@@ -329,11 +371,18 @@ fun BrowserScreen(
     val dark = LocalDarkTheme.current
     LaunchedEffect(dark) { browser.setAppearance(if (dark) Appearance.DARK else Appearance.LIGHT) }
 
-    // The address editor submits to the tab it was opened for; null opens a new tab.
-    var addressTab by rememberSaveable { mutableStateOf<String?>(null) }
-    val editAddress = {
-        addressTab = tab?.id
-        sheet = Sheet.ADDRESS
+    // A page's address opens for editing in the bar itself, for the tab shown at the tap, with
+    // its address (on a Kagi results page, the search words) selected.
+    val editAddress: () -> Unit = edit@{
+        val shown = tab ?: return@edit
+        val url = shown.url ?: return@edit
+        addressTab = shown.id
+        pageText = AddressPolicy.kagiQuery(url) ?: url
+        pageEntry++
+        pageEditing = true
+        // The address field takes the keyboard over, without closing it in between: a page
+        // field lets go of its connection and its focus.
+        surfaceView?.yieldKeyboard()
     }
     // New-tab entry points all focus the existing Home field. Save its prefill before queuing
     // the blank tab so rotation cannot drop text another app sent while creation is pending.
@@ -341,6 +390,8 @@ fun BrowserScreen(
         homeText = text.orEmpty()
         homeEntry++
         homeMode = AddressEditorMode.EDITING
+        // Home's field takes the focus and the keyboard over from a page's address editor.
+        pageEditing = false
         sheet = Sheet.NONE
         surfaceView?.hideKeyboard()
         browser.newTab()
@@ -349,6 +400,7 @@ fun BrowserScreen(
     val openAddress = { target: String?, decision: AddressDecision ->
         sheet = Sheet.NONE
         stopHomeInput()
+        stopPageInput()
         val open = { url: String -> if (target != null) browser.openUrlInTab(target, url) else browser.openUrl(url, Placement.NEW_TAB) }
         when (decision) {
             is AddressDecision.Navigate -> open(decision.url)
@@ -363,6 +415,7 @@ fun BrowserScreen(
     var recentScope by rememberSaveable { mutableStateOf(RecentScope.OPEN) }
     val openRecent = { initial: RecentScope ->
         if (homeMode == AddressEditorMode.EDITING) stopHomeInput()
+        if (pageEditing) stopPageInput()
         recentScope = initial
         sheet = Sheet.RECENT
     }
@@ -411,13 +464,22 @@ fun BrowserScreen(
     // Find and Home editing take precedence over going back in the page.
     BackHandler(enabled = sheet == Sheet.NONE && state.find != null) { browser.closeFind() }
     BackHandler(enabled = sheet == Sheet.NONE && home && homeMode == AddressEditorMode.EDITING) { stopHomeInput() }
+    // A page question that appears meanwhile is answered first, as Back answers it in the page.
+    BackHandler(enabled = sheet == Sheet.NONE && editingPage && state.pageControl == null) { stopPageInput() }
 
     val density = LocalDensity.current
+    val imeShown = WindowInsets.ime.getBottom(density) > 0
+    // Taken when the editor opens, given back once its keyboard has gone: resizing the surface
+    // under the dimmed page would show its last frame scaled until the engine draws one, and lay
+    // the page out again twice for nothing. A page field that asks for the keyboard ends it.
+    LaunchedEffect(editingPage, imeShown) {
+        holdSurface = editingPage || (holdSurface && imeShown)
+    }
     val accessibleControls = rememberAccessibleControlsRequired()
     val barBehavior = when {
         home || page == null || state.engine != EngineStatus.READY || tab.crashed || tab.loadFailed -> BottomBarBehavior.PINNED
         sheet != Sheet.NONE || state.find != null || state.pageControl != null || appLink != null -> BottomBarBehavior.PINNED
-        WindowInsets.ime.getBottom(density) > 0 || accessibleControls -> BottomBarBehavior.PINNED
+        editingPage || imeShown || accessibleControls -> BottomBarBehavior.PINNED
         else -> BottomBarBehavior.SCROLLING
     }
     // A new document or editing context starts with reachable controls, not an old drag.
@@ -431,7 +493,9 @@ fun BrowserScreen(
     val drawnOverlap = (surfaceBottom - pageBottom).roundToInt().coerceAtLeast(0)
     val coveredInset = if (showBar || state.find != null) drawnOverlap else 0
     var viewportRequest by remember { mutableStateOf<ViewportRequest?>(null) }
-    LaunchedEffect(coveredInset, surfaceView, state.engine) {
+    LaunchedEffect(coveredInset, surfaceView, state.engine, holdSurface) {
+        // The editor covers the page: its layout waits, and catches up once the surface is free.
+        if (holdSurface) return@LaunchedEffect
         val view = surfaceView ?: return@LaunchedEffect
         viewportRequest = ViewportRequest(view.coverBottom(coveredInset), coveredInset)
     }
@@ -559,8 +623,16 @@ fun BrowserScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
+                // Held, the keyboard covers the surface's bottom instead of shrinking it: the
+                // safe area without the keyboard at all. (Consuming the keyboard's inset would not
+                // do: while it rises past the navigation bar, safeDrawing's bottom shrinks.)
+                .then(
+                    if (holdSurface) {
+                        Modifier.windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                    } else {
+                        Modifier.imePadding().windowInsetsPadding(WindowInsets.safeDrawing)
+                    },
+                )
                 .onGloballyPositioned { surfaceBottom = it.boundsInRoot().bottom },
             update = { view ->
                 view.observeScroll(page) {
@@ -570,11 +642,15 @@ fun BrowserScreen(
                 }
             },
         )
-        Column(Modifier.fillMaxSize().imePadding()) {
+        // The status bar's inset is taken here, once: the page box keeps clear of it, and so does
+        // the bar when the address editor's matches make it tall.
+        Column(Modifier.fillMaxSize().imePadding().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    // Behind the address editor, the page's own controls are no TalkBack stops.
+                    .then(if (editingPage) Modifier.clearAndSetSemantics {} else Modifier)
                     .windowInsetsPadding(pageInsets)
                     .onGloballyPositioned { pageBottom = it.boundsInRoot().bottom },
             ) {
@@ -606,7 +682,7 @@ fun BrowserScreen(
                         )
                     },
                 )
-                if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed) {
+                if (state.engine == EngineStatus.READY && state.reader == null && page != null && !tab.loadFailed && !editingPage) {
                     reloadPull?.let { pull ->
                         ReloadPullIndicator(
                             progress = pull.progress,
@@ -641,6 +717,16 @@ fun BrowserScreen(
                         },
                         onClose = browser::closeReader,
                     )
+                }
+                // The page dims behind its address editor; a tap on it leaves the editor. Not the
+                // Column's scoped overload: this is the page box.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = editingPage,
+                    enter = fadeIn(tween(SCRIM_FADE_MS)),
+                    exit = fadeOut(tween(SCRIM_FADE_MS)),
+                    modifier = Modifier.matchParentSize(),
+                ) {
+                    Scrim(onDismiss = stopPageInput)
                 }
             }
             // Find in page takes the bottom bar's place, above the keyboard like it.
@@ -691,25 +777,43 @@ fun BrowserScreen(
                 onRecent = { openRecent(RecentScope.OPEN) },
                 onRecentLongPress = { browser.focusPreviousTab() },
                 onSwipeTab = { step -> browser.stepTab(step) },
-                homeMode = homeMode,
-                homeSearch = {
-                    AddressEditor(
-                        target = tab?.id,
-                        initialText = homeText,
-                        restartKey = homeEntry,
-                        recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
-                        onDecision = { decision -> openAddress(tab?.id, decision) },
-                        onSelectTab = { id -> stopHomeInput(); browser.selectTab(id) },
-                        onNewTab = newTab,
-                        onDismiss = stopHomeInput,
-                        mode = homeMode,
-                        focusKey = homeEntry.takeIf { homeMode == AddressEditorMode.EDITING },
-                        onFocused = { homeMode = AddressEditorMode.EDITING },
-                        placeholder = R.string.home_search_hint,
-                        modifier = if (homeMode == AddressEditorMode.EDITING) {
-                            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                        } else Modifier,
-                    )
+                editorMode = when {
+                    home -> homeMode
+                    editingPage -> AddressEditorMode.EDITING
+                    else -> AddressEditorMode.IDLE
+                },
+                editor = {
+                    if (home) {
+                        AddressEditor(
+                            target = tab?.id,
+                            initialText = homeText,
+                            restartKey = homeEntry,
+                            recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
+                            onDecision = { decision -> openAddress(tab?.id, decision) },
+                            onSelectTab = { id -> stopHomeInput(); browser.selectTab(id) },
+                            onNewTab = newTab,
+                            onDismiss = stopHomeInput,
+                            mode = homeMode,
+                            focusKey = homeEntry.takeIf { homeMode == AddressEditorMode.EDITING },
+                            onFocused = { homeMode = AddressEditorMode.EDITING },
+                            placeholder = R.string.home_search_hint,
+                        )
+                    } else {
+                        AddressEditor(
+                            target = addressTab,
+                            initialText = pageText,
+                            restartKey = pageEntry,
+                            // Suggestions search the retained history, like a Recent search.
+                            recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
+                            onDecision = { decision -> openAddress(addressTab, decision) },
+                            // The exact tab, as in Recent: switching never follows an equal address elsewhere.
+                            onSelectTab = { id -> stopPageInput(); browser.selectTab(id) },
+                            onNewTab = newTab,
+                            onDismiss = stopPageInput,
+                            prefill = AddressPrefill.CURRENT_PAGE,
+                            focusKey = pageEntry,
+                        )
+                    }
                 },
                 modifier = Modifier.onSizeChanged { barHeight = with(density) { it.height.toDp() } },
                 menuButton = {
@@ -750,22 +854,6 @@ fun BrowserScreen(
     val dismiss = { sheet = Sheet.NONE }
     when (sheet) {
         Sheet.NONE -> Unit
-        Sheet.ADDRESS -> AddressSheet(
-            target = addressTab,
-            restartKey = launches,
-            // On a Kagi results page, start with its search words instead of the address.
-            initialText = addressTab?.let { id -> tab?.takeIf { it.id == id }?.url }?.let { AddressPolicy.kagiQuery(it) ?: it },
-            // Suggestions search the retained history, like a Recent search.
-            recent = { browser.recent(HistoryDepth.ALL_RETAINED) },
-            onDecision = { decision -> openAddress(addressTab, decision) },
-            // The exact tab, as in Recent: switching never follows an equal address elsewhere.
-            onSelectTab = { tabId ->
-                dismiss()
-                browser.selectTab(tabId)
-            },
-            onNewTab = newTab,
-            onDismiss = dismiss,
-        )
         Sheet.RECENT -> RecentSheet(
             browser = browser,
             integrations = graph.integrations,
@@ -1058,6 +1146,28 @@ internal fun backResponse(content: PageControlContent): ControlResponse =
 
 /** Space between a snackbar and the bottom bar under it. */
 private val SNACKBAR_GAP = 8.dp
+
+/** The page's dimming behind the address editor fades in and out this fast. */
+private const val SCRIM_FADE_MS = 150
+
+/**
+ * Dims the page behind the address editor and takes its touches: a tap leaves the editor, and
+ * nothing reaches the page meanwhile. Not a TalkBack stop; the editor's own Close and Back are.
+ */
+@Composable
+private fun Scrim(onDismiss: () -> Unit) {
+    val dismiss by rememberUpdatedState(onDismiss)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = SCRIM_ALPHA))
+            .pointerInput(Unit) { detectTapGestures { dismiss() } }
+            .clearAndSetSemantics {},
+    )
+}
+
+/** Material's modal scrim opacity. */
+private const val SCRIM_ALPHA = 0.32f
 
 /** Longest a hidden bar waits for the engine to draw the page under it (bottomBarHeld). */
 private const val BAR_HOLD_TIMEOUT_MS = 400L

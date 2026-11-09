@@ -1068,9 +1068,10 @@ do not add one silently). If it is not, say so in `docs/VIDEO.md`. Effort:
 
 usability: fast, convenient, clear — nice-to-have
 
-Recent and Settings have headings; address entry has an On this device heading
-only when suggestions exist. The address pane title and the engine/reader
-overlay live regions are implemented in open PR #315. Engine
+Recent and Settings have headings. The address editor, in the bar since
+9 November 2026, is a pane titled "Address or search" while editing, and its
+rows say what each does; it has no list heading. The engine/reader overlay
+live regions are implemented in open PR #315. Engine
 starting/missing/failed/crashed overlays and load starts still need a current
 TalkBack announcement check. The old More-sheet
 implementation has since become a toolbar menu, so its earlier missing-heading
@@ -1085,14 +1086,16 @@ spam. Effort: about half a day with TalkBack.
 
 visual issues and layout problems — nice-to-have
 
-Address focus is requested from `LaunchedEffect`; actual sheet/window timing,
+Address focus is requested from `LaunchedEffect`. Since 9 November 2026 the
+address editor is in the main window, not a sheet: its keyboard animation and
+the held engine surface were checked frame by frame on an API 36 emulator, but
 IME resizing and snackbar clearance still need physical-device evidence.
 Existing main-thread state collection, inline Home entry, page Paste/Back
 handling and measured bottom-bar padding should not be replaced based on the
 older review's assumptions.
 
 Suggested fix: exercise address open/type/suggestion selection/rotation with
-IME up, page autofocus while an address sheet owns focus, keyboard Back and
+IME up, page autofocus while the address editor owns focus, keyboard Back and
 reopen, and nested-sheet dismissal. Measure bar/snackbar bounds at large font
 sizes before adding animated insets, respecting reduced motion. Effort: about
 half a day on-device.

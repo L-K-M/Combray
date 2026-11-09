@@ -7,8 +7,12 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowInsets
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -90,6 +94,40 @@ class KeyboardTest {
         shell("input keyevent KEYCODE_BACK")
         awaitKeyboard(visible = false)
         awaitTitle(BLURRED_TITLE)
+    }
+
+    /**
+     * The address editor takes the keyboard over from a page field without closing it, and the
+     * field lets go: typing goes to the address, and once the editor has closed, a tap on the
+     * field opens its keyboard again (Servo asks only when a field gains focus).
+     */
+    @Test
+    fun theAddressEditorTakesThePagesKeyboardAndTheFieldGetsItBack() {
+        openFocusedField()
+        tapField()
+        awaitKeyboard(visible = true)
+
+        compose.onNodeWithContentDescription("Edit address", substring = true).performClick()
+        awaitTitle(BLURRED_TITLE)
+        assertTrue("the keyboard closed between the page and the address", keyboardVisible())
+        runUi(SETTLE_MS)
+        instrumentation.sendStringSync("zz")
+        runUi(FRAME_WAIT_MS)
+        val address = compose.onNode(hasSetTextAction() and isFocused()).fetchSemanticsNode()
+        assertEquals("zz", address.config[SemanticsProperties.EditableText].text)
+        assertEquals(BLURRED_TITLE, device.browser.browserState.value.activeTab?.title)
+
+        // Back closes the keyboard, then the editor.
+        shell("input keyevent KEYCODE_BACK")
+        awaitKeyboard(visible = false)
+        shell("input keyevent KEYCODE_BACK")
+        runUi(SETTLE_MS)
+        assertTrue(compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isEmpty())
+        assertEquals(AUTOFOCUS_URL, device.browser.browserState.value.activeTab?.url)
+
+        tapField()
+        awaitKeyboard(visible = true)
+        awaitTitle(FOCUSED_TITLE)
     }
 
     @Test
