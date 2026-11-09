@@ -45,6 +45,13 @@ object NativeEngine {
 
     @JvmStatic external fun surfaceChanged(width: Int, height: Int)
 
+    /**
+     * The app's bottom controls cover the surface's bottom [inset] pixels, and pages lay out
+     * above them. The engine reports `viewport_painted` with [request] once a frame shows that
+     * page, so the controls can stay until then.
+     */
+    @JvmStatic external fun setViewportInset(inset: Int, request: Long)
+
     /** Stops rendering into the surface at once and waits (bounded) for the engine to unbind it. */
     @JvmStatic external fun surfaceDestroyed(): Boolean
 

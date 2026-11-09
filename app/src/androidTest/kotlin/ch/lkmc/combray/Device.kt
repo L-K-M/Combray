@@ -11,6 +11,8 @@ import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TextSize
 import ch.lkmc.combray.core.browser.ThemeMode
+import ch.lkmc.combray.engine.EngineEvent
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -295,6 +297,13 @@ class Device(private val frame: () -> Unit = {}) {
         runBlocking { withTimeout(timeoutMs) { browser.browserState.first(predicate) } }
 
     fun awaitEngine() = awaitState { it.engine == EngineStatus.READY }
+
+    /** Waits for the engine's answer to a viewport request (EngineSurfaceView.coverBottom). */
+    fun awaitPaintedViewport(
+        timeoutMs: Long = LOAD_TIMEOUT_MS,
+        predicate: (EngineEvent.ViewportPainted) -> Boolean,
+    ): EngineEvent.ViewportPainted =
+        runBlocking { withTimeout(timeoutMs) { browser.paintedViewport.filterNotNull().first(predicate) } }
 
     /** Waits until the focused tab committed [url] and finished loading. */
     fun awaitPage(url: String, timeoutMs: Long = LOAD_TIMEOUT_MS): BrowserState =

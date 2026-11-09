@@ -87,6 +87,12 @@ sealed interface EngineEvent {
 
     data object SurfaceUnbound : EngineEvent
 
+    /**
+     * A frame on screen shows the page above the [inset] pixels that the app's viewport request
+     * [request] said its controls cover, the pixels it uncovered included.
+     */
+    data class ViewportPainted(val request: Long, val inset: Int) : EngineEvent
+
     data class TabCreated(val view: ViewRef) : EngineEvent
 
     data class TabSelected(val view: ViewRef) : EngineEvent
@@ -262,6 +268,7 @@ sealed interface EngineEvent {
                 "engine_ready" -> EngineReady(event.int("width"), event.int("height"), event.string("user_agent"))
                 "surface_bound" -> SurfaceBound(event.int("width"), event.int("height"))
                 "surface_unbound" -> SurfaceUnbound
+                "viewport_painted" -> ViewportPainted(event.long("request"), event.int("inset"))
                 "tab_created" -> TabCreated(event.view())
                 "tab_selected" -> TabSelected(event.view())
                 "tab_closed" -> TabClosed(event.view())

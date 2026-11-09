@@ -527,7 +527,10 @@ class MediaPlayerTest {
         }
     }
 
-    /** A tap on the engine's view, halfway across and at [fraction] of its height, where the page's `vh` measure. */
+    /**
+     * A tap on the page, halfway across and at [fraction] of its viewport's height, where the
+     * page's `vh` measure: the engine's view less the bottom pixels the controls cover.
+     */
     private fun tapPage(fraction: Float) {
         device.dismissSystemDialogs()
         val origin = IntArray(2)
@@ -537,8 +540,9 @@ class MediaPlayerTest {
             surface.getLocationOnScreen(origin)
             size = surface.width to surface.height
         }
+        val covered = device.browser.paintedViewport.value?.inset ?: 0
         val x = origin[0] + size.first / 2f
-        val y = origin[1] + size.second * fraction
+        val y = origin[1] + (size.second - covered) * fraction
         val down = SystemClock.uptimeMillis()
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0))

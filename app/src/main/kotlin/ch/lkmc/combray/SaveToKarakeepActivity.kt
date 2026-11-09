@@ -128,8 +128,9 @@ class SaveToKarakeepActivity : Activity() {
                 throw cancelled
             } catch (failure: Exception) {
                 // Storage failed (a full disk, an I/O error): nothing was queued, and this screen
-                // is gone, so a crash here would end the process without a word.
-                Log.e(LOG_TAG, "saving a shared link failed", failure)
+                // is gone, so a crash here would end the process without a word. The class only:
+                // an exception message can quote the shared link or a storage path.
+                Log.e(LOG_TAG, "saving a shared link failed: ${failure.javaClass.name}")
                 R.string.save_failed
             }
             withContext(Dispatchers.Main) { toast(app, message) }

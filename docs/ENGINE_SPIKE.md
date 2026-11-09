@@ -60,7 +60,7 @@ Software emulation is slow and timing-sensitive: Android's own framework timed o
 ```
 
 - **Ownership:** `Servo`, `WebView` and the rendering context are `Rc`-based and stay on one engine thread. JNI calls only enqueue commands. Servo's event-loop waker is another sender on the same channel. Delegates copy each notification into a queue; the engine processes the queue after the spin, so no callback re-enters Servo.
-- **Views:** one `WindowRenderingContext` bound to the visible `SurfaceView`; every tab is a separate `WebViewBuilder::build()` (a new constellation browsing context, not a cloned handle). Selecting shows and focuses one view and hides the others; only the selected view is painted. Hidden views keep running (measured in the results).
+- **Views:** one `WindowRenderingContext` bound to the visible `SurfaceView`, and one `OffscreenRenderingContext` made from it that every view renders into: the surface's rows above the app's bottom controls, copied to the top of the surface after each frame ([section 57](#57-bottom-bar-over-a-fixed-surface-8-november-2026)). Every tab is a separate `WebViewBuilder::build()` (a new constellation browsing context, not a cloned handle). Selecting shows and focuses one view and hides the others; only the selected view is painted. Hidden views keep running (measured in the results).
 - **Identity:** events carry the application's tab ID, an engine-wide **generation** per native view (recreating a tab yields a new generation; events from an older generation are dropped), and the **document ID** (Servo's top-level pipeline ID). A new document ID means a new document even at the same URL. Reports from a document that was replaced are marked `stale`; reports that overtake their document's commit (Servo delivers them on a different channel) are held until the commit.
 - **Surface lifecycle:** `surfaceDestroyed` first advances a surface epoch (painting stops at once), then waits for the engine to call `take_window()` and release its `ANativeWindow` reference. A new surface is bound with `set_window()`; Servo, tabs and documents survive.
 - **Panics:** a panic inside a surface operation (Servo and surfman `expect` on some surface errors) becomes an error and the engine continues. Any other panic on the engine thread aborts the process, so Android reports a crash and the app restarts with session recovery, rather than leaving a silently dead engine. Panics on Servo's own threads, and those Servo marks as handled, are left to Servo.
@@ -3252,6 +3252,39 @@ These differences remain, did not decide this check, and are candidates for late
 - `performance.timing.navigationStart` is 0.
 - A script reload sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-User: ?1`.
 
+## Integration foundation fixture gates (8 November 2026)
+
+Two foundation candidates passed the complete Engine workflow on their reviewed
+heads. Neither changes native source or the Servo pin:
+`8720afc00e4daead852b8f7f63bb59e87e0b2a99` (upstream source
+`aac43a3f31a259f04a574f5ec4e959c943ad7cc7`).
+
+| Candidate | Reviewed head | Engine run | Build/fixture merge ref |
+| --- | --- | --- | --- |
+| Process-wide Keystore creation lock (#221) | `2f26391d7a4863958e9de8bdd5392416b75287b1` | [42500893043](https://github.com/L-K-M/Combray/actions/runs/42500893043) | `5b67afbc3c7f523791fd06fd176b6a2116d88175` |
+| Nullable queued-job URL, schema 6 (#298) | `745b707e15a35daa397753698961ee545179b6c6` | [42501469481](https://github.com/L-K-M/Combray/actions/runs/42501469481) | `1a472c6ad714c1cd08a83a012fdea00638ddeed2` |
+
+Both runs passed host `cargo fmt --check` and `cargo test --lib --locked`, native
+builds for arm64 and x86_64 through `scripts/build-native.sh`, the complete
+`scripts/check-app.sh` fixture sequence and test-APK artifact cleanup. The device
+was the hosted Android 11/API 30 x86_64 emulator, not a physical phone. The workflow
+pins the Rust/Android build environment; the downloaded `device.txt` records API
+30 and `ro.product.cpu.abi=x86_64`.
+
+Downloaded device evidence contains 209 passed checks for #221 and 207 for #298,
+including process-death preparation and verification. #221's two additional
+`SecretStoreDeviceTest` cases passed on Android Keystore: simultaneous first writes
+remain readable, and separate store instances safely share their isolated alias.
+Those tests use UUID aliases and separate directories, never production credentials.
+
+#298's schema-5-to-6 upgrade regression is JVM/Room coverage. Its emulator evidence
+verifies the current schema, normal fixture workflows and process death; it is not
+an upgrade of an existing physical-phone profile. Legacy queue payloads are decoded
+off the UI thread but may be decoded again on flow emissions, not once per job.
+All endpoints, pages and secrets in these checks are synthetic. No live service or
+personal history was used. These historical results do not validate subsequent
+candidate heads; later rich-editor and service-root checks need their own evidence.
+
 ## 53. Image downloads (7 November 2026)
 
 Owner request: offer Download image in the long-press image menu. It is separate
@@ -3651,6 +3684,106 @@ The complete `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 gate, `cargo fmt --check` and 185 native host tests pass locally after these changes.
 The host build does not compile the Android-only engine module. No local cap on
 committed/composed text was invented; no supported bridge limit is established.
-Current-head Android native builds, full emulator fixtures and hosted review remain
-pending. The historical arm64 checks above do not validate these newer changes or a
-physical keyboard/IME.
+The historical arm64 checks above do not validate these newer changes or a physical
+keyboard/IME.
+
+### Paired-head CI evidence (8 November 2026)
+
+[Engine run 42518553585](https://github.com/L-K-M/Combray/actions/runs/42518553585)
+validated paired PR #317 head `8805846d9ba7c1a7ba7fa9df8180f330af71e8cb`
+through merge ref `5490e8b61dc0ca1f2aa28677bdd99f844fb8a87f`. The downstream pin
+is `5813399954091a7efd7f736ea6fe14cb1ed523b9`. The host job, both Android native
+ABI builds and the full fixture job passed; these builds compile the Android-only
+engine module the local host crate excludes. The device was an Android 11/API 30
+x86_64 emulator, not a physical phone.
+
+`scripts/check-app.sh` recorded 214 passed checks, no failed or failed report-only
+checks, including process-death prepare/verify and all three `EditorImeTest` cases:
+composition preview/update/final replacement, Shift+Arrow selection replacement,
+and stale connection/invalid-context rejection after document replacement. The
+full hosted review was assessed against the source and pinned artifacts; its
+hypothetical missing-definition/global-counter claims did not apply. No Servo
+upstream contact was made.
+
+This evidence applies to the exact paired head above. It is not runtime proof of
+later capture-rollback fences in this branch, real third-party IMEs, physical
+phones or the remaining unsupported editing APIs.
+
+## 57. Bottom bar over a fixed surface (8 November 2026)
+
+### Report
+
+A recording from a phone (One UI, inner foldable display) showed one wrong frame each time the
+bottom bar hid or showed while scrolling. On hide, the page was stretched about 1.09 times,
+pushed up, and a white band filled the bar's old place. On show, it was squeezed about
+0.91 times, pushed down, and a white band appeared under the status bar. The next frame was
+always right. Frame-by-frame row matching against the frame before put the glitch frame's
+content in a layer of the new page size, with its bottom edge at the old one, holding the old
+buffer scaled to fit.
+
+### Diagnosis
+
+The bar was a sibling of the page box in a `Column`, so toggling it resized the
+`EngineSurfaceView`. Android 16's `SurfaceView` (`android16-release`) applies an in-app resize
+(`setBufferSize`, the BLAST queue's destination frame, the window crop, and the render thread's
+position and scale) with the app's next frame. The engine draws at the new size only after
+`surfaceChanged` reaches its thread. Until then SurfaceFlinger scales the old buffer into the new
+geometry. Only window-manager syncs (`isInWMSRequestedSync`) wait for the SurfaceView's next
+buffer (`handleSyncBufferCallback`). An in-app layout change takes `handleSyncNoBuffer`, so
+`surfaceRedrawNeededAsync` cannot hold the frame, and no public API syncs a SurfaceView's buffer
+with its parent's frame. Servo's `WebView` is always as big as its `RenderingContext`.
+
+The bug reproduces on the `combray-toolbar` AVD (arm64, API 36, host GPU). That run used the
+debug APK of Engine run 42503438302 (commit `89a5fe32`), `screenrecord --size 540x1200`, and a
+synthetic long dark page. Five of six bar transitions produced a frame with 131 to 143 white
+rows (at half scale) and content shifted against its neighbors.
+
+### Changes
+
+- The surface no longer resizes when the bottom controls come or go. `BrowserScreen` lays the
+  `EngineSurfaceView` out under the page box, in the page box's area with the bar hidden
+  (`imePadding()` plus `safeDrawing`). The bar and the find bar are opaque `Surface`s over its
+  bottom. Touches reach it through the page box, which takes none itself. The keyboard still
+  resizes it as before.
+- The engine (`native/src/engine.rs`, `native/src/viewport.rs`) renders every view into one
+  `OffscreenRenderingContext` made from the window context. The offscreen context covers the
+  surface minus the bottom rows the app reports (`setViewportInset(inset, request)`, sent by
+  `EngineSurfaceView.coverBottom`). `paint` renders the selected view into it, clears the window
+  to Servo's clear color, copies the page to the window's top rows (GL coordinates:
+  `y = surface height - page height`) and presents. Pages see the smaller viewport
+  (`innerHeight`, fixed elements above the bar). Report screenshots crop the surface to the rows
+  above the controls.
+- A hiding bar stays until the engine has drawn the rows it covered (`bottomBarHeld`, at most
+  400 ms). The app's request ids are process-wide. The engine answers with `viewport_painted`
+  after the first presented frame that shows the whole page. After a resize, Servo's first
+  frames can come from a WebRender frame built for the smaller page, which leaves the new rows
+  in Servo's clear color (`shell_background_color_rgba`, now set explicitly to its default
+  white), and frames in flight while scrolling make "the first frame after the resize"
+  unreliable. So after a growth the engine reads the new rows back. It accepts them when they
+  hold another color, when a whole row among the 32 shown rows above is the clear color too (so
+  the page looks the same either way), or after three new frames. The coordinator publishes the
+  answer through a `StateFlow` outside its queue, which waits on Room reads.
+
+Costs: one framebuffer copy per painted frame and an offscreen framebuffer of the page's size
+(RGBA plus depth), as servoshell's desktop build composites its WebView. A readback of the
+uncovered rows happens only while a growth is unconfirmed.
+
+Not changed: the keyboard's animation still resizes the surface each frame. Switching between
+the bottom bar and a shorter find bar changes the inset without a hold, so the rows between them
+can show the clear color until the next frame.
+
+### Checks
+
+Same AVD, recording and page as the reproduction: with the fix, six bar transitions produced no
+frame with white rows or non-uniform shifts. A page with a `position: fixed; bottom: 0` banner
+reported `innerHeight` 726 with the bar and 838 without, and the banner sat above the bar.
+
+The full device suite (`scripts/check-app.sh`, every class plus process death) on the same AVD,
+with this change rebased onto `ab855bfe` (Servo pin `5813399`): 212 checks pass. Two fail on main
+on these arm64 API 36 AVDs too: `ReaderScrollTest.readerJumpsToBothEndsAndKeepsTheButtonOnTheLeftForRtlArticles`
+(reproduced with `ab855bfe` itself) and `AccessibilityTest.theBottomBarOnANewTabIsAccessible`
+("New tab" and "Recent" share a touch area at 200% font). `ScrollTest` now asserts that the surface
+keeps its height while the bar hides and returns, and that the page's `innerHeight` and the
+engine's `viewport_painted` follow the bar. Host checks: `cargo fmt --check`, `cargo test --lib`
+(204), the Gradle unit tests, lint, both APK assemblies, `scripts/tests` (121) and
+`check_docs.py`. A physical phone, including the foldable from the report, is unverified.

@@ -13,6 +13,7 @@
 #   ANDROID_AVD_HOME             AVD directory (default: where avdmanager keeps it)
 #   COMBRAY_EMULATOR_PORT        console port (default: 5560; adb serial emulator-<port>)
 #   COMBRAY_BOOT_TIMEOUT         seconds to wait for boot (default: 3600; a loaded host needs more)
+#   COMBRAY_EMULATOR_DIAGNOSTICS  1 adds guest kernel output to the emulator log (default: off)
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
@@ -58,11 +59,17 @@ export LD_LIBRARY_PATH="$ANDROID_SDK_ROOT/emulator/lib64:$ANDROID_SDK_ROOT/emula
 LOG="$COMBRAY_WORK/logs/emulator.log"
 mkdir -p "$(dirname "$LOG")"
 
+diagnostic_arg=""
+if [ "${COMBRAY_EMULATOR_DIAGNOSTICS:-0}" = "1" ]; then
+    diagnostic_arg="-show-kernel"
+fi
+
 echo "==> booting $AVD on port $PORT (accel=$accel); log: $LOG"
 nohup "$EMULATOR" "@$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
-    -gpu swiftshader_indirect -camera-back none -camera-front none -accel "$accel" \
+    -gpu swiftshader_indirect -camera-back none -camera-front none -accel "$accel" ${diagnostic_arg:+"$diagnostic_arg"} \
     > "$LOG" 2>&1 &
 emulator_pid=$!
+printf '%s\n' "$emulator_pid" > "$(dirname "$LOG")/emulator.pid"
 
 started=$(date +%s)
 until [ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
