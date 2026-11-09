@@ -301,7 +301,8 @@ All notable changes to this project are documented here. The format follows
   scripts after an earlier plain request for the same file: the engine
   no longer reuses a cached response that varies on a header the new
   request sends.
-
+- Malformed engine events and failed shared-link/file operations log exception
+  classes, not diagnostic values that can quote private input.
 - Settings no longer decodes whole job payloads (up to 256 KiB of
   captured page text) per row while composing the queue. Jobs record
   their address at enqueue in a `url` column (schema 6, auto-migrated);
@@ -402,6 +403,9 @@ All notable changes to this project are documented here. The format follows
   still on.
 - Queue UI tests dispose Compose before closing Room, so live collectors
   no longer query a closed database during fixture cleanup.
+- Preference feedback tests dispose Compose before closing their fixture scope
+  and Room, and release a failed test's scripted commit latch before the
+  bounded cancel-and-join, so cleanup cannot hang on an admitted write.
 - Device-check runs log each request the fixture server receives, and
   their summary lists every failed report-only check and every check
   slower than 30 s.
@@ -419,6 +423,9 @@ All notable changes to this project are documented here. The format follows
   `local.properties`.
 - Scroll-to-top/bottom buttons fade out after scrolling stops and return
   on the next scroll, on pages and in Reader view.
+- A failed history commit no longer lets a capture label the new page's
+  text with the old address. Capture requests and replies check the
+  persisted visit and document identity, including same-address reloads.
 - A PDF, or another file Servo cannot show, no longer reaches Hister as
   the sentence "Unknown content type (application/pdf).", and reader view
   no longer offers that sentence as an article. Servo shows such a file as
@@ -496,6 +503,12 @@ All notable changes to this project are documented here. The format follows
 - A page Hister refuses on purpose (its skip rules, or sensitive content) is
   dropped with its text instead of staying as a stopped capture that counts
   against the capture budget.
+- Two services configured for the first time at the same time could race the
+  device's first Keystore key creation, and one could replace the key the
+  other's credential had just been sealed with, silently losing it. Key
+  creation is now serialized process-wide across store instances. The device
+  check uses its own Keystore alias and directory, so it never deletes or
+  overwrites the app's real credential.
 - Addresses with common credential parameters (`auth_token`, `accessToken`,
   `X-Amz-Signature`, `sig`, `key`, `oauth_token`, `client_secret`, an OAuth
   `code` with its `state`, session IDs) could be saved to Karakeep or captured
@@ -542,6 +555,9 @@ All notable changes to this project are documented here. The format follows
 - Proxy sign-ins Servo saved in its profile are deleted when the engine
   starts instead of being sent again after a restart. They still reach
   the disk while the app runs until a Servo patch change.
+- Large Hister requests retain the longest text prefix that fits the JSON
+  byte limit, without splitting Unicode characters or over-trimming escaped
+  text. Multibyte titles and Karakeep search queries stay bounded too.
 - With Hister capture on, a large page could stop responding for seconds
   after it loaded while Combray read its text. Reading now stops in time
   and keeps what it has, and waits while you scroll or tap.
@@ -572,6 +588,9 @@ All notable changes to this project are documented here. The format follows
 - A page whose tab is between renderers (evicted, restored, or sent back
   home by a refused address) no longer disappears from Recent when the
   tab moves on: it stays as ordinary history.
+- A screenshot encoder Error no longer leaves a site report preparing
+  forever. The draft continues without a screenshot; cancellation still
+  stops preparation rather than being reported as a copy failure.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
@@ -672,6 +691,11 @@ All notable changes to this project are documented here. The format follows
   credentials, also as one word of a longer text, so a search such as
   `ssh://git@host failed` or `com.example:lib:1.0@aar` is refused too. An
   image digest (`nginx:1.25@sha256:…`) is still searched.
+- Service setup accepts Unicode (IDN) names without mapping deviation
+  characters to a different server. A trailing dot or default port keeps
+  existing credential, queue and saved-page bindings. Explicit ports must
+  be 1–65535: zero, negative, overflowing, empty or malformed ports are
+  refused before a connection, and unsupported addresses report failure.
 - An address with `user:pass@` and a host Java's URI parser cannot read
   (an underscore in it, for example) was not treated as sensitive, so it
   could be captured to Hister or saved to Karakeep with its password.
