@@ -66,7 +66,7 @@ internal class SiteReportsClient(private val transport: HttpTransport) {
                     val identity = parseObject(outcome.body)
                     when {
                         identity?.string("service") != SERVICE_NAME -> ConnectionCheck.WrongAddress(outcome.status)
-                        identity?.string("role") == REPORTER_ROLE -> ConnectionCheck.Connected(null)
+                        identity.string("role") == REPORTER_ROLE -> ConnectionCheck.Connected(null)
                         // An agent token reads reports and cannot send them.
                         else -> ConnectionCheck.Unauthorized
                     }

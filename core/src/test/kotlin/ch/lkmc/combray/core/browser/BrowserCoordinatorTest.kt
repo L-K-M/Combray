@@ -869,7 +869,9 @@ class BrowserCoordinatorTest {
             now += 8 * DAY
             title(1, 11, "New")
             withTimeout(TEST_WAIT_MS) {
-                while (answers.receive().any { it.url == "https://old.test/" }) Unit
+                do {
+                    val listed = answers.receive()
+                } while (listed.any { it.url == "https://old.test/" })
             }
         }
         sheet.cancel()

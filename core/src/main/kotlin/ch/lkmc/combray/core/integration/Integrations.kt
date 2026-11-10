@@ -178,7 +178,7 @@ class Integrations(
                 val fingerprint = if (previous != null && keepsServer) previous.fingerprint else addresses.fingerprint
                 // A stored key belongs to the addresses it was entered for, never to a new one.
                 val knownAddresses = keepsServer &&
-                    (addresses.alternate == null || ServiceUrls.sameDestination(addresses.alternate, previous?.alternateUrl))
+                    (addresses.alternate == null || ServiceUrls.sameDestination(addresses.alternate, previous.alternateUrl))
                 if (key == null && !(knownAddresses && credentials.read(SecretName.KARAKEEP_API_KEY, fingerprint) != null)) {
                     return@withLock Configured.MissingCredential
                 }

@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.core.content.IntentCompat
 import ch.lkmc.combray.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -58,7 +59,7 @@ class RecentVisitMenuTest {
 
         val chooser = shadowOf(context).nextStartedActivity
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
-        val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+        val send = IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java)
         assertNotNull(send)
         assertEquals(Intent.ACTION_SEND, send!!.action)
         assertEquals("text/plain", send.type)

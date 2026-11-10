@@ -33,7 +33,7 @@ class UploadLifetimeTest {
     @Test
     fun startupCleanupRemovesOldFilesButKeepsThisProcessAttachments() = runBlocking {
         val root = folder.newFolder("uploads")
-        val old = File(root, "old-pick/0/attachment").apply { parentFile.mkdirs(); writeText("old") }
+        val old = File(root, "old-pick/0/attachment").apply { parentFile!!.mkdirs(); writeText("old") }
         val uploads = UploadStaging(root, resolver, reserveBytes = 0)
         val uri = input("one", ByteArrayInputStream("current".toByteArray()))
         val paths = uploads.stagedPaths(listOf(uri))

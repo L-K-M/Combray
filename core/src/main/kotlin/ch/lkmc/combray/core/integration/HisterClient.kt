@@ -141,8 +141,8 @@ class HisterClient(private val transport: HttpTransport) {
         if ((documents != null && documents !is JsonArray) || (history != null && history !is JsonArray)) {
             return HisterSearch.Malformed
         }
-        val documentHits = (documents as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = false) }
-        val historyHits = (history as? JsonArray).orEmpty().mapNotNull { hit(it, fromHistory = true) }
+        val documentHits = documents.orEmpty().mapNotNull { hit(it, fromHistory = false) }
+        val historyHits = history.orEmpty().mapNotNull { hit(it, fromHistory = true) }
         // Promoted history first, then documents not already listed: neither array is dropped.
         // Each address appears once, even when the server repeats it within one array.
         val hits = (historyHits + documentHits).distinctBy { it.url }

@@ -272,7 +272,7 @@ class Outbox(
                 !sameDestination -> job.copy(state = JobState.CANCELLED, error = "destination_changed")
                 // A failed job keeps its real reason; Retry rebinds it to the new generation.
                 job.state == JobState.FAILED -> continue
-                job.generation != current?.generation -> job.copy(state = JobState.AUTH_REQUIRED, error = "credential_changed")
+                job.generation != current.generation -> job.copy(state = JobState.AUTH_REQUIRED, error = "credential_changed")
                 else -> continue
             }
             dao.updateJob(update.copy(updatedAt = now, leaseOwner = null, leaseUntil = null))

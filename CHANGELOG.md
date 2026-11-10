@@ -314,6 +314,10 @@ All notable changes to this project are documented here. The format follows
 - The Hister field's hint reads "Words you remember, searched in Hister…".
 - Reader view sets the article in a serif reading face (the system's Noto
   Serif) with a larger title, and has a "Show the page" button at the top.
+- The build has no Kotlin compiler warnings left, so a new one stands out.
+  One unit test waits for the capture fallback timer instead of sleeping
+  for as long as it should take, and a new one removes Karakeep while its
+  save is on the wire.
 
 ### Changed
 
