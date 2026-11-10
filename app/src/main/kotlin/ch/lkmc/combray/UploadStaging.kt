@@ -110,7 +110,9 @@ class UploadStaging(
             }
             if (free - read < reserveBytes) throw OutOfStagingSpace()
             target.write(buffer, 0, read)
-            // Between re-reads, count what this copy used so the reserve cannot be overshot.
+            // Between re-reads, count what this copy used so this copy alone cannot overshoot
+            // the reserve; concurrent copies can still jointly overshoot it by up to
+            // SPACE_RECHECK_BYTES each.
             free -= read
             sinceCheck += read
         }
@@ -131,7 +133,7 @@ class UploadStaging(
                 null
             }
         }
-    } catch (failure: RuntimeException) {
+    } catch (failure: Exception) {
         null
     }
 
