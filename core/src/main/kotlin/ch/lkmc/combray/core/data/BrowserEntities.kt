@@ -21,6 +21,9 @@ enum class VisitKind {
  * A logical tab. It outlives native views: a restored or evicted tab is still OPEN without a
  * renderer. [url] and [title] are the recovery record (last committed page, or the address
  * requested while no renderer existed); null [url] is the internal new-tab state.
+ *
+ * A page chooses both strings. Their writer, the coordinator, keeps them within `StoredText`'s
+ * bounds: Android cannot read back a row above about 2 MB.
  */
 @Entity(tableName = "tabs", indices = [Index("state"), Index("lastFocusedAt")])
 data class TabEntity(
@@ -42,7 +45,8 @@ data class TabEntity(
 
 /**
  * One page the user was on. Never a native handle: [documentKey] only identifies the engine
- * document within the process that recorded it, to group back/forward returns.
+ * document within the process that recorded it, to group back/forward returns. [url] and
+ * [title] are page-chosen and bounded like a tab's ([TabEntity]).
  */
 @Entity(
     tableName = "visits",

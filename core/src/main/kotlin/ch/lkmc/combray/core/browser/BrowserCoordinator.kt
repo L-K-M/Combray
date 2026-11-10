@@ -314,6 +314,7 @@ class BrowserCoordinator(
 
     /** Opens [url] (already classified as a web address or search) in the focused, a new or a background tab. */
     fun openUrl(url: String, placement: Placement) = submit {
+        if (refusesAddress(url)) return@submit
         // With no tab in focus there is nothing to stay on: every placement opens a focused tab.
         val active = activeTab()
         if (active == null) {
@@ -336,6 +337,7 @@ class BrowserCoordinator(
      * ([returnToOtherApp]).
      */
     fun openFromOtherApp(url: String) = submit {
+        if (refusesAddress(url)) return@submit
         otherAppTab = createTab(url)
         reconcile()
         publish()
@@ -359,6 +361,7 @@ class BrowserCoordinator(
      * page opened, Back on the new tab's first page returns to the opener ([returnToOpener]).
      */
     fun openUrlFromTab(url: String, openerTabId: String) = submit {
+        if (refusesAddress(url)) return@submit
         createTab(url, openerTabId)
         reconcile()
         publish()
@@ -385,6 +388,7 @@ class BrowserCoordinator(
      * closed tab gets a new one instead.
      */
     fun openUrlInTab(tabId: String, url: String) = submit {
+        if (refusesAddress(url)) return@submit
         val tab = dao.tab(tabId)?.takeIf { it.state == TabState.OPEN }
         if (tab == null) {
             createTab(url)
@@ -394,6 +398,16 @@ class BrowserCoordinator(
         }
         reconcile()
         publish()
+    }
+
+    /**
+     * An address too long to keep ([StoredText]) is not opened: a tab stores the address it was
+     * asked for, and the engine takes no longer link from a page either (native MAX_URL_CHARS).
+     */
+    private fun refusesAddress(url: String): Boolean {
+        if (StoredText.keeps(url)) return false
+        state.update { it.copy(notice = Notice.Problem(ADDRESS_TOO_LONG)) }
+        return true
     }
 
     private suspend fun navigateTab(tab: TabEntity, url: String) {
@@ -585,8 +599,19 @@ class BrowserCoordinator(
         val site = HostNames.normalize(host)?.let(HostNames::mergedSite) ?: return@submit
         val spellings = HostNames.siteSpellings(site)
         val subdomains = if (includeSubdomains) ".$site" else null
+        val ofSite = { url: String ->
+            HostNames.of(url)?.let { candidate -> spellings.any { HostNames.matches(candidate, it, includeSubdomains) } } ?: false
+        }
         database.withTransaction {
             dao.detachVisitsForHosts(spellings, subdomains)
+            // A tab can hold a page of the site without a visit to detach: one opened in the
+            // background that has not loaded yet, or one whose requested address has not committed.
+            // It stays open on that address, and loading it records and sends nothing either.
+            // Like the detached tabs it points at no visit: a tab's address and visit are written
+            // together, so the only one it could still name is a row that is already gone.
+            dao.openTabs()
+                .filter { tab -> !tab.pageForgotten && tab.url?.let(ofSite) == true }
+                .forEach { dao.updateTab(it.copy(currentVisitId = null, pageForgotten = true)) }
             dao.deleteVisitsForHosts(spellings, subdomains)
             dao.deleteEmptyClosedTabs()
             database.homeLinks().let { home ->
@@ -598,10 +623,7 @@ class BrowserCoordinator(
             }
             spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
         }
-        cancelPendingCapture { url ->
-            val candidate = HostNames.of(url) ?: return@cancelPendingCapture false
-            spellings.any { HostNames.matches(candidate, it, includeSubdomains) }
-        }
+        cancelPendingCapture(ofSite)
     }
 
     /**
@@ -1123,7 +1145,11 @@ class BrowserCoordinator(
                     if (forgotten) null else sameDocumentVisit(view, tab, current, event, now)
                 }
                 HistoryKind.LIST_UPDATED -> current?.let {
-                    if (it.url == event.url) it else it.copy(url = event.url, host = HostNames.of(event.url)).also { updated -> dao.updateVisit(updated) }
+                    if (it.url == event.url || !StoredText.keeps(event.url)) {
+                        it
+                    } else {
+                        it.copy(url = event.url, host = HostNames.of(event.url)).also { updated -> dao.updateVisit(updated) }
+                    }
                 }
             }
             visit?.let { view.documentVisits[event.document] = it.id }
@@ -1135,8 +1161,16 @@ class BrowserCoordinator(
             val lastFocusedAt = if (focused) now else tab.lastFocusedAt
             // A forgotten page stays open without a visit, under its last title.
             val title = if (visit == null && (forgotten || event.kind == HistoryKind.LIST_UPDATED)) tab.title else visit?.title
+            // A page chooses its address, and one too long to keep ([StoredText]) is not stored. A
+            // new document then has none, like a page-opened window before its first commit. A page
+            // that changed only its own address stays on its origin: it keeps the last one that fit.
+            val address = when {
+                StoredText.keeps(event.url) -> event.url
+                event.kind == HistoryKind.DOCUMENT_COMMITTED -> null
+                else -> tab.url
+            }
             dao.updateTab(
-                tab.copy(currentVisitId = visit?.id, url = event.url, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
+                tab.copy(currentVisitId = visit?.id, url = address, title = title, lastFocusedAt = lastFocusedAt, pageForgotten = forgotten),
             )
         }
         if (event.kind == HistoryKind.DOCUMENT_COMMITTED) {
@@ -1148,7 +1182,8 @@ class BrowserCoordinator(
     /**
      * Grouping (documented in docs/IMPLEMENTATION_PLAN.md section 5): a back/forward return to a
      * document this view already showed reuses its visit; a same-URL reload refreshes the current
-     * visit; any other new document is a new visit. Non-web documents are not history.
+     * visit; any other new document is a new visit. Non-web documents are not history, nor is
+     * one at an address too long to keep ([StoredText]).
      */
     private suspend fun committedVisit(
         view: LiveView,
@@ -1157,7 +1192,7 @@ class BrowserCoordinator(
         event: EngineEvent.HistoryChanged,
         now: Long,
     ): VisitEntity? {
-        if (!HostNames.isWeb(event.url)) return null
+        if (!recordable(event.url)) return null
         val key = documentKey(view, event.document)
 
         val returned = view.documentVisits[event.document]?.let { dao.visit(it) }
@@ -1180,7 +1215,7 @@ class BrowserCoordinator(
         event: EngineEvent.HistoryChanged,
         now: Long,
     ): VisitEntity? {
-        if (!HostNames.isWeb(event.url)) return current
+        if (!recordable(event.url)) return current
         if (current != null && current.url.substringBefore('#') == event.url.substringBefore('#')) {
             return current.copy(url = event.url, lastSeenAt = now).also { dao.updateVisit(it) }
         }
@@ -1189,6 +1224,9 @@ class BrowserCoordinator(
             .copy(title = current?.title ?: tab.title)
             .also { dao.updateVisit(it) }
     }
+
+    /** History holds web pages at addresses the database can keep. */
+    private fun recordable(url: String) = StoredText.keeps(url) && HostNames.isWeb(url)
 
     private suspend fun newVisit(tab: TabEntity, url: String, key: String, kind: VisitKind, now: Long): VisitEntity =
         VisitEntity(
@@ -1210,7 +1248,7 @@ class BrowserCoordinator(
         val visitId = view.documentVisits[event.document] ?: return
         database.withTransaction {
             val visit = dao.visit(visitId) ?: return@withTransaction
-            val title = event.title?.takeIf { it.isNotBlank() }
+            val title = event.title?.takeIf { it.isNotBlank() }?.let(StoredText::title)
             // Servo commits its own error page for failed loads, with no other failure signal.
             val errorPage = title in SERVO_ERROR_TITLES
             if (errorPage) view.errorDocuments += event.document
@@ -1935,6 +1973,7 @@ class BrowserCoordinator(
         const val LOG_TAG = "CombrayBrowser"
         const val ACTION_FAILED = "Something went wrong; the last action may not have completed."
         const val RESTORE_FAILED = "Your open tabs could not be fully restored."
+        const val ADDRESS_TOO_LONG = "That address is too long to open."
         const val PROCESS_KEY_LENGTH = 8
 
         /** Titles of the pages Servo commits for network and certificate failures (neterror.html, badcert.html). */

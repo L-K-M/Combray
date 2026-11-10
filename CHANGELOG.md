@@ -845,3 +845,14 @@ All notable changes to this project are documented here. The format follows
 - Pages that draw SVG charts from data attributes no longer show their
   error state instead of the content: SVG elements now expose `dataset`
   like HTML elements do.
+- A page with an enormous title or address can no longer break history
+  for good. Android cannot read back a database row above about 2 MB, so
+  one such page made Recent, restore and its tab fail until the app's
+  data was cleared. A title is now kept to 4,096 characters. An address
+  longer than 32,768 characters is not opened and not stored: a page
+  that moves itself there still shows, without a Recent entry or an
+  address to restore.
+- Forget this site also covers a tab that holds a page of the site
+  without having loaded it, such as a link opened in the background.
+  Loading it later no longer puts the site back in Recent or sends its
+  text to Hister, as for a page an open tab already shows.
