@@ -94,6 +94,11 @@ class BrowserCoordinator(
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
     /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
     private val textSize: () -> TextSize = { TextSize.DEFAULT },
+    /**
+     * The wall-clock time maintenance expires history and unused tabs against. The app passes
+     * [RetentionClock.now], so a device clock set far forward cannot wipe history in one pass.
+     */
+    private val retentionNow: () -> Long = { clock.now() },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -1712,7 +1717,7 @@ class BrowserCoordinator(
     }
 
     private suspend fun maintain() {
-        val cutoff = clock.now() - retention.closedHistoryMillis
+        val cutoff = retentionNow() - retention.closedHistoryMillis
         if (unusedTabs() == UnusedTabs.CLOSE) {
             val active = dao.session()?.activeTabId
             dao.openTabs().filter { it.id != active && it.lastFocusedAt < cutoff }.forEach { closeLogically(it) }
