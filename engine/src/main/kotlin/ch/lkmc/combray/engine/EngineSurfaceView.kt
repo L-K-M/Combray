@@ -270,6 +270,30 @@ class EngineSurfaceView(
         useFieldKind(kind, multiline, contextId, context.getSystemService(InputMethodManager::class.java))
     }
 
+    /**
+     * A page field asked for the keyboard while one of the app's own fields is typing with it
+     * (the address editor, which covers the page): the keyboard stays with that field, and this
+     * view takes neither focus nor the keyboard. As when Android refuses [showKeyboard], the page
+     * field gives up focus, so a tap on it asks again once the page is back.
+     */
+    fun declineKeyboard() {
+        pageKeyboard.reset()
+        Log.i(LOG_TAG, "keyboard declined, $pageKeyboard")
+        reportDismissal(Dismissal.DECLINED)
+    }
+
+    /**
+     * One of the app's own fields takes the keyboard now (the address editor, which covers the
+     * page). Unlike [hideKeyboard], the keyboard stays up for that field, and a page field that
+     * had it gives up its focus, so a tap on it asks again once the page is back: a hidden page
+     * keyboard would leave the field focused, and Servo asks only when a field gains focus.
+     */
+    fun yieldKeyboard() {
+        val hadField = pageKeyboard.reset() or pageFieldActive
+        Log.i(LOG_TAG, "keyboard yielded, field=$hadField, $pageKeyboard")
+        if (hadField) reportDismissal(Dismissal.DECLINED)
+    }
+
     fun hideKeyboard() {
         pageFieldActive = false
         retireInputConnection()
@@ -309,6 +333,9 @@ class EngineSurfaceView(
         /** Back, or the keyboard's own key. */
         CLOSED_BY_USER,
         SHOW_REFUSED,
+
+        /** One of the app's own fields had or took the keyboard ([declineKeyboard], [yieldKeyboard]). */
+        DECLINED,
         WINDOW_GONE,
     }
 

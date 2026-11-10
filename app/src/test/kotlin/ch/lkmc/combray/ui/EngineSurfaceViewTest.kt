@@ -50,6 +50,40 @@ class EngineSurfaceViewTest {
         assertNull(stopped.onCreateInputConnection(EditorInfo()))
     }
 
+    /** The address editor keeps the keyboard: the page's field lets go, and this view stays uneditable. */
+    @Test
+    fun aDeclinedKeyboardRetiresThePageFieldWithoutAConnection() {
+        var running = true
+        val view = EngineSurfaceView(context) { running }
+        view.prepareKeyboard("text", contextId = 1)
+        assertTrue(view.onCheckIsTextEditor())
+
+        // No engine to tell in a JVM test: the decline itself is what is checked.
+        running = false
+        view.declineKeyboard()
+        running = true
+        assertFalse(view.onCheckIsTextEditor())
+        assertNull(view.onCreateInputConnection(EditorInfo()))
+        assertFalse(view.isFocused)
+    }
+
+    /** Taking the keyboard for the address editor retires a page field; with none, nothing happens. */
+    @Test
+    fun yieldingTheKeyboardRetiresAPageFieldOnlyWhenThereIsOne() {
+        var running = true
+        val view = EngineSurfaceView(context) { running }
+        // No page field: nothing to tell the engine, which a JVM test does not have.
+        view.yieldKeyboard()
+        assertFalse(view.onCheckIsTextEditor())
+
+        view.prepareKeyboard("text", contextId = 1)
+        running = false
+        view.yieldKeyboard()
+        running = true
+        assertFalse(view.onCheckIsTextEditor())
+        assertNull(view.onCreateInputConnection(EditorInfo()))
+    }
+
     @Test
     fun aNewPreparedFieldIsEditableAgainAfterTheKeyboardWasHidden() {
         val view = EngineSurfaceView(context) { true }

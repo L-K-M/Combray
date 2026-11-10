@@ -65,7 +65,8 @@ internal enum class ReportProblem(
 ) {
     NOT_SET_UP(R.string.report_not_set_up, R.string.report_lost_not_set_up, offersSettings = true),
     TOO_MANY(R.string.report_too_many, R.string.report_lost_too_many, offersSettings = true),
-    NOT_STORED(R.string.report_not_stored),
+    NOT_STORED(R.string.report_not_stored, R.string.report_lost_not_stored, offersSettings = true),
+    PREVIOUSLY_STORED(R.string.report_previously_stored, R.string.report_lost_previously_stored, offersSettings = true),
     ADDRESS(R.string.report_invalid_address),
     COMMENT(R.string.report_comment_too_long),
     SCREENSHOT(R.string.report_screenshot_invalid),
@@ -78,6 +79,7 @@ internal enum class ReportProblem(
             ReportRequest.NotConfigured -> NOT_SET_UP
             ReportRequest.TooMany -> TOO_MANY
             ReportRequest.NotStored -> NOT_STORED
+            ReportRequest.PreviouslyStored -> PREVIOUSLY_STORED
             is ReportRequest.Invalid -> when (result.field) {
                 ReportField.URL -> ADDRESS
                 ReportField.COMMENT -> COMMENT

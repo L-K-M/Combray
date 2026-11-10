@@ -291,6 +291,121 @@ class SiteReportsTest {
     }
 
     @Test
+    fun aRepeatedTapOnAFailedReportQueuesItAgain() {
+        configure()
+        server.fault = FakeReports.Fault.CONFLICT
+        server.faultCount = 1
+        val report = draft()
+        submit(report)
+        drain()
+        assertEquals(JobState.FAILED, job(report).state)
+        val originalJobId = job(report).id
+        val originalPayload = job(report).payload
+
+        // Retry is an intent to deliver the original report, not to overwrite its payload.
+        offline = true
+        assertEquals(ReportRequest.Queued, submit(report.copy(url = "https://other.synthetic.example/", comment = "a later edit")))
+        drain()
+        assertEquals(JobState.RETRY_WAIT, job(report).state)
+        assertEquals(0, job(report).attempts)
+        assertEquals(originalJobId, job(report).id)
+        assertEquals(originalPayload, job(report).payload)
+        assertEquals(1, jobs().size)
+
+        offline = false
+        makeDue()
+        drain()
+        assertEquals(JobState.SUCCEEDED, job(report).state)
+        assertEquals(2, posts().size)
+        val stored = checkNotNull(server.reports[report.id])
+        assertEquals(report.url, stored.getValue("page").jsonObject.getValue("url").jsonPrimitive.content)
+        assertEquals(report.comment, stored.getValue("comment").jsonPrimitive.content)
+        assertArrayEquals(FakeReports.PNG, server.screenshots[report.id])
+    }
+
+    @Test
+    fun aRepeatedTapDoesNotClaimAParkedReportIsQueuedToTheNewDestination() {
+        configure()
+        offline = true
+        val report = draft()
+        submit(report)
+        drain()
+        val originalPayload = job(report).payload
+        FakeReports().use { other ->
+            configure(root = other.root)
+            assertEquals(JobState.DESTINATION_CHANGED, job(report).state)
+
+            assertEquals(ReportRequest.PreviouslyStored, submit(report.copy(comment = "a later edit")))
+            drain()
+            assertEquals(JobState.DESTINATION_CHANGED, job(report).state)
+            assertEquals(originalPayload, job(report).payload)
+            assertArrayEquals(FakeReports.PNG, file(report).readBytes())
+            assertTrue(other.requests.none { it.method == "POST" })
+        }
+    }
+
+    @Test
+    fun removingTheServiceDiscardsRatherThanRevivesItsPriorSubmission() {
+        configure()
+        offline = true
+        val report = draft()
+        submit(report)
+        drain()
+        runBlocking { reports.remove() }
+
+        assertEquals(ReportRequest.NotConfigured, submit(report))
+        assertEquals(JobState.CANCELLED, job(report).state)
+        assertFalse(file(report).exists())
+    }
+
+    @Test
+    fun aRepeatedTapDoesNotReviveSeveralLegacyRowsForOneReport() {
+        configure()
+        server.fault = FakeReports.Fault.CONFLICT
+        server.faultCount = 1
+        val report = draft()
+        submit(report)
+        drain()
+        val first = job(report)
+        assertEquals(JobState.FAILED, first.state)
+        val duplicate = first.copy(id = "legacy-duplicate")
+        runBlocking { database.integrations().insertJob(duplicate) }
+
+        assertEquals(ReportRequest.PreviouslyStored, submit(report))
+        val failed = runBlocking { database.integrations().failedJobs(JobKind.SITE_REPORT, first.fingerprint, report.id) }
+        assertEquals(setOf(first.id, duplicate.id), failed.map { it.id }.toSet())
+        assertEquals(1, posts().size)
+        assertArrayEquals(FakeReports.PNG, file(report).readBytes())
+    }
+
+    @Test
+    fun aRetryStorageFailureDoesNotDenyTheEarlierDurableSubmission() {
+        configure()
+        server.fault = FakeReports.Fault.CONFLICT
+        server.faultCount = 1
+        val report = draft()
+        submit(report)
+        drain()
+        assertEquals(JobState.FAILED, job(report).state)
+        val originalPayload = job(report).payload
+        val jobId = job(report).id
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER stop_retry BEFORE UPDATE OF state ON outbox " +
+                "WHEN OLD.id = '$jobId' AND NEW.state = 'PENDING' " +
+                "BEGIN SELECT RAISE(ABORT, 'synthetic'); END",
+        )
+        try {
+            assertEquals(ReportRequest.PreviouslyStored, submit(report))
+            assertEquals(JobState.FAILED, job(report).state)
+            assertEquals(originalPayload, job(report).payload)
+            assertArrayEquals(FakeReports.PNG, file(report).readBytes())
+            assertEquals(1, posts().size)
+        } finally {
+            database.openHelper.writableDatabase.execSQL("DROP TRIGGER stop_retry")
+        }
+    }
+
+    @Test
     fun aNewMainAddressParksReportsUntilTheUserSendsThemThere() {
         configure()
         offline = true
