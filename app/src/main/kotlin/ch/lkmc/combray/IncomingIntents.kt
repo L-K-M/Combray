@@ -27,6 +27,8 @@ sealed interface LaunchRequest : Incoming {
  * except from "Search with Kagi", which the user chose for it in the other app.
  *
  * ```
+ * VIEW https://example.org/a          -> Open https://example.org/a
+ * VIEW https://user:pw@example.org/   -> EditNewTab "https://user:pw@example.org/"
  * SEND "see https://example.org/a."   -> Open https://example.org/a
  * SEND "madeleine"                    -> EditNewTab "madeleine"
  * WEB_SEARCH "madeleine"              -> EditNewTab "madeleine"
@@ -62,7 +64,7 @@ object IncomingIntents {
 
     /** [extra] reads one of the intent's text extras by name. */
     fun interpret(action: String?, data: String?, extra: (String) -> String?): Incoming? = when (action) {
-        Intent.ACTION_VIEW -> data?.let(::open)
+        Intent.ACTION_VIEW -> data?.let(::viewed)
         Intent.ACTION_SEND -> sharedText(extra(Intent.EXTRA_TEXT), extra(Intent.EXTRA_SUBJECT))?.let(::shared)
         Intent.ACTION_WEB_SEARCH -> extra(SearchManager.QUERY)?.let(::editNewTab)
         Intent.ACTION_PROCESS_TEXT -> extra(Intent.EXTRA_PROCESS_TEXT)?.let(::searchNow)
@@ -124,6 +126,14 @@ object IncomingIntents {
 
     private fun open(address: String): Incoming.Open? =
         (AddressPolicy.interpret(address).primary as? AddressDecision.Navigate)?.let { Incoming.Open(it.url) }
+
+    /**
+     * A link another app asks to show opens at once. A web address the policy refuses (one with
+     * credentials in it) waits in the editor, which says why: Combray came to the front for it,
+     * and showing nothing would read as a lost tap. Anything that is no web address is ignored.
+     */
+    private fun viewed(address: String): Incoming? =
+        open(address) ?: address.takeIf { WEB_ADDRESS.matchesAt(it, 0) }?.let(::editNewTab)
 
     /**
      * What a share is about: the text, unless only the subject holds a link (some apps share a

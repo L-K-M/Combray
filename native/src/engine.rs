@@ -43,8 +43,8 @@ use crate::activation::{OpeningTap, TapRecognizer};
 use crate::animations;
 use crate::capture::{self, CaptureKind, ScriptOutcome, Visibility};
 use crate::commands::{
-    Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck, SURFACE_EPOCH,
-    ScrollEdge, Throttling, TouchPhase,
+    Appearance, CaptureRequest, Command, KeyAction, KeyInput, LightPages, LocalDocumentCheck,
+    SURFACE_EPOCH, ScrollEdge, Throttling, TouchPhase,
 };
 use crate::controls::{self, ControlDescription, ControlResponse, SelectOption};
 use crate::controls::{LeavePageAnswer, LeavePageDecision, PageActivation, TabVisibility};
@@ -504,6 +504,8 @@ struct Engine {
     taps: TapRecognizer,
     /// Given to every view, so pages match the app's light or dark theme.
     appearance: Appearance,
+    /// Given to every view: whether Servo paints light pages without dark support dark.
+    light_pages: LightPages,
     /// Fingers on the page now, and when the last touch event came: captures of the page on
     /// screen wait while the user scrolls or taps.
     touches: capture::Touches,
@@ -555,6 +557,7 @@ impl Engine {
             last_activation: None,
             taps,
             appearance: Appearance::Light,
+            light_pages: LightPages::AsAuthored,
             touches: Default::default(),
             deferred_captures: Vec::new(),
             started: Instant::now(),
@@ -649,6 +652,7 @@ impl Engine {
             Command::SelectNone => self.select_none(),
             Command::PersistProfile => self.persist_profile(),
             Command::SetAppearance { appearance } => self.set_appearance(appearance),
+            Command::SetLightPages { light_pages } => self.set_light_pages(light_pages),
             Command::CloseTab { tab } => self.close_tab(tab),
             Command::Navigate { tab, request, url } => self.navigate(tab, request, &url),
             Command::GoBack { tab } => {
@@ -1091,6 +1095,7 @@ impl Engine {
         webview.set_page_zoom(self.page_zoom);
         // Servo starts every view light; documents it loads later inherit the view's theme.
         webview.notify_theme_change(servo_theme(self.appearance));
+        webview.set_adaptive_dark_mode(self.light_pages == LightPages::Darkened);
         let webview_id = format!("{:?}", webview.id());
         self.tabs.insert(
             view.tab,
@@ -1217,6 +1222,14 @@ impl Engine {
         self.appearance = appearance;
         for tab in self.tabs.values() {
             tab.webview.notify_theme_change(servo_theme(appearance));
+        }
+    }
+
+    fn set_light_pages(&mut self, light_pages: LightPages) {
+        self.light_pages = light_pages;
+        for tab in self.tabs.values() {
+            tab.webview
+                .set_adaptive_dark_mode(light_pages == LightPages::Darkened);
         }
     }
 

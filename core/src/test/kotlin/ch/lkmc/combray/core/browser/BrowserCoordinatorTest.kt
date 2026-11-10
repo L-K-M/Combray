@@ -17,6 +17,7 @@ import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.LightPages
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
@@ -73,6 +74,7 @@ class BrowserCoordinatorTest {
     private var ids = 0
     private var unusedTabs = UnusedTabs.KEEP
     private var textSize = TextSize.DEFAULT
+    private var lightPagesInDark = LightPagesInDark.DARKEN
 
     @Before
     fun setUp() {
@@ -97,6 +99,7 @@ class BrowserCoordinatorTest {
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
+            lightPagesInDark = { lightPagesInDark },
             navigationTimeoutMs = navigationTimeoutMs,
             capture = capture, captureTiming = captureTiming,
             retentionNow = retentionNow,
@@ -1841,6 +1844,50 @@ class BrowserCoordinatorTest {
     }
 
     @Test
+    fun lightPagesAreDarkenedOnlyWhilePagesAreDarkAndBeforeTheFirstView() {
+        browser.setAppearance(Appearance.DARK)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        // Nothing to tell an engine that is not running yet.
+        assertTrue(engine.lightPages.isEmpty())
+
+        ready()
+        // Before the restored tab gets its view, so its first page is painted dark.
+        assertEquals(listOf(LightPages.DARKENED to 0), engine.lightPages)
+        assertEquals(1, engine.created.size)
+
+        // A light theme shows pages as designed, and dark darkens them again.
+        browser.setAppearance(Appearance.LIGHT); idle()
+        browser.setAppearance(Appearance.DARK); idle()
+        assertEquals(
+            listOf(LightPages.DARKENED to 0, LightPages.AS_AUTHORED to 1, LightPages.DARKENED to 1),
+            engine.lightPages,
+        )
+
+        // Turning the setting off shows them as designed while dark; repeats send nothing.
+        lightPagesInDark = LightPagesInDark.KEEP
+        browser.applyLightPagesInDark(); idle()
+        browser.applyLightPagesInDark(); idle()
+        browser.setAppearance(Appearance.LIGHT); idle()
+        assertEquals(LightPages.AS_AUTHORED to 1, engine.lightPages.last())
+        assertEquals(4, engine.lightPages.size)
+    }
+
+    @Test
+    fun theLightPageChoiceIsSentAgainToARestartedEngine() {
+        browser.setAppearance(Appearance.DARK)
+        ready()
+        ready()
+        assertEquals(listOf(LightPages.DARKENED to 0, LightPages.DARKENED to 0), engine.lightPages)
+    }
+
+    @Test
+    fun aLightThemeKeepsPagesAsDesignedWhateverTheSetting() {
+        ready()
+        browser.applyLightPagesInDark(); idle()
+        assertEquals(listOf(LightPages.AS_AUTHORED to 0), engine.lightPages)
+    }
+
+    @Test
     fun unusedTabsCloseOnlyWhenChosenAndNeverTheFocusedOne() {
         ready()
         browser.openUrl("https://old.test/", Placement.NEW_TAB); idle()
@@ -2156,6 +2203,86 @@ class BrowserCoordinatorTest {
         commit(view, 12, "https://d.test/")
 
         assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://example.com/login" })
+    }
+
+    /**
+     * A tab can hold a page of the site without a visit: one opened in the background that has not
+     * loaded yet. Forgetting the site covers it like the page an open tab shows.
+     */
+    @Test
+    fun forgettingASiteCoversATabThatHasNotLoadedItsPageYet() {
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100))
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://www.example.com/pending", Placement.BACKGROUND_TAB); idle()
+        val pending = runBlocking { database.browser().openTabs() }.single { it.url == "https://www.example.com/pending" }
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // The tab stays open on its address and loads it when the user returns to it.
+        browser.selectTab(pending.id); idle()
+        val view = engine.created.last().first
+        assertEquals("https://www.example.com/pending", engine.created.last().second)
+        commit(view, 20, "https://www.example.com/pending")
+        loaded(view, 20)
+        runBlocking { delay(400) }; idle()
+
+        // Leaving it finds no visit to put back in Recent, and its text was not sent.
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 21, "https://c.test/")
+        loaded(view, 21)
+        // The next page is captured, so capture was running meanwhile.
+        runBlocking {
+            withTimeout(TEST_WAIT_MS) {
+                while (true) {
+                    browser.awaitIdle()
+                    if ("https://c.test/" in sink.requests) break
+                    delay(20)
+                }
+            }
+        }
+        assertFalse("https://www.example.com/pending" in sink.requests)
+        assertTrue(recent().none { it.url == "https://www.example.com/pending" })
+    }
+
+    /** Retention or an earlier forget can remove the visit of a page a tab still shows. */
+    @Test
+    fun forgettingASiteCoversAnOpenPageWhoseVisitIsAlreadyGone() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        val shown = runBlocking { database.browser().openTabs() }.single()
+        runBlocking { database.browser().deleteVisit(shown.currentVisitId!!) }
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+        val tab = runBlocking { database.browser().openTabs() }.single()
+        assertTrue(tab.pageForgotten)
+        assertNull(tab.currentVisitId)
+
+        // Reloading it is loading it again; leaving it finds no visit to put back in Recent.
+        commit(1, 11, "https://example.com/4")
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 12, "https://c.test/")
+        assertTrue(recent().none { it.url == "https://example.com/4" })
+    }
+
+    /** The unloaded tab is matched like history: by site, its www spelling and, when asked, subdomains. */
+    @Test
+    fun forgettingASiteMarksOnlyThatSitesUnloadedTabs() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        listOf("https://www.example.com/1", "https://sub.example.com/2", "https://badexample.com/3", "data:text/html,example.com")
+            .forEach { browser.openUrl(it, Placement.BACKGROUND_TAB); idle() }
+        fun forgotten() = runBlocking { database.browser().openTabs() }.filter { it.pageForgotten }.map { it.url }.toSet()
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+        assertEquals(setOf("https://www.example.com/1"), forgotten())
+
+        browser.forgetSite("example.com", includeSubdomains = true); idle()
+        assertEquals(setOf("https://www.example.com/1", "https://sub.example.com/2"), forgotten())
     }
 
     @Test

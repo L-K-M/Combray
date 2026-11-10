@@ -71,6 +71,9 @@ object NativeEngine {
     /** Pages match `prefers-color-scheme: dark` when [dark], in every view and in views created later. */
     @JvmStatic external fun setDarkAppearance(dark: Boolean)
 
+    /** Light pages without dark support are painted dark when [darken], in every view and in views created later. */
+    @JvmStatic external fun setDarkenLightPages(darken: Boolean)
+
     @JvmStatic external fun closeTab(tab: Long)
 
     @JvmStatic external fun navigate(tab: Long, request: Long, url: String)

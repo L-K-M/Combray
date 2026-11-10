@@ -6,6 +6,7 @@ import android.view.MotionEvent
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import ch.lkmc.combray.core.browser.LightPagesInDark
 import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.ThemeMode
 import org.junit.After
@@ -17,7 +18,10 @@ import org.junit.runner.RunWith
 import kotlin.math.max
 import kotlin.math.min
 
-/** Real Servo pixels: a dark preference must not put default light text on a white canvas. */
+/**
+ * Real Servo pixels: a dark preference must not put default light text on a white canvas.
+ * Light pages keep their colors here; [AdaptiveDarkModeTest] covers darkening them.
+ */
 @RunWith(AndroidJUnit4::class)
 class PageContrastTest {
     @get:Rule
@@ -25,17 +29,21 @@ class PageContrastTest {
 
     private val device = Device { compose.mainClock.advanceTimeByFrame() }
     private lateinit var originalTheme: ThemeMode
+    private lateinit var originalLightPages: LightPagesInDark
 
     @Before
     fun setUp() {
         originalTheme = device.settings.themeMode.value
+        originalLightPages = device.settings.lightPagesInDark.value
         device.awaitEngine()
         device.closeAllTabs()
+        device.setLightPagesInDark(LightPagesInDark.KEEP)
         device.setThemeMode(ThemeMode.DARK)
     }
 
     @After
-    fun restoreTheme() {
+    fun restoreSettings() {
+        device.setLightPagesInDark(originalLightPages)
         device.setThemeMode(originalTheme)
     }
 

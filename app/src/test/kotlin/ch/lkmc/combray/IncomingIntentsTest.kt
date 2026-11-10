@@ -286,6 +286,22 @@ class IncomingIntentsTest {
         assertNull(IncomingIntents.interpret(Intent.ACTION_VIEW, null) { null })
     }
 
+    /**
+     * The app came to the front for the link: showing nothing would read as a lost tap. The
+     * editor says why an address is refused, as it does for a shared one.
+     */
+    @Test
+    fun aViewedLinkThePolicyRefusesWaitsInTheEditor() {
+        val withPassword = "https://user:secret@example.org/a"
+        assertEquals(LaunchRequest.EditNewTab(withPassword), IncomingIntents.interpret(Intent.ACTION_VIEW, withPassword) { null })
+        val shouting = "HTTP://user@example.org/"
+        assertEquals(LaunchRequest.EditNewTab(shouting), IncomingIntents.interpret(Intent.ACTION_VIEW, shouting) { null })
+
+        // Only a web address is a link to explain; the manifest offers Combray for no other.
+        assertNull(IncomingIntents.interpret(Intent.ACTION_VIEW, "intent://user@example.org/#Intent;end") { null })
+        assertNull(IncomingIntents.interpret(Intent.ACTION_VIEW, "https") { null })
+    }
+
     @Test
     fun launcherShortcutsAskForTheirSheets() {
         assertEquals(LaunchRequest.EditNewTab(""), IncomingIntents.interpret(IncomingIntents.ACTION_NEW_TAB, null) { null })

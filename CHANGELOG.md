@@ -194,6 +194,10 @@ All notable changes to this project are documented here. The format follows
   what you type: a tab switches to that tab, and a
   page opens where the typed address would. The matches come from this
   device; nothing is sent while you type.
+- While Combray is dark, light pages without a dark design of their own
+  get dark colors, like Safari's Adaptive Dark Mode. Pictures, videos and
+  pages that declare their own color scheme keep their colors. Turn it
+  off with Settings › Display › Darken light pages.
 
 ### Changed
 
@@ -817,6 +821,11 @@ All notable changes to this project are documented here. The format follows
   while ignored. Unmapped keyboard actions (including Previous) no longer
   submit the form as Enter; unsupported replacement ranges and code-point
   deletions do not pretend to edit the page through Android's private buffer.
+- A link another app hands to Combray that Combray does not open (one with
+  a user name or password in it) now waits in the address field, which says
+  why. Combray used to come to the front and show nothing.
+- The "Save to Karakeep?" question no longer outlives its screen when the
+  phone rotates or the theme changes while it is asked.
 - A site whose name begins with "www." and has no further dots, such as
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped
@@ -830,6 +839,13 @@ All notable changes to this project are documented here. The format follows
   scripts after an earlier plain request for the same file: the engine
   no longer reuses a cached response that varies on a header the new
   request sends.
+- A long text pasted into Recent's Hister search is cut to 2,000 bytes
+  before it is sent, instead of becoming a request the server refuses with
+  an error that reads like an outage. Karakeep's search, already cut at
+  2,000 characters, now counts bytes too: outside ASCII a character takes
+  up to nine in the address.
+- A long page title saved to Karakeep, and a Hister search excerpt, are no
+  longer cut through the middle of an emoji, which showed as "?".
 - Pages whose module scripts use top-level `await` no longer report a
   spurious script error, and errors those modules throw after awaiting
   are reported. SVG polylines and polygons stop measuring at a malformed
@@ -852,3 +868,14 @@ All notable changes to this project are documented here. The format follows
 - Pages that draw SVG charts from data attributes no longer show their
   error state instead of the content: SVG elements now expose `dataset`
   like HTML elements do.
+- A page with an enormous title or address can no longer break history
+  for good. Android cannot read back a database row above about 2 MB, so
+  one such page made Recent, restore and its tab fail until the app's
+  data was cleared. A title is now kept to 4,096 characters. An address
+  longer than 32,768 characters is not opened and not stored: a page
+  that moves itself there still shows, without a Recent entry or an
+  address to restore.
+- Forget this site also covers a tab that holds a page of the site
+  without having loaded it, such as a link opened in the background.
+  Loading it later no longer puts the site back in Recent or sends its
+  text to Hister, as for a page an open tab already shows.

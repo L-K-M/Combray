@@ -23,6 +23,24 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun aLongTitleIsCutToKarakeepsBoundWithoutSplittingACharacter() {
+        // The emoji straddles the bound: half of it would be sent as "?".
+        create(title = "a".repeat(999) + "😀tail")
+        assertEquals(
+            "POST {\"type\":\"link\",\"url\":\"https://a.example/\",\"title\":\"${"a".repeat(999)}\"}",
+            server.requests.last(),
+        )
+
+        // One that ends on the bound fits.
+        val fitting = "a".repeat(998) + "😀"
+        create(url = "https://b.example/", title = fitting + "tail")
+        assertEquals(
+            "POST {\"type\":\"link\",\"url\":\"https://b.example/\",\"title\":\"$fitting\"}",
+            server.requests.last(),
+        )
+    }
+
+    @Test
     fun aLostAnswerIsRetriableAndTheRetryFindsTheExistingBookmark() {
         server.fault = FakeKarakeep.Fault.STORE_THEN_HANG
         server.faultCount = 1
@@ -143,6 +161,16 @@ class KarakeepClientTest {
         bounded.bookmarks(server.root, FakeKarakeep.KEY, "$prefix😀tail")
         val query = java.net.URLDecoder.decode(sent.substringAfter("q=").substringBefore('&'), "UTF-8")
         assertEquals(prefix, query)
+    }
+
+    @Test
+    fun theQueryBoundCountsWhatIsSentNotCharacters() {
+        create("https://a.example/", "Alpha")
+
+        client.bookmarks(server.root, FakeKarakeep.KEY, query = "猫".repeat(2_000))
+
+        val query = server.uris.last().substringAfter("q=", "").substringBefore('&')
+        assertEquals("%E7%8C%AB".repeat(666), query)
     }
 
     @Test

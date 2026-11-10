@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.combray.core.browser.BrowserState
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HomeSectionVisibility
+import ch.lkmc.combray.core.browser.LightPagesInDark
 import ch.lkmc.combray.core.browser.RecentItem
 import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.TextSize
@@ -323,6 +324,8 @@ class Device(private val frame: () -> Unit = {}) {
     fun setHomeFrequentSites(visibility: HomeSectionVisibility) = awaitPreference(settings.setHomeFrequentSites(visibility))
 
     fun setTextSize(size: TextSize) = awaitPreference(settings.setTextSize(size))
+
+    fun setLightPagesInDark(choice: LightPagesInDark) = awaitPreference(settings.setLightPagesInDark(choice))
 
     // Keep the helpers' JVM return type void: expression-bodied JUnit hooks call them.
     private fun awaitPreference(write: kotlinx.coroutines.Deferred<Boolean>) {

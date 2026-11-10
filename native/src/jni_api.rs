@@ -23,8 +23,8 @@ use log::{LevelFilter, error, info};
 
 use crate::capture::CaptureKind;
 use crate::commands::{
-    ACK_TIMEOUT, Appearance, CaptureRequest, Command, KeyAction, KeyInput, LocalDocumentCheck,
-    SURFACE_EPOCH, ScrollEdge, Throttling, TouchPhase,
+    ACK_TIMEOUT, Appearance, CaptureRequest, Command, KeyAction, KeyInput, LightPages,
+    LocalDocumentCheck, SURFACE_EPOCH, ScrollEdge, Throttling, TouchPhase,
 };
 use crate::engine::{self, EngineConfig, EventSink};
 use crate::events::EngineEvent;
@@ -450,6 +450,21 @@ pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setDarkAppearance<'lo
         Appearance::Light
     };
     send(Command::SetAppearance { appearance });
+}
+
+/// Queued; applies to every view now and to views created later.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_ch_lkmc_combray_engine_NativeEngine_setDarkenLightPages<'local>(
+    _env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    darken: jboolean,
+) {
+    let light_pages = if darken {
+        LightPages::Darkened
+    } else {
+        LightPages::AsAuthored
+    };
+    send(Command::SetLightPages { light_pages });
 }
 
 #[unsafe(no_mangle)]
