@@ -81,6 +81,18 @@ class UploadStagingSpaceTest {
     }
 
     @Test
+    fun aProviderThatIgnoresTheProjectionStillRefusesALargePick() = runBlocking {
+        provider.fixedColumns = true
+        provider.size = 2L * 1024 * 1024
+        val staging = UploadStaging(root, resolver, reserveBytes = reserve, usableSpace = { 2L * 1024 * 1024 })
+
+        val staged = staging.stage(listOf(uri))
+
+        assertEquals(UploadStaging.Staged.NoSpace, staged)
+        assertEquals("The provider's stream was opened for a refused pick", 0, provider.opened)
+    }
+
+    @Test
     fun anUnknownSizeCopyIntoTheReserveStopsEarlyAsNoSpace() = runBlocking {
         val source = CountingSource(64L * 1024 * 1024)
         shadowOf(resolver).registerInputStream(streamUri, source)
@@ -143,11 +155,18 @@ class UploadStagingSpaceTest {
         var size: Long? = null
         var opened = 0
 
+        /** Serves a fixed column set, as a provider that ignores the projection does. */
+        var fixedColumns = false
+
         override fun onCreate() = true
         override fun getType(uri: Uri) = "text/plain"
 
         override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
-            val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            val columns = if (fixedColumns) {
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            } else {
+                projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            }
             return MatrixCursor(columns).apply {
                 addRow(columns.map { column ->
                     when (column) {

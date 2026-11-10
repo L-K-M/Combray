@@ -45,7 +45,7 @@ class UploadStagingIoTest {
             attachInfo(application, ProviderInfo().apply { authority = uri.authority })
         }
         ShadowContentResolver.registerProviderInternal(uri.authority, provider)
-        staging = UploadStaging(root, application.contentResolver)
+        staging = UploadStaging(root, application.contentResolver, reserveBytes = 0)
     }
 
     @Test
@@ -82,7 +82,7 @@ class UploadStagingIoTest {
     fun anotherInstanceInThisProcessKeepsTheExistingPick() = runBlocking {
         val picked = File(stagedPaths(listOf(uri)).single())
         // Constructing another wrapper is not a process restart and must not invalidate Servo's path.
-        UploadStaging(root, RuntimeEnvironment.getApplication().contentResolver).clear()
+        UploadStaging(root, RuntimeEnvironment.getApplication().contentResolver, reserveBytes = 0).clear()
         assertTrue(picked.exists())
     }
 

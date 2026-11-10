@@ -34,7 +34,7 @@ class UploadLifetimeTest {
     fun startupCleanupRemovesOldFilesButKeepsThisProcessAttachments() = runBlocking {
         val root = folder.newFolder("uploads")
         val old = File(root, "old-pick/0/attachment").apply { parentFile.mkdirs(); writeText("old") }
-        val uploads = UploadStaging(root, resolver)
+        val uploads = UploadStaging(root, resolver, reserveBytes = 0)
         val uri = input("one", ByteArrayInputStream("current".toByteArray()))
         val paths = uploads.stagedPaths(listOf(uri))
 
@@ -49,7 +49,7 @@ class UploadLifetimeTest {
 
     @Test
     fun cleanupDuringAProviderCopyCannotDeleteItsReturnedPath() = runBlocking {
-        val uploads = UploadStaging(folder.newFolder("uploads"), resolver)
+        val uploads = UploadStaging(folder.newFolder("uploads"), resolver, reserveBytes = 0)
         val reading = CountDownLatch(1)
         val release = CountDownLatch(1)
         val data = ByteArrayInputStream("picked bytes".toByteArray())
@@ -77,7 +77,7 @@ class UploadLifetimeTest {
     @Test
     fun failedProvidersCannotPutTheirMessagesOrCausesIntoLogs() = runBlocking {
         ShadowLog.clear()
-        val uploads = UploadStaging(folder.newFolder("uploads"), resolver)
+        val uploads = UploadStaging(folder.newFolder("uploads"), resolver, reserveBytes = 0)
         val sensitive = "private-attachment?token=synthetic-secret"
         val uri = input("failure", object : InputStream() {
             override fun read(): Int = throw IOException(sensitive)
@@ -92,7 +92,7 @@ class UploadLifetimeTest {
 
     @Test
     fun separateFilesWithTheSameFallbackNameKeepSeparateBytes() = runBlocking {
-        val uploads = UploadStaging(folder.newFolder("uploads"), resolver)
+        val uploads = UploadStaging(folder.newFolder("uploads"), resolver, reserveBytes = 0)
         val first = input("first", ByteArrayInputStream("first".toByteArray()))
         val second = input("second", ByteArrayInputStream("second".toByteArray()))
 

@@ -52,7 +52,7 @@ class UploadStagingCleanupTest {
             attachInfo(application, ProviderInfo().apply { authority = uri.authority })
         }
         ShadowContentResolver.registerProviderInternal(uri.authority, provider)
-        staging = UploadStaging(root, application.contentResolver)
+        staging = UploadStaging(root, application.contentResolver, reserveBytes = 0)
     }
 
     @Test
@@ -106,7 +106,7 @@ class UploadStagingCleanupTest {
     @Test
     fun twoInstancesDoNotDeleteEachOtherPicks() = runBlocking {
         val application = RuntimeEnvironment.getApplication()
-        val other = UploadStaging(root, application.contentResolver)
+        val other = UploadStaging(root, application.contentResolver, reserveBytes = 0)
         val first = staging.stagedPaths(listOf(uri))
         val second = other.stagedPaths(listOf(uri))
 
@@ -182,7 +182,7 @@ class UploadStagingCleanupTest {
         val freshRoot = temporary.newFolder("uploads-new-process")
         val stale = staleCopy(freshRoot, "old-process/0/attachment.txt")
 
-        UploadStaging(freshRoot, RuntimeEnvironment.getApplication().contentResolver).clear()
+        UploadStaging(freshRoot, RuntimeEnvironment.getApplication().contentResolver, reserveBytes = 0).clear()
 
         assertFalse(stale.exists())
     }

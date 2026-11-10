@@ -116,11 +116,24 @@ class UploadStaging(
         }
     }
 
-    /** The provider's size for the file; null or negative means it does not know. */
-    private fun reportedSize(uri: Uri): Long? =
+    /**
+     * The provider's size for the file; null or negative means it does not know. A provider may
+     * ignore the requested projection or throw from [ContentResolver.query]; the size only lets
+     * staging refuse early, so any failure here degrades to "unknown" and the copy still
+     * enforces the reserve.
+     */
+    private fun reportedSize(uri: Uri): Long? = try {
         resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0).takeIf { it >= 0 } else null
+            val size = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (size >= 0 && cursor.moveToFirst() && !cursor.isNull(size)) {
+                cursor.getLong(size).takeIf { it >= 0 }
+            } else {
+                null
+            }
         }
+    } catch (failure: RuntimeException) {
+        null
+    }
 
     private fun displayName(uri: Uri): String? =
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
