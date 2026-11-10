@@ -3877,9 +3877,10 @@ recorded in the pin PR.
 ## 60. Adaptive dark mode (10 November 2026)
 
 The owner asked for something like Safari's Adaptive Dark Mode: in Dark, most pages declare no
-dark support and showed as white. The pin moves to
-`0186170a96f09642ac91293fd7bca86f763b565e` on [Servo PR #44](https://github.com/L-K-M/servo/pull/44)
-(upstream base still v0.7.0), three commits on `8e097e4`, the HTTP cache fix of section 58.
+dark support and showed as white. The pin moves to `combray/0.7` tip
+`1d59883ded89ce18725ad27219a74fc0d974d985` (upstream base still v0.7.0), the merge of
+[Servo PR #44](https://github.com/L-K-M/servo/pull/44): three commits on `6de1769`, the SVG
+`dataset` fix of section 59.
 
 ### Engine
 
@@ -3903,9 +3904,10 @@ computed styles, `getComputedStyle()`, images, video and `<canvas>` are unchange
 - Opt-outs: `color-scheme` with `dark` or `only` on the root or body (the whole page) or any
   element (its backgrounds), from CSS or `<meta name=color-scheme>`. An opted-out element's
   foregrounds still follow the backdrop: text that paints no background of its own over a
-  darkened one gets lighter, while text over the element's own kept background keeps its color. Script now parses the meta value as a
-  `color-scheme` list for this; its exact `light`/`dark` theme hint is unchanged, so the light
-  root hint of section 22 does not opt pages out. Areas under a repeated or covering background
+  darkened one gets lighter, while text over the element's own kept background keeps its
+  color. Script now parses the meta value as a `color-scheme` list for this; its exact
+  `light`/`dark` theme hint is unchanged, so the light root hint of section 22 does not opt
+  pages out. Areas under a repeated or covering background
   image keep their colors, since text over a picture was designed against it.
 
 Embedder screenshot test `components/servo/tests/adaptive_dark_mode.rs` (one `Servo` for all
@@ -3918,8 +3920,8 @@ removing opt-out metadata darkens the page; an opted-out element stays white wit
 border inside a darkened page; a border outside a `padding-box` background keeps its color over a
 dark page; opted-out text without a background gets lighter; text over a light gradient card on
 a dark page gets readable; a translucent, half-transparent or small-image canvas darkens; under a
-dark theme an unstyled page still darkens and `light only` metadata still opts out; turning the mode off
-repaints the page as authored. The layout unit tests (`adaptive_dark`, 14) cover the color
+dark theme an unstyled page still darkens and `light only` metadata still opts out; turning the
+mode off repaints the page as authored. The layout unit tests (`adaptive_dark`, 14) cover the color
 mapping. Commands, on macOS with the downstream checkout:
 
 ```sh

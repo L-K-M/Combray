@@ -692,7 +692,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Karakeep / Hister / Kagi roles | Confirmed | Existing personal services |
 | Kotlin/Compose + Rust bridge | Verified (M0 bridge, M1 app) | Own `cdylib`, one engine thread, JSON events; Compose BOM 2026.09.00 with Material 3 |
 | Brand palette, no dynamic color | Proposed (M4) | Complete light and dark Material 3 schemes from the icon's pine and ivory, with a sage secondary and an ochre tertiary kept for memory and Hister accents. `ThemeContrastTest` checks text (4.5:1) and outline (3:1) contrast on the JVM; not yet reviewed on a device |
-| Darken light pages in Dark | Proposed (default on) | Owner asked for something like Safari's Adaptive Dark Mode; on by default and the switch's placement are proposals. Servo darkens at display-list time, so styles, scripts, images and media are untouched; opt-outs follow `color-scheme` dark or `only`. [ENGINE_SPIKE.md section 59](ENGINE_SPIKE.md#59-adaptive-dark-mode-10-november-2026) |
+| Darken light pages in Dark | Proposed (default on) | Owner asked for something like Safari's Adaptive Dark Mode; on by default and the switch's placement are proposals. Servo darkens at display-list time, so styles, scripts, images and media are untouched; opt-outs follow `color-scheme` dark or `only`. [ENGINE_SPIKE.md section 60](ENGINE_SPIKE.md#60-adaptive-dark-mode-10-november-2026) |
 | Recent sheet initial layout | Proposed; implemented as the sheet (M1) | Both concepts accepted in general; no exclusive final selection. Recent home remains possible: Recent is one composable over `BrowserCoordinator.recent()` |
 | Service settings in Room, not DataStore | Decided (M2) | A service row's fingerprint and generation bind outbox jobs; keeping it in the outbox's database makes configuration changes and job invalidation one transaction |
 | HTTP client: `HttpURLConnection` | Decided (M2) | No extra dependency; redirects are not followed (they could carry a credential or page text to another origin); bounded timeouts and response sizes |
@@ -776,7 +776,7 @@ Do not stop initial source/build/fixture work to collect every answer. Ask focus
 Adaptive dark mode (10 November 2026): while Combray is dark, Servo paints
 light pages that declare no dark support with dark colors, and a Settings
 switch turns it off. Engine evidence and limits are in
-[ENGINE_SPIKE.md section 59](ENGINE_SPIKE.md#59-adaptive-dark-mode-10-november-2026);
+[ENGINE_SPIKE.md section 60](ENGINE_SPIKE.md#60-adaptive-dark-mode-10-november-2026);
 `AdaptiveDarkModeTest` is the device check. Next for this feature, if the
 owner wants it: per-site "show original colors", inverting dark `<img>`
 icons, and a dark first frame (the shell's clear color is white).
