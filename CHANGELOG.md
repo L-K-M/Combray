@@ -845,3 +845,6 @@ All notable changes to this project are documented here. The format follows
 - Pages that draw SVG charts from data attributes no longer show their
   error state instead of the content: SVG elements now expose `dataset`
   like HTML elements do.
+- A PDF that was still downloading when you went back and came forward
+  again now opens once it has arrived, instead of showing "The PDF viewer
+  stopped".

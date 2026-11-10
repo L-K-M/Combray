@@ -419,9 +419,15 @@ async function onFakePage(run) {
   const listeners = {};
   const frames = [];
   const workers = [];
+  const observers = new Set();
   const page = {
     root,
     workers,
+    /** The engine moving the document to `state`, as the viewer's observer sees it. */
+    engineState(state) {
+      root.setAttribute("data-pdf-state", state);
+      for (const observer of [...observers]) observer.callback();
+    },
     get worker() {
       return workers.at(-1);
     },
@@ -449,8 +455,15 @@ async function onFakePage(run) {
       }
     },
     MutationObserver: class {
-      observe() {}
-      disconnect() {}
+      constructor(callback) {
+        this.callback = callback;
+      }
+      observe() {
+        observers.add(this);
+      }
+      disconnect() {
+        observers.delete(this);
+      }
     },
     ImageData: class {
       constructor(data, width, height) {
@@ -534,6 +547,48 @@ test("back from the back-forward cache, no page is drawn before the PDF is open 
     await drawPages(page);
     assert.ok(worker.requests("render").length > 0);
     assert.ok([...viewer.views.values()].every((view) => !view.failed && view.drawn));
+  });
+});
+
+test("back from the back-forward cache while the PDF still downloads, it opens once it has arrived", async () => {
+  await onFakePage(async (page) => {
+    page.root.setAttribute("data-pdf-state", ENGINE_STATE.LOADING);
+    const viewer = new Viewer(page.root);
+    viewer.start();
+    page.dispatch("pagehide");
+    page.dispatch("pageshow", { persisted: true });
+
+    page.engineState(ENGINE_STATE.READY);
+    await tick();
+
+    assert.equal(viewer.problem, null);
+    const worker = page.worker;
+    assert.equal(page.workers.length, 2);
+    worker.reply(worker.requests("open")[0], { count: 1, pages: [LETTER], title: "" });
+    await tick();
+    page.frame();
+    await drawPages(page);
+    assert.ok([...viewer.views.values()].every((view) => !view.failed && view.drawn));
+  });
+});
+
+test("a PDF that arrives while its page is in the back-forward cache opens on the way back", async () => {
+  await onFakePage(async (page) => {
+    page.root.setAttribute("data-pdf-state", ENGINE_STATE.LOADING);
+    const viewer = new Viewer(page.root);
+    viewer.start();
+    page.dispatch("pagehide");
+
+    page.engineState(ENGINE_STATE.READY);
+    await tick();
+    // Away, the viewer holds no worker and PDFium reads nothing.
+    assert.equal(page.workers.length, 1);
+    assert.equal(viewer.worker, null);
+
+    page.dispatch("pageshow", { persisted: true });
+    assert.equal(viewer.problem, null);
+    assert.equal(page.workers.length, 2);
+    assert.equal(page.worker.requests("open").length, 1);
   });
 });
 
