@@ -809,3 +809,6 @@ All notable changes to this project are documented here. The format follows
   scripts after an earlier plain request for the same file: the engine
   no longer reuses a cached response that varies on a header the new
   request sends.
+- Pages that draw SVG charts from data attributes no longer show their
+  error state instead of the content: SVG elements now expose `dataset`
+  like HTML elements do.
