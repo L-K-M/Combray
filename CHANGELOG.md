@@ -822,3 +822,7 @@ All notable changes to this project are documented here. The format follows
   white band where the bar had been. The page area now keeps its size
   under the bar, pages lay out above the bar, and a hiding bar leaves
   only once the page under it is drawn.
+- Pages whose scripts load from a shared CDN no longer fail module
+  scripts after an earlier plain request for the same file: the engine
+  no longer reuses a cached response that varies on a header the new
+  request sends.
