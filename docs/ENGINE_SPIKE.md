@@ -3837,3 +3837,39 @@ No embedder API, lockfile or resource change; the notices were
 regenerated for the new pin. This host has no Android SDK: both native
 ABI builds, packaging and the emulator checks are the Engine workflow's
 evidence, recorded in the pin PR.
+
+## 59. dataset on SVG elements (10 November 2026)
+
+The pin moves to `combray/0.7` tip
+`6de17695af632cc722d15fe8a35799bf70247258` (upstream base still v0.7.0),
+the merge of [Servo PR #43](https://github.com/L-K-M/servo/pull/43).
+It backports upstream `a022712ac45`: `dataset` was implemented only for
+`HTMLElement` (the `HTMLOrSVGElement` mixin's attribute was commented
+out), so `el.dataset` on an SVG element was `undefined` and a property
+read such as `el.dataset.barId` on a `<rect data-bar-id="...">` threw
+`TypeError`. A page that keys SVG marks by data attributes (chart bars
+animated with `Element.animate()`) died while building its
+visualizations and showed its error state instead of the content.
+`dataset` now sits in the mixin for HTML and SVG elements and
+`DOMStringMap` holds any element; the backport drops upstream's
+MathMLElement half (v0.7.0 has no MathMLElement).
+
+The engine PR adds
+`tests/wpt/mozilla/tests/mozilla/svg-element-dataset.html` (its four
+subtests fail on the engine before the change and pass after), flips
+the WPT expectations that now pass (`SVG elements should have a
+.dataset`, `dataset attribute`, `SVGElement interface: attribute
+dataset`) and removes one stale duplicate in an inert idlharness
+variant section. It passed the `svg/struct/scripted` and
+`html/dom/elements/global-attributes` WPT directories (146 tests) and
+`html/dom/idlharness.https.html` (5942 checks) with no unexpected
+results, `./mach test-tidy` with no findings in the touched files, and
+a servoshell site-check sweep whose two findings reproduce unchanged on
+the engine before the change. Independent review: Devin SWE-2 max and
+Ant Group Ling 3.1 Flash (MINOR ONLY, their one shared finding fixed)
+and GLM 5.3 with no actionable suggestions.
+
+No embedder API, lockfile or resource change; the notices were
+regenerated for the new pin on this host. Both native ABI builds,
+packaging and the emulator checks are the Engine workflow's evidence,
+recorded in the pin PR.

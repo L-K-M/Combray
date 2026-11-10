@@ -838,3 +838,6 @@ All notable changes to this project are documented here. The format follows
   storage. Combray refuses a pick that would leave less than 512 MB free
   and says so, instead of copying until storage runs out and then
   reporting the file as unreadable.
+- Pages that draw SVG charts from data attributes no longer show their
+  error state instead of the content: SVG elements now expose `dataset`
+  like HTML elements do.
