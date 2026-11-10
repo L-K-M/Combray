@@ -44,11 +44,12 @@ class EngineSurfaceView(
     private var pressX = 0f
     private var pressY = 0f
     private val scrollGesture = ScrollGestureTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    /** The document the app shows on this surface: [observeScroll] brings every change of it. */
     private var scrollPage: PageRef? = null
     private var onScroll: (ScrollEdge) -> Unit = {}
     private val longPressCheck = Runnable {
-        // The engine may have stopped since the press.
-        if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
+        // The engine may have stopped since the press, or the page under the finger been replaced.
+        if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis(), scrollPage)) return@Runnable
         longPressed = true
         // Felt the moment the press turns into a long-press, as elsewhere on Android: from here on
         // the finger no longer scrolls or taps. The system's touch feedback setting applies.
@@ -170,7 +171,7 @@ class EngineSurfaceView(
                 pressPointer = event.getPointerId(0)
                 pressX = event.x
                 pressY = event.y
-                longPress.press(event.x, event.y, SystemClock.uptimeMillis())
+                longPress.press(event.x, event.y, SystemClock.uptimeMillis(), scrollPage)
                 removeCallbacks(longPressCheck)
                 postDelayed(longPressCheck, longPressTimeoutMs)
             }
