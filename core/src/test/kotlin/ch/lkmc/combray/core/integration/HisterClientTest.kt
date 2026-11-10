@@ -153,9 +153,18 @@ class HisterClientTest {
         assertEquals("q=${"a".repeat(1_999)}&format=json", server.searchQueries.last())
 
         // A query of exactly the bound is sent whole, and so is the next page of a capped one.
-        val longest = "a".repeat(1_998) + "😀"
+        val longest = "a".repeat(1_996) + "😀"
         client.search(server.root, FakeHister.TOKEN, longest, pageKey = "next")
-        assertEquals("q=${"a".repeat(1_998)}%F0%9F%98%80&format=json&page_key=next", server.searchQueries.last())
+        assertEquals("q=${"a".repeat(1_996)}%F0%9F%98%80&format=json&page_key=next", server.searchQueries.last())
+    }
+
+    /** The request line is what a server or proxy limits, and every byte outside ASCII is three characters of it. */
+    @Test
+    fun theQueryBoundCountsWhatIsSentNotCharacters() {
+        client.search(server.root, FakeHister.TOKEN, "猫".repeat(2_000))
+
+        // 666 whole characters of three bytes each: 5,994 characters of address, not 18,000.
+        assertEquals("q=${"%E7%8C%AB".repeat(666)}&format=json", server.searchQueries.last())
     }
 
     @Test

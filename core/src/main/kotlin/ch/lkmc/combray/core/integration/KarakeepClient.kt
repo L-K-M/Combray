@@ -183,7 +183,7 @@ class KarakeepClient(private val transport: HttpTransport) {
     private fun boundedQuery(query: String?): String? {
         val trimmed = query?.trim().orEmpty()
         if (trimmed.isEmpty()) return null
-        return trimmed.takeWholeChars(MAX_QUERY_CHARS)
+        return trimmed.takeUtf8Bytes(MAX_QUERY_BYTES)
     }
 
     private fun JsonObject.string(key: String): String? =
@@ -212,8 +212,11 @@ class KarakeepClient(private val transport: HttpTransport) {
         /** Bookmarks per page in Recent's Karakeep scope. */
         const val PAGE_SIZE = 20
 
-        /** Longest search query, in characters. A longer one is cut rather than sent as a huge URL. */
-        const val MAX_QUERY_CHARS = 2_000
+        /**
+         * Longest search query, in UTF-8 bytes. A longer one is cut rather than sent as a huge
+         * URL; in bytes because that is what percent-encoding multiplies (HisterClient).
+         */
+        const val MAX_QUERY_BYTES = 2_000
 
         const val LINK = "link"
         const val MANUAL_LIST = "manual"

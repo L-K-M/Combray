@@ -164,6 +164,16 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun theQueryBoundCountsWhatIsSentNotCharacters() {
+        create("https://a.example/", "Alpha")
+
+        client.bookmarks(server.root, FakeKarakeep.KEY, query = "猫".repeat(2_000))
+
+        val query = server.uris.last().substringAfter("q=", "").substringBefore('&')
+        assertEquals("%E7%8C%AB".repeat(666), query)
+    }
+
+    @Test
     fun aLongSearchQueryIsCapped() {
         create("https://a.example/", "Alpha")
 

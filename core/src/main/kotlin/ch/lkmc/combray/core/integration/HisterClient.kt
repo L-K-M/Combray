@@ -63,7 +63,7 @@ class HisterClient(private val transport: HttpTransport) {
     fun search(root: String, token: String, query: String, pageKey: String? = null): HisterSearch {
         val parameters = buildString {
             // Bounded: a pasted text would otherwise become a request line of megabytes.
-            append("q=").append(encode(query.takeWholeChars(MAX_QUERY_CHARS))).append("&format=json")
+            append("q=").append(encode(query.takeUtf8Bytes(MAX_QUERY_BYTES))).append("&format=json")
             pageKey?.let { append("&page_key=").append(encode(it)) }
         }
         val outcome = transport.execute(HttpRequest("GET", ServiceUrls.endpoint(root, "search?$parameters"), headers(token)))
@@ -116,15 +116,6 @@ class HisterClient(private val transport: HttpTransport) {
             title?.let { put("title", it.takeUtf8Bytes(MAX_TITLE_CHARS)) }
             put("text", text)
         }.toString().toByteArray(Charsets.UTF_8)
-
-    /** At most [maxBytes] of UTF-8, without splitting a character. */
-    private fun String.takeUtf8Bytes(maxBytes: Int): String {
-        val bytes = toByteArray(Charsets.UTF_8)
-        if (bytes.size <= maxBytes) return this
-        var end = maxBytes
-        while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
-        return String(bytes, 0, end, Charsets.UTF_8)
-    }
 
     private fun parseResults(body: ByteArray): HisterSearch {
         val root = try {
@@ -190,8 +181,12 @@ class HisterClient(private val transport: HttpTransport) {
         const val MAX_TITLE_CHARS = 4 * 1024
         const val MAX_EXCERPT_CHARS = 300
 
-        /** Longest search query, in characters, as for Karakeep. A longer one is cut. */
-        const val MAX_QUERY_CHARS = 2_000
+        /**
+         * Longest search query, in UTF-8 bytes, as for Karakeep; a longer one is cut. Bytes, not
+         * characters: percent-encoding makes three characters of each byte outside ASCII, and
+         * 6,000 of them stay within the 8 KB request line that servers and proxies commonly take.
+         */
+        const val MAX_QUERY_BYTES = 2_000
         const val CHECK_QUERY = "combray connection check"
 
         private const val SKIPPED_BY_SERVER = "skipped_by_server"
