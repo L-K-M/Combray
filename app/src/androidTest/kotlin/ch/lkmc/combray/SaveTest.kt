@@ -85,6 +85,10 @@ class SaveTest {
         val saved = bookmarks()
         assertEquals(1, saved.length())
         assertEquals("SOLID-2e6b4f", saved.getJSONObject(url).getString("title"))
+        // The outbox receipt can precede the UI collector and merged semantics update.
+        compose.waitUntil(Device.LOAD_TIMEOUT_MS) {
+            compose.onAllNodesWithContentDescription("Saved to Karakeep").fetchSemanticsNodes().size == 1
+        }
         compose.onNodeWithContentDescription("Saved to Karakeep").assertExists()
     }
 
