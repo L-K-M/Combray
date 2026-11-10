@@ -619,6 +619,79 @@ test("a page that failed to draw at the old width is drawn again at the new one"
   });
 });
 
+test("a page that failed at the current size is drawn again after a resize", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER, LETTER]);
+    const worker = page.worker;
+    const [first] = worker.requests("render");
+    worker.fail(first, { kind: "memory", message: "no memory for a page" });
+    await tick();
+    page.frame();
+    const view = viewer.views.get(0);
+    assert.equal(view.failed, true);
+    assert.ok(view.element.querySelector(".page-error"));
+
+    page.root.clientWidth = 720;
+    page.dispatch("resize");
+    page.frame();
+    await drawPages(page);
+    assert.equal(view.failed, false);
+    assert.equal(view.element.querySelector(".page-error"), null);
+    const widths = worker.requests("render").filter(({ index }) => index === 0).map(({ width }) => width);
+    assert.deepEqual(widths, [360 - 2 * PAGE_MARGIN, 720 - 2 * PAGE_MARGIN]);
+  });
+});
+
+test("tapping a failed page's note asks for it again", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER, LETTER]);
+    const worker = page.worker;
+    const [first] = worker.requests("render");
+    worker.fail(first, { kind: "memory", message: "no memory for a page" });
+    await tick();
+    page.frame();
+    const view = viewer.views.get(0);
+    const note = view.element.querySelector(".page-error");
+    assert.ok(note);
+    note.listeners.click[0]();
+    await tick();
+    page.frame();
+    await drawPages(page);
+    assert.equal(view.failed, false);
+    assert.equal(view.element.querySelector(".page-error"), null);
+  });
+});
+
+test("a problem releases every page's bitmap", async () => {
+  await onFakePage(async (page) => {
+    const viewer = await openViewer(page, [LETTER, LETTER]);
+    await drawPages(page);
+    const canvases = [...viewer.views.values()].map((view) => view.canvas);
+    assert.ok(canvases.every((canvas) => canvas.width > 1));
+    viewer.fail({ kind: "memory", message: "no memory" });
+    assert.ok(canvases.every((canvas) => canvas.width <= 1));
+  });
+});
+
+test("the retry button's hover text stays readable on white paper in dark mode", () => {
+  const css = readFileSync(new URL("../viewer.css", import.meta.url), "utf8");
+  const paper = css.match(/\.page\s*\{[^}]*background:\s*(#[0-9a-f]{6})/i);
+  const darkText = css.match(/@media\s*\(prefers-color-scheme:\s*dark\)[\s\S]*?--text:\s*(#[0-9a-f]{6})/i);
+  const hover = css.match(/\.page-error:hover\s*\{[^}]*color:\s*(#[0-9a-f]{6}|var\(--text\))/i);
+  assert.ok(paper && darkText && hover, "paper and hover declarations must be covered");
+  const ink = hover[1] === "var(--text)" ? darkText[1] : hover[1];
+  const luminance = (hex) => {
+    const channels = [1, 3, 5].map((offset) => {
+      const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  const values = [luminance(ink), luminance(paper[1])].sort((a, b) => b - a);
+  const ratio = (values[0] + 0.05) / (values[1] + 0.05);
+  assert.ok(ratio >= 4.5, `retry hover contrast ${ratio} is below 4.5:1`);
+});
+
 test("after the PDF fails to open again, no blank page or note comes back under the problem", async () => {
   await onFakePage(async (page) => {
     const sizes = Array.from({ length: MAX_PAGES }, () => LETTER);

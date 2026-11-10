@@ -322,6 +322,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A PDF page that failed to draw at the current size can recover: a resize
+  draws it again, and tapping its error note asks for the page again. A
+  problem that clears the viewer releases its page canvases before the
+  elements leave the page, rather than waiting for garbage collection.
 - Integration fixtures reserve unreachable loopback ports until test cleanup,
   so another listener cannot turn an offline test into a real HTTP request.
   Their connect waits are bounded separately from response reads.
@@ -669,6 +673,10 @@ All notable changes to this project are documented here. The format follows
 - A screenshot encoder Error no longer leaves a site report preparing
   forever. The draft continues without a screenshot; cancellation still
   stops preparation rather than being reported as a copy failure.
+- Tapping Send again retries one failed report using its original payload
+  and destination, rather than claiming a still-failed job is queued.
+  Parked reports and unconfirmed retries say the earlier report was saved
+  and offer Settings, without claiming new delivery or overwriting it.
 - The browser starts once and keeps working after an internal error. A
   second or concurrent start no longer starts a second work queue, and an
   `Error` in one state update (for example running out of memory while
@@ -814,6 +822,14 @@ All notable changes to this project are documented here. The format follows
   white band where the bar had been. The page area now keeps its size
   under the bar, pages lay out above the bar, and a hiding bar leaves
   only once the page under it is drawn.
+- Pages whose scripts load from a shared CDN no longer fail module
+  scripts after an earlier plain request for the same file: the engine
+  no longer reuses a cached response that varies on a header the new
+  request sends.
+- Pages whose module scripts use top-level `await` no longer report a
+  spurious script error, and errors those modules throw after awaiting
+  are reported. SVG polylines and polygons stop measuring at a malformed
+  point list, as the SVG grammar requires.
 - Setting the phone's date far ahead (or a bad network time) no longer
   deletes browsing history or closes unused tabs. Until the phone
   reboots, retention ignores a clock that runs ahead of the time that
