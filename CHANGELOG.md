@@ -821,6 +821,11 @@ All notable changes to this project are documented here. The format follows
   while ignored. Unmapped keyboard actions (including Previous) no longer
   submit the form as Enter; unsupported replacement ranges and code-point
   deletions do not pretend to edit the page through Android's private buffer.
+- A link another app hands to Combray that Combray does not open (one with
+  a user name or password in it) now waits in the address field, which says
+  why. Combray used to come to the front and show nothing.
+- The "Save to Karakeep?" question no longer outlives its screen when the
+  phone rotates or the theme changes while it is asked.
 - A site whose name begins with "www." and has no further dots, such as
   `www.com`, no longer shows as its bare suffix (`com`) in the address
   bar, tab switcher, Recent and the new-tab page: the label is dropped

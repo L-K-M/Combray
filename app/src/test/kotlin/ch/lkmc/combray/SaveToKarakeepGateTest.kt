@@ -69,6 +69,22 @@ class SaveToKarakeepGateTest {
         idleFor(0)
     }
 
+    /** A rotation or a theme change destroys the screen; its question must not outlive it. */
+    @Test
+    fun theQuestionGoesWithItsScreenAndTheNextOneAsksAgain() {
+        val controller = Robolectric.buildActivity(SaveToKarakeepActivity::class.java, share()).setup()
+        val first = ShadowAlertDialog.getLatestAlertDialog() as AlertDialog
+        assertTrue(first.isShowing)
+
+        controller.recreate()
+
+        assertFalse(first.isShowing)
+        val second = ShadowAlertDialog.getLatestAlertDialog() as AlertDialog
+        assertTrue(second !== first && second.isShowing)
+        // Destroying the screen is not an answer: nothing finished it.
+        assertFalse(controller.get().isFinishing)
+    }
+
     @Test
     fun saveWaitsUntilTheEnterAnimationHasEndedForAMoment() {
         val (activity, dialog) = ask()
