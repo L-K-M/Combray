@@ -212,7 +212,7 @@ class AdaptiveDarkModeTest {
         const val DARK_SCHEME_CANVAS = 0x1e1e1e
         const val DARK_SCHEME_INK = 0xe8e8e8
         const val REPAINT_TIMEOUT_MS = 30_000L
-        /** Well under the fixture's SLOW_PAGE_SECONDS, so the tab is sampled before the answer. */
+        /** Loading wait plus sampling can take twice this; the fixture delays its reply 8s. */
         const val EMPTY_TAB_MS = 3_000L
         const val POLL_MS = 500L
     }

@@ -44,7 +44,7 @@ class DefaultRunTest(unittest.TestCase):
 
 
 class NightModeTest(unittest.TestCase):
-    def run_mode(self, mode, result=0, switch_result=0, restore_result=0):
+    def run_mode(self, mode, result=0, switch_result=0, restore_result=0, query_result=0):
         source = (ROOT / "scripts/check-app.sh").read_text()
         cleanup = "cleanup() {" + source.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
         appearance = "use_light_mode() {" + source.split("use_light_mode() {", 1)[1].split(
@@ -53,6 +53,7 @@ class NightModeTest(unittest.TestCase):
         command = r'''
 PIDS=()
 FIXTURE_PORT=8766
+SERIAL=test-device
 STAY_ON_ORIGINAL=""
 NIGHT_ORIGINAL=""
 ADB=(fake_adb)
@@ -61,7 +62,7 @@ fake_adb() {
     if [ "$1" != shell ]; then return; fi
     if [ "$#" -eq 4 ]; then
         printf 'Night mode: %s\r\n' "$MODE"
-        return
+        return "$QUERY_RESULT"
     fi
     printf 'SET:%s\n' "$5" >&3
     if [ "$5" = no ]; then
@@ -77,6 +78,7 @@ fake_adb() {
             env={
                 **os.environ, "MODE": mode, "RESULT": str(result),
                 "SWITCH_RESULT": str(switch_result), "RESTORE_RESULT": str(restore_result),
+                "QUERY_RESULT": str(query_result),
             },
             capture_output=True, text=True, timeout=10,
         )
@@ -100,6 +102,12 @@ fake_adb() {
     def test_an_unrecognized_mode_is_not_changed(self):
         completed = self.run_mode("unknown")
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("SET:", completed.stdout)
+
+    def test_a_failed_query_reports_the_device_and_changes_nothing(self):
+        completed = self.run_mode("yes", query_result=17)
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        self.assertIn("could not read night mode from test-device", completed.stderr)
         self.assertNotIn("SET:", completed.stdout)
 
     def test_a_failed_restore_is_reported_without_hiding_the_test_failure(self):

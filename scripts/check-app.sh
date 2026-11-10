@@ -167,7 +167,10 @@ sys.exit(0 if any(pixels[i] or pixels[i + 1] or pixels[i + 2] for i in range(0, 
 # fail. Run with the device in light mode; checks of the dark appearance choose it in the app.
 use_light_mode() {
     local night
-    night="$("${ADB[@]}" shell cmd uimode night 2>/dev/null | tr -d '\r' | sed -n 's/^Night mode: //p')"
+    if ! night="$("${ADB[@]}" shell cmd uimode night 2>/dev/null | tr -d '\r' | sed -n 's/^Night mode: //p')"; then
+        echo "!! could not read night mode from $SERIAL" >&2
+        exit 1
+    fi
     case "$night" in
         yes | auto | custom_schedule | custom_bedtime) ;;
         *) return 0 ;;

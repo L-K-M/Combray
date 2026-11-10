@@ -4119,7 +4119,7 @@ theme in `PdfTest`. Whether that is test timing or a viewer defect is open.
 
 Local host checks on macOS arm64 (JDK 21, Rust 1.97.1, NDK r29): 1,147 JVM tests,
 `lintDebug`, debug and device-test assembly, 205 bridge unit tests, `cargo fmt --check`,
-192 script/fixture tests, documentation checks and `git diff --check` pass. APK verification
+193 script/fixture tests, documentation checks and `git diff --check` pass. APK verification
 confirms arm64 libraries. Notices were regenerated; only the pin's input hash changed.
 
 ### Limits
