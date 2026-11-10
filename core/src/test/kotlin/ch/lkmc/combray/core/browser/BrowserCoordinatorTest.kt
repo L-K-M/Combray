@@ -91,6 +91,7 @@ class BrowserCoordinatorTest {
         navigationTimeoutMs: Long = LONG_TIMEOUT_MS,
         capture: CaptureSink? = null,
         captureTiming: CaptureTiming = CaptureTiming(),
+        retentionNow: () -> Long = { now },
     ): BrowserCoordinator {
         engine = FakeEngine()
         return BrowserCoordinator(
@@ -98,6 +99,7 @@ class BrowserCoordinatorTest {
             textSize = { textSize },
             navigationTimeoutMs = navigationTimeoutMs,
             capture = capture, captureTiming = captureTiming,
+            retentionNow = retentionNow,
         ).also { it.start() }
     }
 
@@ -1596,6 +1598,85 @@ class BrowserCoordinatorTest {
         assertTrue(items.none { it.url == "https://old-closed.test/" })
         assertEquals(1, runBlocking { database.browser().openTabs() }.size)
     }
+
+    /**
+     * A device clock set a year ahead (a manual date, a bad network time) is a jump, not elapsed
+     * time: maintenance under it keeps closed history, the background tab and that tab's page,
+     * also over repeated passes. Elapsed time barely moves while the wall clock jumps.
+     */
+    @Test
+    fun aForwardJumpedClockKeepsHistoryAndUnusedTabs() {
+        unusedTabs = UnusedTabs.CLOSE
+        var elapsed = 1_000L
+        browser = newCoordinator(
+            retentionNow = RetentionClock({ now }, { elapsed }, { 1 }, RetentionClockTest.MemoryAnchors())::now,
+        )
+        ready()
+        browser.openUrl("https://background.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://background.test/")
+        browser.openUrl("https://closed.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://closed.test/")
+        browser.closeTab(state().activeTab!!.id); idle()
+        browser.openUrl("https://active.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://active.test/")
+        val background = runBlocking { database.browser().openTabs() }.single { it.url == "https://background.test/" }
+
+        now += 365 * DAY
+        elapsed += 60_000
+        browser.runMaintenance(); idle()
+        elapsed += 60_000
+        browser.runMaintenance(); idle()
+
+        val open = runBlocking { database.browser().openTabs() }
+        assertTrue("the jumped clock must not close an unused tab", open.any { it.id == background.id })
+        assertNotNull(runBlocking { database.browser().visit(background.currentVisitId!!) })
+        assertTrue("the jumped clock must not expire history", storedHistory().any { it.url == "https://closed.test/" })
+    }
+
+    /** Wall and elapsed time advancing together is real time: history and unused tabs expire. */
+    @Test
+    fun honestElapsedTimeStillExpiresHistoryAndUnusedTabs() {
+        unusedTabs = UnusedTabs.CLOSE
+        browser = newCoordinator(
+            retentionNow = RetentionClock({ now }, { now - START }, { 1 }, RetentionClockTest.MemoryAnchors())::now,
+        )
+        ready()
+        browser.openUrl("https://background.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://background.test/")
+        browser.openUrl("https://closed.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://closed.test/")
+        browser.closeTab(state().activeTab!!.id); idle()
+        browser.openUrl("https://active.test/", Placement.NEW_TAB); idle()
+        commit(3, 30, "https://active.test/")
+
+        now += 8 * DAY
+        browser.runMaintenance(); idle()
+
+        assertTrue(storedHistory().none { it.url == "https://closed.test/" })
+        assertTrue(runBlocking { database.browser().openTabs() }.none { it.url == "https://background.test/" })
+    }
+
+    /** The trusted reading persists: a new process on the same boot still sees the jump. */
+    @Test
+    fun theGuardHoldsWhenTheProcessRestartsOnTheSameBoot() {
+        val anchors = RetentionClockTest.MemoryAnchors()
+        var elapsed = 1_000L
+        browser = newCoordinator(retentionNow = RetentionClock({ now }, { elapsed }, { 5 }, anchors)::now)
+        ready()
+        browser.openUrl("https://closed.test/", Placement.NEW_TAB); idle()
+        commit(1, 10, "https://closed.test/")
+        browser.closeTab(state().activeTab!!.id); idle()
+
+        now += 365 * DAY
+        elapsed += 60_000
+        // The next process: a fresh coordinator whose start-up maintenance reads the stored anchor.
+        browser = newCoordinator(retentionNow = RetentionClock({ now }, { elapsed }, { 5 }, anchors)::now)
+        idle()
+
+        assertTrue(storedHistory().any { it.url == "https://closed.test/" })
+    }
+
+    private fun storedHistory() = runBlocking { database.browser().observeHistory(Long.MIN_VALUE, 5000).first() }
 
     @Test
     fun searchingRecentLooksAtEveryRetainedVisitNotOnlyTheNewest() {

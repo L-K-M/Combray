@@ -3,6 +3,8 @@ package ch.lkmc.combray
 import android.app.Application
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.annotation.OptIn
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -14,9 +16,11 @@ import androidx.media3.common.util.UnstableApi
 import ch.lkmc.combray.core.browser.AppVisibility
 import ch.lkmc.combray.core.browser.BrowserCoordinator
 import ch.lkmc.combray.core.browser.BrowserSettings
+import ch.lkmc.combray.core.browser.Clock
 import ch.lkmc.combray.core.browser.EngineStatus
 import ch.lkmc.combray.core.browser.HomeLinks
 import ch.lkmc.combray.core.browser.Retention
+import ch.lkmc.combray.core.browser.RetentionClock
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.integration.Integrations
 import ch.lkmc.combray.core.integration.KeystoreSecretStore
@@ -160,6 +164,16 @@ class AppGraph(application: Application) {
         capture = integrations.hister,
         unusedTabs = { settings.unusedTabs.value },
         textSize = { settings.textSize.value },
+        retentionNow = RetentionClock(
+            wall = Clock.SYSTEM,
+            elapsedMillis = SystemClock::elapsedRealtime,
+            bootCount = {
+                Settings.Global.getInt(application.contentResolver, Settings.Global.BOOT_COUNT, -1).takeIf { it >= 0 }
+            },
+            store = RetentionClock.PreferencesAnchorStore(
+                application.getSharedPreferences(RetentionClock.FILE_NAME, Context.MODE_PRIVATE),
+            ),
+        )::now,
     )
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
     val imageDownloads = ImageDownloads(application)

@@ -8,8 +8,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -36,9 +34,9 @@ class UploadLifetimeTest {
     fun startupCleanupRemovesOldFilesButKeepsThisProcessAttachments() = runBlocking {
         val root = folder.newFolder("uploads")
         val old = File(root, "old-pick/0/attachment").apply { parentFile.mkdirs(); writeText("old") }
-        val uploads = UploadStaging(root, resolver)
+        val uploads = UploadStaging(root, resolver, reserveBytes = 0)
         val uri = input("one", ByteArrayInputStream("current".toByteArray()))
-        val paths = uploads.stage(listOf(uri))!!
+        val paths = uploads.stagedPaths(listOf(uri))
 
         uploads.clear()
 
@@ -51,7 +49,7 @@ class UploadLifetimeTest {
 
     @Test
     fun cleanupDuringAProviderCopyCannotDeleteItsReturnedPath() = runBlocking {
-        val uploads = UploadStaging(folder.newFolder("uploads"), resolver)
+        val uploads = UploadStaging(folder.newFolder("uploads"), resolver, reserveBytes = 0)
         val reading = CountDownLatch(1)
         val release = CountDownLatch(1)
         val data = ByteArrayInputStream("picked bytes".toByteArray())
@@ -64,7 +62,7 @@ class UploadLifetimeTest {
                 return data.read(buffer, offset, length)
             }
         })
-        val copying = async(Dispatchers.IO) { uploads.stage(listOf(uri)) }
+        val copying = async(Dispatchers.IO) { uploads.stagedPaths(listOf(uri)) }
         try {
             assertTrue(reading.await(5, TimeUnit.SECONDS))
             uploads.clear()
@@ -73,20 +71,19 @@ class UploadLifetimeTest {
         }
 
         val paths = copying.await()
-        assertNotNull(paths)
-        assertEquals("picked bytes", File(paths!!.single()).readText())
+        assertEquals("picked bytes", File(paths.single()).readText())
     }
 
     @Test
     fun failedProvidersCannotPutTheirMessagesOrCausesIntoLogs() = runBlocking {
         ShadowLog.clear()
-        val uploads = UploadStaging(folder.newFolder("uploads"), resolver)
+        val uploads = UploadStaging(folder.newFolder("uploads"), resolver, reserveBytes = 0)
         val sensitive = "private-attachment?token=synthetic-secret"
         val uri = input("failure", object : InputStream() {
             override fun read(): Int = throw IOException(sensitive)
         })
 
-        assertNull(uploads.stage(listOf(uri)))
+        assertEquals(UploadStaging.Staged.Unreadable, uploads.stage(listOf(uri)))
 
         val logs = ShadowLog.getLogsForTag("CombrayUpload")
         assertTrue(logs.isNotEmpty())
@@ -95,16 +92,19 @@ class UploadLifetimeTest {
 
     @Test
     fun separateFilesWithTheSameFallbackNameKeepSeparateBytes() = runBlocking {
-        val uploads = UploadStaging(folder.newFolder("uploads"), resolver)
+        val uploads = UploadStaging(folder.newFolder("uploads"), resolver, reserveBytes = 0)
         val first = input("first", ByteArrayInputStream("first".toByteArray()))
         val second = input("second", ByteArrayInputStream("second".toByteArray()))
 
-        val paths = uploads.stage(listOf(first, second))!!
+        val paths = uploads.stagedPaths(listOf(first, second))
         uploads.clear()
 
         assertEquals(listOf("first", "second"), paths.map { File(it).readText() })
         assertEquals(2, paths.distinct().size)
     }
+
+    private suspend fun UploadStaging.stagedPaths(uris: List<Uri>): List<String> =
+        (stage(uris) as UploadStaging.Staged.Files).paths
 
     private fun input(name: String, stream: InputStream): Uri = Uri.parse("content://synthetic-uploads/$name").also {
         shadowOf(resolver).registerInputStream(it, stream)
