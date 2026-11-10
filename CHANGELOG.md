@@ -834,3 +834,7 @@ All notable changes to this project are documented here. The format follows
   deletes browsing history or closes unused tabs. Until the phone
   reboots, retention ignores a clock that runs ahead of the time that
   actually passed; after a reboot the clock is trusted again.
+- A page's file upload no longer copies a file that would fill the phone's
+  storage. Combray refuses a pick that would leave less than 512 MB free
+  and says so, instead of copying until storage runs out and then
+  reporting the file as unreadable.
