@@ -64,8 +64,8 @@ class ServiceRoutesTest {
             assertThrows(IllegalStateException::class.java) {
                 routes.call(service()) { attempt, root ->
                     attempt.execute(request(root))
+                    // The handler catches the violation and carries on.
                     runCatching { attempt.execute(request(root)) }
-                    "ignored violation"
                 }
             }
             assertEquals("A caught violation must not permit failover", 1, calls)

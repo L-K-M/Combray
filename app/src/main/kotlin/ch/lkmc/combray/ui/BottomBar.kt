@@ -250,7 +250,7 @@ fun BottomBar(
                         if (!stacked) {
                             AddressChip(tab, histerStored, onAddress, onCopyAddress, readerDisplay, onStop, onReader, onPlayMedia, Modifier.weight(1f))
                         }
-                        SaveButton(saveStatus, enabled = tab?.url != null, onSave)
+                        SaveButton(saveStatus, enabled = tab.url != null, onSave)
                         IconButton(onClick = onCloseTab) {
                             Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_tab))
                         }

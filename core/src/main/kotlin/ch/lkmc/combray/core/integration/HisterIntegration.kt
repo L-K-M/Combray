@@ -103,7 +103,7 @@ class HisterIntegration(
                 val fingerprint = if (previous != null && keepsServer) previous.fingerprint else addresses.fingerprint
                 // A stored token belongs to the addresses it was entered for, never to a new one.
                 val knownAddresses = keepsServer &&
-                    (addresses.alternate == null || ServiceUrls.sameDestination(addresses.alternate, previous?.alternateUrl))
+                    (addresses.alternate == null || ServiceUrls.sameDestination(addresses.alternate, previous.alternateUrl))
                 val stored = credentials.read(SecretName.HISTER_TOKEN, fingerprint) != null
                 if (secret == null && !(knownAddresses && stored)) return@withLock Configured.MissingCredential
                 // Same server, stored token kept: queued captures keep going. At most the alternate was dropped or re-spelled.

@@ -287,6 +287,23 @@ class IntegrationsTest {
         assertTrue(parked().isEmpty())
     }
 
+    /** Removing the service while its save is on the wire cancels the job: the late answer records nothing. */
+    @Test
+    fun aSaveInFlightWhenKarakeepIsRemovedRecordsNothing() = runBlocking {
+        configure()
+        val fingerprint = service().fingerprint
+        afterCreate = { runBlocking { integrations.removeKarakeep() } }
+        save()
+        drain()
+
+        // The server made the bookmark; the app no longer has a service to credit it to.
+        assertEquals(1, server.bookmarks.size)
+        assertEquals(JobState.CANCELLED, job().state)
+        assertNull(job().leaseOwner)
+        assertNull(database.integrations().observeSaved(fingerprint, URL).first())
+        assertEquals(SaveStatus.NotConfigured, status())
+    }
+
     @Test
     fun savingAParkedPageAgainSendsItOnceToTheCurrentAddress() {
         queueARetryingSave()

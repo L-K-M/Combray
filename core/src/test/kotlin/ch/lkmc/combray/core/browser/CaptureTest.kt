@@ -256,8 +256,11 @@ class CaptureTest {
         idle()
         settle()
         assertTrue(engine.captures.isEmpty())
-        Thread.sleep(400)
-        idle()
+        // The timer runs on real time: wait for it rather than for as long as it should take.
+        assertTrue(
+            "the fallback capture fired; engine saw ${engine.captures}",
+            awaitUntil(FALLBACK_WINDOW_MS) { engine.captures.any { it.first == 10L } },
+        )
         assertEquals(10L, engine.captures.single().first)
     }
 

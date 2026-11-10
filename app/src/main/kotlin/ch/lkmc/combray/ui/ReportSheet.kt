@@ -162,7 +162,6 @@ internal fun ReportSheetContent(
                 val preview = when (current) {
                     is ReportShot.Pending -> current.preview
                     is ReportShot.Ready -> current.preview
-                    else -> null
                 }
                 preview?.let {
                     Image(
