@@ -15,7 +15,10 @@ internal class LongPressTracker(private val timeoutMs: Long, private val slopPx:
     private var startX = 0f
     private var startY = 0f
 
-    /** A finger down on [page], the document shown then (none before a tab's first one). */
+    /**
+     * A finger down on [page], the document shown then. None (the view has reported no document
+     * yet) is a state of its own, not "no press": while none is reported the press still counts.
+     */
     fun press(x: Float, y: Float, now: Long, page: PageRef?) {
         pressedAt = now
         pressedPage = page

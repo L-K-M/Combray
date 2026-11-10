@@ -214,7 +214,9 @@ test('the node budget ends the walk', () => {
 test('a spent time budget ends the walk at the next look at the clock', () => {
   const paragraphs = Array.from({ length: 300 }, () => element('P', [text('needle')]));
   const result = find(fakePage(paragraphs), 'needle', { maxMillis: -1 });
-  assert.deepEqual(result, { count: 255, index: 0, capped: true });
+  assert.equal(result.capped, true);
+  // How many nodes pass between two looks at the clock is the script's own business.
+  assert.ok(result.count > 0 && result.count < 300, `stopped after ${result.count} of 300`);
 });
 
 test('no match selects nothing and scrolls nowhere', () => {

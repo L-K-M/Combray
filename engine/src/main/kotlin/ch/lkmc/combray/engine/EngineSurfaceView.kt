@@ -44,6 +44,7 @@ class EngineSurfaceView(
     private var pressX = 0f
     private var pressY = 0f
     private val scrollGesture = ScrollGestureTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    /** The document the app shows on this surface: [observeScroll] brings every change of it. */
     private var scrollPage: PageRef? = null
     private var onScroll: (ScrollEdge) -> Unit = {}
     private val longPressCheck = Runnable {

@@ -564,6 +564,7 @@ test("back from the back-forward cache while the PDF still downloads, it opens o
     assert.equal(viewer.problem, null);
     const worker = page.worker;
     assert.equal(page.workers.length, 2);
+    assert.equal(worker.requests("open").length, 1);
     worker.reply(worker.requests("open")[0], { count: 1, pages: [LETTER], title: "" });
     await tick();
     page.frame();

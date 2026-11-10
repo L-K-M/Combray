@@ -65,6 +65,16 @@ class LongPressTest {
         assertFalse(tracker.timerFired(now = 2_000 + TIMEOUT, PAGE))
     }
 
+    /**
+     * Without a reported document there is nothing to compare. Such a press is left as it was
+     * before presses were tied to pages: the engine decides what, if anything, is under it.
+     */
+    @Test
+    fun aPressWhereNoPageWasReportedIsStillALongPress() {
+        tracker.press(10f, 10f, now = 0, page = null)
+        assertTrue(tracker.timerFired(now = TIMEOUT, page = null))
+    }
+
     private companion object {
         const val TIMEOUT = 400L
         const val SLOP = 16f
