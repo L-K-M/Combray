@@ -23,6 +23,24 @@ class KarakeepClientTest {
     }
 
     @Test
+    fun aLongTitleIsCutToKarakeepsBoundWithoutSplittingACharacter() {
+        // The emoji straddles the bound: half of it would be sent as "?".
+        create(title = "a".repeat(999) + "😀tail")
+        assertEquals(
+            "POST {\"type\":\"link\",\"url\":\"https://a.example/\",\"title\":\"${"a".repeat(999)}\"}",
+            server.requests.last(),
+        )
+
+        // One that ends on the bound fits.
+        val fitting = "a".repeat(998) + "😀"
+        create(url = "https://b.example/", title = fitting + "tail")
+        assertEquals(
+            "POST {\"type\":\"link\",\"url\":\"https://b.example/\",\"title\":\"$fitting\"}",
+            server.requests.last(),
+        )
+    }
+
+    @Test
     fun aLostAnswerIsRetriableAndTheRetryFindsTheExistingBookmark() {
         server.fault = FakeKarakeep.Fault.STORE_THEN_HANG
         server.faultCount = 1

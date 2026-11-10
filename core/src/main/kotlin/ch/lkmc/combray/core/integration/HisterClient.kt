@@ -62,7 +62,8 @@ class HisterClient(private val transport: HttpTransport) {
 
     fun search(root: String, token: String, query: String, pageKey: String? = null): HisterSearch {
         val parameters = buildString {
-            append("q=").append(encode(query)).append("&format=json")
+            // Bounded: a pasted text would otherwise become a request line of megabytes.
+            append("q=").append(encode(query.takeWholeChars(MAX_QUERY_CHARS))).append("&format=json")
             pageKey?.let { append("&page_key=").append(encode(it)) }
         }
         val outcome = transport.execute(HttpRequest("GET", ServiceUrls.endpoint(root, "search?$parameters"), headers(token)))
@@ -155,7 +156,7 @@ class HisterClient(private val transport: HttpTransport) {
         val item = element as? JsonObject ?: return null
         val url = item.string("url") ?: return null
         val excerpt = listOf("text", "snippet", "description").firstNotNullOfOrNull { item.string(it) }
-        return HisterHit(url, item.string("title"), excerpt?.take(MAX_EXCERPT_CHARS), fromHistory)
+        return HisterHit(url, item.string("title"), excerpt?.takeWholeChars(MAX_EXCERPT_CHARS), fromHistory)
     }
 
     private fun JsonObject.string(key: String): String? =
@@ -188,6 +189,9 @@ class HisterClient(private val transport: HttpTransport) {
         const val MAX_REQUEST_BYTES = 900 * 1024
         const val MAX_TITLE_CHARS = 4 * 1024
         const val MAX_EXCERPT_CHARS = 300
+
+        /** Longest search query, in characters, as for Karakeep. A longer one is cut. */
+        const val MAX_QUERY_CHARS = 2_000
         const val CHECK_QUERY = "combray connection check"
 
         private const val SKIPPED_BY_SERVER = "skipped_by_server"

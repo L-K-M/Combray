@@ -43,7 +43,7 @@ class KarakeepClient(private val transport: HttpTransport) {
         val body = buildJsonObject {
             put("type", "link")
             put("url", url)
-            title?.trim()?.takeIf { it.isNotEmpty() }?.let { put("title", it.take(MAX_TITLE_CHARS)) }
+            title?.trim()?.takeIf { it.isNotEmpty() }?.let { put("title", it.takeWholeChars(MAX_TITLE_CHARS)) }
         }
         val outcome = transport.execute(
             HttpRequest(
@@ -183,9 +183,7 @@ class KarakeepClient(private val transport: HttpTransport) {
     private fun boundedQuery(query: String?): String? {
         val trimmed = query?.trim().orEmpty()
         if (trimmed.isEmpty()) return null
-        var end = minOf(trimmed.length, MAX_QUERY_CHARS)
-        if (end > 0 && end < trimmed.length && trimmed[end - 1].isHighSurrogate() && trimmed[end].isLowSurrogate()) end--
-        return trimmed.substring(0, end)
+        return trimmed.takeWholeChars(MAX_QUERY_CHARS)
     }
 
     private fun JsonObject.string(key: String): String? =

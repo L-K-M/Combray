@@ -830,6 +830,11 @@ All notable changes to this project are documented here. The format follows
   scripts after an earlier plain request for the same file: the engine
   no longer reuses a cached response that varies on a header the new
   request sends.
+- A long text pasted into Recent's Hister search is cut to 2,000 characters
+  before it is sent, as for Karakeep, instead of becoming a request the
+  server refuses with an error that reads like an outage.
+- A long page title saved to Karakeep, and a Hister search excerpt, are no
+  longer cut through the middle of an emoji, which showed as "?".
 - Pages whose module scripts use top-level `await` no longer report a
   spurious script error, and errors those modules throw after awaiting
   are reported. SVG polylines and polygons stop measuring at a malformed

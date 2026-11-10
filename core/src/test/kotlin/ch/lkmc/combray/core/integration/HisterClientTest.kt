@@ -142,6 +142,32 @@ class HisterClientTest {
         assertEquals("q=servo&format=json&page_key=%5B%220.53%22%2C%22docid%22%5D", server.searchQueries.last())
     }
 
+    /** A pasted text must not become a request line of megabytes that the server answers with 414. */
+    @Test
+    fun aLongSearchQueryIsCapped() {
+        client.search(server.root, FakeHister.TOKEN, "a".repeat(5_000))
+        assertEquals("q=${"a".repeat(2_000)}&format=json", server.searchQueries.last())
+
+        // The cut never leaves half of a character.
+        client.search(server.root, FakeHister.TOKEN, "a".repeat(1_999) + "😀tail")
+        assertEquals("q=${"a".repeat(1_999)}&format=json", server.searchQueries.last())
+
+        // A query of exactly the bound is sent whole, and so is the next page of a capped one.
+        val longest = "a".repeat(1_998) + "😀"
+        client.search(server.root, FakeHister.TOKEN, longest, pageKey = "next")
+        assertEquals("q=${"a".repeat(1_998)}%F0%9F%98%80&format=json&page_key=next", server.searchQueries.last())
+    }
+
+    @Test
+    fun aSearchExcerptIsCutWithoutSplittingACharacter() {
+        val text = "a".repeat(299) + "😀tail"
+        server.searchBody = """{"documents":[{"url":"https://a.example/","text":"$text"}],"history":[],"total":1,"page_key":""}"""
+
+        val results = client.search(server.root, FakeHister.TOKEN, "a") as HisterSearch.Results
+
+        assertEquals("a".repeat(299), results.hits.single().excerpt)
+    }
+
     @Test
     fun searchStatesAreDistinct() {
         assertEquals(HisterSearch.Unauthorized, client.search(server.root, "wrong", "x"))
