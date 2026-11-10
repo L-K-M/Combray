@@ -56,6 +56,11 @@ Pages
   /scheme.html               page in #2e6b4f, or #3b4f8a when it matches prefers-color-scheme: dark
   /contrast.html             inherited text-color swatch, green paint marker and page canvas;
                               ?mode=white|dark|meta|authored exercises site color declarations
+  /adaptive.html?mode=plain|meta-only|css-only|dark
+                             light page for adaptive dark mode: a text-color border swatch on the left,
+                             the green paint marker and the page canvas; the modes opt out in
+                             <meta name=color-scheme> or CSS (light only) or are dark already;
+                             title ADAPTIVE:<mode>
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
@@ -740,6 +745,14 @@ def page(title, body, head=""):
         f"<title>{html.escape(title)}</title>{head}</head><body>{body}</body></html>"
     )
 
+
+# Pages for adaptive dark mode: (extra head markup, extra CSS) per mode.
+ADAPTIVE_MODES = {
+    "plain": ("", ""),
+    "meta-only": ("<meta name='color-scheme' content='light only'>", ""),
+    "css-only": ("", ":root{color-scheme:light only}"),
+    "dark": ("", "html{background:#202124;color:#e8eaed}"),
+}
 
 # Each control fills the page except a left margin, so a tap in the middle reaches it and a pixel
 # in the margin shows the page has painted.
@@ -1544,6 +1557,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 metadata + "<style>body{margin:0}#ink,#paint{position:fixed;top:0;bottom:0}"
                 "#ink{left:0;width:40vw;background:currentColor}"
                 "#paint{left:40vw;width:20vw;background:" + marker + "}" + colors + "</style>"))
+        if path == "/adaptive.html":
+            mode = query.get("mode", [""])[0]
+            if mode not in ADAPTIVE_MODES:
+                return self.send(400, page("bad mode", ""))
+            head, colors = ADAPTIVE_MODES[mode]
+            # A border in currentColor is painted like text (a foreground), unlike a background.
+            return self.send(http.HTTPStatus.OK, page("ADAPTIVE:" + mode,
+                "<div id='ink'></div><div id='paint'></div>",
+                head + "<style>body{margin:0}#ink,#paint{position:fixed;top:0;bottom:0}"
+                "#ink{left:0;width:0;border-left:40vw solid currentColor}"
+                "#paint{left:40vw;width:20vw;background:#2e6b4f}" + colors + "</style>"))
         if path == "/has-selector.html":
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
         if path == "/document.pdf":

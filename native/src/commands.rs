@@ -64,6 +64,15 @@ pub enum Appearance {
     Dark,
 }
 
+/// How pages that are light and declare no dark support are painted. Servo's adaptive dark
+/// mode darkens them without changing their styles; pages that support dark or opt out with
+/// `color-scheme: light only` are painted as authored either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LightPages {
+    AsAuthored,
+    Darkened,
+}
+
 /// Whether the engine may refuse a capture locally when it already knows the expected
 /// document was replaced. Tests disable the shortcut to exercise Servo's own guard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,6 +175,10 @@ pub enum Command {
     /// For every view now and every view created later.
     SetAppearance {
         appearance: Appearance,
+    },
+    /// For every view now and every view created later.
+    SetLightPages {
+        light_pages: LightPages,
     },
     SetThrottling {
         tab: i64,

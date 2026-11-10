@@ -5,6 +5,7 @@ import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
+import ch.lkmc.combray.engine.LightPages
 import ch.lkmc.combray.engine.PageRef
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ViewRef
@@ -45,6 +46,9 @@ class FakeEngine : EnginePort {
     /** Each appearance sent, with how many views existed then. */
     val appearances = mutableListOf<Pair<Appearance, Int>>()
 
+    /** Each light-page choice sent, with how many views existed then. */
+    val lightPages = mutableListOf<Pair<LightPages, Int>>()
+
     override fun start(listener: (EngineEvent) -> Unit): EngineStart {
         startCount++
         this.listener = listener
@@ -79,6 +83,10 @@ class FakeEngine : EnginePort {
 
     override fun setAppearance(appearance: Appearance) {
         appearances += appearance to created.size
+    }
+
+    override fun setLightPages(lightPages: LightPages) {
+        this.lightPages += lightPages to created.size
     }
 
     /** What the native bridge does for `window.open`: a view with an engine-chosen ID. */

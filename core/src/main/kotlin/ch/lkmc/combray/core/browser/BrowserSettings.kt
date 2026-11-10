@@ -28,6 +28,12 @@ enum class TabCounter { HIDDEN, SHOWN }
 enum class HomeSectionVisibility { SHOWN, HIDDEN }
 
 /**
+ * What pages get while they follow the app's dark theme, when they are light and declare no dark
+ * design of their own: dark colors painted by the engine, or their own colors.
+ */
+enum class LightPagesInDark { DARKEN, KEEP }
+
+/**
  * The browser's own preferences. Service configuration stays in the database, where it binds
  * queued work; these are plain user choices with nothing depending on them transactionally.
  *
@@ -60,6 +66,9 @@ class BrowserSettings(
     private val frequentSites = MutableStateFlow(
         acknowledge(KEY_HOME_FREQUENT, HomeSectionVisibility.entries, HomeSectionVisibility.SHOWN),
     )
+    private val lightPages = MutableStateFlow(
+        acknowledge(KEY_LIGHT_PAGES_IN_DARK, LightPagesInDark.entries, LightPagesInDark.DARKEN),
+    )
 
     val unusedTabs: StateFlow<UnusedTabs> = unused.asStateFlow()
 
@@ -75,6 +84,8 @@ class BrowserSettings(
     /** The new-tab page's automatic frequent-site links. */
     val homeFrequentSites: StateFlow<HomeSectionVisibility> = frequentSites.asStateFlow()
 
+    val lightPagesInDark: StateFlow<LightPagesInDark> = lightPages.asStateFlow()
+
     fun setUnusedTabs(choice: UnusedTabs): Deferred<Boolean> = write(KEY_UNUSED_TABS, unused, choice)
 
     fun setThemeMode(choice: ThemeMode): Deferred<Boolean> = write(KEY_THEME_MODE, theme, choice)
@@ -87,6 +98,10 @@ class BrowserSettings(
     fun setHomeContinue(choice: HomeSectionVisibility): Deferred<Boolean> = write(KEY_HOME_CONTINUE, continueCard, choice)
 
     fun setHomeFrequentSites(choice: HomeSectionVisibility): Deferred<Boolean> = write(KEY_HOME_FREQUENT, frequentSites, choice)
+
+    /** Only stores the choice: [BrowserCoordinator.applyLightPagesInDark] passes it to the engine. */
+    fun setLightPagesInDark(choice: LightPagesInDark): Deferred<Boolean> =
+        write(KEY_LIGHT_PAGES_IN_DARK, lightPages, choice)
 
     /** An unknown stored name falls back to its default: preferences never block startup. */
     private fun <T : Enum<T>> acknowledge(key: String, values: List<T>, default: T): T {
@@ -177,6 +192,7 @@ class BrowserSettings(
         private const val KEY_TAB_COUNTER = "tab_counter"
         private const val KEY_HOME_CONTINUE = "home_continue"
         private const val KEY_HOME_FREQUENT = "home_frequent_sites"
+        private const val KEY_LIGHT_PAGES_IN_DARK = "light_pages_in_dark"
     }
 }
 

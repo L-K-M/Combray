@@ -144,6 +144,9 @@ fun BrowserScreen(
     val state by browser.browserState.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val textSize by graph.settings.textSize.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val lightPagesInDark by graph.settings.lightPagesInDark.collectAsStateWithLifecycle(
+        context = Dispatchers.Main.immediate,
+    )
     val paintedViewport by browser.paintedViewport.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     var sheet by rememberSaveable { mutableStateOf(Sheet.NONE) }
     var homeMode by rememberSaveable { mutableStateOf(AddressEditorMode.IDLE) }
@@ -370,6 +373,8 @@ fun BrowserScreen(
     // the chrome around them.
     val dark = LocalDarkTheme.current
     LaunchedEffect(dark) { browser.setAppearance(if (dark) Appearance.DARK else Appearance.LIGHT) }
+    // Settings stores the choice; the coordinator reads it and tells the engine.
+    LaunchedEffect(lightPagesInDark) { browser.applyLightPagesInDark() }
 
     // A page's address opens for editing in the bar itself, for the tab shown at the tap, with
     // its address (on a Kagi results page, the search words) selected.

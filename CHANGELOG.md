@@ -194,6 +194,10 @@ All notable changes to this project are documented here. The format follows
   what you type: a tab switches to that tab, and a
   page opens where the typed address would. The matches come from this
   device; nothing is sent while you type.
+- While Combray is dark, light pages without a dark design of their own
+  get dark colors, like Safari's Adaptive Dark Mode. Pictures, videos and
+  pages that declare their own color scheme keep their colors. Turn it
+  off with Settings › Display › Darken light pages.
 
 ### Changed
 

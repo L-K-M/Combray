@@ -164,6 +164,7 @@ class AppGraph(application: Application) {
         capture = integrations.hister,
         unusedTabs = { settings.unusedTabs.value },
         textSize = { settings.textSize.value },
+        lightPagesInDark = { settings.lightPagesInDark.value },
         retentionNow = RetentionClock(
             wall = Clock.SYSTEM,
             elapsedMillis = SystemClock::elapsedRealtime,

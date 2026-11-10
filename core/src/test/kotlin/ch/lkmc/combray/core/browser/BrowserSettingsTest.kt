@@ -46,12 +46,14 @@ class BrowserSettingsTest {
         assertTrue(first.setThemeMode(ThemeMode.DARK).awaitBlocking())
         assertTrue(first.setUnusedTabs(UnusedTabs.CLOSE).awaitBlocking())
         assertTrue(first.setTabCounter(TabCounter.SHOWN).awaitBlocking())
+        assertTrue(first.setLightPagesInDark(LightPagesInDark.KEEP).awaitBlocking())
 
         val restarted = newSettings(preferences)
 
         assertEquals(ThemeMode.DARK, restarted.themeMode.value)
         assertEquals(UnusedTabs.CLOSE, restarted.unusedTabs.value)
         assertEquals(TabCounter.SHOWN, restarted.tabCounter.value)
+        assertEquals(LightPagesInDark.KEEP, restarted.lightPagesInDark.value)
     }
 
     @Test
@@ -61,6 +63,7 @@ class BrowserSettingsTest {
         assertEquals(ThemeMode.SYSTEM, settings.themeMode.value)
         assertEquals(UnusedTabs.KEEP, settings.unusedTabs.value)
         assertEquals(TabCounter.HIDDEN, settings.tabCounter.value)
+        assertEquals(LightPagesInDark.DARKEN, settings.lightPagesInDark.value)
     }
 
     @Test
@@ -70,18 +73,21 @@ class BrowserSettingsTest {
         assertTrue(probe.setThemeMode(ThemeMode.LIGHT).awaitBlocking())
         assertTrue(probe.setUnusedTabs(UnusedTabs.CLOSE).awaitBlocking())
         assertTrue(probe.setTabCounter(TabCounter.SHOWN).awaitBlocking())
+        assertTrue(probe.setLightPagesInDark(LightPagesInDark.KEEP).awaitBlocking())
         assertEquals("LIGHT", preferences.getString("theme_mode", null))
         assertEquals("CLOSE", preferences.getString("unused_tabs", null))
         assertEquals("SHOWN", preferences.getString("tab_counter", null))
+        assertEquals("KEEP", preferences.getString("light_pages_in_dark", null))
 
         preferences.edit().putString("theme_mode", "MIDNIGHT").putString("unused_tabs", "SOMETIMES")
-            .putString("tab_counter", "SOMETIMES").apply()
+            .putString("tab_counter", "SOMETIMES").putString("light_pages_in_dark", "SOMETIMES").apply()
 
         val settings = newSettings(preferences)
 
         assertEquals(ThemeMode.SYSTEM, settings.themeMode.value)
         assertEquals(UnusedTabs.KEEP, settings.unusedTabs.value)
         assertEquals(TabCounter.HIDDEN, settings.tabCounter.value)
+        assertEquals(LightPagesInDark.DARKEN, settings.lightPagesInDark.value)
     }
 
     @Test

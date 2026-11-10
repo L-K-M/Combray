@@ -53,6 +53,9 @@ class NativeEngineHost(private val profileDir: File, private val density: Float)
 
     override fun setAppearance(appearance: Appearance) = NativeEngine.setDarkAppearance(appearance == Appearance.DARK)
 
+    override fun setLightPages(lightPages: LightPages) =
+        NativeEngine.setDarkenLightPages(lightPages == LightPages.DARKENED)
+
     override fun closeView(tab: Long) = NativeEngine.closeTab(tab)
 
     override fun navigate(tab: Long, request: Long, url: String) = NativeEngine.navigate(tab, request, url)
