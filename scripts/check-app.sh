@@ -66,7 +66,9 @@ cleanup() {
         "${ADB[@]}" shell settings put global stay_on_while_plugged_in "$STAY_ON_ORIGINAL" 2>/dev/null || true
     fi
     if [ -n "$NIGHT_ORIGINAL" ]; then
-        "${ADB[@]}" shell cmd uimode night "$NIGHT_ORIGINAL" > /dev/null 2>&1 || true
+        if ! "${ADB[@]}" shell cmd uimode night "$NIGHT_ORIGINAL" > /dev/null 2>&1; then
+            echo "!! could not restore night mode to $NIGHT_ORIGINAL" >&2
+        fi
     fi
 }
 trap cleanup EXIT

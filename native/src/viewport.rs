@@ -18,7 +18,7 @@
 /// what the engine paints under the app's controls and while no page is shown. It is the
 /// color most pages start from, so a page that has not painted yet does not flash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ClearColor(pub [u8; 4]);
+pub(crate) struct ClearColor([u8; 4]);
 
 impl ClearColor {
     /// The canvas of a page painted as authored, unless it says otherwise.

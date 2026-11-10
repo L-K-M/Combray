@@ -330,6 +330,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Simple dark logos and icons stay visible when light pages are darkened;
+  photos, animations and scanner-like codes keep their pixels.
+- Pages that support both color schemes get dark default colors in Dark,
+  and new tabs stay dark while waiting for their first page to paint.
 - A PDF page that failed to draw at the current size can recover: a resize
   draws it again, and tapping its error note asks for the page again. A
   problem that clears the viewer releases its page canvases before the

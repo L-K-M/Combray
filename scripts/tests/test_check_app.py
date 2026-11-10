@@ -44,7 +44,7 @@ class DefaultRunTest(unittest.TestCase):
 
 
 class NightModeTest(unittest.TestCase):
-    def run_mode(self, mode, result=0, switch_result=0):
+    def run_mode(self, mode, result=0, switch_result=0, restore_result=0):
         source = (ROOT / "scripts/check-app.sh").read_text()
         cleanup = "cleanup() {" + source.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
         appearance = "use_light_mode() {" + source.split("use_light_mode() {", 1)[1].split(
@@ -67,13 +67,17 @@ fake_adb() {
     if [ "$5" = no ]; then
         return "$SWITCH_RESULT"
     fi
+    return "$RESTORE_RESULT"
 }
 '''
         command += cleanup + "\ntrap cleanup EXIT\n" + appearance
         command += '\nuse_light_mode\nexit "$RESULT"\n'
         return subprocess.run(
             ["bash", "-euo", "pipefail", "-c", command],
-            env={**os.environ, "MODE": mode, "RESULT": str(result), "SWITCH_RESULT": str(switch_result)},
+            env={
+                **os.environ, "MODE": mode, "RESULT": str(result),
+                "SWITCH_RESULT": str(switch_result), "RESTORE_RESULT": str(restore_result),
+            },
             capture_output=True, text=True, timeout=10,
         )
 
@@ -97,6 +101,11 @@ fake_adb() {
         completed = self.run_mode("unknown")
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn("SET:", completed.stdout)
+
+    def test_a_failed_restore_is_reported_without_hiding_the_test_failure(self):
+        completed = self.run_mode("yes", result=23, restore_result=17)
+        self.assertEqual(completed.returncode, 23, completed.stderr)
+        self.assertIn("could not restore night mode", completed.stderr)
 
     def test_a_failed_switch_attempt_restores_the_original_and_stops(self):
         completed = self.run_mode("yes", switch_result=17)
