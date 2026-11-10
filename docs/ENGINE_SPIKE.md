@@ -3878,8 +3878,8 @@ recorded in the pin PR.
 
 The owner asked for something like Safari's Adaptive Dark Mode: in Dark, most pages declare no
 dark support and showed as white. The pin moves to
-`564fccfbc9fe252b36b680eb65c166b558741fc4` on [Servo PR #44](https://github.com/L-K-M/servo/pull/44)
-(upstream base still v0.7.0), two commits on `8e097e4`, the HTTP cache fix of section 58.
+`0186170a96f09642ac91293fd7bca86f763b565e` on [Servo PR #44](https://github.com/L-K-M/servo/pull/44)
+(upstream base still v0.7.0), three commits on `8e097e4`, the HTTP cache fix of section 58.
 
 ### Engine
 
@@ -3890,14 +3890,20 @@ computed styles, `getComputedStyle()`, images, video and `<canvas>` are unchange
 - Backgrounds, gradient stops, shadows and highlights lighter than OKLab L 0.6 map linearly down
   to L 0.21, keeping their hue with reduced chroma: white becomes `#181818`, next to the app's
   Charcoal (L 0.207). Darker colors stay.
-- The paint traversal carries each box's backdrop: its authored color and what was painted.
-  Over a darkened backdrop, text, decorations and carets get the lightness that restores their
-  authored contrast, at least 4.5:1; outlines at least 3:1. The lightest foreground is L 0.93.
+- The paint traversal carries each box's backdrop: its authored color and what was painted,
+  including the average color stop of a gradient that fills a background. Over a darkened
+  backdrop, text, decorations and carets get the lightness that restores their authored
+  contrast, at least 4.5:1; outlines at least 3:1. The lightest foreground is L 0.93. A border
+  is judged over its box's own background where that extends under it (`background-clip`), an
+  outline over what is behind the box.
 - Dark icons drawn as inline SVG on a darkened backdrop get a lightness-inverting color matrix
   (invert, then hue-rotate 180 degrees).
-- A top-level canvas with no background is painted dark, since the shell's clear color is white.
-- Opt-outs: `color-scheme` with `dark` or `only` on the root (the whole page) or any element
-  (its subtree), from CSS or `<meta name=color-scheme>`. Script now parses the meta value as a
+- A top-level canvas whose color is not opaque, or that has only a small image, gets the
+  darkened default canvas under it, since the shell's clear color is white.
+- Opt-outs: `color-scheme` with `dark` or `only` on the root or body (the whole page) or any
+  element (its backgrounds), from CSS or `<meta name=color-scheme>`. An opted-out element's
+  foregrounds still follow the backdrop: text that paints no background of its own over a
+  darkened one gets lighter, while text over the element's own kept background keeps its color. Script now parses the meta value as a
   `color-scheme` list for this; its exact `light`/`dark` theme hint is unchanged, so the light
   root hint of section 22 does not opt pages out. Areas under a repeated or covering background
   image keep their colors, since text over a picture was designed against it.
@@ -3906,10 +3912,13 @@ Embedder screenshot test `components/servo/tests/adaptive_dark_mode.rs` (one `Se
 cases, because embedder tests in one process cannot each create one): off by default; an
 unstyled page and a white page darken with readable text while `<canvas>` keeps its pixels and
 scripts read black and white; a repeated background image and a dark page keep their colors;
-CSS `light only`, `only light`, `light dark` and metadata `light only`, `light dark` opt out;
-invalid metadata (`only`, `light only dark`, `normal dark`) does not; removing opt-out metadata
-darkens the page; an opted-out element stays white inside a darkened page; under a dark theme an
-unstyled page still darkens and `light only` metadata still opts out; turning the mode off
+CSS `light only`, `only light`, `light dark` on the root or body and metadata `light only`,
+`light dark` opt out; invalid metadata (`only`, `light only dark`, `normal dark`) does not;
+removing opt-out metadata darkens the page; an opted-out element stays white with its black
+border inside a darkened page; a border outside a `padding-box` background keeps its color over a
+dark page; opted-out text without a background gets lighter; text over a light gradient card on
+a dark page gets readable; a translucent, half-transparent or small-image canvas darkens; under a
+dark theme an unstyled page still darkens and `light only` metadata still opts out; turning the mode off
 repaints the page as authored. The layout unit tests (`adaptive_dark`, 14) cover the color
 mapping. Commands, on macOS with the downstream checkout:
 
@@ -3935,11 +3944,15 @@ created later. JVM tests: `BrowserCoordinatorTest` (dark and light appearance, t
 engine restart), `BrowserSettingsTest`, `SettingsSheetTest`. Device test `AdaptiveDarkModeTest`
 loads `/adaptive.html` from the fixture server: a plain page darkens with at least 4.5:1 text,
 returns to black on white with the setting off or a light theme, and `light only` metadata, the
-CSS equivalent and a dark page keep their colors.
+CSS equivalent and a dark page keep their colors. `PageContrastTest` checks authored colors
+under a dark preference, so it turns darkening off.
 
 ### Limits
 
 Not yet: per-site exceptions, inverting dark icons in `<img>` (SVG or bitmap), and a dark frame
 before the first paint (the surface clear color is white). A positioned element is darkened
 against its stacking context's backdrop, not the boxes it overlaps. Metadata `light dark` keeps
-the light root hint, so such a page relying on system colors is shown light.
+the light root hint, so such a page relying on system colors is shown light. Text over a
+gradient is judged against its average stop, so over the light part of a hard-edged light and
+dark split it can fall slightly below 4.5:1. A frame's transparent areas are assumed to show a
+darkened parent; over a parent that keeps its light colors, its text can be light on light.
