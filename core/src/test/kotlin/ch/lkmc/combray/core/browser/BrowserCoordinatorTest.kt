@@ -2156,6 +2156,65 @@ class BrowserCoordinatorTest {
         assertTrue(recent().none { it is RecentItem.Visit && it.url == "https://example.com/login" })
     }
 
+    /**
+     * A tab can hold a page of the site without a visit: one opened in the background that has not
+     * loaded yet. Forgetting the site covers it like the page an open tab shows.
+     */
+    @Test
+    fun forgettingASiteCoversATabThatHasNotLoadedItsPageYet() {
+        val sink = RecordingSink()
+        browser = newCoordinator(capture = sink, captureTiming = CaptureTiming(settleMs = 100, fallbackMs = 100, debounceMs = 100))
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        browser.openUrl("https://www.example.com/pending", Placement.BACKGROUND_TAB); idle()
+        val pending = runBlocking { database.browser().openTabs() }.single { it.url == "https://www.example.com/pending" }
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+
+        // The tab stays open on its address and loads it when the user returns to it.
+        browser.selectTab(pending.id); idle()
+        val view = engine.created.last().first
+        assertEquals("https://www.example.com/pending", engine.created.last().second)
+        commit(view, 20, "https://www.example.com/pending")
+        loaded(view, 20)
+        runBlocking { delay(400) }; idle()
+
+        // Leaving it finds no visit to put back in Recent, and its text was not sent.
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(view, 21, "https://c.test/")
+        loaded(view, 21)
+        // The next page is captured, so capture was running meanwhile.
+        runBlocking {
+            withTimeout(TEST_WAIT_MS) {
+                while (true) {
+                    browser.awaitIdle()
+                    if ("https://c.test/" in sink.requests) break
+                    delay(20)
+                }
+            }
+        }
+        assertFalse("https://www.example.com/pending" in sink.requests)
+        assertTrue(recent().none { it.url == "https://www.example.com/pending" })
+    }
+
+    /** The unloaded tab is matched like history: by site, its www spelling and, when asked, subdomains. */
+    @Test
+    fun forgettingASiteMarksOnlyThatSitesUnloadedTabs() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        listOf("https://www.example.com/1", "https://sub.example.com/2", "https://badexample.com/3", "data:text/html,example.com")
+            .forEach { browser.openUrl(it, Placement.BACKGROUND_TAB); idle() }
+        fun forgotten() = runBlocking { database.browser().openTabs() }.filter { it.pageForgotten }.map { it.url }.toSet()
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+        assertEquals(setOf("https://www.example.com/1"), forgotten())
+
+        browser.forgetSite("example.com", includeSubdomains = true); idle()
+        assertEquals(setOf("https://www.example.com/1", "https://sub.example.com/2"), forgotten())
+    }
+
     @Test
     fun aRestartRestoresOpenTabsAndRecreatesOnlyTheFocusedView() {
         ready()

@@ -848,3 +848,7 @@ All notable changes to this project are documented here. The format follows
   longer than 32,768 characters is not opened and not stored: a page
   that moves itself there still shows, without a Recent entry or an
   address to restore.
+- Forget this site also covers a tab that holds a page of the site
+  without having loaded it, such as a link opened in the background.
+  Loading it later no longer puts the site back in Recent or sends its
+  text to Hister, as for a page an open tab already shows.

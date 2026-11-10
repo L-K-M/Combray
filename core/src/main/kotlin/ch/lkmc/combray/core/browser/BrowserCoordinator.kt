@@ -599,8 +599,17 @@ class BrowserCoordinator(
         val site = HostNames.normalize(host)?.let(HostNames::mergedSite) ?: return@submit
         val spellings = HostNames.siteSpellings(site)
         val subdomains = if (includeSubdomains) ".$site" else null
+        val ofSite = { url: String ->
+            HostNames.of(url)?.let { candidate -> spellings.any { HostNames.matches(candidate, it, includeSubdomains) } } ?: false
+        }
         database.withTransaction {
             dao.detachVisitsForHosts(spellings, subdomains)
+            // A tab can hold a page of the site without a visit to detach: one opened in the
+            // background that has not loaded yet, or one whose requested address has not committed.
+            // It stays open on that address, and loading it records and sends nothing either.
+            dao.openTabs()
+                .filter { tab -> !tab.pageForgotten && tab.url?.let(ofSite) == true }
+                .forEach { dao.updateTab(it.copy(pageForgotten = true)) }
             dao.deleteVisitsForHosts(spellings, subdomains)
             dao.deleteEmptyClosedTabs()
             database.homeLinks().let { home ->
@@ -612,10 +621,7 @@ class BrowserCoordinator(
             }
             spellings.forEach { capture?.forgetHost(it, includeSubdomains) }
         }
-        cancelPendingCapture { url ->
-            val candidate = HostNames.of(url) ?: return@cancelPendingCapture false
-            spellings.any { HostNames.matches(candidate, it, includeSubdomains) }
-        }
+        cancelPendingCapture(ofSite)
     }
 
     /**
