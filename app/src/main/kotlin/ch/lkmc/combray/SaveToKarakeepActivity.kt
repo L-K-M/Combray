@@ -30,7 +30,8 @@ import kotlinx.coroutines.withContext
  * can start it, and nothing reaches the owner's Karakeep without a tap here.
  */
 class SaveToKarakeepActivity : Activity() {
-    // The question's Save button, once it is shown.
+    // The question, once it is shown, and its Save button.
+    private var question: AlertDialog? = null
     private var saveButton: Button? = null
     private val enableSave = Runnable { saveButton?.isEnabled = true }
 
@@ -66,6 +67,7 @@ class SaveToKarakeepActivity : Activity() {
             .setNegativeButton(R.string.action_cancel) { _, _ -> finish() }
             .setOnCancelListener { finish() }
             .show()
+        question = dialog
         saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
             // A click while Save is off, from an accessibility service or posted just before Save
             // went off, does nothing.
@@ -85,6 +87,19 @@ class SaveToKarakeepActivity : Activity() {
             isEnabled = false
             viewTreeObserver.addOnWindowFocusChangeListener { hasFocus -> holdSave(enableLater = hasFocus) }
         }
+    }
+
+    /**
+     * The question goes with its screen. A rotation or a theme change destroys the activity while
+     * it is asked, and a dialog left showing then is a window the system has to take away itself.
+     * Dismissing is not cancelling: the recreated screen asks again.
+     */
+    override fun onDestroy() {
+        saveButton?.removeCallbacks(enableSave)
+        question?.dismiss()
+        question = null
+        saveButton = null
+        super.onDestroy()
     }
 
     // The end of the enter animation counts like focus, for a dialog whose focus is not reported.
