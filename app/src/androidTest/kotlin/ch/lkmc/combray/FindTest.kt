@@ -71,7 +71,7 @@ class FindTest {
         compose.onNode(hasSetTextAction()).performTextInput(NEEDLE)
         // Typing searches after a pause: let it pass on the test clock too.
         compose.mainClock.advanceTimeBy(TYPING_PAUSE_MS)
-        // The hidden, script and form-field copies are not counted.
+        // The hidden, invisible, script and form-field copies are not counted.
         assertEquals(FindOutcome.Found(3, 0, capped = false), awaitMatch(0))
         compose.onNodeWithText("1 of 3").assertIsDisplayed()
         val first = awaitReport { it.selection == "combraneedle" && it.scrollY > 0 }

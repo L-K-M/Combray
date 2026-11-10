@@ -848,3 +848,5 @@ All notable changes to this project are documented here. The format follows
 - A PDF that was still downloading when you went back and came forward
   again now opens once it has arrived, instead of showing "The PDF viewer
   stopped".
+- Find in page no longer counts, or stops at, text a page keeps invisible
+  with `visibility: hidden`, such as the items of a closed menu.
