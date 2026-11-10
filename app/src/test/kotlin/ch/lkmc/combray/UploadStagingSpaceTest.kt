@@ -108,6 +108,19 @@ class UploadStagingSpaceTest {
     }
 
     @Test
+    fun aBatchRefusedOnTheSecondPickLeavesNothingStaged() = runBlocking {
+        val source = CountingSource(64L * 1024 * 1024)
+        provider.size = CONTENT.length.toLong()
+        shadowOf(resolver).registerInputStream(streamUri, source)
+        val staging = UploadStaging(root, resolver, reserveBytes = reserve, usableSpace = { 64L * 1024 * 1024 - 8 * source.read })
+
+        val staged = staging.stage(listOf(uri, streamUri))
+
+        assertEquals(UploadStaging.Staged.NoSpace, staged)
+        assertTrue(root.walkBottomUp().none { it.isFile })
+    }
+
+    @Test
     fun anIOFailureBelowTheReserveAnswersNoSpace() = runBlocking {
         shadowOf(resolver).registerInputStream(streamUri, FailingSource(IOException("provider ran out of space")))
         val staging = UploadStaging(root, resolver, reserveBytes = reserve, usableSpace = { reserve / 2 })
@@ -126,6 +139,19 @@ class UploadStagingSpaceTest {
         val staged = staging.stage(listOf(streamUri))
 
         assertEquals(UploadStaging.Staged.Unreadable, staged)
+        assertTrue("An unreadable pick must not leave partial files", root.walkBottomUp().none { it.isFile })
+    }
+
+    @Test
+    fun anUnknownSizePickThatFitsIsStagedFromTheStream() = runBlocking {
+        shadowOf(resolver).registerInputStream(streamUri, CountingSource(CONTENT.length.toLong()))
+        val staging = UploadStaging(root, resolver, reserveBytes = reserve, usableSpace = { 64L * 1024 * 1024 })
+
+        val staged = staging.stage(listOf(streamUri))
+
+        val path = (staged as UploadStaging.Staged.Files).paths.single()
+        assertEquals("attachment.txt", File(path).name)
+        assertEquals(CONTENT.length.toLong(), File(path).length())
     }
 
     @Test
