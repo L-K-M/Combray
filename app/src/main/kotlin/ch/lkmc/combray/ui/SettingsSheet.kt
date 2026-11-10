@@ -63,6 +63,7 @@ import ch.lkmc.combray.BuildConfig
 import ch.lkmc.combray.R
 import ch.lkmc.combray.ThirdPartyNotices
 import ch.lkmc.combray.core.browser.BrowserSettings
+import ch.lkmc.combray.core.browser.LightPagesInDark
 import ch.lkmc.combray.core.browser.Retention
 import ch.lkmc.combray.core.browser.TabCounter
 import ch.lkmc.combray.core.browser.ThemeMode
@@ -214,6 +215,7 @@ fun SettingsSheet(
             UnusedTabsSetting(settings, days, onUnusedTabsChanged)
             SectionTitle(R.string.settings_display_title)
             ThemeSetting(settings)
+            LightPagesSetting(settings)
             TabCounterSetting(settings)
             SectionTitle(R.string.settings_about_title)
             Text(stringResource(R.string.settings_version, BuildConfig.VERSION_NAME))
@@ -266,6 +268,40 @@ private fun ThemeSetting(settings: BrowserSettings) {
                 feedback.choose(write = { settings.setThemeMode(mode) })
             }
         }
+    }
+    if (feedback.failure) ChangeFailure()
+}
+
+/**
+ * One switch, explained underneath: the choice only matters while pages are dark, and it leaves
+ * pictures and pages with their own dark design alone.
+ */
+@Composable
+private fun LightPagesSetting(settings: BrowserSettings) {
+    val choice by settings.lightPagesInDark.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val scope = rememberCoroutineScope()
+    val feedback = remember { PreferenceFeedback(scope) }
+    val darken = choice == LightPagesInDark.DARKEN
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
+            .toggleable(value = darken, role = Role.Switch) { enabled ->
+                feedback.choose(
+                    write = {
+                        settings.setLightPagesInDark(if (enabled) LightPagesInDark.DARKEN else LightPagesInDark.KEEP)
+                    },
+                )
+            },
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.settings_darken_pages))
+            Text(
+                stringResource(R.string.settings_darken_pages_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = darken, onCheckedChange = null)
     }
     if (feedback.failure) ChangeFailure()
 }

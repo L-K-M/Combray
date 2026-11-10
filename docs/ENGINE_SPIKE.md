@@ -3873,3 +3873,73 @@ No embedder API, lockfile or resource change; the notices were
 regenerated for the new pin on this host. Both native ABI builds,
 packaging and the emulator checks are the Engine workflow's evidence,
 recorded in the pin PR.
+
+## 60. Adaptive dark mode (10 November 2026)
+
+The owner asked for something like Safari's Adaptive Dark Mode: in Dark, most pages declare no
+dark support and showed as white. The pin moves to
+`564fccfbc9fe252b36b680eb65c166b558741fc4` on [Servo PR #44](https://github.com/L-K-M/servo/pull/44)
+(upstream base still v0.7.0), two commits on `8e097e4`, the HTTP cache fix of section 58.
+
+### Engine
+
+`WebView::set_adaptive_dark_mode` travels with the view's state like the theme. A change rebuilds
+the display list without a restyle. Darkening happens while the display list is built, so
+computed styles, `getComputedStyle()`, images, video and `<canvas>` are unchanged.
+
+- Backgrounds, gradient stops, shadows and highlights lighter than OKLab L 0.6 map linearly down
+  to L 0.21, keeping their hue with reduced chroma: white becomes `#181818`, next to the app's
+  Charcoal (L 0.207). Darker colors stay.
+- The paint traversal carries each box's backdrop: its authored color and what was painted.
+  Over a darkened backdrop, text, decorations and carets get the lightness that restores their
+  authored contrast, at least 4.5:1; outlines at least 3:1. The lightest foreground is L 0.93.
+- Dark icons drawn as inline SVG on a darkened backdrop get a lightness-inverting color matrix
+  (invert, then hue-rotate 180 degrees).
+- A top-level canvas with no background is painted dark, since the shell's clear color is white.
+- Opt-outs: `color-scheme` with `dark` or `only` on the root (the whole page) or any element
+  (its subtree), from CSS or `<meta name=color-scheme>`. Script now parses the meta value as a
+  `color-scheme` list for this; its exact `light`/`dark` theme hint is unchanged, so the light
+  root hint of section 22 does not opt pages out. Areas under a repeated or covering background
+  image keep their colors, since text over a picture was designed against it.
+
+Embedder screenshot test `components/servo/tests/adaptive_dark_mode.rs` (one `Servo` for all
+cases, because embedder tests in one process cannot each create one): off by default; an
+unstyled page and a white page darken with readable text while `<canvas>` keeps its pixels and
+scripts read black and white; a repeated background image and a dark page keep their colors;
+CSS `light only`, `only light`, `light dark` and metadata `light only`, `light dark` opt out;
+invalid metadata (`only`, `light only dark`, `normal dark`) does not; removing opt-out metadata
+darkens the page; an opted-out element stays white inside a darkened page; under a dark theme an
+unstyled page still darkens and `light only` metadata still opts out; turning the mode off
+repaints the page as authored. The layout unit tests (`adaptive_dark`, 14) cover the color
+mapping. Commands, on macOS with the downstream checkout:
+
+```sh
+./mach build --profile medium --media-stack dummy
+cargo test --profile medium -p servo-layout --lib adaptive_dark
+cargo test --profile medium -p servo --test adaptive_dark_mode
+```
+
+The existing theme tests also pass, each run alone with `--exact`: `test_theme_change`,
+`test_dark_theme_keeps_unstyled_page_colors_light` and `test_theme_change_media_query_event`.
+
+Synthetic sample pages (articles, cards, buttons, form controls, a dark band, an opted-out
+widget, an inline SVG icon) were also inspected in servoshell screenshots.
+
+### App
+
+`BrowserCoordinator` sends `LightPages.DARKENED` only while pages are dark (the resolved
+appearance is Dark) and Settings › Display › Darken light pages is on (proposed default: on).
+It sends the choice again to a restarted engine before restoring tabs, so the first paint of a
+restored page is already darkened. The native bridge applies it to every view and to views
+created later. JVM tests: `BrowserCoordinatorTest` (dark and light appearance, the setting, an
+engine restart), `BrowserSettingsTest`, `SettingsSheetTest`. Device test `AdaptiveDarkModeTest`
+loads `/adaptive.html` from the fixture server: a plain page darkens with at least 4.5:1 text,
+returns to black on white with the setting off or a light theme, and `light only` metadata, the
+CSS equivalent and a dark page keep their colors.
+
+### Limits
+
+Not yet: per-site exceptions, inverting dark icons in `<img>` (SVG or bitmap), and a dark frame
+before the first paint (the surface clear color is white). A positioned element is darkened
+against its stacking context's backdrop, not the boxes it overlaps. Metadata `light dark` keeps
+the light root hint, so such a page relying on system colors is shown light.

@@ -160,6 +160,7 @@ class AppGraph(application: Application) {
         capture = integrations.hister,
         unusedTabs = { settings.unusedTabs.value },
         textSize = { settings.textSize.value },
+        lightPagesInDark = { settings.lightPagesInDark.value },
     )
     val uploads = UploadStaging(File(application.noBackupFilesDir, "uploads"), application.contentResolver)
     val imageDownloads = ImageDownloads(application)

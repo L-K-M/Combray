@@ -17,6 +17,7 @@ import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.Attribution
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineEvent
+import ch.lkmc.combray.engine.LightPages
 import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.HistoryKind
@@ -73,6 +74,7 @@ class BrowserCoordinatorTest {
     private var ids = 0
     private var unusedTabs = UnusedTabs.KEEP
     private var textSize = TextSize.DEFAULT
+    private var lightPagesInDark = LightPagesInDark.DARKEN
 
     @Before
     fun setUp() {
@@ -96,6 +98,7 @@ class BrowserCoordinatorTest {
         return BrowserCoordinator(
             database, engine, scope, clock = { now }, newId = { "id${ids++}" }, unusedTabs = { unusedTabs },
             textSize = { textSize },
+            lightPagesInDark = { lightPagesInDark },
             navigationTimeoutMs = navigationTimeoutMs,
             capture = capture, captureTiming = captureTiming,
         ).also { it.start() }
@@ -1755,6 +1758,50 @@ class BrowserCoordinatorTest {
         textSize = TextSize.PERCENT_80
         browser.applyTextSize(); idle()
         assertEquals(listOf(1.25f to 0, 0.8f to 1), engine.pageZooms)
+    }
+
+    @Test
+    fun lightPagesAreDarkenedOnlyWhilePagesAreDarkAndBeforeTheFirstView() {
+        browser.setAppearance(Appearance.DARK)
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        // Nothing to tell an engine that is not running yet.
+        assertTrue(engine.lightPages.isEmpty())
+
+        ready()
+        // Before the restored tab gets its view, so its first page is painted dark.
+        assertEquals(listOf(LightPages.DARKENED to 0), engine.lightPages)
+        assertEquals(1, engine.created.size)
+
+        // A light theme shows pages as designed, and dark darkens them again.
+        browser.setAppearance(Appearance.LIGHT); idle()
+        browser.setAppearance(Appearance.DARK); idle()
+        assertEquals(
+            listOf(LightPages.DARKENED to 0, LightPages.AS_AUTHORED to 1, LightPages.DARKENED to 1),
+            engine.lightPages,
+        )
+
+        // Turning the setting off shows them as designed while dark; repeats send nothing.
+        lightPagesInDark = LightPagesInDark.KEEP
+        browser.applyLightPagesInDark(); idle()
+        browser.applyLightPagesInDark(); idle()
+        browser.setAppearance(Appearance.LIGHT); idle()
+        assertEquals(LightPages.AS_AUTHORED to 1, engine.lightPages.last())
+        assertEquals(4, engine.lightPages.size)
+    }
+
+    @Test
+    fun theLightPageChoiceIsSentAgainToARestartedEngine() {
+        browser.setAppearance(Appearance.DARK)
+        ready()
+        ready()
+        assertEquals(listOf(LightPages.DARKENED to 0, LightPages.DARKENED to 0), engine.lightPages)
+    }
+
+    @Test
+    fun aLightThemeKeepsPagesAsDesignedWhateverTheSetting() {
+        ready()
+        browser.applyLightPagesInDark(); idle()
+        assertEquals(listOf(LightPages.AS_AUTHORED to 0), engine.lightPages)
     }
 
     @Test

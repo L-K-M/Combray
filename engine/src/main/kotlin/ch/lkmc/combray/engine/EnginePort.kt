@@ -50,6 +50,9 @@ interface EnginePort {
     /** Pages see [appearance] as `prefers-color-scheme`, now and in views created later. */
     fun setAppearance(appearance: Appearance)
 
+    /** How light pages without dark support are painted, now and in views created later. */
+    fun setLightPages(lightPages: LightPages)
+
     /** Answers a [EngineEvent.ControlShown]; ignored once the control was hidden. */
     fun respondToControl(control: Long, response: ControlResponse)
 
@@ -75,6 +78,14 @@ interface EnginePort {
 
 /** The system's light or dark theme, which pages follow through `prefers-color-scheme`. */
 enum class Appearance { LIGHT, DARK }
+
+/**
+ * How Servo paints a page that is light and declares no dark support: as authored, or with dark
+ * colors (adaptive dark mode). Darkening changes only what is painted: scripts read the page's
+ * own colors, and images, video and canvas keep theirs. Pages that support dark or opt out with
+ * `color-scheme: light only` are painted as authored either way.
+ */
+enum class LightPages { AS_AUTHORED, DARKENED }
 
 enum class EngineStart {
     STARTED,

@@ -20,6 +20,7 @@ import ch.lkmc.combray.engine.EnginePort
 import ch.lkmc.combray.engine.EngineStart
 import ch.lkmc.combray.engine.FindStatus
 import ch.lkmc.combray.engine.HistoryKind
+import ch.lkmc.combray.engine.LightPages
 import ch.lkmc.combray.engine.LoadPhase
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
@@ -94,6 +95,11 @@ class BrowserCoordinator(
     private val navigationTimeoutMs: Long = NAVIGATION_TIMEOUT_MS,
     /** Read when the engine becomes ready and at [applyTextSize]: the page zoom of every view. */
     private val textSize: () -> TextSize = { TextSize.DEFAULT },
+    /**
+     * Read when the engine becomes ready, when the appearance changes and at
+     * [applyLightPagesInDark]: whether light pages are darkened while pages are dark.
+     */
+    private val lightPagesInDark: () -> LightPagesInDark = { LightPagesInDark.DARKEN },
 ) {
     private val dao = database.browser()
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -141,6 +147,9 @@ class BrowserCoordinator(
 
     /** What pages see as `prefers-color-scheme`; the engine gets it as soon as it runs. */
     private var appearance = Appearance.LIGHT
+
+    /** The light-page choice the engine has, or null before one was sent to this engine. */
+    private var sentLightPages: LightPages? = null
 
     /** The page field the keyboard was last requested for, while its page is the one shown. */
     private var keyboardOwner: KeyboardOwner? = null
@@ -660,6 +669,26 @@ class BrowserCoordinator(
         if (appearance == this.appearance) return@submit
         this.appearance = appearance
         if (engineReady) engine.setAppearance(appearance)
+        sendLightPages()
+    }
+
+    /** Passes the stored [LightPagesInDark] choice to the engine after it changed. */
+    fun applyLightPagesInDark() = submit { sendLightPages() }
+
+    /**
+     * Light pages are darkened only while pages get the dark appearance: a light theme shows
+     * them as designed. Sent once per change, and again after the engine (re)starts.
+     */
+    private fun sendLightPages() {
+        if (!engineReady) return
+        val wanted = if (appearance == Appearance.DARK && lightPagesInDark() == LightPagesInDark.DARKEN) {
+            LightPages.DARKENED
+        } else {
+            LightPages.AS_AUTHORED
+        }
+        if (wanted == sentLightPages) return
+        sentLightPages = wanted
+        engine.setLightPages(wanted)
     }
 
     /**
@@ -800,6 +829,8 @@ class BrowserCoordinator(
                 state.update { it.copy(engine = EngineStatus.READY) }
                 // Before reconcile creates views: a dark page must not start light.
                 engine.setAppearance(appearance)
+                sentLightPages = null
+                sendLightPages()
                 reconcile()
             }
             is EngineEvent.TabCreated -> liveByNative[event.view.tab]?.let { live ->

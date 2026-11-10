@@ -6,6 +6,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -23,6 +25,7 @@ import androidx.test.core.app.ApplicationProvider
 import ch.lkmc.combray.ThirdPartyNotices
 import ch.lkmc.combray.core.browser.BrowserSettings
 import ch.lkmc.combray.core.browser.Clock
+import ch.lkmc.combray.core.browser.LightPagesInDark
 import ch.lkmc.combray.core.browser.Retention
 import ch.lkmc.combray.core.data.CombrayDatabase
 import ch.lkmc.combray.core.integration.HttpOutcome
@@ -68,6 +71,9 @@ class SettingsSheetTest {
 
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val settings by lazy {
+        BrowserSettings(context.getSharedPreferences("settings-form-test", Context.MODE_PRIVATE), scope)
+    }
     private lateinit var integrations: Integrations
 
     @Volatile private var blockWrites = false
@@ -288,6 +294,18 @@ class SettingsSheetTest {
         assertEquals(0, compose.onAllNodesWithText("Check the address", substring = true).fetchSemanticsNodes().size)
     }
 
+    @Test
+    fun darkeningLightPagesStartsOnAndItsSwitchStoresTheChoice() {
+        show()
+        val row = compose.onNodeWithText("Darken light pages", substring = true)
+        row.performScrollTo().assertIsOn()
+
+        row.performClick()
+
+        compose.waitUntil(5_000) { settings.lightPagesInDark.value == LightPagesInDark.KEEP }
+        row.assertIsOff()
+    }
+
     private fun awaitAdmission(latch: CountDownLatch) {
         // Room can resume the action on main before it reaches the IO fake. Blocking this
         // thread on the admission latch can prevent that continuation from ever running.
@@ -300,7 +318,7 @@ class SettingsSheetTest {
             CombrayTheme {
                 SettingsSheet(
                     integrations = integrations,
-                    settings = BrowserSettings(context.getSharedPreferences("settings-form-test", Context.MODE_PRIVATE), scope),
+                    settings = settings,
                     retention = Retention(),
                     onUnusedTabsChanged = {},
                     notices = ThirdPartyNotices(application.assets),
