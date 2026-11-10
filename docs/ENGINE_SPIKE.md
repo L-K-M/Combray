@@ -1352,6 +1352,34 @@ unresolved; substituted geometry values must carry units; deeper
 subtree mutations still do not invalidate the cached serialization
 (pre-existing).
 
+### Module top-level await errors and SVG points (29 October 2026)
+
+Two more downstream fixes reached the app with the same pin,
+`6d3218a2a94`, which contains `combray/0.7` commit
+`634843fca29ba6ce05e8249073d790a4ecb08dca`. Their own pin PR,
+[L-K-M/Combray#153](https://github.com/L-K-M/Combray/pull/153), was
+overtaken by that pin before it merged, so their evidence is recorded
+here.
+
+- [Servo PR #15](https://github.com/L-K-M/servo/pull/15): a module script
+  that awaits at the top level made Servo report an uncaught exception
+  `undefined`, without a location, as soon as it started awaiting, and an
+  error it threw after the await was never reported. Servo read the
+  still-pending evaluation promise synchronously; it now reports the
+  evaluation's error when the promise rejects, as HTML's "run a module
+  script" requires. The PR notes that upstream has the same code. New
+  WPT test 0/1 before, 1/1 after; the existing WPT test
+  `module-import-referrer.html` went from a harness error to 4/4.
+- [Servo PR #14](https://github.com/L-K-M/servo/pull/14): polyline and
+  polygon `points` are read with the path data parser, so lengths stop at
+  a malformed list (a doubled or leading comma) and a sign separates
+  coordinates. Follow-up to section 26.
+
+Neither PR changes the embedder API or `Cargo.lock`. Both were validated
+downstream (the area's WPT directories, tidy, a site-check sweep without
+regressions) and independently reviewed. Their Android evidence comes
+from the Engine workflow runs of every pin since `6d3218a2a94`.
+
 ## 30. Device-check timing races (30 October 2026)
 
 Three device checks failed intermittently in the Engine workflow for
@@ -3787,3 +3815,25 @@ keeps its height while the bar hides and returns, and that the page's `innerHeig
 engine's `viewport_painted` follow the bar. Host checks: `cargo fmt --check`, `cargo test --lib`
 (204), the Gradle unit tests, lint, both APK assemblies, `scripts/tests` (121) and
 `check_docs.py`. A physical phone, including the foldable from the report, is unverified.
+
+## 58. HTTP cache Vary matching (9 November 2026)
+
+The pin moves to `combray/0.7` tip
+`8e097e4bdb5990262296a11a825b49baeccb5207` (upstream base still v0.7.0),
+the merge of [Servo PR #41](https://github.com/L-K-M/servo/pull/41).
+It backports upstream `44deea18cfa`: Servo's HTTP cache treated a header
+that the stored response's `Vary` names as matching when the new request
+sent it but the stored request did not (RFC 9111 section 4.1 forbids
+that), so a CORS request could reuse a response stored for a no-cors
+request and fail its CORS check. Revalidation now also replaces every
+matching stored response. A downstream follow-up makes a revalidated
+range request take its headers and body from one stored response; the
+backport could mix them. The PR adds a `fetch/http-cache/vary.any.js`
+case that fails before, a net unit test for the range refresh, and
+passed the fetch WPT directories and a servoshell site-check sweep
+without regressions, with two rounds of independent review.
+
+No embedder API, lockfile or resource change; the notices were
+regenerated for the new pin. This host has no Android SDK: both native
+ABI builds, packaging and the emulator checks are the Engine workflow's
+evidence, recorded in the pin PR.
