@@ -8,15 +8,16 @@ import android.content.SharedPreferences
  * Maintenance deletes history, and may close unused tabs, by comparing stored wall-clock stamps
  * with "now". A device clock set far forward (a manual date, a bad network time) would make one
  * pass delete everything at once. Within one boot the elapsed-time clock cannot jump, so [now]
- * refuses to let the wall clock run more than [maxSkewMillis] ahead of the time that measurably
- * passed since the last trusted reading. That reading persists, so the guard also holds after
- * the process dies and restarts on the same boot.
+ * refuses to let the wall clock run more than [maxSkewMillis] ahead of the measured time: the
+ * last trusted reading plus the time that measurably passed since it. That reading persists, so
+ * the guard also holds after the process dies and restarts on the same boot.
  *
  * Deliberate limits:
  * - After a reboot (another boot count) elapsed time restarts and the wall clock is trusted
  *   again, as it was before this guard. A clock that is still wrong across a reboot, or set
  *   wrong while the device was off, can still expire history.
- * - A clock corrected backwards is accepted at once: retention then waits instead of deleting.
+ * - A clock corrected backwards is accepted at once: retention then waits instead of deleting,
+ *   and the anchor stays on the measured timeline, so a later correction forward is accepted.
  * - Rows stamped while the clock ran ahead keep those stamps and expire late.
  *
  * Not thread-safe: the coordinator calls it only from its single work queue.
@@ -34,8 +35,17 @@ class RetentionClock(
         val raw = wall.now()
         val elapsed = elapsedMillis()
         val boot = bootCount()
-        val trusted = trustedNow(raw, elapsed, boot, store.read(), maxSkewMillis)
-        if (boot != null) store.write(ClockAnchor(trusted, elapsed, boot))
+        val anchor = store.read()
+        val trusted = trustedNow(raw, elapsed, boot, anchor, maxSkewMillis)
+        // Keep the anchor on the measured timeline: anchoring on the accepted wall time would let
+        // repeated sub-skew jumps accumulate without bound, and would hold retention down after a
+        // clock that drifted backwards is corrected forward again.
+        val measured = if (anchor != null && anchor.boot == boot && elapsed >= anchor.elapsed) {
+            anchor.wall + (elapsed - anchor.elapsed)
+        } else {
+            trusted
+        }
+        if (boot != null) store.write(ClockAnchor(measured, elapsed, boot))
         return trusted
     }
 
@@ -96,5 +106,5 @@ class RetentionClock(
     }
 }
 
-/** A trusted wall-clock reading, the elapsed-time reading taken with it, and its boot. */
+/** The measured wall-clock time, the elapsed-time reading taken with it, and its boot. */
 data class ClockAnchor(val wall: Long, val elapsed: Long, val boot: Int)

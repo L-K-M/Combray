@@ -69,7 +69,8 @@ class RetentionClockTest {
         wall -= 2 * DAY
 
         assertEquals(START - 2 * DAY, clock.now())
-        assertEquals(START - 2 * DAY, anchors.stored!!.wall)
+        // The anchor stays on the measured timeline, so a later correction forward is accepted.
+        assertEquals(START, anchors.stored!!.wall)
     }
 
     @Test
@@ -82,6 +83,33 @@ class RetentionClockTest {
         wall = START + 2 * MINUTE // the date is set right again
         elapsed += MINUTE
         assertEquals(START + 2 * MINUTE, clock.now())
+    }
+
+    @Test
+    fun aBackwardsExcursionFollowedByACorrectionForwardEndsTheHold() {
+        clock.now()
+        wall -= 2 * DAY
+        elapsed += MINUTE
+        assertEquals(START - 2 * DAY, clock.now())
+
+        // The date is set right again: the guard ends the hold instead of staying pinned to the
+        // corrupted baseline.
+        wall = START + MINUTE
+        elapsed += MINUTE
+        assertEquals(START + MINUTE, clock.now())
+    }
+
+    @Test
+    fun repeatedSubSkewNudgesDoNotAccumulatePastTheSkew() {
+        clock.now()
+        repeat(50) {
+            wall += RetentionClock.MAX_SKEW_MILLIS / 2
+            elapsed += MINUTE
+            clock.now()
+        }
+
+        // The anchor stays on the measured timeline, so the accumulated wall-clock lead is refused.
+        assertEquals(START + 50 * MINUTE, clock.now())
     }
 
     @Test
