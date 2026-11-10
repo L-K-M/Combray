@@ -850,3 +850,5 @@ All notable changes to this project are documented here. The format follows
   stopped".
 - Find in page no longer counts, or stops at, text a page keeps invisible
   with `visibility: hidden`, such as the items of a closed menu.
+- A long-press no longer opens a link menu on a page that replaced the
+  pressed one while the finger was still down.

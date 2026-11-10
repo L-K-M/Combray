@@ -11,11 +11,14 @@ import kotlin.math.hypot
  */
 internal class LongPressTracker(private val timeoutMs: Long, private val slopPx: Float) {
     private var pressedAt: Long? = null
+    private var pressedPage: PageRef? = null
     private var startX = 0f
     private var startY = 0f
 
-    fun press(x: Float, y: Float, now: Long) {
+    /** A finger down on [page], the document shown then (none before a tab's first one). */
+    fun press(x: Float, y: Float, now: Long, page: PageRef?) {
         pressedAt = now
+        pressedPage = page
         startX = x
         startY = y
     }
@@ -30,11 +33,15 @@ internal class LongPressTracker(private val timeoutMs: Long, private val slopPx:
         pressedAt = null
     }
 
-    /** True once, when the timer runs and the press has been held long enough. */
-    fun timerFired(now: Long): Boolean {
+    /**
+     * True once, when the timer runs, the press has been held long enough and [page], the
+     * document shown now, is still the one pressed. The click that follows goes to whatever the
+     * selected tab shows, so a press must not outlive its page.
+     */
+    fun timerFired(now: Long, page: PageRef?): Boolean {
         val pressed = pressedAt ?: return false
         if (now - pressed < timeoutMs) return false
         pressedAt = null
-        return true
+        return page == pressedPage
     }
 }
