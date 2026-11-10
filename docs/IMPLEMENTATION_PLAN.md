@@ -643,7 +643,7 @@ Use policy/unit tests for deterministic state transitions and URL classification
 | R2/R3 chrome | Routine actions remain reachable above IME/system insets | Device walkthrough at narrow width, font scaling, landscape |
 | R5 identity | Two tabs at identical URL have independent state; closing one preserves the other | Coordinator tests plus native test |
 | R5 navigation | A→B retains A in local Recent; an old visit opens its recorded address | Room projection and device flow |
-| Retention | Eight-day closed visit expires; eight-day open tab remains recoverable | Fake-clock database test, startup maintenance |
+| Retention | Eight-day closed visit expires; eight-day open tab remains recoverable; a device clock set forward within one boot expires nothing until elapsed time catches up (after a reboot the clock is trusted again) | Fake-clock database test, startup maintenance, `RetentionClockTest` |
 | Active close | Closing active tab focuses deterministic remaining tab or internal home | State assertion plus painted-page check |
 | Process death | Open/active tabs and pending saves survive; no POST replay or native pointer reuse | Kill/relaunch after transaction and dispatch boundaries |
 | Surface lifecycle | Rotation/background/surface replacement do not close tabs or use obsolete surface | Repeated real-engine/device sequence |
