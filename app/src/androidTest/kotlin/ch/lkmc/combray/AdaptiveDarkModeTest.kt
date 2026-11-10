@@ -8,6 +8,7 @@ import ch.lkmc.combray.core.browser.Placement
 import ch.lkmc.combray.core.browser.ThemeMode
 import org.junit.After
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -105,16 +106,21 @@ class AdaptiveDarkModeTest {
     /** Waits until the swatch and canvas satisfy [expected]; a change repaints asynchronously. */
     private fun awaitColors(what: String, expected: (ink: Int, canvas: Int) -> Boolean) {
         val deadline = System.currentTimeMillis() + REPAINT_TIMEOUT_MS
-        var ink: Int
-        var canvas: Int
+        var seen: Pair<Int, Int>? = null
         while (true) {
             device.dismissSystemDialogs()
-            ink = checkNotNull(device.screenColor(xFraction = INK_X))
-            canvas = checkNotNull(device.screenColor(xFraction = CANVAS_X))
-            if (expected(ink, canvas) || System.currentTimeMillis() > deadline) break
+            // A screenshot can fail while the surface changes; that is one more poll.
+            val ink = device.screenColor(xFraction = INK_X)
+            val canvas = device.screenColor(xFraction = CANVAS_X)
+            if (ink != null && canvas != null) {
+                if (expected(ink, canvas)) return
+                seen = ink to canvas
+            }
+            if (System.currentTimeMillis() > deadline) break
             Thread.sleep(POLL_MS)
         }
-        assertTrue("$what: text %06x, canvas %06x".format(ink, canvas), expected(ink, canvas))
+        val (ink, canvas) = checkNotNull(seen) { "$what: no screenshot" }
+        fail("$what: text %06x, canvas %06x".format(ink, canvas))
     }
 
     private fun luminance(color: Int) = Color.luminance(color or Color.BLACK)

@@ -285,10 +285,10 @@ private fun LightPagesSetting(settings: BrowserSettings) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
-            .toggleable(value = darken, role = Role.Switch) { enabled ->
+            .toggleable(value = darken, role = Role.Switch) { checked ->
                 feedback.choose(
                     write = {
-                        settings.setLightPagesInDark(if (enabled) LightPagesInDark.DARKEN else LightPagesInDark.KEEP)
+                        settings.setLightPagesInDark(if (checked) LightPagesInDark.DARKEN else LightPagesInDark.KEEP)
                     },
                 )
             },
