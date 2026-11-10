@@ -276,7 +276,6 @@ All notable changes to this project are documented here. The format follows
   5,000 retained visits once you type, and filters in memory.
 - Hister capture no longer has a pause/resume row in More; the capture switch
   stays in Settings.
-- Share is in the bottom bar, next to Save, instead of the More menu.
 - Save shows a bookmark instead of a star, which in Karakeep means
   Favourite: an outline, filled while saving, with a check once saved.
   Recent shows stacked pages instead of a list.
@@ -297,7 +296,7 @@ All notable changes to this project are documented here. The format follows
   default to arm64; set `COMBRAY_ABI=x86_64` for the emulator. The build
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
-- Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- Gradle 9.8.2, Kotlin 2.4.21 and Room 2.8.5.
 - CI also compiles the device checks, fails when Room's exported schemas
   are not committed or a committed version's schema changed, and checks
   the engine bridge's Rust formatting and page-script syntax.
@@ -719,7 +718,7 @@ All notable changes to this project are documented here. The format follows
   `documents` nor a `history` field, or either of the wrong type) is
   reported as malformed instead of an empty search. A null list, which
   Hister sends for an empty one, still counts as empty.
-- On a screen narrower than 400dp the address sits on its own row above
+- On a screen narrower than 516dp the address sits on its own row above
   the actions, so the site name stays readable. Wider screens keep the
   single row, and snackbars stay clear of the bar either way.
 - Pages read a real screen and window size: `screen.width`,
