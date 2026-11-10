@@ -62,7 +62,8 @@ class HisterClient(private val transport: HttpTransport) {
 
     fun search(root: String, token: String, query: String, pageKey: String? = null): HisterSearch {
         val parameters = buildString {
-            append("q=").append(encode(query)).append("&format=json")
+            // Bounded: a pasted text would otherwise become a request line of megabytes.
+            append("q=").append(encode(query.takeUtf8Bytes(MAX_QUERY_BYTES))).append("&format=json")
             pageKey?.let { append("&page_key=").append(encode(it)) }
         }
         val outcome = transport.execute(HttpRequest("GET", ServiceUrls.endpoint(root, "search?$parameters"), headers(token)))
@@ -116,15 +117,6 @@ class HisterClient(private val transport: HttpTransport) {
             put("text", text)
         }.toString().toByteArray(Charsets.UTF_8)
 
-    /** At most [maxBytes] of UTF-8, without splitting a character. */
-    private fun String.takeUtf8Bytes(maxBytes: Int): String {
-        val bytes = toByteArray(Charsets.UTF_8)
-        if (bytes.size <= maxBytes) return this
-        var end = maxBytes
-        while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
-        return String(bytes, 0, end, Charsets.UTF_8)
-    }
-
     private fun parseResults(body: ByteArray): HisterSearch {
         val root = try {
             json.parseToJsonElement(body.toString(Charsets.UTF_8)) as? JsonObject
@@ -155,7 +147,7 @@ class HisterClient(private val transport: HttpTransport) {
         val item = element as? JsonObject ?: return null
         val url = item.string("url") ?: return null
         val excerpt = listOf("text", "snippet", "description").firstNotNullOfOrNull { item.string(it) }
-        return HisterHit(url, item.string("title"), excerpt?.take(MAX_EXCERPT_CHARS), fromHistory)
+        return HisterHit(url, item.string("title"), excerpt?.takeWholeChars(MAX_EXCERPT_CHARS), fromHistory)
     }
 
     private fun JsonObject.string(key: String): String? =
@@ -188,6 +180,13 @@ class HisterClient(private val transport: HttpTransport) {
         const val MAX_REQUEST_BYTES = 900 * 1024
         const val MAX_TITLE_CHARS = 4 * 1024
         const val MAX_EXCERPT_CHARS = 300
+
+        /**
+         * Longest search query, in UTF-8 bytes, as for Karakeep; a longer one is cut. Bytes, not
+         * characters: percent-encoding makes three characters of each byte outside ASCII, and
+         * 6,000 of them stay within the 8 KB request line that servers and proxies commonly take.
+         */
+        const val MAX_QUERY_BYTES = 2_000
         const val CHECK_QUERY = "combray connection check"
 
         private const val SKIPPED_BY_SERVER = "skipped_by_server"
