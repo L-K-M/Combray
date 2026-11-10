@@ -826,3 +826,7 @@ All notable changes to this project are documented here. The format follows
   scripts after an earlier plain request for the same file: the engine
   no longer reuses a cached response that varies on a header the new
   request sends.
+- Pages whose module scripts use top-level `await` no longer report a
+  spurious script error, and errors those modules throw after awaiting
+  are reported. SVG polylines and polygons stop measuring at a malformed
+  point list, as the SVG grammar requires.
