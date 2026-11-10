@@ -607,9 +607,11 @@ class BrowserCoordinator(
             // A tab can hold a page of the site without a visit to detach: one opened in the
             // background that has not loaded yet, or one whose requested address has not committed.
             // It stays open on that address, and loading it records and sends nothing either.
+            // Like the detached tabs it points at no visit: a tab's address and visit are written
+            // together, so the only one it could still name is a row that is already gone.
             dao.openTabs()
                 .filter { tab -> !tab.pageForgotten && tab.url?.let(ofSite) == true }
-                .forEach { dao.updateTab(it.copy(pageForgotten = true)) }
+                .forEach { dao.updateTab(it.copy(currentVisitId = null, pageForgotten = true)) }
             dao.deleteVisitsForHosts(spellings, subdomains)
             dao.deleteEmptyClosedTabs()
             database.homeLinks().let { home ->

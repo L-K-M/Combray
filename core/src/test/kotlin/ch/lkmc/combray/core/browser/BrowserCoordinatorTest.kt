@@ -2198,6 +2198,27 @@ class BrowserCoordinatorTest {
         assertTrue(recent().none { it.url == "https://www.example.com/pending" })
     }
 
+    /** Retention or an earlier forget can remove the visit of a page a tab still shows. */
+    @Test
+    fun forgettingASiteCoversAnOpenPageWhoseVisitIsAlreadyGone() {
+        ready()
+        browser.openUrl("https://example.com/4", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://example.com/4")
+        val shown = runBlocking { database.browser().openTabs() }.single()
+        runBlocking { database.browser().deleteVisit(shown.currentVisitId!!) }
+
+        browser.forgetSite("example.com", includeSubdomains = false); idle()
+        val tab = runBlocking { database.browser().openTabs() }.single()
+        assertTrue(tab.pageForgotten)
+        assertNull(tab.currentVisitId)
+
+        // Reloading it is loading it again; leaving it finds no visit to put back in Recent.
+        commit(1, 11, "https://example.com/4")
+        browser.openUrl("https://c.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 12, "https://c.test/")
+        assertTrue(recent().none { it.url == "https://example.com/4" })
+    }
+
     /** The unloaded tab is matched like history: by site, its www spelling and, when asked, subdomains. */
     @Test
     fun forgettingASiteMarksOnlyThatSitesUnloadedTabs() {
