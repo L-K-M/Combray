@@ -830,3 +830,7 @@ All notable changes to this project are documented here. The format follows
   spurious script error, and errors those modules throw after awaiting
   are reported. SVG polylines and polygons stop measuring at a malformed
   point list, as the SVG grammar requires.
+- Setting the phone's date far ahead (or a bad network time) no longer
+  deletes browsing history or closes unused tabs. Until the phone
+  reboots, retention ignores a clock that runs ahead of the time that
+  actually passed; after a reboot the clock is trusted again.
