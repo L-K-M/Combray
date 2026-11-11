@@ -197,7 +197,11 @@ sealed interface EngineEvent {
         val showKeyboard: Boolean,
         /** Native editing-context identity, not an address or an Android view identity. */
         val context: Long = 0,
+        val caret: Int? = null,
     ) : EngineEvent
+
+    /** Read-only caret metadata for the original field/frame, never page text. */
+    data class ImeCaretChanged(val view: ViewRef, val document: Long, val context: Long, val caret: Int?) : EngineEvent
 
     data class ImeHidden(val view: ViewRef) : EngineEvent
 
@@ -326,7 +330,9 @@ sealed interface EngineEvent {
                     event.optionalString("kind") ?: "text",
                     event.boolean("show_keyboard"),
                     event.long("context"),
+                    event.caret(),
                 )
+                "ime_caret_changed" -> ImeCaretChanged(event.view(), event.long("document"), event.long("context"), event.caret())
                 "ime_hidden" -> ImeHidden(event.view())
                 "crashed" -> Crashed(event.view(), event.string("reason"))
                 "media_blocked" -> MediaBlocked(
@@ -448,6 +454,13 @@ sealed interface EngineEvent {
 
         private fun JsonObject.int(key: String): Int =
             primitive(key).intOrNull ?: throw IllegalArgumentException("$key is not an integer")
+
+        private fun JsonObject.caret(): Int? {
+            val value = get("caret") ?: return null
+            if (value is JsonNull) return null
+            return (value as? JsonPrimitive)?.intOrNull?.takeIf { it >= 0 }
+                ?: throw IllegalArgumentException("invalid IME caret")
+        }
 
         private fun JsonObject.boolean(key: String): Boolean =
             primitive(key).booleanOrNull ?: throw IllegalArgumentException("$key is not a boolean")

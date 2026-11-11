@@ -4046,3 +4046,75 @@ accepted in a disposable profile), the page measures 412px
 Environment: `./mach build --profile medium --media-stack dummy`,
 `./mach test-wpt --profile medium --headless`, macOS 15, Apple silicon,
 Rust 1.97.1.
+
+## 61. Keyboard caret bootstrap (11 November 2026)
+
+FUTO Keyboard 0.1.30's default alternative input connection maintains its
+own composition and sends ordinary commits. Before its first letter it
+needs a cursor position from `getSurroundingText(1, 1, 0)` or extracted
+text. Combray returned unknown for both, so the keyboard dropped each
+preview and sent the complete word only when Space committed it. This
+was reproduced with the real keyboard on the synthetic rich editor,
+without signing in to any page or reading personal history.
+
+The candidate pin is `f0f5e511aa7ff4db8fe593e8fffd20d867e0743e`,
+[downstream Servo PR #48](https://github.com/L-K-M/servo/pull/48).
+`notify_input_method_caret_changed` queues/coalesces read-only metadata
+after focus and selection tasks. The exact field control, frame, view
+generation and process-unique editing context fence its path to the
+original InputConnection. The bridge waits for the first reply (including
+explicit unknown), then prepares it before Android's `restartInput`, so a
+keyboard's first key cannot race the initial snapshot. No page text
+crosses this channel. Form controls use their selection; rich editors use UTF-16 offsets in a
+`textContent` projection, without rendered paragraph separators. Their
+scan stops at 10,000 nodes or 65,536 code units; noncollapsed, outside
+and over-budget selections stay unknown rather than becoming zero.
+
+A connection can expose an empty, zero-width window at that actual
+caret to bootstrap the keyboard. Requested surrounding lengths are
+upper bounds, not a claim that surrounding text is available. After
+this connection sends an edit, reads return unknown instead of claiming
+that an asynchronous snapshot includes the edit. The framework's
+unrelated Editable never supplies page state. Extracted-text monitoring,
+full text snapshots, writable selection and full surrounding-text/revision
+synchronization remain unsupported. No ongoing Android selection updates
+are injected from the rich editor's textContent projection.
+
+Evidence so far:
+
+- Baseline: API 36 Google APIs arm64 emulator, FUTO 0.1.30, Combray's
+  successful Engine run `42952613571` (engine pin `a4a77d750`). Tapping
+  `h`, then `e`, left the fixture blank; Space displayed `he`.
+- The real-Android bootstrap regression failed before the change:
+  expected caret `0`, received `null`. The prepared-field/document
+  replacement JVM regression also failed before its state fix.
+- macOS arm64, Rust 1.97.1: eleven downstream SDK tests pass, each in
+  its own process, using `cargo test --profile medium -p servo
+  --no-default-features --features bundled,js_jit --test webview
+  <name> -- --exact`. The new `test_input_method_caret_metadata` covers
+  real IME commit, non-BMP offsets, empty/rich/form controls, scan bounds,
+  element boundaries, a closed shadow root and a child frame. Existing
+  typing, composition, readonly/cancellation, newline and shadow tests
+  remain green.
+- Local JDK 21 gates pass: `testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest`; native `cargo fmt --check` and all 205 host
+  unit tests; all 187 build-script tests. Notices were regenerated; only
+  the Servo-pin input hash changed, not the license inventory.
+- `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh` passes
+  (first build 5m29s, final incremental build 13s); APK verification
+  reports arm64. On the same API 36 emulator, `scripts/check-app.sh`
+  passes all 17 `EditorImeTest` and `KeyboardTest` checks with FUTO
+  selected. The first caret read is immediate; the replacement-connection
+  Unicode assertion waits for the UI-thread metadata, not just its engine
+  receipt. A broader BrowsingTest attempt was interrupted by the host's
+  command timeout and is not counted as a completed pass.
+- Real keyboard taps, without Space: FUTO now paints `h`, then `he`, in
+  ordinary, nested and closed-shadow rich editors; fixture InputEvents
+  independently report both values. Newline inserts a paragraph, typing
+  on the next line stays visible and Backspace removes just its last
+  character. Gboard 15.1.08 typing also stays visible. These are real IME
+  taps and screen/DOM checks, not just direct InputConnection calls.
+- Full hosted CI (including both ABIs and the API 30 fixture run) and
+  independent PR review remain pending. Physical-phone and authenticated
+  live-editor acceptance are not claimed. Full selection/surrounding-text
+  synchronization remains separate from this bootstrap fix.
