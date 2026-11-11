@@ -329,6 +329,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Pages that lay out their main column with CSS subgrid
+  (`grid-template-columns: subgrid`) fit the screen again: the column
+  now follows the parent grid's columns and line names instead of
+  growing to its content, so an article no longer renders 1260px wide
+  in a 412px viewport with most of the text off screen. Nested
+  subgrids and dynamic style changes follow too; gaps inherited from
+  the parent grid and some baseline cases are not covered yet.
+- A page whose ad scripts close the document from inside
+  `document.write()` content no longer kills the tab after a while
+  ("This page stopped working."): the written content is kept and the
+  page keeps running.
 - A PDF page that failed to draw at the current size can recover: a resize
   draws it again, and tapping its error note asks for the page again. A
   problem that clears the viewer releases its page canvases before the

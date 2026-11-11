@@ -3958,3 +3958,91 @@ the light root hint, so such a page relying on system colors is shown light. Tex
 gradient is judged against its average stop, so over the light part of a hard-edged light and
 dark split it can fall slightly below 4.5:1. A frame's transparent areas are assumed to show a
 darkened parent; over a parent that keeps its light colors, its text can be light on light.
+
+## 60. document.write() end-of-input and subgrid fallback (11 November 2026)
+
+A site report (pages reproduced under the site-check policy, not named
+here) gave two engine bugs on one page: the article column laid out
+1260px wide in a 412px viewport, and the page died after a while and
+showed "This page stopped working." The pin moves to the `combray/0.7`
+merge of [Servo PR #45](https://github.com/L-K-M/servo/pull/45), which
+fixes both.
+
+### Crash: document.close() inside document.write() content
+
+Eight captured backtraces agreed: html5ever's tree builder panicked
+with "no current element" from `Document::write`. A late
+`document.write()` whose content contains a script that calls
+`document.close()`, with content after that script (the ad pattern on
+that page), ended the parser inside the outer write feed: `close()`
+ran the tokenizer to its EOF, which drains the parser's open elements,
+and the content after the script then panicked the script thread. The
+panicking thread is what produced the crash page.
+
+The fix defers the end of input while a tokenize feed is active and
+runs it from the outermost `document.write()` once everything the
+write inserted has been consumed; `close()` on a stopped or aborted
+parser does nothing; a `document.write()` on one runs the document
+open steps instead of feeding the drained tree builder; and the end
+phase no longer unregisters a parser the open steps already replaced.
+
+Evidence: `tests/wpt/mozilla/tests/mozilla/document-write-nested-close.html`
+and `document-write-nested-write-close.html` crash before the fix and
+pass after (the nested case is its own file because the document open
+steps erase all event listeners, so one subtest's `document.write()`
+removed the other's `load` handler mid-dispatch; both tests read the
+text outside script elements so their assertions can fail, and the
+nested one writes a self-contained script). The
+`dynamic-markup-insertion` WPT suite is unchanged apart from the
+pre-existing `document-write/contentType.window.html` media-document
+crash, which is identical with and without the fix. On the reported
+page, 7+ loads in about 85% of attempts panicked before the fix; 11
+loads and scroll soaks after it were all clean, with the written
+content intact. Ten synthetic `document.write()`/`document.close()`
+fixtures behave identically before and after.
+
+### Width: subgrid items used implicit auto tracks
+
+The article is a grid item whose `grid-template-columns` is `subgrid`
+(verified against a Chromium reference, which computed `subgrid` and
+fit the viewport). Servo did not parse the keyword (its stylo pref
+was off) and taffy has no subgrid support, so the item's tracks came
+out as implicit auto tracks sized to their content; a `nowrap` bar and
+a long unbreakable compound word grew one track to 1220px and the
+column with it.
+
+The fix turns `layout.css.grid-template-subgrid-value.enabled` on and
+approximates subgrid in the taffy wrapper: for each subgrid axis the
+item resolves the slice of its parent's track list its placement
+covers, and the line names covering that slice (the
+`subgrid <line-name-list>` names override them). Fixed-count
+`<track-repeat>` groups expand into the slice with their names
+concatenated at joined lines. Every grid item keeps the parent axis
+data it resolved from, so nested subgrids resolve from their parent's
+resolved tracks and a restyle that gains, loses or edits `subgrid`
+re-resolves instead of keeping nothing or something stale. Unit tests
+cover the placement-to-slice mapping. Known gaps, recorded in
+`tests/wpt/meta` and `DOWNSTREAM.md`: parent `repeat(auto-fill,
+auto-fit)` lists, `<track-repeat>` counts above 10000 expanded
+tracks, inherited parent gutters, and subgrid baselines. Separately
+noted and not in this pin: `hyphens: auto` (dictionary hyphenation)
+is still unimplemented and lets long compounds widen a 412px page to
+681px where a reference engine hyphenates; a page that relies on
+`overflow-wrap` alone is covered.
+
+Evidence: `tests/wpt/mozilla/tests/mozilla/css-grid-subgrid-track-fallback.html`
+fails before the change and passes after (a subgrid child on line 2
+must sit after the parent's first track, not after a content-sized
+track; its nested and restyle cases fail before their fix commits and
+pass after, verified on those revisions). The full
+`tests/wpt/tests/css/css-grid/` suite runs 2355 checks as expected
+after the expectation updates in the PR; the subgrid reftests that
+only "passed" before did so because the keyword did not parse and
+test and reference rendered identically, and the expectations now
+record the approximation's gaps. Against the reported page (consent
+accepted in a disposable profile), the page measures 412px
+`scrollWidth` in a 412px viewport, as in the Chromium reference.
+
+Environment: `./mach build --profile medium --media-stack dummy`,
+`./mach test-wpt --profile medium --headless`, macOS 15, Apple silicon,
+Rust 1.97.1.
