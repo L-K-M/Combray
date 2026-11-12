@@ -24,6 +24,7 @@ import ch.lkmc.combray.engine.HistoryKind
 import ch.lkmc.combray.engine.LeavePageChoice
 import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
+import ch.lkmc.combray.engine.PageRef
 import ch.lkmc.combray.engine.ScrollEdge
 import ch.lkmc.combray.engine.ReloadPullPhase
 import ch.lkmc.combray.engine.ViewRef
@@ -3700,6 +3701,110 @@ class BrowserCoordinatorTest {
         keyboardOnFirstPage()
         browser.closeTab(state().activeTab!!.id); idle()
         assertEquals(KeyboardRequest.Hide, state().keyboard)
+    }
+
+    @Test
+    fun imeShownBindsTheCaretToItsFieldAndAReplacementFieldResetsIt() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "text", showKeyboard = true, context = 7, caret = 4)); idle()
+        assertEquals(EditorCaret(PageRef(engine.view(1), 10), 7, 4), state().editorCaret)
+
+        // Focus moved to another field of the page: its caret starts from its own event, not the old one's.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "text", showKeyboard = true, context = 8)); idle()
+        assertEquals(EditorCaret(PageRef(engine.view(1), 10), 8, null), state().editorCaret)
+    }
+
+    @Test
+    fun preparedCaretLeavesWithItsDocumentButAPrecommitFieldSurvives() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = true, kind = "text", showKeyboard = false, context = 7, caret = 4)); idle()
+        commit(1, 11, "https://a.test/next", index = 1, length = 2)
+        assertNull(state().editorCaret)
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 12, multiline = true, kind = "text", showKeyboard = false, context = 8, caret = 3)); idle()
+        commit(1, 12, "https://a.test/again", index = 2, length = 3)
+        assertEquals(EditorCaret(PageRef(engine.view(1), 12), 8, 3), state().editorCaret)
+    }
+
+    @Test
+    fun caretMovesUpdateOnlyThePositionAndKeepThePendingKeyboardRequest() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "text", showKeyboard = true, context = 7, caret = 4)); idle()
+        val pendingShow = state().keyboard
+        engine.emit(EngineEvent.ImeCaretChanged(engine.view(1), 10, 7, 12)); idle()
+        assertEquals(EditorCaret(PageRef(engine.view(1), 10), 7, 12), state().editorCaret)
+        assertEquals("A caret move must not consume the field's pending keyboard request", pendingShow, state().keyboard)
+
+        // A field focused before the page is used only prepares the keyboard; the same must hold for it.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false, context = 9, caret = 1)); idle()
+        val pendingPrepare = state().keyboard
+        engine.emit(EngineEvent.ImeCaretChanged(engine.view(1), 10, 9, null)); idle()
+        assertEquals(EditorCaret(PageRef(engine.view(1), 10), 9, null), state().editorCaret)
+        assertEquals("A caret move must not consume a pending preparation either", pendingPrepare, state().keyboard)
+    }
+
+    @Test
+    fun caretMovesForAnotherContextFrameGenerationOrHiddenTabAreIgnored() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "text", showKeyboard = true, context = 7, caret = 4)); idle()
+        val bound = state().editorCaret
+
+        engine.emit(EngineEvent.ImeCaretChanged(engine.view(1), 10, 8, 15)); idle() // another field's context
+        assertEquals(bound, state().editorCaret)
+        engine.emit(EngineEvent.ImeCaretChanged(engine.view(1), 11, 7, 15)); idle() // another frame's document
+        assertEquals(bound, state().editorCaret)
+        engine.emit(EngineEvent.ImeCaretChanged(ViewRef(1, 999), 10, 7, 15)); idle() // a replaced view's generation
+        assertEquals(bound, state().editorCaret)
+
+        // Another page shown: the field's metadata leaves with its page, and the now-hidden tab's
+        // field can neither move the old caret nor establish a new one.
+        browser.openUrl("https://b.test/", Placement.NEW_TAB); idle()
+        commit(2, 20, "https://b.test/")
+        assertNull(state().editorCaret)
+        engine.emit(EngineEvent.ImeCaretChanged(engine.view(1), 10, 7, 15)); idle()
+        assertNull(state().editorCaret)
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "text", showKeyboard = true, context = 7, caret = 15)); idle()
+        assertNull(state().editorCaret)
+    }
+
+    @Test
+    fun theCaretLeavesWhenClearedHiddenOrSwitchedAwayEvenForAFieldThatOnlyPrepared() {
+        ready()
+        browser.openUrl("https://a.test/", Placement.CURRENT_TAB); idle()
+        commit(1, 10, "https://a.test/")
+        val first = state().activeTab!!.id
+
+        // A field focused on load never owns the visible keyboard; clearing it must still drop its metadata.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false, context = 7, caret = 4)); idle()
+        assertEquals(EditorCaret(PageRef(engine.view(1), 10), 7, 4), state().editorCaret)
+        engine.emit(EngineEvent.ImeHidden(engine.view(1))); idle()
+        assertNull(state().editorCaret)
+
+        // The internal home over the page: no page's field may keep its metadata.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "search", showKeyboard = false, context = 7, caret = 4)); idle()
+        browser.newTab(); idle()
+        assertNull(state().editorCaret)
+
+        browser.selectTab(first); idle()
+        // A form sent with Enter: the next document replaces the field's document.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 10, multiline = false, kind = "text", showKeyboard = true, context = 7, caret = 4)); idle()
+        assertEquals(EditorCaret(PageRef(engine.view(1), 10), 7, 4), state().editorCaret)
+        commit(1, 11, "https://a.test/results", index = 1, length = 2)
+        assertNull(state().editorCaret)
+
+        // Closing the tab takes whatever field it still has.
+        engine.emit(EngineEvent.ImeShown(engine.view(1), 11, multiline = false, kind = "text", showKeyboard = true, context = 7, caret = 4)); idle()
+        browser.closeTab(state().activeTab!!.id); idle()
+        assertNull(state().editorCaret)
     }
 
     @Test

@@ -4135,3 +4135,186 @@ frame remains transparent as specified; adaptive mode still assumes its parent w
 there, which can give light text on light when the parent opted out. The remaining limits of
 section 60 (positioned elements, gradients, matching-scheme frames over a light parent) still
 hold.
+
+### Integration refresh (12 November 2026)
+
+PR #344 now incorporates main's keyboard-caret and document/subgrid work, retaining
+`f0f5e511aa7ff4db8fe593e8fffd20d867e0743e` and its generated notices rather than
+rolling back those fixes. A fetch of the downstream history confirms that the
+original tested dark-mode pin `1f613a704e` is an ancestor of this pin.
+
+The two earlier hosted emulator attempts exited with QEMU SIGSEGV before all
+classes ran. They remain failures, not device acceptance. This refresh also
+incorporates main's `ubuntu-24.04` device host and owned-process/kernel diagnostics;
+it does not change the emulator, renderer, fixtures or timeouts. Main's subsequent
+full Engine run `43094790426` passed, but does not establish this PR's result.
+The updated PR still requires its own successful full Engine gate and latest-head
+review. No physical phone or personal browsing data is used.
+
+Refreshed local checks on macOS arm64, JDK 21, Rust 1.97.1 and NDK r29 pass:
+1,160 JVM tests, lint, debug/test/release assembly, 206 bridge tests, Rust formatting,
+193 script/fixture tests, shellcheck and 74 page-script/PDF JavaScript tests. The
+arm64 native rebuild and packaged-ABI verification also pass. Gradle reported
+shared-cache workspace warnings but completed all 390 tasks; no shared
+cache was deleted. Documentation and diff checks pass. No device was connected for
+a new local runtime run, so the hosted device gate remains unverified.
+
+## 60. document.write() end-of-input and subgrid fallback (11 November 2026)
+
+A site report (pages reproduced under the site-check policy, not named
+here) gave two engine bugs on one page: the article column laid out
+1260px wide in a 412px viewport, and the page died after a while and
+showed "This page stopped working." The pin moves to the `combray/0.7`
+merge of [Servo PR #45](https://github.com/L-K-M/servo/pull/45), which
+fixes both.
+
+### Crash: document.close() inside document.write() content
+
+Eight captured backtraces agreed: html5ever's tree builder panicked
+with "no current element" from `Document::write`. A late
+`document.write()` whose content contains a script that calls
+`document.close()`, with content after that script (the ad pattern on
+that page), ended the parser inside the outer write feed: `close()`
+ran the tokenizer to its EOF, which drains the parser's open elements,
+and the content after the script then panicked the script thread. The
+panicking thread is what produced the crash page.
+
+The fix defers the end of input while a tokenize feed is active and
+runs it from the outermost `document.write()` once everything the
+write inserted has been consumed; `close()` on a stopped or aborted
+parser does nothing; a `document.write()` on one runs the document
+open steps instead of feeding the drained tree builder; and the end
+phase no longer unregisters a parser the open steps already replaced.
+
+Evidence: `tests/wpt/mozilla/tests/mozilla/document-write-nested-close.html`
+and `document-write-nested-write-close.html` crash before the fix and
+pass after (the nested case is its own file because the document open
+steps erase all event listeners, so one subtest's `document.write()`
+removed the other's `load` handler mid-dispatch; both tests read the
+text outside script elements so their assertions can fail, and the
+nested one writes a self-contained script). The
+`dynamic-markup-insertion` WPT suite is unchanged apart from the
+pre-existing `document-write/contentType.window.html` media-document
+crash, which is identical with and without the fix. On the reported
+page, 7+ loads in about 85% of attempts panicked before the fix; 11
+loads and scroll soaks after it were all clean, with the written
+content intact. Ten synthetic `document.write()`/`document.close()`
+fixtures behave identically before and after.
+
+### Width: subgrid items used implicit auto tracks
+
+The article is a grid item whose `grid-template-columns` is `subgrid`
+(verified against a Chromium reference, which computed `subgrid` and
+fit the viewport). Servo did not parse the keyword (its stylo pref
+was off) and taffy has no subgrid support, so the item's tracks came
+out as implicit auto tracks sized to their content; a `nowrap` bar and
+a long unbreakable compound word grew one track to 1220px and the
+column with it.
+
+The fix turns `layout.css.grid-template-subgrid-value.enabled` on and
+approximates subgrid in the taffy wrapper: for each subgrid axis the
+item resolves the slice of its parent's track list its placement
+covers, and the line names covering that slice (the
+`subgrid <line-name-list>` names override them). Fixed-count
+`<track-repeat>` groups expand into the slice with their names
+concatenated at joined lines. Every grid item keeps the parent axis
+data it resolved from, so nested subgrids resolve from their parent's
+resolved tracks and a restyle that gains, loses or edits `subgrid`
+re-resolves instead of keeping nothing or something stale. Unit tests
+cover the placement-to-slice mapping. Known gaps, recorded in
+`tests/wpt/meta` and `DOWNSTREAM.md`: parent `repeat(auto-fill,
+auto-fit)` lists, `<track-repeat>` counts above 10000 expanded
+tracks, inherited parent gutters, and subgrid baselines. Separately
+noted and not in this pin: `hyphens: auto` (dictionary hyphenation)
+is still unimplemented and lets long compounds widen a 412px page to
+681px where a reference engine hyphenates; a page that relies on
+`overflow-wrap` alone is covered.
+
+Evidence: `tests/wpt/mozilla/tests/mozilla/css-grid-subgrid-track-fallback.html`
+fails before the change and passes after (a subgrid child on line 2
+must sit after the parent's first track, not after a content-sized
+track; its nested and restyle cases fail before their fix commits and
+pass after, verified on those revisions). The full
+`tests/wpt/tests/css/css-grid/` suite runs 2355 checks as expected
+after the expectation updates in the PR; the subgrid reftests that
+only "passed" before did so because the keyword did not parse and
+test and reference rendered identically, and the expectations now
+record the approximation's gaps. Against the reported page (consent
+accepted in a disposable profile), the page measures 412px
+`scrollWidth` in a 412px viewport, as in the Chromium reference.
+
+Environment: `./mach build --profile medium --media-stack dummy`,
+`./mach test-wpt --profile medium --headless`, macOS 15, Apple silicon,
+Rust 1.97.1.
+
+## 61. Keyboard caret bootstrap (11 November 2026)
+
+FUTO Keyboard 0.1.30's default alternative input connection maintains its
+own composition and sends ordinary commits. Before its first letter it
+needs a cursor position from `getSurroundingText(1, 1, 0)` or extracted
+text. Combray returned unknown for both, so the keyboard dropped each
+preview and sent the complete word only when Space committed it. This
+was reproduced with the real keyboard on the synthetic rich editor,
+without signing in to any page or reading personal history.
+
+The candidate pin is `f0f5e511aa7ff4db8fe593e8fffd20d867e0743e`,
+[downstream Servo PR #48](https://github.com/L-K-M/servo/pull/48).
+`notify_input_method_caret_changed` queues/coalesces read-only metadata
+after focus and selection tasks. The exact field control, frame, view
+generation and process-unique editing context fence its path to the
+original InputConnection. The bridge waits for the first reply (including
+explicit unknown), then prepares it before Android's `restartInput`, so a
+keyboard's first key cannot race the initial snapshot. No page text
+crosses this channel. Form controls use their selection; rich editors use UTF-16 offsets in a
+`textContent` projection, without rendered paragraph separators. Their
+scan stops at 10,000 nodes or 65,536 code units; noncollapsed, outside
+and over-budget selections stay unknown rather than becoming zero.
+
+A connection can expose an empty, zero-width window at that actual
+caret to bootstrap the keyboard. Requested surrounding lengths are
+upper bounds, not a claim that surrounding text is available. After
+this connection sends an edit, reads return unknown instead of claiming
+that an asynchronous snapshot includes the edit. The framework's
+unrelated Editable never supplies page state. Extracted-text monitoring,
+full text snapshots, writable selection and full surrounding-text/revision
+synchronization remain unsupported. No ongoing Android selection updates
+are injected from the rich editor's textContent projection.
+
+Evidence so far:
+
+- Baseline: API 36 Google APIs arm64 emulator, FUTO 0.1.30, Combray's
+  successful Engine run `42952613571` (engine pin `a4a77d750`). Tapping
+  `h`, then `e`, left the fixture blank; Space displayed `he`.
+- The real-Android bootstrap regression failed before the change:
+  expected caret `0`, received `null`. The prepared-field/document
+  replacement JVM regression also failed before its state fix.
+- macOS arm64, Rust 1.97.1: eleven downstream SDK tests pass, each in
+  its own process, using `cargo test --profile medium -p servo
+  --no-default-features --features bundled,js_jit --test webview
+  <name> -- --exact`. The new `test_input_method_caret_metadata` covers
+  real IME commit, non-BMP offsets, empty/rich/form controls, scan bounds,
+  element boundaries, a closed shadow root and a child frame. Existing
+  typing, composition, readonly/cancellation, newline and shadow tests
+  remain green.
+- Local JDK 21 gates pass: `testDebugUnitTest lintDebug assembleDebug
+  assembleDebugAndroidTest`; native `cargo fmt --check` and all 205 host
+  unit tests; all 187 build-script tests. Notices were regenerated; only
+  the Servo-pin input hash changed, not the license inventory.
+- `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh` passes
+  (first build 5m29s, final incremental build 13s); APK verification
+  reports arm64. On the same API 36 emulator, `scripts/check-app.sh`
+  passes all 17 `EditorImeTest` and `KeyboardTest` checks with FUTO
+  selected. The first caret read is immediate; the replacement-connection
+  Unicode assertion waits for the UI-thread metadata, not just its engine
+  receipt. A broader BrowsingTest attempt was interrupted by the host's
+  command timeout and is not counted as a completed pass.
+- Real keyboard taps, without Space: FUTO now paints `h`, then `he`, in
+  ordinary, nested and closed-shadow rich editors; fixture InputEvents
+  independently report both values. Newline inserts a paragraph, typing
+  on the next line stays visible and Backspace removes just its last
+  character. Gboard 15.1.08 typing also stays visible. These are real IME
+  taps and screen/DOM checks, not just direct InputConnection calls.
+- Full hosted CI (including both ABIs and the API 30 fixture run) and
+  independent PR review remain pending. Physical-phone and authenticated
+  live-editor acceptance are not claimed. Full selection/surrounding-text
+  synchronization remains separate from this bootstrap fix.

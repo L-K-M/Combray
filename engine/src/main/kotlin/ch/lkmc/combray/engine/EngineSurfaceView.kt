@@ -15,9 +15,13 @@ import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedText
+import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.SurroundingText
 import android.view.inputmethod.TextAttribute
+import android.view.inputmethod.TextSnapshot
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -44,11 +48,12 @@ class EngineSurfaceView(
     private var pressX = 0f
     private var pressY = 0f
     private val scrollGesture = ScrollGestureTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    /** The document the app shows on this surface: [observeScroll] brings every change of it. */
     private var scrollPage: PageRef? = null
     private var onScroll: (ScrollEdge) -> Unit = {}
     private val longPressCheck = Runnable {
-        // The engine may have stopped since the press.
-        if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis())) return@Runnable
+        // The engine may have stopped since the press, or the page under the finger been replaced.
+        if (!engineRunning() || !longPress.timerFired(SystemClock.uptimeMillis(), scrollPage)) return@Runnable
         longPressed = true
         // Felt the moment the press turns into a long-press, as elsewhere on Android: from here on
         // the finger no longer scrolls or taps. The system's touch feedback setting applies.
@@ -170,7 +175,7 @@ class EngineSurfaceView(
                 pressPointer = event.getPointerId(0)
                 pressX = event.x
                 pressY = event.y
-                longPress.press(event.x, event.y, SystemClock.uptimeMillis())
+                longPress.press(event.x, event.y, SystemClock.uptimeMillis(), scrollPage)
                 removeCallbacks(longPressCheck)
                 postDelayed(longPressCheck, longPressTimeoutMs)
             }
@@ -201,6 +206,7 @@ class EngineSurfaceView(
     private var fieldKind = TEXT
     private var fieldMultiline = false
     private var fieldContext = 0L
+    private var caretPosition: Int? = null
     private var inputConnection: EngineInputConnection? = null
 
     /**
@@ -242,16 +248,27 @@ class EngineSurfaceView(
         if (!engineRunning() || !pageFieldActive) return null
         retireInputConnection()
         configurePageEditor(outAttrs, fieldKind, fieldMultiline)
-        return EngineInputConnection(this, engineRunning, fieldContext).also { inputConnection = it }
+        outAttrs.initialSelStart = caretPosition ?: -1
+        outAttrs.initialSelEnd = outAttrs.initialSelStart
+        val owner = fieldContext
+        return EngineInputConnection(this, engineRunning, owner) {
+            caretPosition.takeIf { pageFieldActive && fieldContext == owner }
+        }.also { inputConnection = it }
+    }
+
+    /** Metadata only, fenced to the field that owns the connection, not its URL or type. */
+    fun updateCaret(contextId: Long, position: Int?) {
+        if (!pageFieldActive || contextId <= 0 || contextId != fieldContext) return
+        caretPosition = position?.takeIf { it >= 0 }
     }
 
     /** Shows the keyboard for a page field of [kind] (as reported by the engine). */
-    fun showKeyboard(kind: String = TEXT, multiline: Boolean = false, contextId: Long = 0) {
+    fun showKeyboard(kind: String = TEXT, multiline: Boolean = false, contextId: Long = 0, caret: Int? = null) {
         val keyboard = context.getSystemService(InputMethodManager::class.java)
         requestFocus()
         // Before restartInput: it consults onCheckIsTextEditor, which is false without a field.
         pageFieldActive = true
-        useFieldKind(kind, multiline, contextId, keyboard)
+        useFieldKind(kind, multiline, contextId, caret, keyboard)
         pageKeyboard.showRequested()
         val shown = keyboard.showSoftInput(this, 0)
         Log.i(LOG_TAG, "keyboard show for $kind: accepted=$shown, $pageKeyboard")
@@ -265,9 +282,9 @@ class EngineSurfaceView(
      * the user used the page); the engine asks for [showKeyboard] when the user taps the field.
      * Focus is not taken: a sheet the user is typing in keeps it.
      */
-    fun prepareKeyboard(kind: String, multiline: Boolean = false, contextId: Long = 0) {
+    fun prepareKeyboard(kind: String, multiline: Boolean = false, contextId: Long = 0, caret: Int? = null) {
         pageFieldActive = true
-        useFieldKind(kind, multiline, contextId, context.getSystemService(InputMethodManager::class.java))
+        useFieldKind(kind, multiline, contextId, caret, context.getSystemService(InputMethodManager::class.java))
     }
 
     /**
@@ -314,13 +331,15 @@ class EngineSurfaceView(
         if (engineRunning()) NativeEngine.imeDismissed()
     }
 
-    private fun useFieldKind(kind: String, multiline: Boolean, contextId: Long, keyboard: InputMethodManager) {
+    private fun useFieldKind(kind: String, multiline: Boolean, contextId: Long, caret: Int?, keyboard: InputMethodManager) {
         // Even an identically typed field is a new editing context. Never keep an old
         // InputConnection that could deliver a delayed word into its replacement.
         retireInputConnection()
         fieldKind = kind
         fieldMultiline = multiline
         fieldContext = contextId
+        // Before restartInput: the IME can request its connection and metadata immediately.
+        caretPosition = caret?.takeIf { contextId > 0 && it >= 0 }
         keyboard.restartInput(this)
     }
 
@@ -352,7 +371,13 @@ class EngineInputConnection(
     view: EngineSurfaceView,
     private val engineRunning: () -> Boolean,
     private val fieldContext: Long,
+    private val caret: () -> Int? = { null },
 ) : BaseInputConnection(view, false) {
+    // Bootstrap metadata is safe before this connection sends edits. Afterwards reads are
+    // refused: an old snapshot must not acknowledge
+    // an edit whose engine completion has not arrived. Full text/revision synchronization is
+    // separate, as are writable selection and surrounding-text operations.
+    private var initialSnapshot = true
     private val composition = PageComposition(
         send = { id, phase, text ->
             if (engineRunning() && fieldContext > 0) NativeEngine.imeComposition(id, fieldContext, phase.nativeValue, text)
@@ -362,6 +387,7 @@ class EngineInputConnection(
 
     override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
         if (!canEdit() || !isRepresentableCursorPosition(newCursorPosition)) return false
+        initialSnapshot = false
         return composition.update(text.toString())
     }
 
@@ -372,6 +398,7 @@ class EngineInputConnection(
         // native bridge establishes a supported bound, and inventing one would misrepresent the
         // engine. Only deletions are bounded, because each one becomes per-character key events.
         if (!canEdit() || !isRepresentableCursorPosition(newCursorPosition)) return false
+        initialSnapshot = false
         return composition.commit(text.toString())
     }
 
@@ -385,6 +412,7 @@ class EngineInputConnection(
         // Refused before the composition ends or a key is sent: a failed deletion must leave the
         // IME's composition and the page's text as they were.
         val keys = editDeletion(beforeLength, afterLength) ?: return false
+        initialSnapshot = false
         composition.finish()
         keys.forEach { tapKey(it) }
         return true
@@ -398,6 +426,7 @@ class EngineInputConnection(
             KeyEvent.ACTION_UP -> NativeEngine.KEY_RELEASE
             else -> return false
         }
+        initialSnapshot = false
         NativeEngine.keyInContext(action, event.keyCode, event.unicodeChar, event.metaState, fieldContext)
         return true
     }
@@ -405,14 +434,41 @@ class EngineInputConnection(
     override fun performEditorAction(actionCode: Int): Boolean {
         if (!canEdit()) return false
         val key = editorActionKey(actionCode) ?: return false
+        initialSnapshot = false
         composition.finish()
         tapKey(key)
         return true
     }
 
-    // The bridge has no page selection or surrounding-text channel, so these requests cannot be
-    // represented. BaseInputConnection would answer from its own private editable and report a
-    // selection the page never made, so each is refused or returns null instead.
+    // A zero-width window at a real collapsed caret lets a keyboard bootstrap its position
+    // without claiming any surrounding text. Lengths are maxima, not promised buffer lengths.
+    override fun getExtractedText(request: ExtractedTextRequest?, flags: Int): ExtractedText? {
+        if (request == null || flags != 0) return null // Monitoring text is not implemented.
+        val offset = snapshotCaret() ?: return null
+        return ExtractedText().apply {
+            text = ""
+            startOffset = offset
+            selectionStart = 0
+            selectionEnd = 0
+            partialStartOffset = -1
+            partialEndOffset = -1
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.S)
+    override fun getSurroundingText(beforeLength: Int, afterLength: Int, flags: Int): SurroundingText? {
+        require(beforeLength >= 0 && afterLength >= 0)
+        val offset = snapshotCaret() ?: return null
+        return SurroundingText("", 0, 0, offset)
+    }
+
+    @TargetApi(Build.VERSION_CODES.TIRAMISU)
+    override fun takeSnapshot(): TextSnapshot? = null
+
+    private fun snapshotCaret(): Int? = if (canEdit() && initialSnapshot) caret()?.takeIf { it >= 0 } else null
+
+    // The bridge still cannot place a page selection or read surrounding text. The framework's
+    // private Editable is unrelated to the page, so these operations remain explicitly refused.
     override fun setSelection(start: Int, end: Int): Boolean = false
 
     override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean = false

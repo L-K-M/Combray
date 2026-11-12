@@ -190,6 +190,63 @@ class EngineEventTest {
     }
 
     @Test
+    fun imeShownKeepsItsOldPayloadAndParsesItsNewCaret() {
+        val old = EngineEvent.parse(
+            """{"type":"ime_shown","document":10,"context":7,"multiline":false,"kind":"search",""" +
+                """"show_keyboard":true,"tab":1,"generation":2,"schema":1}""",
+        )
+        val withCaret = EngineEvent.parse(
+            """{"type":"ime_shown","document":10,"context":7,"multiline":false,"kind":"search",""" +
+                """"show_keyboard":true,"caret":9,"tab":1,"generation":2,"schema":1}""",
+        )
+
+        assertEquals(
+            EngineEvent.ImeShown(ViewRef(1, 2), 10, multiline = false, kind = "search", showKeyboard = true, context = 7),
+            old,
+        )
+        assertEquals(
+            EngineEvent.ImeShown(ViewRef(1, 2), 10, multiline = false, kind = "search", showKeyboard = true, context = 7, caret = 9),
+            withCaret,
+        )
+    }
+
+    @Test
+    fun parsesImeCaretChangedWithItsViewDocumentContextAndCaret() {
+        val zero = EngineEvent.parse(
+            """{"type":"ime_caret_changed","document":4294967331,"context":7,"caret":0,"tab":1,"generation":2,"schema":1}""",
+        )
+        val moved = EngineEvent.parse(
+            """{"type":"ime_caret_changed","document":4294967331,"context":7,"caret":12,"tab":1,"generation":2,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.ImeCaretChanged(ViewRef(1, 2), 4294967331L, 7, 0), zero)
+        assertEquals(EngineEvent.ImeCaretChanged(ViewRef(1, 2), 4294967331L, 7, 12), moved)
+    }
+
+    @Test
+    fun anUnknownImeCaretIsNullMissingOrExplicit() {
+        val missing = EngineEvent.parse(
+            """{"type":"ime_caret_changed","document":10,"context":7,"tab":1,"generation":2,"schema":1}""",
+        )
+        val explicit = EngineEvent.parse(
+            """{"type":"ime_caret_changed","document":10,"context":7,"caret":null,"tab":1,"generation":2,"schema":1}""",
+        )
+
+        assertEquals(EngineEvent.ImeCaretChanged(ViewRef(1, 2), 10, 7, null), missing)
+        assertEquals(EngineEvent.ImeCaretChanged(ViewRef(1, 2), 10, 7, null), explicit)
+    }
+
+    /** The caret places a candidate window: only a real nonnegative character offset is one. */
+    @Test
+    fun rejectsImeCaretsThatAreNegativeOutOfRangeOrNotIntegers() {
+        for (caret in listOf("-1", "2147483648", "1.5", "\"x\"", "true", "{}")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                EngineEvent.parse("""{"type":"ime_caret_changed","document":10,"context":7,"caret":$caret,"tab":1,"generation":2,"schema":1}""")
+            }
+        }
+    }
+
+    @Test
     fun keepsUnknownTypesAsOther() {
         assertEquals(EngineEvent.Other("default_handled"), EngineEvent.parse("""{"schema":1,"type":"default_handled","request":"x"}"""))
     }

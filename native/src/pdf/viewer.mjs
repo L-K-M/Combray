@@ -688,9 +688,13 @@ export class Viewer {
     this.stopped = false;
     this.drawing = false;
     this.generation++;
-    if (this.problem || this.root.getAttribute("data-pdf-state") !== ENGINE_STATE.READY) return;
+    if (this.problem) return;
+    const state = this.root.getAttribute("data-pdf-state");
+    if (state !== ENGINE_STATE.READY && state !== ENGINE_STATE.LOADING) return;
     this.startWorker();
-    this.open();
+    // Still downloading: the observer from start() opens the PDF once the engine has it, and
+    // needs a worker by then.
+    if (state === ENGINE_STATE.READY) this.open();
   }
 }
 

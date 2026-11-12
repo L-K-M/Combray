@@ -69,6 +69,11 @@ pub enum DelegateEvent {
         /// cover the page with the keyboard.
         allow_keyboard: bool,
     },
+    ImeCaretChanged {
+        view: ViewKey,
+        control: EmbedderControlId,
+        caret: Option<u32>,
+    },
     /// A `<select>` picker, script dialog or file picker; kept whole until answered.
     PageControl {
         view: ViewKey,
@@ -293,6 +298,19 @@ impl WebViewDelegate for TabDelegate {
             multiline: input_method.multiline(),
             kind,
             allow_keyboard: input_method.allow_virtual_keyboard(),
+        });
+    }
+
+    fn notify_input_method_caret_changed(
+        &self,
+        _webview: WebView,
+        control: EmbedderControlId,
+        caret: Option<u32>,
+    ) {
+        self.push(DelegateEvent::ImeCaretChanged {
+            view: self.view,
+            control,
+            caret,
         });
     }
 

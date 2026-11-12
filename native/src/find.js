@@ -5,9 +5,10 @@
 // The query arrives as a JSON string literal, never as source text. A match lies within one
 // text node (text split by markup is not found) and ignores case wherever lowercasing keeps the
 // text's length; otherwise it is exact. Text that is not rendered is skipped: scripts, styles,
-// form controls and hidden subtrees. Shadow roots and frames are not searched. Budgets: at most
-// maxMatches matches, maxNodes text nodes and maxMillis milliseconds, checked as the walk goes;
-// Servo cannot interrupt this script, so they are what bounds it.
+// form controls, and subtrees that are hidden or invisible (display: none, visibility: hidden).
+// Shadow roots and frames are not searched. Budgets: at most maxMatches matches, maxNodes text
+// nodes and maxMillis milliseconds, checked as the walk goes; Servo cannot interrupt this script,
+// so they are what bounds it.
 //
 // Combray's PDF viewer has no text to search yet: there the script answers { unavailable: true }
 // instead of counting the viewer's own labels.
@@ -107,6 +108,11 @@
     // every node after it in the document, so hidden text before visible text counted.
     var element = node.parentElement;
     if (!element || !element.getClientRects().length) continue;
+    // A box that is not painted (a closed CSS menu, say) shows no text either. Visibility is
+    // inherited, so the text's own element answers for its ancestors. Read last and only for a
+    // node with a match: in Servo every computed-style read is a layout query.
+    var visibility = window.getComputedStyle(element).visibility;
+    if (visibility === "hidden" || visibility === "collapse") continue;
 
     while (at >= 0) {
       if (matches.length >= maxMatches) {

@@ -276,7 +276,6 @@ All notable changes to this project are documented here. The format follows
   5,000 retained visits once you type, and filters in memory.
 - Hister capture no longer has a pause/resume row in More; the capture switch
   stays in Settings.
-- Share is in the bottom bar, next to Save, instead of the More menu.
 - Save shows a bookmark instead of a star, which in Karakeep means
   Favourite: an outline, filled while saving, with a check once saved.
   Recent shows stacked pages instead of a list.
@@ -297,7 +296,7 @@ All notable changes to this project are documented here. The format follows
   default to arm64; set `COMBRAY_ABI=x86_64` for the emulator. The build
   and check scripts also select the NDK's macOS tools and fall back to
   `shasum` (not yet verified on macOS).
-- Gradle 9.8.1, Kotlin 2.4.21 and Room 2.8.5.
+- Gradle 9.8.2, Kotlin 2.4.21 and Room 2.8.5.
 - CI also compiles the device checks, fails when Room's exported schemas
   are not committed or a committed version's schema changed, and checks
   the engine bridge's Rust formatting and page-script syntax.
@@ -334,6 +333,21 @@ All notable changes to this project are documented here. The format follows
   photos, animations and scanner-like codes keep their pixels.
 - Pages that support both color schemes get dark default colors in Dark,
   and new tabs stay dark while waiting for their first page to paint.
+- FUTO Keyboard can show each letter in a new rich-text comment editor
+  before Space commits the word. The keyboard receives the real initial
+  caret instead of an unknown position.
+
+- Pages that lay out their main column with CSS subgrid
+  (`grid-template-columns: subgrid`) fit the screen again: the column
+  now follows the parent grid's columns and line names instead of
+  growing to its content, so an article no longer renders 1260px wide
+  in a 412px viewport with most of the text off screen. Nested
+  subgrids and dynamic style changes follow too; gaps inherited from
+  the parent grid and some baseline cases are not covered yet.
+- A page whose ad scripts close the document from inside
+  `document.write()` content no longer kills the tab after a while
+  ("This page stopped working."): the written content is kept and the
+  page keeps running.
 - A PDF page that failed to draw at the current size can recover: a resize
   draws it again, and tapping its error note asks for the page again. A
   problem that clears the viewer releases its page canvases before the
@@ -723,7 +737,7 @@ All notable changes to this project are documented here. The format follows
   `documents` nor a `history` field, or either of the wrong type) is
   reported as malformed instead of an empty search. A null list, which
   Hister sends for an empty one, still counts as empty.
-- On a screen narrower than 400dp the address sits on its own row above
+- On a screen narrower than 516dp the address sits on its own row above
   the actions, so the site name stays readable. Wider screens keep the
   single row, and snackbars stay clear of the bar either way.
 - Pages read a real screen and window size: `screen.width`,
@@ -858,6 +872,13 @@ All notable changes to this project are documented here. The format follows
   deletes browsing history or closes unused tabs. Until the phone
   reboots, retention ignores a clock that runs ahead of the time that
   actually passed; after a reboot the clock is trusted again.
+- A PDF that was still downloading when you went back and came forward
+  again now opens once it has arrived, instead of showing "The PDF viewer
+  stopped".
+- Find in page no longer counts, or stops at, text a page keeps invisible
+  with `visibility: hidden`, such as the items of a closed menu.
+- A long-press no longer opens a link menu on a page that replaced the
+  pressed one while the finger was still down.
 - A page's file upload no longer copies a file that would fill the phone's
   storage. Combray refuses a pick that would leave less than 512 MB free
   and says so, instead of copying until storage runs out and then

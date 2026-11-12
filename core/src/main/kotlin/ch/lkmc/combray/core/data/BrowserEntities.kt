@@ -23,7 +23,9 @@ enum class VisitKind {
  * requested while no renderer existed); null [url] is the internal new-tab state.
  *
  * A page chooses both strings. Their writer, the coordinator, keeps them within `StoredText`'s
- * bounds: Android cannot read back a row above about 2 MB.
+ * bounds: Android cannot read back a row above about 2 MB. A title is cut to fit. An address is
+ * kept whole or not at all: a shown page at an over-long address also has a null [url], and after
+ * a restart its tab is a new tab.
  */
 @Entity(tableName = "tabs", indices = [Index("state"), Index("lastFocusedAt")])
 data class TabEntity(

@@ -1023,8 +1023,8 @@ def fixed_scroll_page(pending_image):
 
 
 # Find in page: the word appears three times, a screen and a half apart and in three cases, and
-# also where find must not count it (hidden, a script, a form field). The title reports the
-# scroll offset and the selected text: "FIND:<scrollY>:<selection>".
+# also where find must not count it (hidden, invisible, a script, a form field). The title
+# reports the scroll offset and the selected text: "FIND:<scrollY>:<selection>".
 FIND_GAP = "<div style='height:150vh'></div>"
 FIND_PAGE = page(
     "FIND",
@@ -1033,6 +1033,7 @@ FIND_PAGE = page(
     f"{FIND_GAP}<p>Second CombraNeedle here.</p>"
     f"{FIND_GAP}<p>Third COMBRANEEDLE here.</p>{FIND_GAP}"
     "<div hidden>combraneedle hidden</div><div style='display:none'>combraneedle not shown</div>"
+    "<div style='visibility:hidden'>combraneedle <span>not painted</span></div>"
     "<textarea>combraneedle in a field</textarea><script>var unused = 'combraneedle in a script';</script>"
     "<script>function report() { var t = 'FIND:' + Math.round(window.scrollY) + ':' + String(window.getSelection());"
     " if (document.title !== t) document.title = t; }"

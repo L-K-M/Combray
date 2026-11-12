@@ -909,11 +909,21 @@ class BrowserCoordinator(
                 } else {
                     KeyboardRequest.Prepare(event.kind, event.multiline, event.context, requestId = nextRequest++)
                 }
-                state.update { it.copy(keyboard = request) }
+                state.update {
+                    it.copy(keyboard = request, editorCaret = EditorCaret(PageRef(event.view, event.document), event.context, event.caret))
+                }
+            }
+            is EngineEvent.ImeCaretChanged -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
+                state.update { current ->
+                    val field = current.editorCaret
+                    if (field?.page == PageRef(event.view, event.document) && field.context == event.context) {
+                        current.copy(editorCaret = field.copy(position = event.caret))
+                    } else current
+                }
             }
             is EngineEvent.ImeHidden -> view(event.view)?.takeIf { it.nativeTab == selectedNative }?.let {
                 keyboardOwner = null
-                state.update { it.copy(keyboard = KeyboardRequest.Hide) }
+                state.update { it.copy(keyboard = KeyboardRequest.Hide, editorCaret = null) }
             }
             is EngineEvent.Crashed -> {
                 // A crash for a view that was already replaced is stale: that tab is alive. The
@@ -1132,6 +1142,16 @@ class BrowserCoordinator(
         view.currentPage = PageKey(event.document, event.url.substringBefore('#'))
         // Servo hides nothing when a navigation replaces the field's document (a form sent with
         // Enter). A field of the new document may have asked for the keyboard before its commit.
+        // Prepared fields have metadata without owning a visible keyboard. Drop the departing
+        // document's, but preserve a new field already reported before its document commits.
+        if (event.kind == HistoryKind.DOCUMENT_COMMITTED && view.currentDocument != event.document) {
+            state.update { current ->
+                val field = current.editorCaret
+                if (field?.page?.view == event.view && field.page.document == view.currentDocument) {
+                    current.copy(editorCaret = null)
+                } else current
+            }
+        }
         val owner = keyboardOwner
         if (event.kind == HistoryKind.DOCUMENT_COMMITTED && owner?.nativeTab == view.nativeTab && owner.document != event.document) {
             releaseKeyboard(view.nativeTab)
@@ -1647,6 +1667,8 @@ class BrowserCoordinator(
      * or no longer exists. Servo itself hides it only when the field loses focus.
      */
     private fun releaseKeyboard(nativeTab: Long) {
+        // Prepared fields own caret metadata even before they are allowed to show a keyboard.
+        state.update { if (it.editorCaret?.page?.view?.tab == nativeTab) it.copy(editorCaret = null) else it }
         if (keyboardOwner?.nativeTab != nativeTab) return
         keyboardOwner = null
         state.update { it.copy(keyboard = KeyboardRequest.Hide) }
