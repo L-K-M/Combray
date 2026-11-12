@@ -13,7 +13,8 @@ Rules, in the order they are checked:
    reference also hung or crashed on the page: then the page itself is at fault
    and the verdict is `reference-failed`.
 4. No reference was loaded (`--no-reference`): `not-compared`, excluded from
-   triage. No usable reference: `reference-failed`, excluded from triage.
+   triage. No usable reference (it failed, is blank, or is an interstitial while
+   Servo got the page): `reference-failed`, excluded from triage.
 5. Servo reported a navigation error that Chromium did not: `blank` (4) with the
    signature `navigation-error`.
 6. A Servo result with neither page text nor a screenshot gives no evidence
@@ -84,6 +85,16 @@ SCOPE_SEPARATOR = "@"
 # this and its screenshot is near-uniform: an error page, a bot wall drawn on a
 # canvas, or nothing at all.
 _REFERENCE_MIN_TEXT = 50
+
+# The reference also counts as failed when Chromium got an interstitial instead of
+# the page (a bot check or consent wall drawn as a short message) while Servo got
+# the page itself: the reference has under 300 characters of text and loaded no
+# image, and Servo has at least 1000 characters and ten times the reference's text.
+# Judged against such a baseline, the page's images and screenshot all look like
+# Servo's failures. Short pages are safe: Servo's text then stays below the floor.
+_INTERSTITIAL_REFERENCE_MAX_TEXT = 300
+_INTERSTITIAL_SERVO_MIN_TEXT = 1000
+_INTERSTITIAL_TEXT_RATIO = 10
 
 # Grayscale thumbnail standard deviation (0-255) below which a screenshot is
 # near-uniform, i.e. nothing visible was painted.
@@ -249,7 +260,7 @@ def verdict(
         return _excluded(
             VerdictKind.NOT_COMPARED, "no reference was loaded; only crashes and hangs are judged"
         )
-    reference_problem = _reference_problem(ref, img)
+    reference_problem = _reference_problem(ref, img, servo.metrics)
     if reference_problem is not None:
         return _excluded(VerdictKind.REFERENCE_FAILED, reference_problem)
     assert ref.metrics is not None
@@ -368,7 +379,11 @@ def _metric_findings(
     return findings
 
 
-def _reference_problem(ref: PageResult | None, img: Mapping[str, Any] | None) -> str | None:
+def _reference_problem(
+    ref: PageResult | None,
+    img: Mapping[str, Any] | None,
+    servo_metrics: Mapping[str, Any] | None,
+) -> str | None:
     """Why the reference is no usable baseline, or None when it is."""
     if ref is None:
         return "no reference result"
@@ -378,6 +393,9 @@ def _reference_problem(ref: PageResult | None, img: Mapping[str, Any] | None) ->
         return "reference has no probe metrics"
 
     text_length = _number(ref.metrics, "textLength")
+    interstitial = _interstitial_reference(ref.metrics, servo_metrics)
+    if interstitial is not None:
+        return interstitial
     stddev = _stddev(img, "reference")
     # Without image statistics a low-text page cannot be told from a failed one.
     # It is kept: the text and screenshot rules cannot fire on such a baseline,
@@ -386,6 +404,28 @@ def _reference_problem(ref: PageResult | None, img: Mapping[str, Any] | None) ->
         return None
     if text_length < _REFERENCE_MIN_TEXT and stddev < _BLANK_STDDEV_MAX:
         return f"reference has {int(text_length)} characters of text and a blank screenshot"
+    return None
+
+
+def _interstitial_reference(ref: Mapping[str, Any], servo: Mapping[str, Any] | None) -> str | None:
+    """Why the reference looks like an interstitial while Servo got the page, or None."""
+    if servo is None:
+        return None
+    ref_text = _number(ref, "textLength")
+    ref_images = _number(ref, "imagesLoaded")
+    servo_text = _number(servo, "textLength")
+    if ref_text is None or ref_images is None or servo_text is None:
+        return None
+    if (
+        ref_text < _INTERSTITIAL_REFERENCE_MAX_TEXT
+        and ref_images == 0
+        and servo_text >= _INTERSTITIAL_SERVO_MIN_TEXT
+        and servo_text >= _INTERSTITIAL_TEXT_RATIO * ref_text
+    ):
+        return (
+            f"reference has {int(ref_text)} characters of text and no loaded image, "
+            f"servo {int(servo_text)} characters: the reference got an interstitial"
+        )
     return None
 
 
