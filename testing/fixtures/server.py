@@ -56,11 +56,17 @@ Pages
   /scheme.html               page in #2e6b4f, or #3b4f8a when it matches prefers-color-scheme: dark
   /contrast.html             inherited text-color swatch, green paint marker and page canvas;
                               ?mode=white|dark|meta|authored exercises site color declarations
-  /adaptive.html?mode=plain|meta-only|css-only|dark
+  /adaptive.html?mode=plain|meta-only|css-only|dark|meta-both|css-both
                              light page for adaptive dark mode: a text-color border swatch on the left,
                              the green paint marker and the page canvas; the modes opt out in
-                             <meta name=color-scheme> or CSS (light only) or are dark already;
+                             <meta name=color-scheme> or CSS (light only), are dark already, or
+                             declare both schemes (light dark) in either place and set no colors,
+                             so the browser's defaults for the preferred scheme show;
                              title ADAPTIVE:<mode>
+  /adaptive-images.html      light page with two images around the green paint marker: on the left
+                             /adaptive/logo.png, black on its left half and transparent on its right,
+                             and on the right /adaptive/picture.png, an opaque #1b2a4a; adaptive dark
+                             mode lightens the first and keeps the second; title ADAPTIVE:images
   /auth.html                 HTTP Basic sign-in (realm "fixture"): user "ada", password "lovelace" gives
                              title AUTH:ada; otherwise 401 with title AUTH-REQUIRED
   /media.html                <video> and <audio> from /media/slow.bin; title MEDIA:errors:<n> counts their
@@ -184,6 +190,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import zlib
 
 # The report service's own validation, so the fake accepts exactly what the service accepts.
 # Appended, not prepended: the standard library keeps precedence over that directory.
@@ -754,7 +761,34 @@ ADAPTIVE_MODES = {
     "meta-only": ("<meta name='color-scheme' content='light only'>", ""),
     "css-only": ("", ":root{color-scheme:light only}"),
     "dark": ("", "html{background:#202124;color:#e8eaed}"),
+    "meta-both": ("<meta name='color-scheme' content='light dark'>", ""),
+    "css-both": ("", ":root{color-scheme:light dark}"),
 }
+
+
+def png(width, height, pixel):
+    """An RGBA PNG whose `pixel(x, y)` is (red, green, blue, alpha)."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    # Each row starts with its filter type: 0, none.
+    rows = b"".join(b"\x00" + bytes(c for x in range(width) for c in pixel(x, y)) for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)  # 8 bits a channel, RGBA
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+ADAPTIVE_IMAGE_SIZE = 16
+# A shape drawn for a light page, as a logo or an icon: black on the left half, transparent on the
+# right. On a darkened page it would vanish, so adaptive dark mode paints it light.
+ADAPTIVE_LOGO = png(ADAPTIVE_IMAGE_SIZE, ADAPTIVE_IMAGE_SIZE,
+                    lambda x, y: (0, 0, 0, 255 if x < ADAPTIVE_IMAGE_SIZE // 2 else 0))
+# An opaque dark image, as a photo taken at night: adaptive dark mode keeps its pixels.
+ADAPTIVE_PICTURE = png(ADAPTIVE_IMAGE_SIZE, ADAPTIVE_IMAGE_SIZE, lambda x, y: (0x1b, 0x2a, 0x4a, 255))
+ADAPTIVE_IMAGES_PAGE = page(
+    "ADAPTIVE:images",
+    "<img id='logo' src='/adaptive/logo.png'><div id='paint'></div><img id='picture' src='/adaptive/picture.png'>",
+    "<style>body{margin:0}#logo,#paint,#picture{position:fixed;top:0;width:40vw;height:100vh}"
+    "#logo{left:0}#paint{left:40vw;width:20vw;background:#2e6b4f}#picture{left:60vw}</style>")
 
 # Each control fills the page except a left margin, so a tap in the middle reaches it and a pixel
 # in the margin shows the page has painted.
@@ -1578,6 +1612,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 head + "<style>body{margin:0}#ink,#paint{position:fixed;top:0;bottom:0}"
                 "#ink{left:0;width:0;border-left:40vw solid currentColor}"
                 "#paint{left:40vw;width:20vw;background:#2e6b4f}" + colors + "</style>"))
+        if path == "/adaptive-images.html":
+            return self.send(http.HTTPStatus.OK, ADAPTIVE_IMAGES_PAGE)
+        if path == "/adaptive/logo.png":
+            return self.send(http.HTTPStatus.OK, ADAPTIVE_LOGO, "image/png")
+        if path == "/adaptive/picture.png":
+            return self.send(http.HTTPStatus.OK, ADAPTIVE_PICTURE, "image/png")
         if path == "/has-selector.html":
             return self.send(http.HTTPStatus.OK, HAS_SELECTOR_PAGE)
         if path == "/document.pdf":

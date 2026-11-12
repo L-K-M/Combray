@@ -188,7 +188,7 @@ Settings › Display › Show tab count controls the counter on the Recent (tabs
 
 Support light/dark appearance, meaningful TalkBack labels and state announcements, at least 48dp primary touch targets, font scaling, landscape, system bars and keyboard insets. Android's font size scales the app's own text, reader view included, but not web pages: only the display density reaches Servo. Proposed default: More › Text size zooms every page in steps from 80% to 150% (100%, the page's own size, until changed), and reader view scales its type by the same step on top of Android's font size, so one control sets both. Servo's page zoom lays the page out again, so pictures and layout grow with the text; following the system font size instead (up to 200%) would halve a phone's CSS width and break most sites. Do not depend on long press, swipe, color, hover, or tiny icon meaning for an essential action. Native permission and certificate information can be more detailed when necessary; keep everyday browsing free of engine implementation terms.
 
-Proposed default (owner request, 10 November 2026, after Safari's Adaptive Dark Mode): while Combray is dark, Settings › Display › Darken light pages (on by default) has Servo paint light pages that declare no dark support with dark colors. Light backgrounds darken; text, borders and outlines keep a readable contrast against them; pictures, video, canvases and areas under background images keep their pixels. Pages that declare dark support or `only` with `color-scheme` (CSS or metadata), and elements that do, are painted as authored. Scripts still read the page's own colors, because only painting changes. A light Combray theme always shows pages as authored. Not yet: per-site exceptions, inverting dark icons in `<img>`, and the white frame before a dark page's first paint.
+Proposed default (owner request, 10 November 2026, after Safari's Adaptive Dark Mode): while Combray is dark, Settings › Display › Darken light pages (on by default) has Servo paint light pages that declare no dark support with dark colors. Light backgrounds darken; text, borders and outlines keep a readable contrast against them; pictures, video, canvases and areas under background images keep their pixels, except simple dark logos and icons (`<img>`, CSS background icons, inline SVG), whose lightness is inverted so they stay visible. Pages that declare dark support or `only` with `color-scheme` (CSS or metadata), and elements that do, are painted as authored; a page that declares both `light` and `dark` gets the dark scheme's default colors while Combray is dark. Scripts still read the page's own colors, because only painting changes. A light Combray theme always shows pages as authored. While light pages are darkened an empty tab is dark too, so a new page does not flash white before it paints. Not yet: per-site exceptions; logos the classifier keeps on purpose (bold lettering in a white box, artwork that mixes dark and colored parts) stay dark.
 
 ## 3. Architecture and engine boundary
 
@@ -704,7 +704,7 @@ Suggested performance measurements are targets to establish after M0, not assert
 | Karakeep / Hister / Kagi roles | Confirmed | Existing personal services |
 | Kotlin/Compose + Rust bridge | Verified (M0 bridge, M1 app) | Own `cdylib`, one engine thread, JSON events; Compose BOM 2026.09.00 with Material 3 |
 | Brand palette, no dynamic color | Proposed (M4) | Complete light and dark Material 3 schemes from the icon's pine and ivory, with a sage secondary and an ochre tertiary kept for memory and Hister accents. `ThemeContrastTest` checks text (4.5:1) and outline (3:1) contrast on the JVM; not yet reviewed on a device |
-| Darken light pages in Dark | Proposed (default on) | Owner asked for something like Safari's Adaptive Dark Mode; on by default and the switch's placement are proposals. Servo darkens at display-list time, so styles, scripts, images and media are untouched; opt-outs follow `color-scheme` dark or `only`. [ENGINE_SPIKE.md section 60](ENGINE_SPIKE.md#60-adaptive-dark-mode-10-november-2026) |
+| Darken light pages in Dark | Proposed (default on) | Owner asked for something like Safari's Adaptive Dark Mode; on by default and the switch's placement are proposals. Servo darkens at display-list time, so styles, scripts and image source pixels are untouched; opt-outs follow `color-scheme` dark or `only`. Simple dark logos and icons are painted with inverted lightness, judged from a sample of their pixels; which images count is a heuristic, not an owner decision. ENGINE_SPIKE.md sections [60](ENGINE_SPIKE.md#60-adaptive-dark-mode-10-november-2026) and [61](ENGINE_SPIKE.md#61-adaptive-dark-mode-logos-icons-and-dark-canvases-10-november-2026) |
 | Recent sheet initial layout | Proposed; implemented as the sheet (M1) | Both concepts accepted in general; no exclusive final selection. Recent home remains possible: Recent is one composable over `BrowserCoordinator.recent()` |
 | Service settings in Room, not DataStore | Decided (M2) | A service row's fingerprint and generation bind outbox jobs; keeping it in the outbox's database makes configuration changes and job invalidation one transaction |
 | HTTP client: `HttpURLConnection` | Decided (M2) | No extra dependency; redirects are not followed (they could carry a credential or page text to another origin); bounded timeouts and response sizes |
@@ -795,11 +795,15 @@ in [ENGINE_SPIKE.md](ENGINE_SPIKE.md#video-downloads-12-november-2026).
 
 Adaptive dark mode (10 November 2026): while Combray is dark, Servo paints
 light pages that declare no dark support with dark colors, and a Settings
-switch turns it off. Engine evidence and limits are in
-[ENGINE_SPIKE.md section 60](ENGINE_SPIKE.md#60-adaptive-dark-mode-10-november-2026);
+switch turns it off. Simple dark logos and icons are inverted, pages that
+support both schemes get the dark one, and an empty tab is dark. Engine
+evidence and limits are in ENGINE_SPIKE.md sections
+[60](ENGINE_SPIKE.md#60-adaptive-dark-mode-10-november-2026) and
+[61](ENGINE_SPIKE.md#61-adaptive-dark-mode-logos-icons-and-dark-canvases-10-november-2026);
 `AdaptiveDarkModeTest` is the device check. Next for this feature, if the
-owner wants it: per-site "show original colors", inverting dark `<img>`
-icons, and a dark first frame (the shell's clear color is white).
+owner wants it: per-site "show original colors", and the logos the
+classifier keeps on purpose (bold lettering in a white box, artwork that
+mixes dark and colored parts).
 
 Address editing in place (9 November 2026, owner request after a screen
 recording of the old sheet): the page's address opens in the bar like Home's

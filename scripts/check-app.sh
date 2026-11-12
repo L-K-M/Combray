@@ -55,6 +55,8 @@ fi
 PIDS=()
 # The device's own "stay awake while charging" setting, restored on exit.
 STAY_ON_ORIGINAL=""
+# The device's own night mode when the run turned it off, restored on exit.
+NIGHT_ORIGINAL=""
 # Called by the EXIT trap, which shellcheck does not follow.
 # shellcheck disable=SC2317,SC2329
 cleanup() {
@@ -62,6 +64,11 @@ cleanup() {
     "${ADB[@]}" reverse --remove "tcp:$FIXTURE_PORT" 2>/dev/null || true
     if [ -n "$STAY_ON_ORIGINAL" ]; then
         "${ADB[@]}" shell settings put global stay_on_while_plugged_in "$STAY_ON_ORIGINAL" 2>/dev/null || true
+    fi
+    if [ -n "$NIGHT_ORIGINAL" ]; then
+        if ! "${ADB[@]}" shell cmd uimode night "$NIGHT_ORIGINAL" > /dev/null 2>&1; then
+            echo "!! could not restore night mode to $NIGHT_ORIGINAL" >&2
+        fi
     fi
 }
 trap cleanup EXIT
@@ -155,11 +162,30 @@ pixels = data[16:]
 sys.exit(0 if any(pixels[i] or pixels[i + 1] or pixels[i + 2] for i in range(0, len(pixels), 4 * 997)) else 1)'
 }
 
+# The checks compare page colors with what their pages authored, on a light device as in CI.
+# A device in night mode makes Combray dark, which darkens light pages, and some checks then
+# fail. Run with the device in light mode; checks of the dark appearance choose it in the app.
+use_light_mode() {
+    local night
+    if ! night="$("${ADB[@]}" shell cmd uimode night 2>/dev/null | tr -d '\r' | sed -n 's/^Night mode: //p')"; then
+        echo "!! could not read night mode from $SERIAL" >&2
+        exit 1
+    fi
+    case "$night" in
+        yes | auto | custom_schedule | custom_bedtime) ;;
+        *) return 0 ;;
+    esac
+    NIGHT_ORIGINAL="$night"
+    echo "==> night mode off for the checks (was: $night)"
+    "${ADB[@]}" shell cmd uimode night no > /dev/null
+}
+
 wait_for_package_manager
 if ! display_works; then
     echo "!! screenshots of $SERIAL are all black (the home screen too): restart the emulator" >&2
     exit 1
 fi
+use_light_mode
 
 # sha256sum, or shasum on macOS: the same output.
 sha256() { if command -v sha256sum > /dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }

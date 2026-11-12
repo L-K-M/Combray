@@ -334,6 +334,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Simple dark logos and icons stay visible when light pages are darkened;
+  photos, animations and scanner-like codes keep their pixels.
+- Pages that support both color schemes get dark default colors in Dark,
+  and new tabs stay dark while waiting for their first page to paint.
 - FUTO Keyboard can show each letter in a new rich-text comment editor
   before Space commits the word. The keyboard receives the real initial
   caret instead of an unknown position.
