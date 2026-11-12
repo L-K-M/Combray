@@ -11,6 +11,37 @@ A second pass checked the claims against source and corrected them. Servo paths 
 
 Status: you chose option C, a fullscreen tap-to-play native player, first (28 October 2026). Option B, an inline backend on the device's decoders, is acceptable later. On 29 October 2026 you confirmed C's network rules, with home networks and tailnets open to any page, and accepted Media3 with OkHttp at its APK size and the notice and Play wording. Leaving MSE out is still a proposed default. Phase C1 is implemented and passes its checks on the emulator, not yet on a phone (see [phase C1](#phase-c1-a-fullscreen-player-for-media-combray-cancels)). On 6 November 2026 you chose to keep Play reachable after the first notice: the offer stays until you play or close it, the address field shows Play, and a tap on the page's own player offers it again. The `canPlayType` claim mechanism of [phase C2](#phase-c2-x-posts-through-an-hls-claim) claims the progressive types since 5 November 2026, and phase C2 itself — the HLS rows, `media3-exoplayer-hls` and the player's HLS branch — is implemented since 6 November 2026; an X-post check on a phone remains.
 
+## Downloading a video (12 November 2026)
+
+Owner request: download videos as well as playing them. Menu › Download video
+saves the page's one video, or opens the media list when there are several.
+The list keeps Play and adds a labeled download button beside each video.
+The selected tab and existing playback behavior do not change.
+
+Implementation defaults: a foreground, cancellable download remuxes progressive
+video or finite HLS into one MP4, keeping separate audio when the stream has it.
+Media3 Transformer 1.11.1 uses the existing `MediaNetwork` for every request,
+playlist, segment and key, with the same per-hop policy, origin-only referrer
+and Servo user agent. No browser cookies or integration credentials are exported;
+platform media diagnostics stay off. No encoding or default/local data source is
+allowed. An extensionless playlist gets the player's one format-based HLS retry.
+
+Downloads use private staging, then a pending MediaStore Downloads entry which
+becomes visible only after the complete copy. Failures and cancellation remove
+partial output; the next download cleans abandoned private files and this app's
+pending video entries after process death. Completed files are never cleaned.
+Names are generated locally, not from server headers or address parameters.
+
+Keep Combray open while downloading. One download runs at a time and survives
+Activity recreation, but backgrounding cancels it and process death does not
+resume it. Proposed bounds: 512 MiB of input/output and twenty minutes. Live
+streams, DRM, `blob:`/MSE sources, authenticated export and unsupported MP4 codecs
+are outside this slice. A failed or incomplete transfer never says it was saved.
+
+Files: `app/.../download/VideoDownloads.kt`, `VideoExporter.kt`, `VideoFiles.kt`
+and `ui/VideoDownloadDialog.kt`. Synthetic host/device evidence and remaining
+checks: [ENGINE_SPIKE.md](ENGINE_SPIKE.md#video-downloads-12-november-2026).
+
 ## Owner decisions
 
 - **Fullscreen player first** (28 October 2026): option C, a native player that opens fullscreen after a tap. See the [plan](#plan).

@@ -33,8 +33,8 @@ class MoreActionsTest {
             mediaPage = MediaPageRef("tab", 1),
         )
         assertEquals(
-            listOf(MoreAction.FIND, MoreAction.PLAY_MEDIA, MoreAction.REPORT_SITE, MoreAction.TEXT_SIZE),
-            moreActions(withMedia, readerDisplay = ReaderDisplay.PAGE).dropWhile { it != MoreAction.FIND }.take(4),
+            listOf(MoreAction.FIND, MoreAction.PLAY_MEDIA, MoreAction.DOWNLOAD_VIDEO, MoreAction.REPORT_SITE, MoreAction.TEXT_SIZE),
+            moreActions(withMedia, readerDisplay = ReaderDisplay.PAGE).dropWhile { it != MoreAction.FIND }.take(5),
         )
         // Reader view covers the page, not its media.
         assertEquals(true, MoreAction.PLAY_MEDIA in moreActions(withMedia, readerDisplay = ReaderDisplay.ARTICLE))

@@ -4318,3 +4318,105 @@ Evidence so far:
   independent PR review remain pending. Physical-phone and authenticated
   live-editor acceptance are not claimed. Full selection/surrounding-text
   synchronization remains separate from this bootstrap fix.
+
+## Video downloads (12 November 2026)
+
+Owner request: save a video as well as playing it. Menu › Download video starts
+the page's one video, or opens the media list for several. That list also has
+separate, labeled Play and Download targets. No playback, engine, JNI or Servo
+source changed. Engine pin stays `f0f5e511aa7ff4db8fe593e8fffd20d867e0743e`.
+
+`app/.../download/VideoExporter.kt` uses Media3 Transformer 1.11.1 to remux
+progressive videos and finite HLS into one MP4, including separate audio. It
+forbids encoding and DRM sessions, disables platform diagnostics and supplies
+only an OkHttp data source backed by `MediaNetwork`. Playlists, segments, keys
+and redirects therefore keep the player's per-hop URL/DNS/address policy,
+origin-only referrer and Servo agent, without browser cookies or integration
+credentials. Extensionless progressive input gets one HLS retry only on an
+unrecognized format. Shared input-byte and output-size bounds are 512 MiB;
+the foreground coordinator also bounds a transfer to twenty minutes.
+
+`VideoDownloads.kt` snapshots the original request, allows one foreground
+transfer, survives Activity recreation and exposes only transfer categories.
+Cancel and app backgrounding stop export before deleting private output. A
+completed MP4 is copied to a pending MediaStore Downloads entry, then published
+as one non-cancellable local commit. Failed publication removes its entry.
+The next download cleans abandoned staging and only this package's pending
+video entries after process death; it never deletes completed downloads.
+There is no background service, retry/resume promise, authenticated export,
+live recording, MSE/`blob:` support or general file-downloader expansion.
+
+Evidence on macOS arm64, JDK 21, Rust 1.97.1, NDK r29:
+
+- Red: both new menu regressions failed on unchanged main: no Download video
+  row and no media-list download target. They pass after the implementation.
+- Host: all 1,177 JVM tests (422 app, 689 core, 66 engine), lint, debug and
+  release assembly and device-test compilation pass. Menu/controller/storage/budget tests cover the transfer
+  rules; the large-font dialog regression failed before making its message
+  scrollable and now passes. Status changes have polite live-region semantics.
+  All 205 native host checks and 187 build/fixture-script checks pass.
+  Licensee includes the new Transformer, Effect and Muxer artifacts, all
+  Apache-2.0, in its generated notice inventory.
+- Native: `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh`
+  passes, using the unchanged pin (4m44s). No native source edits were needed.
+- API 36 Google APIs arm64 emulator: all six `VideoDownloadTest` checks pass
+  with real Servo and Android's real Downloads provider. The menu
+  preserves the exact tab and page; saved MP4s expose video samples and, for
+  HLS and extensionless HLS, independent audio samples via a local file
+  descriptor. Every recorded request has no Cookie, an origin-only Referer
+  and Servo's agent; no media-address token reaches logcat. Live playlists
+  and a segment redirect to `file:` fail without a saved/pending file.
+  Cancel during a real transfer removes private output without publication.
+  The large-font media-sheet accessibility check and all four toolbar checks
+  pass. Fourteen of fifteen existing player checks pass; the second-half
+  pixel assertion in `aPageVideoPlaysAfterATapWithoutServosCookie` reads
+  `252e4b` instead of blue. It fails identically on a separately built
+  `origin/main` (`7522e3d4`) APK with the same native engine and emulator.
+  No playback code or assertion was changed to conceal that baseline failure.
+- Independent GLM 5.3 CLI review: no important findings. Its non-blocking
+  suggestion about asynchronous cancellation was rejected against the pinned
+  1.11.1 sources: `Transformer.cancel()` returns `void` and
+  `TransformerInternal.cancel()` blocks on `canceledConditionVariable`
+  until release, matching the comment and real-transfer cancellation check.
+
+### Hosted merge-gate follow-up
+
+The first hosted API-30 gate on `af67b697` (Engine run `43207483423`)
+completed all checks: 237 passed and one failed. All six video-download cases,
+all existing player cases and process death passed. The only failure was
+`ScrollTest.homeAndTabSwitchingRestoreTheControls`, before it exercised Home
+or tab switching: the immediate assertion still found the New tab button.
+
+That test used the page's `SCROLL-MIDDLE` title as if it acknowledged the
+separate viewport paint. `BrowserScreen` intentionally keeps the bar until
+that paint answer or its existing 400 ms hold deadline; the existing
+`BottomBarVisibilityTest` covers that contract. The test now waits at most
+five seconds for the actual toolbar disappearance before keeping its original
+absence, Home restoration and tab-restoration assertions. No production
+behavior, global device deadline or renderer changed. This is a synchronization
+fix for the observed red test, not a waived failure or an unconditional sleep.
+
+With the fix, all 14 ScrollTest and six VideoDownloadTest cases pass on a
+fresh API-36 Google APIs arm64 emulator. The full local JVM/lint/debug/test/release
+Gradle gate passes as well. Evidence: `build/device-checks/merge-scroll-video-20261112/`.
+
+After merging #344, the matching arm64 native engine was rebuilt and all 26
+checks in ScrollTest, VideoDownloadTest and AdaptiveDarkModeTest pass together
+on that fresh emulator. The integrated tree also passes 206 native host tests,
+193 script/fixture tests, 74 page-script/PDF tests and the full Gradle gate,
+including release assembly and packaged-arm64 verification. Evidence:
+`build/device-checks/merge-integrated-video-20261112/`. The updated head still
+requires its full hosted Engine gate and GLM review.
+
+Reproduction commands (SDK path depends on the host):
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease
+python3 -I -m unittest discover -s scripts/tests
+COMBRAY_ABI=arm64 scripts/build-native.sh
+scripts/check-app.sh emulator-5582 ch.lkmc.combray.VideoDownloadTest
+```
+
+No real service, history, reported page or physical phone was used for this
+feature's validation. Full current-head CI and GLM review remain merge gates;
+physical-phone and live-site download acceptance remain unverified.

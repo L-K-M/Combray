@@ -15,6 +15,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Menu › Download video saves a video as an MP4 in Downloads without
+  leaving the page. The media list also has a download button beside each
+  video. Finite HLS streams include their separate audio; keep Combray
+  open while downloading. Live streams, protected media and files over
+  512 MiB are not supported.
 - Long-press a web image and choose Download image to save it to Downloads
   without opening a tab. Android handles progress, completion and retries,
   including after Combray closes. This uses a new request without the page’s

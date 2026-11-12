@@ -109,6 +109,8 @@ Pages
   /media/hls-init.mp4        fMP4 init segment for the video playlist
   /media/hls-video-{0,1}.m4s fMP4 media segments (video/iso.segment)
   /media/hls-audio-{0,1}.aac ADTS AAC media segments
+  /media/hls-live.m3u8       a live video playlist (no ENDLIST), for download refusal
+  /media/hls-refused.m3u8    a finite playlist whose segment redirects to file:, for download policy checks
                              /_admin/state "media" counts all of them under "hls"
   /media/redirect?to=clip|file[&k=<alnum>]
                              302 to /media/clip.mp4?k=..., or to file:///system/etc/hosts
@@ -1510,6 +1512,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/media/hls.m3u8" or path == "/media/hls-manifest":
             return self.send_media("hls", hls_master_playlist(media_key(query)).encode(),
                                    "application/vnd.apple.mpegurl")
+        if path in ("/media/hls-live.m3u8", "/media/hls-refused.m3u8"):
+            key = media_key(query)
+            segment = f"/media/hls-video-0.m4s?k={key}" if path == "/media/hls-live.m3u8" else f"/media/redirect?to=file&k={key}"
+            playlist = hls_media_playlist([(3.0, segment)], f"/media/hls-init.mp4?k={key}")
+            if path == "/media/hls-live.m3u8":
+                playlist = playlist.replace("#EXT-X-PLAYLIST-TYPE:VOD\n", "").replace("#EXT-X-ENDLIST\n", "")
+            return self.send_media("hls", playlist.encode(), "application/vnd.apple.mpegurl")
         if path == "/media/hls-video.m3u8":
             key = media_key(query)
             entries = [(3.0, f"/media/hls-video-{i}.m4s?k={key}") for i in range(len(HLS_VIDEO_SEGMENTS))]

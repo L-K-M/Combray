@@ -320,12 +320,13 @@ class AccessibilityTest {
     fun theMediaSheetIsAccessible() {
         show(LARGE_FONT) {
             Column(Modifier.width(NARROW_WIDTH)) {
-                MediaEntries(MEDIA, onPlay = {})
+                MediaEntries(MEDIA, onPlay = {}, onDownload = {})
             }
         }
 
         assertTargetsAreAccessible()
         compose.onNodeWithContentDescription("Play video clip.mp4 from example.org").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Download video clip.mp4 from example.org").performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription("Play audio tone.wav from cdn.example.org").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Audio and video on this page").assertIsDisplayed()
     }

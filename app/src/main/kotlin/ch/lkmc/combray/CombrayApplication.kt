@@ -30,6 +30,9 @@ import ch.lkmc.combray.core.integration.ReportEnvironment
 import ch.lkmc.combray.core.integration.UrlConnectionTransport
 import ch.lkmc.combray.core.integration.WorkManagerScheduler
 import ch.lkmc.combray.core.media.MediaNetwork
+import ch.lkmc.combray.download.VideoDownloads
+import ch.lkmc.combray.download.VideoExporter
+import ch.lkmc.combray.download.VideoFiles
 import ch.lkmc.combray.engine.NativeEngineHost
 import ch.lkmc.combray.player.PlaybackRequests
 import ch.lkmc.combray.ui.ReportDrafts
@@ -89,6 +92,7 @@ class CombrayApplication : Application(), OutboxHost {
         process.lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = graph.browser.setAppVisibility(AppVisibility.FOREGROUND)
             override fun onStop(owner: LifecycleOwner) {
+                graph.videoDownloads.cancel()
                 graph.browser.setAppVisibility(AppVisibility.BACKGROUND)
                 graph.browser.persistProfile()
             }
@@ -186,8 +190,15 @@ class AppGraph(application: Application) {
     /** The site report being previewed; it outlives rotation, not the process. */
     internal val reportDrafts = ReportDrafts(scope, integrations.reports::submit)
 
-    /** The media player's HTTP client, built at the first playback. */
+    /** One HTTP client and network policy for playback and video exports. */
     val media by lazy { MediaNetwork() }
+
+    /** Foreground video exports outlive Activity recreation, but do not promise background work. */
+    internal val videoDownloads = VideoDownloads(
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+        VideoFiles(application),
+        VideoExporter(application, media)::export,
+    )
 
     fun engineRunning(): Boolean = browser.browserState.value.engine.let {
         it == EngineStatus.STARTING || it == EngineStatus.READY

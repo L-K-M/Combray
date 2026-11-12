@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import androidx.core.view.descendants
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -72,6 +73,11 @@ class ScrollTest {
         val tab = device.browser.browserState.value.activeTab!!.id
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
+        // The DOM scroll can arrive before the paint acknowledgement releases the held bar.
+        // Observe the actual hide before testing that Home and tab selection undo it.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription(NEW_TAB).fetchSemanticsNodes().isEmpty()
+        }
         compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
 
         device.browser.newTab()

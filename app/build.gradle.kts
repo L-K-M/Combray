@@ -130,6 +130,7 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.exoplayer.hls)
+    implementation(libs.androidx.media3.transformer)
     constraints {
         implementation(libs.guava) {
             because(
@@ -141,6 +142,7 @@ dependencies {
 
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
     // Queue and search-panel checks compose real in-memory Room data over fixture transports.
