@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the Combray APK from the command line and stage it into dist/.
 #
-# Release build by default; --debug builds the debug-variant APK instead.
+# Debug build by default; --release builds the signed release-variant APK instead.
 # Builds the Servo engine first (scripts/build-native.sh, which also fetches and patches Servo
 # and installs the pinned NDK and Rust toolchain when missing) for COMBRAY_ABI: arm64 (phones)
 # by default, x86_64 for the emulator. The first run takes an hour or more.
@@ -9,14 +9,14 @@
 # Release builds require the COMBRAY_KEYSTORE_* / COMBRAY_KEY_* environment variables
 # documented in docs/BUILDING.md. An engine-less Kotlin CI APK is never staged.
 #
-#   scripts/build.sh                  # incremental release build -> dist/
-#   scripts/build.sh --debug          # debug build -> dist/
+#   scripts/build.sh                  # incremental debug build -> dist/
+#   scripts/build.sh --release        # signed release build -> dist/
 #   scripts/build.sh --install        # build, then install + launch on the connected device
 #   scripts/build.sh --clean          # wipe Gradle build output first
 #   scripts/build.sh --check          # print resolved config; build nothing
-#   COMBRAY_ABI=x86_64 scripts/build.sh --debug   # for the emulator
+#   COMBRAY_ABI=x86_64 scripts/build.sh   # for the emulator
 #
-# Usage: scripts/build.sh [--debug] [--install] [--clean] [--check]
+# Usage: scripts/build.sh [--debug|--release] [--install] [--clean] [--check]
 # Requirements: Python 3.11+, a JDK, the Android SDK (local.properties, ANDROID_HOME, or a standard SDK
 #               location, which is detected), rustup, uv, CMake, make and clang (docs/BUILDING.md);
 #               adb for --install.
@@ -29,13 +29,14 @@ cd "$(dirname "$SELF")/.."
 
 usage() { awk 'NR==1 && /^#!/ {next} /^#/ {sub(/^# ?/,""); print; next} {exit}' "$SELF"; }
 
-VARIANT="release"
+VARIANT="debug"
 CLEAN=0
 CHECK=0
 INSTALL=0
 for arg in "$@"; do
     case "$arg" in
         --debug) VARIANT="debug" ;;
+        --release) VARIANT="release" ;;
         --install) INSTALL=1 ;;
         --clean) CLEAN=1 ;;
         --check) CHECK=1 ;;

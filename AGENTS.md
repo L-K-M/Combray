@@ -43,8 +43,8 @@ The family's build, install, release, and CI tooling is in place ahead of the ap
 | What | Command |
 |---|---|
 | Documentation check | `python3 scripts/check_docs.py` |
-| Release APK → `dist/` | `scripts/build.sh` |
-| Debug APK → `dist/` | `scripts/build.sh --debug` |
+| Debug APK → `dist/` | `scripts/build.sh` |
+| Release APK → `dist/` | `scripts/build.sh --release` |
 | Build, install, launch on a device | `scripts/build.sh --install` (or `scripts/install.sh [--release]`) |
 | Resolved config, no build | `scripts/build.sh --check` |
 | CI gate | `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease`, plus the schema, `cargo fmt` and page-script checks in `.github/workflows/ci.yml` |
