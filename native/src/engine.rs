@@ -71,7 +71,7 @@ use crate::reload_pull::{
     StartPosition,
 };
 use crate::user_agent;
-use crate::viewport::{self, GlRect, Strip, StripCheck, ViewportAck};
+use crate::viewport::{self, ClearColor, GlRect, Strip, StripCheck, ViewportAck};
 use crate::wakeup::{self, PaintRetry};
 
 /// Receives engine events on the engine thread.
@@ -901,10 +901,9 @@ impl Engine {
         // pages document.execCommand, as other browsers do.
         preferences.set_value("dom_exec_command_enabled", PrefValue::Bool(true));
         set_pdf_viewer_preferences(&mut preferences);
-        // Servo's default, set here because `paint` reads rows back expecting this color where a
-        // frame has no content.
-        preferences.shell_background_color_rgba =
-            viewport::CLEAR_RGBA.map(|c| f64::from(c) / 255.0);
+        // Set here because `paint` reads rows back expecting this color where a frame has no
+        // content. `set_light_pages` changes it while Servo runs.
+        preferences.shell_background_color_rgba = shell_background(self.clear_color());
         // Firefox for Android's Gecko token, or firewalls that take a Firefox agent without one
         // for a forged one refuse every page (see `user_agent`).
         match user_agent::with_gecko_token(&preferences.user_agent) {
@@ -1232,10 +1231,31 @@ impl Engine {
     }
 
     fn set_light_pages(&mut self, light_pages: LightPages) {
+        if self.light_pages == light_pages {
+            return;
+        }
         self.light_pages = light_pages;
+        // Before the pages paint anew: a display list built now paints for this color.
+        if let Some(runtime) = &self.runtime {
+            runtime.servo.set_preference(
+                "shell_background_color_rgba",
+                PrefValue::from(shell_background(self.clear_color())),
+            );
+        }
         for tab in self.tabs.values() {
             tab.webview
                 .set_adaptive_dark_mode(light_pages == LightPages::Darkened);
+        }
+        // The rows under the app's controls, and the surface while no page is shown.
+        self.needs_paint = true;
+    }
+
+    /// The color of the surface where no page has painted: the one most pages start from,
+    /// so that opening a page in a dark app does not flash white first.
+    fn clear_color(&self) -> ClearColor {
+        match self.light_pages {
+            LightPages::AsAuthored => ClearColor::LIGHT,
+            LightPages::Darkened => ClearColor::DARKENED,
         }
     }
 
@@ -3008,11 +3028,12 @@ impl Engine {
         }
         self.needs_paint = false;
 
+        let clear_color = self.clear_color();
         let Some(tab) = self.active.and_then(|tab| self.tabs.get_mut(&tab)) else {
             // No selected view: clear, so a closed page never stays on screen. Nothing else is
             // meant to be there, so the whole page counts as shown.
             context.prepare_for_rendering();
-            clear(&*context.gleam_gl_api());
+            clear(&*context.gleam_gl_api(), clear_color);
             context.present();
             self.acknowledge_viewport(Strip::Painted);
             return;
@@ -3020,12 +3041,12 @@ impl Engine {
 
         tab.webview.paint();
         let strip = self.viewport.check().map_or(Strip::Painted, |check| {
-            read_strip(&runtime.page_context, check)
+            read_strip(&runtime.page_context, check, clear_color)
         });
         // The page goes at the top of the surface; the rows below it lie under the app's
         // controls and get the clear color.
         context.prepare_for_rendering();
-        clear(&*context.gleam_gl_api());
+        clear(&*context.gleam_gl_api(), clear_color);
         if let Some(copy) = runtime.page_context.render_to_parent_callback() {
             let target = viewport::page_target(
                 to_size(context.size()),
@@ -3121,16 +3142,21 @@ fn gl_rect(rect: GlRect) -> euclid::Rect<i32, euclid::UnknownUnit> {
     )
 }
 
-/// Clears the bound framebuffer to the color Servo leaves where a frame has no content.
-fn clear(gl: &dyn gleam::gl::Gl) {
-    let [red, green, blue, alpha] = viewport::CLEAR_RGBA.map(|c| f32::from(c) / 255.0);
+/// The value of Servo's `shell_background_color_rgba` preference for `color`.
+fn shell_background(color: ClearColor) -> [f64; 4] {
+    color.components().map(f64::from)
+}
+
+/// Clears the bound framebuffer to `color`, which Servo leaves where a frame has no content.
+fn clear(gl: &dyn gleam::gl::Gl, color: ClearColor) {
+    let [red, green, blue, alpha] = color.components();
     gl.disable(gleam::gl::SCISSOR_TEST);
     gl.clear_color(red, green, blue, alpha);
     gl.clear(gleam::gl::COLOR_BUFFER_BIT);
 }
 
 /// Reads the page rows `check` names back from the frame just rendered into `page`.
-fn read_strip(page: &OffscreenRenderingContext, check: StripCheck) -> Strip {
+fn read_strip(page: &OffscreenRenderingContext, check: StripCheck, clear: ClearColor) -> Strip {
     let read = |rect: GlRect| {
         page.read_to_image(DeviceIntRect::from_origin_and_size(
             DeviceIntPoint::new(rect.x, rect.y),
@@ -3143,6 +3169,7 @@ fn read_strip(page: &OffscreenRenderingContext, check: StripCheck) -> Strip {
         strip.as_ref().map(|image| image.as_raw().as_slice()),
         above.as_ref().map(|image| image.as_raw().as_slice()),
         usize::try_from(check.strip.width).unwrap_or(0),
+        clear,
     )
 }
 

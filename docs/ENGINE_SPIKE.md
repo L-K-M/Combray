@@ -3959,6 +3959,206 @@ gradient is judged against its average stop, so over the light part of a hard-ed
 dark split it can fall slightly below 4.5:1. A frame's transparent areas are assumed to show a
 darkened parent; over a parent that keeps its light colors, its text can be light on light.
 
+## 61. Adaptive dark mode: logos, icons and dark canvases (10 November 2026)
+
+Section 60 left three gaps that showed on real pages: dark logos and icons in `<img>` and CSS
+backgrounds vanished on the darkened page, a page that supports both schemes (`light dark`) was
+shown light, and a new tab flashed white before its page painted. The pin moves to tested
+revision `1f613a704e6d78b7aa8575450905e0f646085079` (upstream base still v0.7.0), incorporating
+[Servo PR #46](https://github.com/L-K-M/servo/pull/46) and
+[Servo PR #47](https://github.com/L-K-M/servo/pull/47).
+
+### Logos, icons and form marks (PR #46)
+
+The engine reads a sample of each image's pixels, a grid of at most 32 by 32, once per image,
+and inverts the lightness of two kinds on a darkened backdrop. Everything else keeps its pixels.
+
+- Dark on clear: at least 40% of the samples are transparent, at least half of the opaque part
+  is dark (OKLab L below 0.5), at most 10% of it is light, and it is flat (at most eight colors
+  cover 90% of it). That is a dark logo or icon drawn for a light page.
+- Dark on light: an opaque image of at most 512 by 512 pixels with a light edge, at least 60%
+  light background, dark marks on 0.5% to 20% of it, little color and little in between. That is
+  a black and white logo in a white box; inverted, its box becomes the backdrop's dark.
+- Kept on purpose: photos and colorful artwork; animated images (later frames may differ);
+  marks that may be a code for a scanner (inside the box around the dark samples at least 25%
+  is dark and at least 15% of neighboring samples differ, as in a QR or bar code); and anything
+  unclear. Bold lettering in a white box can pass for a code and stays as authored.
+- The same rule covers `<img>`, raster and SVG, and CSS background images that do not fill
+  their area (icons, including a `<select>` arrow). Inline SVG keeps the rule of section 60.
+  An image is inverted only where the painted backdrop is dark (luminance below 0.18).
+- Text and icons painted over a kept picture keep their authored colors. The display list
+  builder notes each opaque kept image and each background of at least half opacity painted
+  over one, in paint order; what is painted later looks up the topmost of them under its
+  center. An opaque background image counts where it shows inside its element, also when it
+  does not fill the background: a strip repeated along one axis behind a heading, a photo at
+  a size of its own. The areas are indexed by horizontal bands of 256 pixels, so a long page
+  with many pictures does not compare each box with each picture.
+- Tones are cached by image key; beyond 4096 images a new one replaces one other.
+- Text with next to no authored contrast against its authored backdrop (below 1.25:1) keeps
+  its color: it was drawn for something the backdrop does not know, such as a picture
+  positioned behind it.
+- The checked radio bullet is a border in `FieldText` instead of a black background, so it
+  follows the foreground rule like the checkbox mark.
+
+Layout unit tests (`adaptive_dark`, 34) cover the classifier (logos, icons, photos, gradients,
+codes with and without a quiet zone, simple marks that are not codes, an animated image), the
+cache at its limit, and the band index against comparing every area. The embedder test gained
+cases for each kind in `<img>` and as a background, a picture with black text and a dark icon
+over it, a white box over that picture, black text over a background picture and on a repeated
+strip, text beside an element that shows part of a larger background picture, and the radio
+bullet.
+
+A helper review found four real defects before the PR's own review; each got a failing test
+first. Inverted codes: 250 of 378 synthetic QR and bar codes with a quiet zone counted as dark
+on light, which the code rule now keeps (of 1066 synthetic codes only ones too small to scan
+still invert). Dark icons and text over a photo were lightened. The radio bullet followed
+`currentColor`. Animated images were judged by their first frame. The PR's review then found
+three more: black text over a light background picture was painted (232, 232, 232) on
+(220, 220, 220); the cache forgot every tone at its limit, so a page with more images read all
+of them for every display list; and the lookups compared every box with every picture.
+
+### Dark canvases and the first frame (PR #47)
+
+- Paint applies `shell_background_color_rgba` to every frame instead of once at startup, so
+  the embedder can change it at runtime.
+- A top-level document, or a frame whose used scheme differs from its embedding element's,
+  paints its scheme's default canvas under a canvas background that is not opaque: white,
+  the dark scheme's `Canvas` (30, 30, 30), or the darkened canvas in adaptive dark mode. An
+  already-dark default stays dark. The shell color shows only where no document has painted.
+- A matching-scheme frame remains transparent. The embedding scheme travels with viewport
+  updates to local, remote, pending and history pipelines. Paint-only changes refresh that
+  metadata too, and repair the inner image/iframe fragment's style along with its outer box.
+  A scheme-only update repaints without firing a DOM resize event. Initial `about:blank`
+  frames keep a transparent canvas, using the document lifecycle flag rather than its URL.
+- The root's `color-scheme` hint follows which of `light` and `dark` the
+  `<meta name=color-scheme>` content names. Both give `light dark`, so the page follows the
+  preferred scheme. Dark without light (`only dark`, `dark only`, `dark` with a custom scheme)
+  gives `dark`, as `dark` alone did; a helper review found that those forms got the light
+  hint. Anything else keeps the light hint of section 22. The theme of exactly `light` or
+  `dark` metadata, which decides `prefers-color-scheme`, is unchanged.
+
+Embedder cases: metadata and CSS `dark`, `light dark` and `dark light`, and metadata
+`only dark`, `dark only` and `dark sepia` under a dark theme, with adaptive dark mode off and
+on, show the dark `Canvas` and `CanvasText` (232, 232, 232); `color-scheme: normal` on the root
+follows the preferred scheme, as its system colors do in Stylo; a `Canvas`-colored box matches
+the canvas; changing or removing the metadata follows; of several metadata the first valid one
+counts; under a light theme `light dark` is white and `dark` and `only dark` stay dark; a blue
+shell color does not show through a page without a background; a document without a root
+shows the shell color and follows the preference at runtime. A matching-scheme iframe shows
+its parent's red canvas, changing its embedding element's scheme gives it a white backplate
+without a resize event, and changing the child to match restores transparency. An initial
+`about:blank` frame stays transparent over a dark parent. Paint-only image-rendering changes
+still work.
+
+Negative controls, each by removing one commit's code: without the default canvas, "metadata
+dark" has a white canvas with light text; without the hint, "metadata light dark" is black on
+white; without the per-frame color, the blue shell case shows white. The new CSS `normal`
+case failed with adaptive mode on, showing (24, 24, 24) instead of the system `Canvas`
+(30, 30, 30). The dynamic frame case failed both before backplate plumbing and with inner
+style repair disabled: it still showed the parent's (80, 0, 0) instead of white. Disabling
+only the initial-about:blank exception makes that case white instead of the parent's red.
+
+```sh
+./mach build --profile medium --media-stack dummy
+cargo test --profile medium -p servo-layout --lib adaptive_dark
+cargo test --profile medium -p servo --test adaptive_dark_mode
+```
+
+The theme tests (`test_theme_change`, `test_dark_theme_keeps_unstyled_page_colors_light`,
+`test_theme_change_media_query_event`) and the paint timing tests still pass, each run alone
+with `--exact`.
+
+Web platform tests, the branch against a base build (`./mach test-wpt --profile medium`, the
+base through `--bin`): the initial comparison found six new iframe reftest failures in
+`css/css-color-adjust`, which `tests/wpt/include.ini` skips. That exposed the missing opaque
+backplate rule for a frame whose scheme differs from its embedding element's. The follow-up
+implements it, including paint-only changes and cross-origin propagation. That exposed one
+more regression, the tentative initial-about:blank reftest, which the lifecycle exception
+fixes. At `1f613a704e`, the final run of that suite and
+`html/semantics/document-metadata/the-meta-element/color-scheme` matches the saved pre-change
+baseline in all 47 test results and 193 subtest results. All eight mismatch reftests and the
+initial-about:blank case pass. The inherited seven failing reftests and 99 failing subtests
+remain; this is not a wholly passing WPT suite. The saved baseline used a pre-change desktop
+binary; its run-info revision names the checkout that drove WPT, not that binary, so no exact
+baseline binary revision is claimed here.
+
+### App
+
+The native bridge sets the shell color with the page colors: `ClearColor::DARKENED`
+(24, 24, 24) while light pages are darkened, white otherwise, at startup and whenever
+`SetLightPages` changes it. The surface clear and the viewport's content check use the same
+color, so an empty dark frame is not taken for page content.
+
+Device test `AdaptiveDarkModeTest` (arm64 emulator, API 36, Dark) gained three cases on the
+fixture server: `/adaptive.html?mode=meta-both` and `css-both` show the dark scheme's canvas
+and text, and the page's own colors in a light theme; `/adaptive-images.html` shows a black
+logo light and a photo-like picture with its pixels, and both as authored with the setting
+off; a new tab on a slow page stays dark until the page paints. With the previous engine
+library and the new tests, those three fail ("an empty tab is dark: ffffff", "darkened: logo
+000000", "meta-both in a dark theme: text 000000, canvas ffffff") and the earlier three pass.
+With this pin all 50 checks in `AdaptiveDarkModeTest`, `PageContrastTest`, `PdfTest` and
+`BrowsingTest` pass on the arm64 API-36 emulator, after rebuilding the native engine and both
+APKs. The earlier full run at `61d62373dc` passed 232 of 234 checks: Home's known touch-target
+failure and an engine-free `ReaderScrollTest` case failed. The Reader case reproduces in
+isolation on this emulator. No physical-phone or live-service acceptance is claimed.
+
+Synthetic sample pages (logos in each form, icon sprites, a product photo, a chart, a QR code,
+form controls, pages with each `color-scheme` declaration) were also compared in emulator
+screenshots before and after.
+
+The device checks compare authored page colors and so far ran on light devices, as in CI. On
+an emulator in night mode three of them fail, with the engine of section 60 as well:
+`BrowsingTest.tenTabsCanBeSwitched` reads a darkened page color, and
+`PdfTest.aPdfInAFrameKeepsServosStandInPage` and
+`HisterTest.aPdfInTheViewerIsNotSentAsTheViewersLabels` see dark colors although they choose
+the light theme in the app first. In light mode all three pass. `scripts/check-app.sh` now
+turns a device's night mode off for the run and restores it afterwards; with that the three
+pass on the night-mode emulator. Not explained: in the Hister check the PDF viewer stays dark
+(`1c1c1e`) for the whole wait after the theme changed, while the same viewer page follows the
+theme in `PdfTest`. Whether that is test timing or a viewer defect is open.
+
+Local host checks on macOS arm64 (JDK 21, Rust 1.97.1, NDK r29): 1,147 JVM tests,
+`lintDebug`, debug and device-test assembly, 205 bridge unit tests, `cargo fmt --check`,
+193 script/fixture tests, documentation checks and `git diff --check` pass. APK verification
+confirms arm64 libraries. Notices were regenerated; only the pin's input hash changed.
+
+### Limits
+
+Not yet: per-site exceptions. A black and white logo with bold lettering in an opaque white box
+is kept, as is artwork that mixes dark and colored parts (a multicolor SVG logo, a chart with
+dark axes): its dark parts stay dark. `border-image` and images drawn by `filter` are not
+classified. The size limit of dark on light uses the decoded image, so a `srcset` candidate
+above 512 pixels is kept while a smaller one of the same logo is inverted. The paint-order
+lookup uses rectangles in one scroll frame: rounded corners, gradients and transformed
+ancestors, nonrectangular clips and group opacity/filters are approximated. A matching-scheme
+frame remains transparent as specified; adaptive mode still assumes its parent was darkened
+there, which can give light text on light when the parent opted out. The remaining limits of
+section 60 (positioned elements, gradients, matching-scheme frames over a light parent) still
+hold.
+
+### Integration refresh (12 November 2026)
+
+PR #344 now incorporates main's keyboard-caret and document/subgrid work, retaining
+`f0f5e511aa7ff4db8fe593e8fffd20d867e0743e` and its generated notices rather than
+rolling back those fixes. A fetch of the downstream history confirms that the
+original tested dark-mode pin `1f613a704e` is an ancestor of this pin.
+
+The two earlier hosted emulator attempts exited with QEMU SIGSEGV before all
+classes ran. They remain failures, not device acceptance. This refresh also
+incorporates main's `ubuntu-24.04` device host and owned-process/kernel diagnostics;
+it does not change the emulator, renderer, fixtures or timeouts. Main's subsequent
+full Engine run `43094790426` passed, but does not establish this PR's result.
+The updated PR still requires its own successful full Engine gate and latest-head
+review. No physical phone or personal browsing data is used.
+
+Refreshed local checks on macOS arm64, JDK 21, Rust 1.97.1 and NDK r29 pass:
+1,160 JVM tests, lint, debug/test/release assembly, 206 bridge tests, Rust formatting,
+193 script/fixture tests, shellcheck and 74 page-script/PDF JavaScript tests. The
+arm64 native rebuild and packaged-ABI verification also pass. Gradle reported
+shared-cache workspace warnings but completed all 390 tasks; no shared
+cache was deleted. Documentation and diff checks pass. No device was connected for
+a new local runtime run, so the hosted device gate remains unverified.
+
 ## 60. document.write() end-of-input and subgrid fallback (11 November 2026)
 
 A site report (pages reproduced under the site-check policy, not named

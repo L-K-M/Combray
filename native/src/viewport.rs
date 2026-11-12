@@ -15,8 +15,23 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 /// What Servo paints where a frame has no content (its `shell_background_color_rgba`), and
-/// what the engine paints under the app's controls.
-pub(crate) const CLEAR_RGBA: [u8; 4] = [255, 255, 255, 255];
+/// what the engine paints under the app's controls and while no page is shown. It is the
+/// color most pages start from, so a page that has not painted yet does not flash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClearColor([u8; 4]);
+
+impl ClearColor {
+    /// The canvas of a page painted as authored, unless it says otherwise.
+    pub(crate) const LIGHT: Self = Self([255, 255, 255, 255]);
+
+    /// What Servo's adaptive dark mode paints a white canvas as.
+    pub(crate) const DARKENED: Self = Self([24, 24, 24, 255]);
+
+    /// Red, green, blue and alpha, each from 0 to 1.
+    pub(crate) fn components(self) -> [f32; 4] {
+        self.0.map(|component| f32::from(component) / 255.0)
+    }
+}
 
 /// A size in device pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -185,27 +200,36 @@ impl ViewportAck {
 /// What a frame's new rows (`strip`) and the shown rows above them (`above`) hold, from RGBA
 /// pixels read back in rows of `width` pixels; `None` when there are no such rows or reading
 /// them failed.
-pub(crate) fn classify(strip: Option<&[u8]>, above: Option<&[u8]>, width: usize) -> Strip {
+pub(crate) fn classify(
+    strip: Option<&[u8]>,
+    above: Option<&[u8]>,
+    width: usize,
+    clear: ClearColor,
+) -> Strip {
     let Some(strip) = strip else {
         return Strip::Unknown;
     };
-    if has_content(strip) {
+    if has_content(strip, clear) {
         return Strip::Painted;
     }
     let row = width.max(1) * 4;
     match above {
-        Some(above) if above.chunks_exact(row).any(|line| !has_content(line)) => {
+        Some(above)
+            if above
+                .chunks_exact(row)
+                .any(|line| !has_content(line, clear)) =>
+        {
             Strip::MatchesAbove
         },
         _ => Strip::ClearOnly,
     }
 }
 
-/// Whether any RGBA pixel differs in color from [CLEAR_RGBA] (alpha is ignored).
-fn has_content(pixels: &[u8]) -> bool {
+/// Whether any RGBA pixel differs in color from `clear` (alpha is ignored).
+fn has_content(pixels: &[u8], clear: ClearColor) -> bool {
     pixels
         .chunks_exact(4)
-        .any(|pixel| pixel[..3] != CLEAR_RGBA[..3])
+        .any(|pixel| pixel[..3] != clear.0[..3])
 }
 
 fn to_i32(value: u32) -> i32 {
@@ -447,32 +471,69 @@ mod tests {
 
     #[test]
     fn any_other_color_in_the_new_rows_is_content() {
-        assert_eq!(classify(Some(&DARK), Some(&DARK), 2), Strip::Painted);
-        assert_eq!(classify(Some(&DARK), None, 2), Strip::Painted);
+        assert_eq!(
+            classify(Some(&DARK), Some(&DARK), 2, ClearColor::LIGHT),
+            Strip::Painted
+        );
+        assert_eq!(
+            classify(Some(&DARK), None, 2, ClearColor::LIGHT),
+            Strip::Painted
+        );
     }
 
     #[test]
     fn clear_new_rows_under_content_may_be_a_frame_for_the_smaller_page() {
-        assert_eq!(classify(Some(&CLEAR), Some(&DARK), 2), Strip::ClearOnly);
-        assert_eq!(classify(Some(&CLEAR), None, 2), Strip::ClearOnly);
+        assert_eq!(
+            classify(Some(&CLEAR), Some(&DARK), 2, ClearColor::LIGHT),
+            Strip::ClearOnly
+        );
+        assert_eq!(
+            classify(Some(&CLEAR), None, 2, ClearColor::LIGHT),
+            Strip::ClearOnly
+        );
     }
 
     #[test]
     fn one_clear_row_above_makes_clear_new_rows_look_right_either_way() {
         let text_then_gap = [DARK, CLEAR].concat();
         assert_eq!(
-            classify(Some(&CLEAR), Some(&text_then_gap), 2),
+            classify(Some(&CLEAR), Some(&text_then_gap), 2, ClearColor::LIGHT),
             Strip::MatchesAbove
         );
         let text_only = [DARK, DARK].concat();
         assert_eq!(
-            classify(Some(&CLEAR), Some(&text_only), 2),
+            classify(Some(&CLEAR), Some(&text_only), 2, ClearColor::LIGHT),
             Strip::ClearOnly
         );
     }
 
     #[test]
+    fn the_clear_color_in_use_decides_what_is_content() {
+        // Rows in the darkened clear color; DARKENED_PAGE's second pixel is light text.
+        const DARKENED: [u8; 8] = [24, 24, 24, 255, 24, 24, 24, 255];
+        const DARKENED_PAGE: [u8; 8] = [24, 24, 24, 255, 232, 232, 232, 255];
+        let clear = ClearColor::DARKENED;
+        assert_eq!(
+            classify(Some(&DARKENED), Some(&DARKENED_PAGE), 2, clear),
+            Strip::ClearOnly
+        );
+        assert_eq!(
+            classify(Some(&DARKENED), Some(&DARKENED), 2, clear),
+            Strip::MatchesAbove
+        );
+        // White is the clear color only while pages are painted as authored.
+        assert_eq!(classify(Some(&CLEAR), None, 2, clear), Strip::Painted);
+        assert_eq!(
+            classify(Some(&DARKENED), None, 2, ClearColor::LIGHT),
+            Strip::Painted
+        );
+    }
+
+    #[test]
     fn unread_rows_are_unknown() {
-        assert_eq!(classify(None, Some(&DARK), 2), Strip::Unknown);
+        assert_eq!(
+            classify(None, Some(&DARK), 2, ClearColor::LIGHT),
+            Strip::Unknown
+        );
     }
 }
