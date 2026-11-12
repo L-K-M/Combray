@@ -4150,21 +4150,34 @@ Evidence on macOS arm64, JDK 21, Rust 1.97.1, NDK r29:
 
 - Red: both new menu regressions failed on unchanged main: no Download video
   row and no media-list download target. They pass after the implementation.
-- Host: focused menu/controller/storage/budget tests, lint, debug and release
-  assembly and device-test compilation pass. All 205 native host checks and
-  187 build/fixture-script checks pass. Licensee includes the new Transformer,
-  Effect and Muxer artifacts, all Apache-2.0, in its generated notice inventory.
+- Host: all 1,177 JVM tests (422 app, 689 core, 66 engine), lint, debug and
+  release assembly and device-test compilation pass. Menu/controller/storage/budget tests cover the transfer
+  rules; the large-font dialog regression failed before making its message
+  scrollable and now passes. Status changes have polite live-region semantics.
+  All 205 native host checks and 187 build/fixture-script checks pass.
+  Licensee includes the new Transformer, Effect and Muxer artifacts, all
+  Apache-2.0, in its generated notice inventory.
 - Native: `COMBRAY_ABI=arm64 CARGO_BUILD_JOBS=6 scripts/build-native.sh`
   passes, using the unchanged pin (4m44s). No native source edits were needed.
-- API 36 Google APIs arm64 emulator: the first five `VideoDownloadTest`
-  checks pass with real Servo and Android's real Downloads provider. The menu
+- API 36 Google APIs arm64 emulator: all six `VideoDownloadTest` checks pass
+  with real Servo and Android's real Downloads provider. The menu
   preserves the exact tab and page; saved MP4s expose video samples and, for
   HLS and extensionless HLS, independent audio samples via a local file
   descriptor. Every recorded request has no Cookie, an origin-only Referer
   and Servo's agent; no media-address token reaches logcat. Live playlists
   and a segment redirect to `file:` fail without a saved/pending file.
-  The added real-transfer Cancel check and surrounding player/accessibility
-  regressions still need execution on the final candidate.
+  Cancel during a real transfer removes private output without publication.
+  The large-font media-sheet accessibility check and all four toolbar checks
+  pass. Fourteen of fifteen existing player checks pass; the second-half
+  pixel assertion in `aPageVideoPlaysAfterATapWithoutServosCookie` reads
+  `252e4b` instead of blue. It fails identically on a separately built
+  `origin/main` (`7522e3d4`) APK with the same native engine and emulator.
+  No playback code or assertion was changed to conceal that baseline failure.
+- Independent GLM 5.3 CLI review: no important findings. Its non-blocking
+  suggestion about asynchronous cancellation was rejected against the pinned
+  1.11.1 sources: `Transformer.cancel()` returns `void` and
+  `TransformerInternal.cancel()` blocks on `canceledConditionVariable`
+  until release, matching the comment and real-transfer cancellation check.
 
 Reproduction commands (SDK path depends on the host):
 

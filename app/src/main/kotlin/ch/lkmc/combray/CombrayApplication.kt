@@ -190,7 +190,7 @@ class AppGraph(application: Application) {
     /** The site report being previewed; it outlives rotation, not the process. */
     internal val reportDrafts = ReportDrafts(scope, integrations.reports::submit)
 
-    /** The media player's HTTP client, built at the first playback. */
+    /** One HTTP client and network policy for playback and video exports. */
     val media by lazy { MediaNetwork() }
 
     /** Foreground video exports outlive Activity recreation, but do not promise background work. */
