@@ -106,6 +106,7 @@ import ch.lkmc.combray.engine.Appearance
 import ch.lkmc.combray.engine.ControlResponse
 import ch.lkmc.combray.engine.EngineSurfaceView
 import ch.lkmc.combray.engine.LeavePageChoice
+import ch.lkmc.combray.engine.MediaKind
 import ch.lkmc.combray.engine.PageControlContent
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -143,6 +144,7 @@ fun BrowserScreen(
     // BackHandler's lifecycle effect throws (MainThreadStateTest).
     val state by browser.browserState.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val textSize by graph.settings.textSize.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
+    val videoDownload by graph.videoDownloads.current.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val tabCounter by graph.settings.tabCounter.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val lightPagesInDark by graph.settings.lightPagesInDark.collectAsStateWithLifecycle(
         context = Dispatchers.Main.immediate,
@@ -239,6 +241,7 @@ fun BrowserScreen(
     val mediaPlayable = stringResource(R.string.notice_media_playable)
     val play = stringResource(R.string.action_play)
     val mediaPageLeft = stringResource(R.string.notice_media_page_left)
+    val videoDownloadBusy = stringResource(R.string.video_download_busy)
     val popupBlocked = stringResource(R.string.notice_popup_blocked)
     val undo = stringResource(R.string.action_undo)
     val openedInBackground = stringResource(R.string.notice_opened_in_background)
@@ -248,6 +251,20 @@ fun BrowserScreen(
         scope.launch {
             val request = browser.playbackRequest(page, entry) ?: return@launch
             context.startActivity(PlayerActivity.intent(context, graph.playback.offer(request)))
+        }
+    }
+    val downloadVideo = { page: MediaPageRef, entry: Long ->
+        scope.launch {
+            val request = browser.playbackRequest(page, entry) ?: return@launch
+            if (!graph.videoDownloads.start(request)) notify(videoDownloadBusy)
+        }
+    }
+    val downloadVideos = { page: MediaPageRef ->
+        val videos = browser.browserState.value.activeTab?.takeIf { it.mediaPage == page }?.media?.filter { it.kind == MediaKind.VIDEO }.orEmpty()
+        when (videos.size) {
+            0 -> notify(mediaPageLeft)
+            1 -> downloadVideo(page, videos.single().id)
+            else -> sheet = Sheet.MEDIA
         }
     }
     // One entry plays at once; several open a choice. Only for the page the tab still shows: a notice that outlived its page says so.
@@ -608,6 +625,7 @@ fun BrowserScreen(
             MoreAction.PAGE_INFO -> sheet = Sheet.PAGE_INFO
             MoreAction.FIND -> browser.openFind()
             MoreAction.PLAY_MEDIA -> tab?.mediaPage?.let(playMedia)
+            MoreAction.DOWNLOAD_VIDEO -> tab?.mediaPage?.let(downloadVideos)
             MoreAction.REPORT_SITE -> startReport()
             MoreAction.TEXT_SIZE -> sheet = Sheet.TEXT_SIZE
             MoreAction.SETTINGS -> sheet = Sheet.SETTINGS
@@ -862,6 +880,10 @@ fun BrowserScreen(
         ToolbarMenu(menu, tab, readerDisplay, selectMenuAction)
     }
 
+    videoDownload?.let { download ->
+        VideoDownloadDialog(download, onCancel = graph.videoDownloads::cancel, onDismiss = graph.videoDownloads::dismiss)
+    }
+
     val dismiss = { sheet = Sheet.NONE }
     when (sheet) {
         Sheet.NONE -> Unit
@@ -888,6 +910,10 @@ fun BrowserScreen(
                     onPlay = { entry ->
                         dismiss()
                         openPlayer(page, entry.id)
+                    },
+                    onDownload = { entry ->
+                        dismiss()
+                        downloadVideo(page, entry.id)
                     },
                     onDismiss = dismiss,
                 )

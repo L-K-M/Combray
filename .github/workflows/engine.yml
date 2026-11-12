@@ -49,6 +49,7 @@ on:
       - core/src/main/kotlin/ch/lkmc/combray/core/media/**
       - core/build.gradle.kts
       - app/src/main/kotlin/ch/lkmc/combray/player/**
+      - app/src/main/kotlin/ch/lkmc/combray/download/**
       - app/src/main/AndroidManifest.xml
       - app/src/main/res/xml/network_security_config.xml
       - build.gradle.kts

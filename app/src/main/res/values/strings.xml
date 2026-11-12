@@ -173,6 +173,17 @@
     <string name="action_play">Play</string>
     <string name="action_play_media">Play audio or video</string>
     <string name="media_sheet_title">Audio and video on this page</string>
+    <string name="video_download">Download video</string>
+    <string name="video_download_entry">Download video %1$s from %2$s</string>
+    <string name="video_download_title">Video download</string>
+    <string name="video_download_working">Downloading video… Keep Combray open until it finishes.</string>
+    <string name="video_download_saving">Saving video to Downloads…</string>
+    <string name="video_download_saved">Video saved to Downloads.</string>
+    <string name="video_download_failed">Could not download this video. Protected videos and unsupported formats cannot be saved.</string>
+    <string name="video_download_live">Live streams cannot be downloaded as a complete video.</string>
+    <string name="video_download_large">This video exceeds the 512 MiB download limit.</string>
+    <string name="video_download_timeout">The video download took too long. Try again on a faster connection.</string>
+    <string name="video_download_busy">A video is already downloading.</string>
     <!-- A row of the media sheet: kind and file name, with the site below it. -->
     <string name="media_entry_video">Video · %1$s</string>
     <string name="media_entry_audio">Audio · %1$s</string>

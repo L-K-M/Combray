@@ -52,6 +52,12 @@ internal val OutlinedFlagIcon: ImageVector = materialIcon(
     "M14 6l-1-2H5v17h2v-7h5l1 2h7V6h-6zm4 8h-4l-1-2H7V6h5l1 2h5v6z",
 )
 
+/** Material's "file_download": save a video to Downloads. */
+internal val DownloadIcon: ImageVector = materialIcon(
+    "FileDownload",
+    "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z",
+)
+
 /** A 24dp icon of one filled path; [Icon][androidx.compose.material3.Icon] tints it. */
 private fun materialIcon(name: String, pathData: String): ImageVector = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
     .addPath(addPathNodes(pathData), fill = SolidColor(Color.Black))
