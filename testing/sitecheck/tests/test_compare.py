@@ -341,6 +341,39 @@ class ScopeTest(unittest.TestCase):
                 verdict = compare.verdict(servo(text="hi", textLength=2), reference, img)
                 self.assertEqual(verdict.kind, VerdictKind.OK)
 
+    def test_interstitial_reference_is_excluded(self) -> None:
+        # Chromium got a short bot-check message while Servo got the page, whose
+        # broken images would otherwise count against Servo.
+        reference = ref(text="x" * 100, textLength=100, imagesLoaded=0)
+        page = servo(text="y" * 5000, textLength=5000, imagesBroken=5)
+        verdict = compare.verdict(page, reference, images(score=0.1))
+        self.assertEqual(verdict.kind, VerdictKind.REFERENCE_FAILED)
+        self.assertIn("interstitial", verdict.findings[0].detail)
+
+    def test_interstitial_reference_thresholds(self) -> None:
+        cases = [
+            # (reference text, reference loaded images, servo text, verdict)
+            (299, 0, 2990, VerdictKind.REFERENCE_FAILED),
+            (300, 0, 3000, VerdictKind.OK),
+            (299, 1, 2990, VerdictKind.OK),
+            (99, 0, 1000, VerdictKind.REFERENCE_FAILED),
+            (99, 0, 999, VerdictKind.OK),
+            (200, 0, 2000, VerdictKind.REFERENCE_FAILED),
+            (200, 0, 1999, VerdictKind.OK),
+        ]
+        for ref_text, ref_images, servo_text, expected in cases:
+            with self.subTest(ref_text=ref_text, ref_images=ref_images, servo_text=servo_text):
+                reference = ref(text="x" * ref_text, textLength=ref_text, imagesLoaded=ref_images)
+                page = servo(text="y" * servo_text, textLength=servo_text)
+                verdict = compare.verdict(page, reference, images())
+                self.assertEqual(verdict.kind, expected)
+
+    def test_interstitial_rule_needs_both_measurements(self) -> None:
+        reference = ref(text="x" * 100, textLength=100)
+        del reference.metrics["imagesLoaded"]
+        page = servo(text="y" * 5000, textLength=5000)
+        self.assertEqual(compare.verdict(page, reference, images()).kind, VerdictKind.OK)
+
     def test_servo_navigation_error_with_a_working_reference(self) -> None:
         verdict = compare.verdict(servo(status=PageStatus.NAVIGATION_ERROR), ref(), images())
 
