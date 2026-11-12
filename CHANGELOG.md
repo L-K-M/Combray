@@ -201,6 +201,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `scripts/build.sh` now builds the debug APK by default and `--install`
+  installs it without extra flags; pass `--release` for the signed release
+  variant (the `COMBRAY_KEYSTORE_*` / `COMBRAY_KEY_*` variables still apply
+  there only). `--debug` remains accepted.
 - Tapping the address no longer opens a sheet: the bar itself becomes the
   field, rides up with the keyboard in one motion and dims the page, which
   keeps its layout meanwhile. ← (or Back, or a tap on the page) leaves, ✕

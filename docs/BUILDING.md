@@ -55,9 +55,9 @@ Verified on Linux x86_64 (Debian 12 container, 16 cores, 125 GiB RAM). The scrip
 ## Build the app
 
 ```sh
-scripts/build.sh --debug                       # arm64 (phones) → dist/combray-debug-v<version>-android-arm64.apk
-COMBRAY_ABI=x86_64 scripts/build.sh --debug    # for the emulator
-scripts/build.sh --debug --install             # then install and launch on the connected device
+scripts/build.sh                               # arm64 (phones) → dist/combray-debug-v<version>-android-arm64.apk
+COMBRAY_ABI=x86_64 scripts/build.sh            # for the emulator
+scripts/build.sh --install                     # then install and launch on the connected device
 ```
 
 With `--install`, the build first asks adb for a usable device (`scripts/install.sh --device-check`) and stops at once if there is none, naming the likely cause: USB debugging off, the phone's "Allow USB debugging?" prompt not accepted, an offline connection, or a second adb version on `PATH`. `scripts/install.sh` runs the same check before Gradle and uses the SDK's adb, as Gradle does.
@@ -78,7 +78,7 @@ replaces partial or edited source and removes untracked leftovers, reusing
 the downloaded commit and ignored build caches. `servo-checkout/servo` is
 disposable; develop engine changes in a separate downstream checkout.
 
-`scripts/build.sh [--debug] [--install]` then runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
+`scripts/build.sh [--release] [--install]` then runs Gradle, verifies the produced APK and stages it with a SHA-256 sidecar in `dist/`. Its filename uses the actual packaged architecture (`arm64` or `x86_64`). Missing Servo/runtime libraries, mismatched ELF architectures and stale Gradle output metadata fail before staging. These checks establish packaging, not runtime support or signature validity.
 
 Plain Gradle still builds without `build-native.sh` (CI does this); that APK contains no engine and the app says so. `scripts/build.sh` refuses to stage it. Unit tests, lint and compiling the device checks need no engine:
 
@@ -130,7 +130,7 @@ The owner confirmed `ch.lkmc.combray` as the release ID on 19 October 2026. Supp
 Set passwords through your local secret manager or hidden shell input. All four variables are required together. An incomplete set fails every Gradle invocation, including debug builds, tests and IDE sync; unset all four or complete the set. Values are not printed. Then run:
 
 ```sh
-scripts/build.sh
+scripts/build.sh --release
 "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 ```
 
