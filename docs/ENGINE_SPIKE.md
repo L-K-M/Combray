@@ -4179,6 +4179,28 @@ Evidence on macOS arm64, JDK 21, Rust 1.97.1, NDK r29:
   `TransformerInternal.cancel()` blocks on `canceledConditionVariable`
   until release, matching the comment and real-transfer cancellation check.
 
+### Hosted merge-gate follow-up
+
+The first hosted API-30 gate on `af67b697` (Engine run `43207483423`)
+completed all checks: 237 passed and one failed. All six video-download cases,
+all existing player cases and process death passed. The only failure was
+`ScrollTest.homeAndTabSwitchingRestoreTheControls`, before it exercised Home
+or tab switching: the immediate assertion still found the New tab button.
+
+That test used the page's `SCROLL-MIDDLE` title as if it acknowledged the
+separate viewport paint. `BrowserScreen` intentionally keeps the bar until
+that paint answer or its existing 400 ms hold deadline; the existing
+`BottomBarVisibilityTest` covers that contract. The test now waits at most
+five seconds for the actual toolbar disappearance before keeping its original
+absence, Home restoration and tab-restoration assertions. No production
+behavior, global device deadline or renderer changed. This is a synchronization
+fix for the observed red test, not a waived failure or an unconditional sleep.
+
+With the fix, all 14 ScrollTest and six VideoDownloadTest cases pass on a
+fresh API-36 Google APIs arm64 emulator. The full local JVM/lint/debug/test/release
+Gradle gate passes as well. Evidence: `build/device-checks/merge-scroll-video-20261112/`.
+The updated head still requires its full hosted Engine gate and GLM review.
+
 Reproduction commands (SDK path depends on the host):
 
 ```sh
