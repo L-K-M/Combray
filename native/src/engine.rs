@@ -362,18 +362,24 @@ struct ImeField {
     multiline: bool,
     kind: &'static str,
     keyboard: Keyboard,
+    caret: Option<u32>,
+    caret_received: bool,
 }
 
 impl ImeField {
-    fn shown_event(&self, view: ViewKey) -> EngineEvent {
-        EngineEvent::ImeShown {
+    fn shown_event(&self, view: ViewKey) -> Option<EngineEvent> {
+        if !self.caret_received {
+            return None;
+        }
+        Some(EngineEvent::ImeShown {
             view,
             document: u64::from(self.control.pipeline_id),
             context: self.context,
             multiline: self.multiline,
             kind: self.kind,
             show_keyboard: self.keyboard == Keyboard::Open,
-        }
+            caret: self.caret,
+        })
     }
 }
 
@@ -1702,8 +1708,9 @@ impl Engine {
                 continue;
             };
             field.keyboard = Keyboard::Open;
-            let event = field.shown_event(view);
-            self.emit(event);
+            if let Some(event) = field.shown_event(view) {
+                self.emit(event);
+            }
         }
     }
 
@@ -2326,12 +2333,48 @@ impl Engine {
                     multiline,
                     kind,
                     keyboard,
+                    caret: None,
+                    caret_received: false,
                 };
                 if let Some(tab) = self.live_tab(view) {
+                    // Wait for the initial caret reply (including explicit unknown) before
+                    // opening Android's connection. A keyboard can ask on its very first key.
                     tab.ime_field = Some(field);
-                    if shown {
-                        self.emit(field.shown_event(view));
-                    }
+                }
+            },
+            DelegateEvent::ImeCaretChanged {
+                view,
+                control,
+                caret,
+            } => {
+                let shown = self.active == Some(view.tab);
+                let Some(tab) = self.live_tab(view) else {
+                    return;
+                };
+                let Some(field) = tab
+                    .ime_field
+                    .as_mut()
+                    .filter(|field| field.control == control)
+                else {
+                    return;
+                };
+                // Copy metadata only. The original control/frame and process-unique context
+                // fence a queued selection callback from a replaced field or document.
+                let initial = !field.caret_received;
+                field.caret_received = true;
+                field.caret = caret.filter(|offset| *offset <= i32::MAX as u32);
+                let event = if initial {
+                    field.shown_event(view)
+                } else {
+                    Some(EngineEvent::ImeCaretChanged {
+                        view,
+                        document: u64::from(control.pipeline_id),
+                        context: field.context,
+                        caret: field.caret,
+                    })
+                };
+                if shown && let Some(event) = event {
+                    self.emit(event);
                 }
             },
             DelegateEvent::ClosedByPage { view } => {
@@ -2893,8 +2936,8 @@ impl Engine {
         // Do not replay a withheld preparation over the old page's keyboard-hide request;
         // its normal activation tap will prepare and open it.
         if shown {
-            if let Some(field) = replay_field {
-                self.emit(field.shown_event(view));
+            if let Some(event) = replay_field.and_then(|field| field.shown_event(view)) {
+                self.emit(event);
             }
         }
         for report in released {

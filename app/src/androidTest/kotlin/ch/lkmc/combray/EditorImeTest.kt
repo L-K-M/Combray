@@ -1,5 +1,6 @@
 package ch.lkmc.combray
 
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.text.InputType
@@ -9,6 +10,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -20,6 +22,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -66,6 +69,35 @@ class EditorImeTest {
         awaitTitle("EDITOR:input:été:insertCompositionText")
         onUi { assertTrue(connection.commitText("!", 1)) }
         awaitTitle("EDITOR:input:été!:insertText")
+    }
+
+    @Test fun aKeyboardCanDiscoverTheRealCaretBeforeSendingItsFirstWord() {
+        openEditor()
+        val (connection, info) = connection()
+        assertEquals(0, info.initialSelStart)
+        assertEquals(0, info.initialSelEnd)
+        val request = ExtractedTextRequest().apply { hintMaxChars = 1 }
+        var position: Int? = null
+        onUi {
+            position = connection.getExtractedText(request, 0)?.let { it.startOffset + it.selectionStart }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                assertEquals(0, connection.getSurroundingText(1, 1, 0)?.offset)
+            }
+        }
+        assertEquals("the keyboard needs a real caret on its first request, not after its first key", 0, position)
+        onUi { assertTrue(connection.commitText("é🦊", 1)) }
+        awaitTitle("EDITOR:input:é🦊:insertText")
+        // After its own edits a connection refuses a read instead of returning a stale snapshot.
+        onUi { assertNull(connection.getExtractedText(request, 0)) }
+        device.awaitState { it.editorCaret?.position == 3 }
+        val replacement = connection().first
+        // The engine receipt precedes the UI-thread field's metadata update.
+        compose.waitUntil(TIMEOUT_MS) {
+            var offset: Int? = null
+            onUi { offset = replacement.getExtractedText(request, 0)?.startOffset }
+            offset == 3
+        }
+        onUi { assertEquals(3, replacement.getExtractedText(request, 0)?.startOffset) }
     }
 
     @Test fun aRetiredConnectionAndAnInvalidNativeContextCannotEditTheReplacementDocument() {

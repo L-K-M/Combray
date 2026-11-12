@@ -316,6 +316,13 @@ pub enum EngineEvent {
         /// Whether to open the keyboard. Before the user has used the page, Servo asks for the
         /// field without it (`InputMethodControl::allow_virtual_keyboard`).
         show_keyboard: bool,
+        caret: Option<u32>,
+    },
+    ImeCaretChanged {
+        view: ViewKey,
+        document: u64,
+        context: u64,
+        caret: Option<u32>,
     },
     ImeHidden {
         view: ViewKey,
@@ -565,6 +572,7 @@ impl EngineEvent {
                 multiline,
                 kind,
                 show_keyboard,
+                caret,
             } => with_view(
                 view,
                 json!({
@@ -574,7 +582,17 @@ impl EngineEvent {
                     "multiline": multiline,
                     "kind": kind,
                     "show_keyboard": show_keyboard,
+                    "caret": caret,
                 }),
+            ),
+            EngineEvent::ImeCaretChanged {
+                view,
+                document,
+                context,
+                caret,
+            } => with_view(
+                view,
+                json!({ "type": "ime_caret_changed", "document": document, "context": context, "caret": caret }),
             ),
             EngineEvent::ImeHidden { view } => with_view(view, json!({ "type": "ime_hidden" })),
             EngineEvent::DefaultHandled { view, request } => with_view(
@@ -902,6 +920,7 @@ mod tests {
             multiline: false,
             kind: "search",
             show_keyboard: false,
+            caret: Some(3),
         };
         let json: Value = serde_json::from_str(&event.to_json()).unwrap();
 
@@ -915,10 +934,34 @@ mod tests {
                 "multiline": false,
                 "kind": "search",
                 "show_keyboard": false,
+                "caret": 3,
                 "tab": 3,
                 "generation": 9,
             })
         );
+    }
+
+    #[test]
+    fn caret_metadata_keeps_its_original_frame_and_context_and_unknown_is_not_zero() {
+        for caret in [None, Some(0), Some(3)] {
+            let event = EngineEvent::ImeCaretChanged {
+                view: ViewKey {
+                    tab: 3,
+                    generation: 9,
+                },
+                document: 42,
+                context: 17,
+                caret,
+            };
+            let json: Value = serde_json::from_str(&event.to_json()).unwrap();
+            assert_eq!(
+                json,
+                json!({
+                    "schema": 1, "type": "ime_caret_changed", "tab": 3, "generation": 9,
+                    "document": 42, "context": 17, "caret": caret,
+                })
+            );
+        }
     }
 
     #[test]

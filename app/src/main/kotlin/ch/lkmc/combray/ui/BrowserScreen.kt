@@ -329,13 +329,19 @@ fun BrowserScreen(
             } else {
                 // The page's field needs the room above the keyboard: stop holding the surface.
                 holdSurface = false
-                view.showKeyboard(request.kind, request.multiline, request.context)
+                view.showKeyboard(request.kind, request.multiline, request.context, state.editorCaret?.takeIf { it.context == request.context }?.position)
             }
-            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind, request.multiline, request.context)
+            is KeyboardRequest.Prepare -> view.prepareKeyboard(request.kind, request.multiline, request.context, state.editorCaret?.takeIf { it.context == request.context }?.position)
             // A page's blur must not hide the keyboard now owned by Find or the address editor.
             KeyboardRequest.Hide -> if (state.find == null && !editorTyping) view.hideKeyboard()
         }
+        // The first caret update can be coalesced into the same UI frame as Show/Prepare.
+        state.editorCaret?.let { view.updateCaret(it.context, it.position) }
         browser.keyboardHandled(request)
+    }
+    LaunchedEffect(state.editorCaret, surfaceView) {
+        val caret = state.editorCaret ?: return@LaunchedEffect
+        surfaceView?.updateCaret(caret.context, caret.position)
     }
 
     // A page link for another app asks first (owner decision, 22 October 2026). Open hands it to

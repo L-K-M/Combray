@@ -110,6 +110,9 @@ enum class ReopenFocus {
     KEEP_CURRENT,
 }
 
+/** A real collapsed caret in one field's frame; null [position] means unknown/noncollapsed. */
+data class EditorCaret(val page: PageRef, val context: Long, val position: Int?)
+
 // requestId distinguishes a replay for the same field from the UI's older acknowledgement.
 sealed interface KeyboardRequest {
     /** A page field took focus; [kind] is its type ("text", "password", "email", ...). */
@@ -184,6 +187,8 @@ data class BrowserState(
     val openTabCount: Int = 0,
     /** The page focused (or left) an editable element: show or hide the keyboard. */
     val keyboard: KeyboardRequest? = null,
+    /** Ephemeral metadata for the currently prepared page field, never persisted. */
+    val editorCaret: EditorCaret? = null,
     /** A link for another app, until the UI hands it to Android. */
     val externalLink: ExternalLink? = null,
     /** The focused page's oldest unanswered control. */

@@ -329,6 +329,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- FUTO Keyboard can show each letter in a new rich-text comment editor
+  before Space commits the word. The keyboard receives the real initial
+  caret instead of an unknown position.
+
 - Pages that lay out their main column with CSS subgrid
   (`grid-template-columns: subgrid`) fit the screen again: the column
   now follows the parent grid's columns and line names instead of
