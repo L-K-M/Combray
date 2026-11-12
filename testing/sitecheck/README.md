@@ -190,7 +190,7 @@ local servers (loopback or private hosts, non-default ports) are ever cached.
    | `visual-diff` | 1 | screenshot similarity under 0.55 (the lower of a pixel and an average-hash measure) |
    | `flaky` | 1 | a failure that did not repeat; signature `flaky:<first signature>` |
    | `ok` | 0 | none of the above |
-   | `reference-failed` | 0 | Chromium could not load the page either, or hung on it too; excluded from triage |
+   | `reference-failed` | 0 | Chromium could not load the page either, or hung on it too, or got only an interstitial (little text, no image) while Servo got the page; excluded from triage |
    | `not-compared` | 0 | run with `--no-reference`: only crash and hang were judged; excluded from triage |
    | `excluded` | 0 | the page ended up at a URL the policy excludes; discarded and kept out of later runs |
    | `harness-error` | 0 | the harness failed, or Servo's probe and screenshot gave no evidence either way; excluded from triage |
