@@ -4399,7 +4399,14 @@ fix for the observed red test, not a waived failure or an unconditional sleep.
 With the fix, all 14 ScrollTest and six VideoDownloadTest cases pass on a
 fresh API-36 Google APIs arm64 emulator. The full local JVM/lint/debug/test/release
 Gradle gate passes as well. Evidence: `build/device-checks/merge-scroll-video-20261112/`.
-The updated head still requires its full hosted Engine gate and GLM review.
+
+After merging #344, the matching arm64 native engine was rebuilt and all 26
+checks in ScrollTest, VideoDownloadTest and AdaptiveDarkModeTest pass together
+on that fresh emulator. The integrated tree also passes 206 native host tests,
+193 script/fixture tests, 74 page-script/PDF tests and the full Gradle gate,
+including release assembly and packaged-arm64 verification. Evidence:
+`build/device-checks/merge-integrated-video-20261112/`. The updated head still
+requires its full hosted Engine gate and GLM review.
 
 Reproduction commands (SDK path depends on the host):
 
