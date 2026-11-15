@@ -545,6 +545,10 @@ def _merge_patches(
     path = ""
     file_header = ""
     in_header = False
+    # The merge deletes the current file: it adds no lines, and git prints its hunk
+    # header with an underflowed result count ("+1,18446744073709551615"), so its hunk
+    # lines are skipped rather than counted.
+    deleted = False
     width = 0  # Prefix columns of the current hunk: the number of parents.
     parents_left: list[int] = []  # Lines of each parent still to come in the hunk.
     result_left = 0
@@ -578,8 +582,13 @@ def _merge_patches(
             file_header = line[len(_COMBINED_FILE_HEADER) :]
             path = _combined_header_path(file_header)
             in_header = True
+            deleted = False
+        elif in_header and line.startswith("deleted file mode "):
+            deleted = True
         elif in_header and line.startswith(_NEW_FILE_HEADER):
             yield commit, path, None, _name_text(path, file_header)
+        elif deleted:
+            in_header = False
         elif hunk := _COMBINED_HUNK_HEADER.match(line):
             in_header = False
             width = len(hunk.group("ats")) - 1
