@@ -451,6 +451,44 @@ class GitRangeTest(unittest.TestCase):
             ],
         )
 
+    def test_a_merge_that_deletes_a_conflicted_file(self) -> None:
+        # git prints a combined diff hunk header with an underflowed line count for a
+        # file the merge deletes ("+1,18446744073709551615"). The deleted file adds no
+        # lines; the scan must go on to the files after it.
+        (self.repo / "a-gone.txt").write_text("one\n")
+        (self.repo / "z-kept.txt").write_text("one\ntwo\n")
+        self.commit("Add files")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "--quiet", "-b", "upstream")
+        (self.repo / "a-gone.txt").write_text("".join(f"upstream {n}\n" for n in range(12)))
+        (self.repo / "z-kept.txt").write_text("one\nupstream two\n")
+        self.commit("Upstream change")
+        self.git("checkout", "--quiet", "main")
+        (self.repo / "a-gone.txt").write_text("ours\nours too\n")
+        (self.repo / "z-kept.txt").write_text("one\nour two\n")
+        self.commit("Our change")
+        subprocess.run(
+            ["git", "-C", str(self.repo), "merge", "--quiet", "--no-edit", "upstream"],
+            capture_output=True,
+            check=False,
+        )
+        self.git("rm", "--quiet", "a-gone.txt")
+        (self.repo / "z-kept.txt").write_text("one\nsee www.private-blog.net\n")
+        self.commit("Merge upstream")
+        merge = self.head()
+
+        leaks = leakcheck.scan_git_range(
+            self.repo, f"{base}..HEAD", terms(), exclude_refs=["upstream"]
+        )
+
+        self.assertEqual(
+            sorted(map(str, leaks)),
+            [
+                f"z-kept.txt:2 (commit {merge}): matched host www.private-blog.net",
+                f"z-kept.txt:2 (commit {merge}): matched site private-blog.net",
+            ],
+        )
+
     def test_a_lone_carriage_return_does_not_end_the_hunk(self) -> None:
         # Only "\n" ends a line in a patch. A reduced test case for a line-break bug
         # may hold a lone "\r" before the line that names a site.
