@@ -4420,3 +4420,34 @@ scripts/check-app.sh emulator-5582 ch.lkmc.combray.VideoDownloadTest
 No real service, history, reported page or physical phone was used for this
 feature's validation. Full current-head CI and GLM review remain merge gates;
 physical-phone and live-site download acceptance remain unverified.
+
+## 62. Idle callbacks, UA widget styles under CSP, replaced flex minimums (15 November 2026)
+
+The nightly site check moves the pin to `dc155a86ca011db792565cc65b5f19a75fe22ecc`,
+the `combray/0.7` merge of [Servo PR #49](https://github.com/L-K-M/servo/pull/49).
+Since `f0f5e511aa7ff4db8fe593e8fffd20d867e0743e` it adds three engine changes, each
+with a regression test that fails before it:
+
+- [PR #42](https://github.com/L-K-M/servo/pull/42): `requestIdleCallback()`,
+  `cancelIdleCallback()` and `IdleDeadline` (Cooperative Scheduling of Background
+  Tasks). Idle periods start when a window's event loop is idle, last at most 50 ms
+  and end before the next timer or rendering opportunity.
+- [PR #50](https://github.com/L-K-M/servo/pull/50): style attributes that Servo sets
+  inside user agent widget shadow trees (range, meter, progress, select, details)
+  no longer go through the page's CSP `style-src` check. Under a policy without
+  `'unsafe-inline'`, a range input looped forever: each blocked attribute fired a
+  `securitypolicyviolation` event at the input, whose event handling set the
+  attributes again, so the script thread never became idle. Media controls keep the
+  check, because page script can reach their shadow root.
+- [PR #49](https://github.com/L-K-M/servo/pull/49): the automatic minimum size of a
+  compressible replaced flex item (`<img style="max-width: 100%">`) is compressed
+  for the item's min-content contribution, so a flex row holding one no longer
+  forces its grid track or container wider than the viewport.
+
+Evidence: servoshell builds of each merge head, the new WPT tests (`mozilla/csp/
+ua-widget-style-attribute.html`, the idle callback test and upstream
+`requestidlecallback/` directory, `css/flex-item-compressible-replaced-min-content.html`),
+the affected WPT directories compared with the base build, and the site check
+(affected pages fixed, 20-page regression sweeps all ok). No native bridge or
+`native/Cargo.lock` change; the Engine workflow provides the native builds and
+device checks for this pin.

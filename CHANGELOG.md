@@ -906,3 +906,11 @@ All notable changes to this project are documented here. The format follows
   without having loaded it, such as a link opened in the background.
   Loading it later no longer puts the site back in Recent or sends its
   text to Hister, as for a page an open tab already shows.
+- Pages that schedule background work with `requestIdleCallback()` no
+  longer stop with a script error: the engine now runs idle callbacks.
+- A page served with a strict style policy (a Content Security Policy
+  `style-src` without `'unsafe-inline'`) that contains a range slider
+  no longer freezes its tab, and sliders, meters, progress bars and
+  dropdowns render correctly on such pages.
+- An image that should shrink to its column (`max-width: 100%`) inside
+  a flex row no longer makes the page wider than the screen.
