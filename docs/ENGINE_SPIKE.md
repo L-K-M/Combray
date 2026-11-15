@@ -4451,3 +4451,71 @@ the affected WPT directories compared with the base build, and the site check
 (affected pages fixed, 20-page regression sweeps all ok). No native bridge or
 `native/Cargo.lock` change; the Engine workflow provides the native builds and
 device checks for this pin.
+
+## 63. Script thread crashes in framed content (15 November 2026)
+
+Validated source: `ab77117f7267e561f2667cc6383ac692670da0e8` on `combray/0.7`, the merge of
+[Servo PR #51](https://github.com/L-K-M/servo/pull/51) onto the §62 source
+`dc155a86ca011db792565cc65b5f19a75fe22ecc`.
+
+### Report and reproduction
+
+The owner reported an article page (not named here) that showed "This page
+stopped working" after some scrolling. A spare phone could not take a USB
+install, so the reproduction used the debug APK of the §62 source on an arm64 API
+36 emulator with the report's screen size (2048 × 2232). Each run used a fresh
+profile, accepted the site's consent dialog, then repeated cycles of 40 swipes
+down and 40 up. Three script-thread panics turned up, one after another as each
+was fixed:
+
+1. `Must always have ancestor origins initialized` (`location.rs:639`), within
+   the first cycle. The script thread had read `location.ancestorOrigins`
+   through a same-origin frame's window after the frame's response headers
+   arrived but before its first 1445 body bytes did.
+2. `called Option::unwrap() on a None value` (`intersectionobserver.rs:965`),
+   right after the consent dialog. An IntersectionObserver target sat in a frame
+   that had stopped being rendered. Upstream's expected CRASH for
+   `intersection-observer/transformed-iframe-001-same-origin.html` has the same
+   cause; there the frame's perspective transform has no 2D rectangle.
+3. `assertion failed: parent_proxy.currently_active().is_some()`
+   (`windowproxy.rs:945`), in cycle 5 and in four cross-site frame threads at
+   once. This only became reachable after the first fix ran the ancestor origin
+   steps earlier: a frame's remote parent proxy gets a pipeline only when the
+   constellation reports the parent fully active.
+
+The first two crash upstream `main` as well. Desktop servoshell at the §62
+source's parent `a4a77d750c5` crashes on synthetic versions of both: a frame
+served with a delayed body that a same-origin parent polls, and an observed
+frame switched to `display: none`. The third did not reproduce on desktop in
+synthetic cases that removed or navigated a parent frame while a nested
+cross-site response was pending.
+
+### Changes (downstream PR #51)
+
+- The ancestor origin lists are set as soon as the parser receives the new
+  document (after its abort check), not once the resource header has been read.
+- A frame without a box makes an IntersectionObserver target in it not
+  intersect. A frame whose transform cannot be mapped to a 2D rectangle uses
+  its untransformed box, as the code does not map transforms yet.
+- A remote parent that is not fully active yields no parent origins, as the
+  same-thread branch already did, instead of asserting.
+
+### Evidence
+
+- New WPT cases `mozilla/location-ancestor-origins-before-body.html` and
+  `mozilla/intersection-observer-hidden-frame.html` CRASH on `a4a77d750c5` and
+  pass 3 out of 3 times with the fixes. `transformed-iframe-001-same-origin.html`
+  runs: its first subtest passes and two out-of-view subtests fail on the
+  untransformed approximation.
+- `html/browsers/history/the-location-interface/`,
+  `html/semantics/embedded-content/the-iframe-element/`,
+  `referrer-policy/generic/iframe-inheritance/` and `intersection-observer/`
+  match the base build, apart from the crashes removed. `sandbox_002.htm`
+  crashes and `security_location_0.htm` is flaky on both builds on this Mac.
+- Android, with a local arm64 build of the final PR head: the reported page
+  ran two fresh-profile runs of 8 cycles each (about 26 minutes of scrolling) with no panic. Earlier heads hit panics 1, 2 and 3 as listed
+  above.
+
+Not covered: the owner's own phone and its build, a physical device, and the
+remote-parent trigger in a deterministic test. The Engine workflow provides the
+x86_64 fixture checks and both native builds for this pin.
