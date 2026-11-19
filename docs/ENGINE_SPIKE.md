@@ -4519,3 +4519,79 @@ cross-site response was pending.
 Not covered: the owner's own phone and its build, a physical device, and the
 remote-parent trigger in a deterministic test. The Engine workflow provides the
 x86_64 fixture checks and both native builds for this pin.
+
+## 64. Documents changing layouts they do not own (19 November 2026)
+
+Validated source: `7e59654f20b415ca81d6c27708487e7cc5538bf2` on `combray/0.7`, the merge of
+[Servo PR #53](https://github.com/L-K-M/servo/pull/53) onto the §63 source
+`ab77117f7267e561f2667cc6383ac692670da0e8`.
+
+### Report and reproduction
+
+The owner reported a page (not named here) that showed "This page stopped
+working" right after it opened. Desktop servoshell at the §63 source, run by the
+site-check harness, crashed on it with `called Option::unwrap() on a None value`
+at Stylo's `stylesheet_set.rs:233`, from `HTMLStyleElement::remove_stylesheet`
+during an `Element.append()` in a frame's `load` listener. The §63 debug APK on
+an arm64 API 36 emulator at the report's screen size (2048 × 2232) showed the
+same screen about 5 seconds after opening the page, with the same panic on
+`Script#1`.
+
+The page creates a `<style>` element. In a `load` listener on a frame it then
+inserts, it appends that element to `frame.contentDocument.head`. The listener
+runs twice: synchronously for the frame's initial about:blank document, and
+again once the frame's `srcdoc` document has loaded. A document that replaces an
+initial about:blank document and is same origin-domain with it reuses that
+document's window, and Servo gives the window a new layout for the new document.
+The second `append()` adopts the style element out of the replaced document,
+whose removal steps asked the window's layout, now the new document's, to drop a
+sheet it never had. A 15-line synthetic page with this pattern crashes the same
+way.
+
+The replaced document also changed the new document's layout in other ways. A
+`<style>` inserted into it after the replacement, or a sheet it adopted, styled
+the new document once that document restyled. Review found the same gap in
+quirks mode: every document passed its quirks mode to its window's layout,
+including documents without a browsing context, which share their creator's
+window. Parsing a doctype-less string with `DOMParser`, or setting `innerHTML`
+in a replaced initial document (which is in quirks mode), made the other
+document's class and ID selectors match case-insensitively.
+
+### Changes (downstream PR #53)
+
+- A document adds its style sheets to its window's layout, removes them from
+  it, and sets its quirks mode only while it owns that layout: it has a
+  browsing context and its window was not handed to a replacement. A replaced
+  document keeps its sheets in its own list.
+
+### Evidence
+
+- New WPT cases `mozilla/stylesheets-of-replaced-initial-document.html` and
+  `mozilla/adopted-stylesheets-of-replaced-initial-document.html` CRASH on the
+  §63 source; run alone, their two subtests about styling the new document
+  fail. `mozilla/quirks-mode-of-documents-without-own-layout.html` fails both
+  subtests without the quirks change. With the PR all 7 subtests pass 3 out of
+  3 times. Headless Chromium, Firefox and WebKit pass the stylesheet assertions
+  apart from the window-reuse precondition: none of them reuses the window for
+  `srcdoc`.
+- WPT: `css/cssom/`, the style, link and iframe element directories,
+  `interactions-of-styling-and-scripting/`,
+  `browsing-the-web/navigating-across-documents/` and `mozilla/` (1029 files),
+  and for the quirks change also `quirks/`, `domparsing/`, `dom/nodes/` and
+  `css/selectors/` (1375 files), match the build before each change apart from
+  the new tests. Every other difference in a single run was flaky on both
+  builds in three reruns each.
+- Desktop: the reported page loads without a crash 3 out of 3 times. The
+  harness still reports a script error there, because Servo does not implement
+  SVG `getComputedTextLength()`.
+- Android, local arm64 builds plus `assembleDebug`, fresh install each time: the
+  §63 build showed "This page stopped working" within 5 seconds; the PR's first
+  commit rendered the page and survived 3 cycles of 25 swipes down and 25 up
+  without a panic. A build of
+  this pin did the same.
+
+Not covered: the owner's phone; `getComputedTextLength()` and the other
+`SVGTextContentElement` methods, which remain unimplemented; `document.open()`
+on a replaced document, which still aborts loads of the shared window. The
+Engine workflow provides both native builds and the x86_64 fixture checks for
+this pin.

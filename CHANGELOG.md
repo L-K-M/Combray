@@ -920,3 +920,9 @@ All notable changes to this project are documented here. The format follows
   the frame's content arrived, when a frame whose content a page observed
   for visibility was hidden, and when a nested frame from another site
   loaded while its parent was being replaced.
+- Some pages with embedded frames no longer show "This page stopped
+  working" as soon as they open. The engine crashed when a page moved a
+  style element out of a frame's initial blank page into the content
+  that replaced it. Pages that parse HTML without a doctype in the
+  background also no longer change how their own class and ID
+  selectors match.
