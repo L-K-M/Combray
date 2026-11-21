@@ -4647,3 +4647,17 @@ No site report came with this; §64's review found it.
 Not covered: Android-specific behavior beyond the Engine workflow's native
 builds and x86_64 fixture checks for this pin; no device test exercises
 `document.open()` on a frame document.
+
+### Hosted gate follow-up
+
+Engine run `44891181570` for this pin built both ABIs, but its x86_64 fixture
+checks failed in three of four attempts on one case,
+`ScrollTest.scrollingDownHidesTheBarAndScrollingUpRestoresIt`. Each time the
+assertion right after the `SCROLL-MIDDLE` title still found the New tab button,
+and all other 240 checks passed. The same case failed alone on the §64 pin PR
+and on a Kotlin dependency update with no engine change, so it is the race
+§60's hosted merge-gate follow-up fixed for one test: the page's scroll title
+can arrive before the viewport-paint answer that releases the held bar.
+`ScrollTest` now waits at most five seconds for the bar to go, through one
+helper, in all four cases that check it after that title; their other
+assertions are unchanged.
