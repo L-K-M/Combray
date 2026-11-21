@@ -4595,3 +4595,69 @@ Not covered: the owner's phone; `getComputedTextLength()` and the other
 on a replaced document, which still aborts loads of the shared window. The
 Engine workflow provides both native builds and the x86_64 fixture checks for
 this pin.
+
+## 65. `document.open()` on a replaced frame document (21 November 2026)
+
+Validated source: `b8914cdbbc68fd95b5e10da37ff232782dd66b44` on `combray/0.7`, the merge of
+[Servo PR #54](https://github.com/L-K-M/servo/pull/54) onto the §64 source
+`7e59654f20b415ca81d6c27708487e7cc5538bf2`.
+
+### Problem
+
+§64 left one effect of a replaced initial about:blank document on the window it
+shares with its replacement: `document.open()` on it, and `document.write()`,
+which opens a document without an active parser. Servo ran the open steps'
+"stop loading" for any document with a browsing context, and a replaced document
+keeps one. Stopping aborted the window's whole fetch group, so the replacement's
+`fetch()` and `XMLHttpRequest` requests never settled. It also closed the
+window's event sources, dropped its queued network tasks and reset its
+navigation start, so the replacement's `document.timeline` and the animations on
+it restarted near zero. Documents without a browsing context (`DOMParser`,
+`createHTMLDocument`) reset their creator window's navigation start the same
+way. Review found a related gap: `document.open(url, name, features)` on a
+replaced document navigated the frame away from its replacement with `"_self"`.
+No site report came with this; §64's review found it.
+
+### Changes (downstream PR #54)
+
+- The open steps reset the navigation start and stop loading only for an active
+  document, Servo's stand-in for "document's node navigable is non-null"; a
+  replaced document is not active.
+- `document.open(url, name, features)` throws `InvalidAccessError` unless the
+  document is fully active: a backport of upstream `26e779f3c60` (in v0.8.0).
+
+### Evidence
+
+- New WPT case `mozilla/document-open-of-replaced-initial-document.html`: all six
+  subtests (fetch, XHR through `document.write()`, EventSource, the
+  replacement's timeline, the three-argument `open()`, and a created document's
+  creator timeline) fail on the §64 source and pass with the PR.
+- WPT: `mozilla/`, `dynamic-markup-insertion/`, `eventsource/`,
+  `navigation-timing/`, `web-animations/timing-model/timelines/`, the iframe
+  element directory, `html/browsers/the-window-object/`,
+  `html/browsers/browsing-the-web/`, `fetch/api/abort/` and
+  `xhr/abort-during-open` (1305 files, 9725 results) match the §64 build apart
+  from the new test. Every other difference was flaky on both builds in three
+  reruns. After the backport, `dynamic-markup-insertion/` and
+  `html/dom/usvstring-reflection.https.html` (551 results) match too.
+- Independent reviews: Devin SWE-2 found the three-argument `open()` gap,
+  LongCat 2.5 the untested creator-timeline case; GLM 5.3 found nothing
+  important on the final branch.
+
+Not covered: Android-specific behavior beyond the Engine workflow's native
+builds and x86_64 fixture checks for this pin; no device test exercises
+`document.open()` on a frame document.
+
+### Hosted gate follow-up
+
+Engine run `44891181570` for this pin built both ABIs, but its x86_64 fixture
+checks failed in three of four attempts on one case,
+`ScrollTest.scrollingDownHidesTheBarAndScrollingUpRestoresIt`. Each time the
+assertion right after the `SCROLL-MIDDLE` title still found the New tab button,
+and all other 240 checks passed. The same case failed alone on the §64 pin PR
+and on a Kotlin dependency update with no engine change, so it is the race
+§60's hosted merge-gate follow-up fixed for one test: the page's scroll title
+can arrive before the viewport-paint answer that releases the held bar.
+`ScrollTest` now waits at most five seconds for the bar to go, through one
+helper, in all four cases that check it after that title; their other
+assertions are unchanged.

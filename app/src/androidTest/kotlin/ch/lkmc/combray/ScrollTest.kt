@@ -47,7 +47,7 @@ class ScrollTest {
 
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
-        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+        awaitBarHidden()
         // The page lays out in the space the bar freed, and the engine has drawn it there. The
         // surface keeps its size: a SurfaceView resized by the app's own layout shows its last
         // frame stretched into the new size for a frame (the flicker this guards against).
@@ -73,12 +73,7 @@ class ScrollTest {
         val tab = device.browser.browserState.value.activeTab!!.id
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
-        // The DOM scroll can arrive before the paint acknowledgement releases the held bar.
-        // Observe the actual hide before testing that Home and tab selection undo it.
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithContentDescription(NEW_TAB).fetchSemanticsNodes().isEmpty()
-        }
-        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+        awaitBarHidden()
 
         device.browser.newTab()
         device.awaitState { it.activeTab?.isHome == true }
@@ -103,7 +98,7 @@ class ScrollTest {
         val page = device.browser.browserState.value.activeTab!!.page!!
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
-        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+        awaitBarHidden()
 
         // Stop inertia before the jump; one green frame is not a stable top edge.
         cancelPageTouch()
@@ -245,7 +240,7 @@ class ScrollTest {
         swipe(0.65f, 0.35f)
         awaitTitle("SCROLL-MIDDLE")
         compose.onNodeWithContentDescription(BOTTOM).assertIsDisplayed()
-        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+        awaitBarHidden()
         val oldPage = device.browser.browserState.value.activeTab!!.page
         device.browser.reload()
         device.awaitState { it.activeTab?.page != oldPage && it.activeTab?.title?.substringBefore(':') == "SCROLL-TOP" }
@@ -319,6 +314,18 @@ class ScrollTest {
         compose.waitForIdle()
     }
 
+    /**
+     * The page's scroll title can arrive before the viewport-paint acknowledgement that releases
+     * the held bar (BrowserScreen keeps it until that answer or its hold deadline), so wait for
+     * the bar to go rather than asserting its absence as soon as the title changes.
+     */
+    private fun awaitBarHidden() {
+        compose.waitUntil(BAR_HIDE_TIMEOUT_MS) {
+            compose.onAllNodesWithContentDescription(NEW_TAB).fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNodeWithContentDescription(NEW_TAB).assertDoesNotExist()
+    }
+
     private fun awaitTitle(expected: String) {
         try {
             device.awaitState { it.activeTab?.title?.substringBefore(':') == expected && it.activeTab?.loading == false }
@@ -337,5 +344,6 @@ class ScrollTest {
         const val SWIPE_STEP_MS = 30L
         const val SCROLL_INTERVAL_MS = 1_000L
         const val IDLE_WAIT_MS = 3_000L
+        const val BAR_HIDE_TIMEOUT_MS = 5_000L
     }
 }
