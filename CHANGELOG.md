@@ -926,3 +926,7 @@ All notable changes to this project are documented here. The format follows
   that replaced it. Pages that parse HTML without a doctype in the
   background also no longer change how their own class and ID
   selectors match.
+- Pages that write into an embedded frame's initial blank page after
+  the frame has loaded other content no longer stall that content: its
+  pending downloads finish, its live updates stay connected and its
+  animations no longer restart.
