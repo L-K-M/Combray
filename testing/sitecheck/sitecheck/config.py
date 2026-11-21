@@ -413,10 +413,16 @@ def default_servo_binary(environ: Mapping[str, str] | None = None) -> Path | Non
 
 
 def servo_checkout(binary: Path) -> Path:
-    """The Servo checkout a servoshell binary was built in: the parent of `target/`."""
-    for parent in binary.resolve().parents:
-        if parent.name == _CARGO_TARGET_DIR_NAME:
-            return parent.parent
+    """The Servo checkout a servoshell binary was built in: the parent of `target/`.
+
+    The path is searched as given first, so that a checkout whose `target` is a
+    symbolic link to build output elsewhere (another volume, say) is still found,
+    then with symbolic links resolved, for a link to a checkout's servoshell.
+    """
+    for path in (Path(os.path.abspath(binary)), binary.resolve()):
+        for parent in path.parents:
+            if parent.name == _CARGO_TARGET_DIR_NAME:
+                return parent.parent.resolve()
     raise ConfigError(f"{binary} is not inside a Cargo target directory; cannot find its checkout")
 
 

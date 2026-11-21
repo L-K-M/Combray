@@ -431,6 +431,26 @@ class ServoBinaryTest(TempDirTest):
         binary.write_text("")
         self.assertEqual(config.servo_checkout(binary), (self.root / "servo").resolve())
 
+    def test_servo_checkout_with_a_linked_target_dir(self) -> None:
+        # A checkout may keep its build output on another volume.
+        cache = self.root / "cache" / "servo-target"
+        (cache / "medium").mkdir(parents=True)
+        (cache / "medium" / "servoshell").write_text("")
+        checkout = self.root / "servo"
+        checkout.mkdir()
+        (checkout / "target").symlink_to(cache, target_is_directory=True)
+        binary = checkout / "target" / "medium" / "servoshell"
+        self.assertEqual(config.servo_checkout(binary), checkout.resolve())
+
+    def test_servo_checkout_of_a_link_to_the_binary(self) -> None:
+        built = self.root / "servo" / "target" / "medium" / "servoshell"
+        built.parent.mkdir(parents=True)
+        built.write_text("")
+        link = self.root / "bin" / "servoshell"
+        link.parent.mkdir()
+        link.symlink_to(built)
+        self.assertEqual(config.servo_checkout(link), (self.root / "servo").resolve())
+
     def test_servo_checkout_requires_a_target_dir(self) -> None:
         with self.assertRaises(ConfigError):
             config.servo_checkout(self.root / "bin" / "servoshell")
