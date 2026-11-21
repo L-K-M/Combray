@@ -248,9 +248,26 @@ class ApkBuildTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("metadata", result.stderr)
 
-    def test_release_needs_explicit_signing(self):
+    def test_plain_build_stages_the_debug_apk(self):
+        self.fixture()
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(
+            (self.root / "dist/combray-debug-v0.1.0-android-x86_64.apk").is_file(),
+            f"debug APK missing; dist contents: {sorted(p.name for p in (self.root / 'dist').glob('*'))}",
+        )
+
+    def test_release_fixture_without_flag_is_rejected(self):
+        # The fixture's variant is Gradle metadata, not a build-mode switch: a release
+        # fixture cannot be staged as a debug build.
         self.fixture(variant="release")
         result = self.build()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("metadata", result.stderr)
+
+    def test_release_needs_explicit_signing(self):
+        self.fixture(variant="release")
+        result = self.build("--release")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("COMBRAY_KEYSTORE_FILE", result.stderr)
         self.assertFalse((self.root / "dist").exists())
@@ -283,7 +300,7 @@ class ApkBuildTest(unittest.TestCase):
     def test_release_rejects_partial_signing_configuration(self):
         self.fixture(variant="release")
         self.env["COMBRAY_KEYSTORE_FILE"] = "/unused/test.jks"
-        result = self.build()
+        result = self.build("--release")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("COMBRAY_KEYSTORE_PASSWORD", result.stderr)
 
