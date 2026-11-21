@@ -4661,3 +4661,51 @@ can arrive before the viewport-paint answer that releases the held bar.
 `ScrollTest` now waits at most five seconds for the bar to go, through one
 helper, in all four cases that check it after that title; their other
 assertions are unchanged.
+
+## 66. SVG text measurement and stopped requests
+
+Pinned source: `9b2cc39e7a9eba5ed2c4aa41950ea69464f7f58a` on `combray/0.7`.
+
+Downstream changes are in [Servo PR #55](https://github.com/L-K-M/servo/pull/55)
+and [Servo PR #56](https://github.com/L-K-M/servo/pull/56). They build on
+the §65 pin, `b8914cdbbc68fd95b5e10da37ff232782dd66b44`.
+
+### SVG text
+
+SVG `text` and `tspan` expose `getComputedTextLength()` and
+`getNumberOfChars()`. Length uses shaped glyph advances in CSS pixels
+with the computed font, font fallback, case transform and spacing. The
+count uses UTF-16 code units after whitespace processing and before case
+conversion. The implementation uses horizontal shaping and the engine's
+legacy `xml:space` model. Unitless and px `textLength` with
+`lengthAdjust="spacingAndGlyphs"` apply to the queried element.
+
+The macOS medium-profile servoshell passed the new SVG text test, the
+upstream character-count test and the SVG IDL harness. An Arabic test
+with a bundled font failed before the cursive-spacing correction and
+passed after. The SVG text sweep reproduced 18 baseline reftest
+failures. One additional font-size reftest mismatch passed four
+isolated reruns. Both new methods also passed in the content-visibility
+test, where the other three API checks still fail.
+
+### Stopped requests
+
+`document.open()` stops loading only while its window is navigating.
+When stopping the document ends a request, a pending fetch rejects,
+an unfinished response body fails, and XHR fires `abort` and
+`loadend`. A navigation start holds these callbacks in case the
+document is kept and loading is stopped. Suspending the document clears
+the started marker while preserving tasks that can still run on resume.
+Navigations initiated outside the script thread are outside this
+bookkeeping, and a navigation that ends without a replacement document
+can leave the started marker set.
+
+The macOS medium-profile servoshell ran the downstream stopped-request
+test and the upstream fetch, XHR and document-open WPT cases listed in
+the engine PR. Its broader comparison against the §65 source covered
+1,789 WPT files. Navigation tests showed intermittent failures on both
+builds, with details and reruns recorded in the engine PR.
+
+The Combray Engine workflow builds arm64 and x86_64 and runs the app
+fixture suite on an x86_64 emulator. Those fixtures exercise the pinned
+engine through the app. The new DOM cases were tested in desktop WPT.

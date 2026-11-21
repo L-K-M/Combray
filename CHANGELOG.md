@@ -930,3 +930,8 @@ All notable changes to this project are documented here. The format follows
   the frame has loaded other content no longer stall that content: its
   pending downloads finish, its live updates stay connected and its
   animations no longer restart.
+- SVG labels can be measured by page scripts with
+  `getComputedTextLength()` and `getNumberOfChars()`.
+- Opening a loaded frame's document keeps requests running when there
+  is no navigation to stop. When stopping a navigation does cancel a
+  request, its fetch or XHR reports the cancellation to the page.
