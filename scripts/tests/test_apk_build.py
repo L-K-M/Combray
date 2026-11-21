@@ -252,7 +252,18 @@ class ApkBuildTest(unittest.TestCase):
         self.fixture()
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue((self.root / "dist/combray-debug-v0.1.0-android-x86_64.apk").is_file())
+        self.assertTrue(
+            (self.root / "dist/combray-debug-v0.1.0-android-x86_64.apk").is_file(),
+            f"debug APK missing; dist contents: {sorted(p.name for p in (self.root / 'dist').glob('*'))}",
+        )
+
+    def test_release_fixture_without_flag_is_rejected(self):
+        # The fixture's variant is Gradle metadata, not a build-mode switch: a release
+        # fixture cannot be staged as a debug build.
+        self.fixture(variant="release")
+        result = self.build()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("metadata", result.stderr)
 
     def test_release_needs_explicit_signing(self):
         self.fixture(variant="release")
