@@ -103,7 +103,7 @@
     <string name="address_search">Search Kagi for “%1$s”</string>
     <string name="address_external">Open in another app: %1$s</string>
     <string name="address_copied">Address copied</string>
-    <string name="address_sent_hister">Sent to Hister</string>
+    <string name="address_sent_hister">Sent to Nogon</string>
     <string name="address_reject_empty">Type an address or a search.</string>
     <string name="address_reject_scheme">Combray does not open this kind of address.</string>
     <string name="address_reject_credentials">Addresses that contain a user name or password are not opened.</string>
@@ -134,7 +134,7 @@
     <string name="recent_subtitle">Your open pages and the ones you left.</string>
     <string name="recent_filter_all">All</string>
     <string name="recent_filter_open">Open tabs</string>
-    <string name="recent_scope_hister">Hister</string>
+    <string name="recent_scope_hister">Nogon</string>
     <string name="recent_scope_karakeep">Karakeep</string>
     <string name="recent_filter_hint">Filter tabs and history on this device</string>
     <string name="recent_badge_many">%1$d+</string>
@@ -149,7 +149,7 @@
     <string name="recent_remove">Remove from Recent</string>
     <string name="recent_forget_site">Forget %1$s</string>
     <string name="recent_forget_site_title">Forget %1$s?</string>
-    <string name="recent_forget_site_body">Removes this site’s pages and pinned links on this device, including its www. address. Open tabs stay open on their current page. Hister and Karakeep are not changed.</string>
+    <string name="recent_forget_site_body">Removes this site’s pages and pinned links on this device, including its www. address. Open tabs stay open on their current page. Nogon and Karakeep are not changed.</string>
     <string name="recent_forget_subdomains">Include subdomains</string>
     <string name="recent_forget_confirm">Forget</string>
     <string name="recent_empty">No open tabs or recent pages yet.</string>
@@ -253,7 +253,7 @@
     <string name="settings_saved">Settings saved.</string>
     <string name="settings_root_invalid">Enter the server’s web address, like https://karakeep.example.org.</string>
     <string name="settings_root_cleartext">This server is reached over plain HTTP: anyone on the same network can read the API key and the pages you save.</string>
-    <string name="settings_root_invalid_hister">Enter the server’s web address, like https://hister.example.org.</string>
+    <string name="settings_root_invalid_hister">Enter the server’s web address, like https://nogon.example.org.</string>
     <string name="settings_root_cleartext_hister">This server is reached over plain HTTP: anyone on the same network can read the access token, your searches and the pages Combray sends.</string>
     <string name="settings_key_invalid">This API key contains characters a key cannot have, such as a line break. Paste it again on one line.</string>
     <string name="settings_credential_not_stored">This device could not store the credential, so nothing was changed. Try again; if it keeps failing, restart the device.</string>
@@ -264,7 +264,7 @@
     <string name="check_key_not_stored">No API key is stored on this device. Enter it again.</string>
     <string name="check_token_not_stored">No access token is stored on this device. Enter it again.</string>
     <string name="check_token_unauthorized">The server rejected the access token.</string>
-    <string name="check_wrong_address_hister">The server answered, but not like Hister (HTTP %1$d). Check the address.</string>
+    <string name="check_wrong_address_hister">The server answered, but not like Nogon (HTTP %1$d). Check the address.</string>
     <string name="remove_service_title">Remove %1$s?</string>
     <plurals name="karakeep_remove_body">
         <item quantity="one">The server address and API key are forgotten. %1$d unsent save is cancelled.</item>
@@ -300,14 +300,14 @@
     <string name="action_discard_parked">Discard the saves queued for the previous address</string>
     <string name="discard_parked_title">Discard these saves?</string>
 
-    <!-- Hister -->
-    <string name="hister_title">Hister</string>
-    <string name="hister_explanation">Hister keeps your long-term history. Searching all history sends your query to your Hister server.</string>
-    <string name="hister_url_hint">https://hister.example.org</string>
+    <!-- Nogon -->
+    <string name="hister_title">Nogon</string>
+    <string name="hister_explanation">Nogon keeps your long-term history. Searching all history sends your query to your Nogon server.</string>
+    <string name="hister_url_hint">https://nogon.example.org</string>
     <string name="hister_token">Access token</string>
     <string name="hister_token_saved">A token is saved. Enter a new one to replace it.</string>
-    <string name="hister_capture">Send page text to Hister</string>
-    <string name="hister_capture_explanation">When on, Combray sends the address, title and readable text of pages you open to your Hister server, a few seconds after they load. Off until you switch it on. Excluded sites, the services’ own pages and addresses that look like they contain a login token are never sent. Page text can still contain personal information.</string>
+    <string name="hister_capture">Send page text to Nogon</string>
+    <string name="hister_capture_explanation">When on, Combray sends the address, title and readable text of pages you open to your Nogon server, a few seconds after they load. Off until you switch it on. Excluded sites, the services’ own pages and addresses that look like they contain a login token are never sent. Page text can still contain personal information.</string>
     <string name="hister_capture_paused_budget">Capture is paused: %1$s of page text is waiting to be sent (the limit is 20 MB).</string>
     <string name="hister_queue_size">Waiting to be sent: %1$s</string>
     <string name="hister_exclusions">Never send these sites</string>
@@ -394,17 +394,17 @@
     <string name="report_lost_too_many">The report was not stored because too many reports are waiting to be sent.</string>
 
     <!-- Search all history -->
-    <string name="search_all_hint">Words you remember, searched in Hister…</string>
-    <string name="search_all_not_configured">Connect Hister in Settings to search all history.</string>
-    <string name="search_all_empty">No results in Hister.</string>
+    <string name="search_all_hint">Words you remember, searched in Nogon…</string>
+    <string name="search_all_not_configured">Connect Nogon in Settings to search all history.</string>
+    <string name="search_all_empty">No results in Nogon.</string>
     <plurals name="search_all_count">
         <item quantity="one">%1$d result</item>
         <item quantity="other">%1$d results</item>
     </plurals>
-    <string name="search_all_unauthorized">Hister rejected the token. Check it in Settings.</string>
-    <string name="search_all_unreachable">Could not reach Hister (%1$s). Recent still works on this device.</string>
-    <string name="search_all_error">Hister could not search (HTTP %1$d).</string>
-    <string name="search_all_malformed">Hister’s answer could not be read. Check the address in Settings.</string>
+    <string name="search_all_unauthorized">Nogon rejected the token. Check it in Settings.</string>
+    <string name="search_all_unreachable">Could not reach Nogon (%1$s). Recent still works on this device.</string>
+    <string name="search_all_error">Nogon could not search (HTTP %1$d).</string>
+    <string name="search_all_malformed">Nogon’s answer could not be read. Check the address in Settings.</string>
     <string name="search_all_more">More results</string>
     <string name="karakeep_search_hint">Search your Karakeep bookmarks</string>
     <string name="karakeep_search_not_configured">Connect Karakeep in Settings to see your bookmarks.</string>

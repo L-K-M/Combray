@@ -1,4 +1,4 @@
-"""Read the owner's browsing history from a Hister server.
+"""Read the owner's browsing history from a Nogon server.
 
 Only ``GET {base}/api/history`` is used. It returns the latest indexed documents,
 newest first, ``PAGE_SIZE`` per page. Each response carries an opaque ``page_key``
@@ -44,7 +44,7 @@ _HISTORY_PATH = "/api/history"
 _ALLOWED_SCHEMES = ("http", "https")
 _REQUEST_HEADERS = {
     "Accept": "application/json",
-    # Hister's CSRF middleware accepts this origin as its native/CLI client convention.
+    # Both Hister and Nogon accept this native-client origin.
     "Origin": "hister://",
     "User-Agent": "combray-sitecheck/1",
 }
@@ -55,7 +55,7 @@ _TOKEN_HEADER = "X-Access-Token"
 _MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
 
-# Hister's document type for web pages. Older servers omit the field.
+# Nogon's document type for web pages. Older servers omit the field.
 _WEB_DOC_TYPES = frozenset({0, "0", "web"})
 
 # Values beyond these are corrupt data, not history. The bounds also keep every
@@ -67,7 +67,7 @@ _log = logging.getLogger(__name__)
 
 
 class HisterError(Exception):
-    """Hister could not be read. Messages never contain the access token."""
+    """Nogon could not be read. Messages never contain the access token."""
 
 
 class HisterConfigError(HisterError):
@@ -79,7 +79,7 @@ class HisterAuthError(HisterError):
 
 
 class HisterUnavailable(HisterError):
-    """The history API does not exist: disabled on the server, or not a Hister URL."""
+    """The history API does not exist: disabled on the server, or not a Nogon URL."""
 
 
 class StopReason(str, Enum):
@@ -124,7 +124,7 @@ def incremental_date_from(last_sync: int | None) -> int | None:
 
 
 class HisterClient:
-    """Pages through ``/api/history`` on one Hister server."""
+    """Pages through ``/api/history`` on one Nogon server."""
 
     def __init__(self, base_url: str, token: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
         self._base_url = _validated_base_url(base_url)
@@ -180,7 +180,7 @@ class HisterClient:
             if stats.pages >= max_pages:
                 stats.stop_reason = StopReason.CAP
                 _log.warning(
-                    "Hister paging stopped at the %d page cap; older history was not read",
+                    "Nogon paging stopped at the %d page cap; older history was not read",
                     max_pages,
                 )
                 return
@@ -206,7 +206,7 @@ class HisterClient:
                 stats.stop_reason = StopReason.CURSOR_REPEAT
                 # The cursor can be a history URL, so it stays out of the log.
                 _log.warning(
-                    "Hister repeated a paging cursor after %d pages; stopped to avoid a loop",
+                    "Nogon repeated a paging cursor after %d pages; stopped to avoid a loop",
                     stats.pages,
                 )
                 return
@@ -229,16 +229,16 @@ class HisterClient:
 
         payload = self._get_json(url)
         if not isinstance(payload, dict):
-            raise HisterError("Hister history response is not a JSON object")
+            raise HisterError("Nogon history response is not a JSON object")
         page_key = payload.get("page_key")
         if page_key is not None and not isinstance(page_key, str):
-            raise HisterError("Hister history response has a non-string 'page_key' field")
+            raise HisterError("Nogon history response has a non-string 'page_key' field")
         documents = payload.get("documents")
         # Go encodes an empty slice as null.
         if documents is None:
             return [], page_key or None
         if not isinstance(documents, list):
-            raise HisterError("Hister history response has a non-list 'documents' field")
+            raise HisterError("Nogon history response has a non-list 'documents' field")
         return documents, page_key or None
 
     def _get_json(self, url: str) -> Any:
@@ -266,41 +266,41 @@ class HisterClient:
             if isinstance(exc.reason, TimeoutError):
                 raise self._timeout_error(server) from None
             raise HisterError(
-                f"Could not reach Hister at {server}: {_describe(exc.reason)}"
+                f"Could not reach Nogon at {server}: {_describe(exc.reason)}"
             ) from None
         except TimeoutError:
             raise self._timeout_error(server) from None
         except (OSError, http.client.HTTPException) as exc:
             raise HisterError(
-                f"Connection to Hister at {server} failed: {_describe(exc)}"
+                f"Connection to Nogon at {server} failed: {_describe(exc)}"
             ) from None
 
         try:
             return json.loads(body)
         except (UnicodeDecodeError, ValueError, RecursionError):
             raise HisterError(
-                f"Hister at {server} returned a response that is not JSON; "
-                "check that HISTER_URL points at the Hister server"
+                f"Nogon at {server} returned a response that is not JSON; "
+                "check that HISTER_URL points at the Nogon server"
             ) from None
 
     def _timeout_error(self, server: str) -> HisterError:
-        return HisterError(f"Hister at {server} did not answer within {self._timeout:g} s")
+        return HisterError(f"Nogon at {server} did not answer within {self._timeout:g} s")
 
     def _http_error(self, status: int, server: str) -> HisterError:
         if status in (401, 403):
             return HisterAuthError(
-                f"Hister at {server} rejected the access token (HTTP {status}); check HISTER_TOKEN"
+                f"Nogon at {server} rejected the access token (HTTP {status}); check HISTER_TOKEN"
             )
         if status == 404:
             return HisterUnavailable(
-                f"Hister at {server} has no history API (HTTP 404): history is disabled "
-                "on the server, or HISTER_URL is not a Hister server"
+                f"Nogon at {server} has no history API (HTTP 404): history is disabled "
+                "on the server, or HISTER_URL is not a Nogon server"
             )
         if 300 <= status < 400:
             return HisterError(
-                f"Hister at {server} answered with a redirect (HTTP {status}) that was not followed"
+                f"Nogon at {server} answered with a redirect (HTTP {status}) that was not followed"
             )
-        return HisterError(f"Hister at {server} answered HTTP {status}")
+        return HisterError(f"Nogon at {server} answered HTTP {status}")
 
     def _redacted(self, error: HisterError) -> HisterError:
         message = str(error)
@@ -332,7 +332,7 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
             fp.close()
             # The target is not named: the server chose it and knows the token.
             raise HisterError(
-                f"Hister at {_origin_text(req.full_url)} redirected to another origin; "
+                f"Nogon at {_origin_text(req.full_url)} redirected to another origin; "
                 "the token is not sent there. Set HISTER_URL to the server's final address"
             )
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -350,7 +350,7 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
             # urllib parses the Location header before redirect_request sees it.
             fp.close()
             raise HisterError(
-                f"Hister at {_origin_text(req.full_url)} sent a malformed redirect"
+                f"Nogon at {_origin_text(req.full_url)} sent a malformed redirect"
             ) from None
 
     # The base class aliases these to its own http_error_302.
@@ -436,7 +436,7 @@ def _read_capped(response: Any) -> bytes:
     declared = _declared_length(response)
     if declared is not None and declared > _MAX_RESPONSE_BYTES:
         raise HisterError(
-            f"Hister response of {declared} bytes exceeds the {_MAX_RESPONSE_BYTES} byte limit"
+            f"Nogon response of {declared} bytes exceeds the {_MAX_RESPONSE_BYTES} byte limit"
         )
 
     chunks: list[bytes] = []
@@ -447,7 +447,7 @@ def _read_capped(response: Any) -> bytes:
             return b"".join(chunks)
         total += len(chunk)
         if total > _MAX_RESPONSE_BYTES:
-            raise HisterError(f"Hister response exceeds the {_MAX_RESPONSE_BYTES} byte limit")
+            raise HisterError(f"Nogon response exceeds the {_MAX_RESPONSE_BYTES} byte limit")
         chunks.append(chunk)
 
 
@@ -464,7 +464,7 @@ def _declared_length(response: Any) -> int | None:
 def _cursor_of(raw: Any) -> str:
     url = raw.get("url") if isinstance(raw, dict) else None
     if not isinstance(url, str) or not url:
-        raise HisterError("Hister returned a full page whose last document has no URL to page from")
+        raise HisterError("Nogon returned a full page whose last document has no URL to page from")
     return url
 
 
@@ -524,7 +524,7 @@ def _parse_time_text(text: str) -> int:
     except ValueError:  # Also raised for digit strings too long to convert.
         return 0
     if parsed.tzinfo is None:
-        return 0  # Ambiguous without a zone; Hister always sends one.
+        return 0  # Ambiguous without a zone; Nogon always sends one.
     return int(parsed.timestamp())
 
 

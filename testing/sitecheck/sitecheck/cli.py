@@ -9,7 +9,7 @@ never compete for the machine's memory or the store.
 No servoshell outlives the command: an atexit handler and the SIGINT, SIGTERM and
 SIGHUP handlers kill every live servoshell process group, servo.py's supervisor kills
 the group when this process dies without running them, and leaving the Chromium
-context manager stops Playwright's driver and its browser. The Hister settings are
+context manager stops Playwright's driver and its browser. The Nogon settings are
 removed from this process's environment once read, so no child inherits the token.
 """
 
@@ -79,7 +79,7 @@ _CHECK_LABEL = "check"
 
 # URLs named on the command line skip the history-oriented exclusions (private hosts,
 # odd ports and file-like paths are how reduced test cases are served), but never
-# these: a deny-listed site, credentials, the Hister server or an action URL.
+# these: a deny-listed site, credentials, the Nogon server or an action URL.
 _REFUSED_NAMED_REASONS = frozenset(
     {
         urlpolicy.Reason.INVALID,
@@ -183,10 +183,10 @@ class Runtime:
 
 @dataclass(frozen=True)
 class _UrlPolicy:
-    """The URL policy as configured now: the Hister host and the deny list.
+    """The URL policy as configured now: the Nogon host and the deny list.
 
     Pages are classified when they enter the store, so a deny entry added later, a new
-    Hister host or a stricter policy reaches stored pages only through `reclassify`,
+    Nogon host or a stricter policy reaches stored pages only through `reclassify`,
     which every page-loading command runs first.
     """
 
@@ -235,7 +235,7 @@ def main(argv: Sequence[str] | None = None, runtime: Runtime | None = None) -> i
     if rt.environ is os.environ:
         # The commands read their settings from a copy; child processes (servoshell,
         # Playwright's driver and Chromium, git) inherit the process environment,
-        # which no longer holds the Hister settings.
+        # which no longer holds the Nogon settings.
         rt.environ = dict(os.environ)
         config.scrub_secrets(os.environ)
     parser = _parser()
@@ -295,7 +295,7 @@ def _cmd_sync(args: argparse.Namespace, rt: Runtime) -> int:
     config_path = config.config_dir(rt.environ)
     if settings is None:
         raise config.ConfigError(
-            f"Hister is not configured: set {config.HISTER_URL_KEY} and "
+            f"Nogon is not configured: set {config.HISTER_URL_KEY} and "
             f"{config.HISTER_TOKEN_KEY} in {config_path / config.HISTER_ENV_NAME}"
         )
     deny = config.load_deny_list(config.deny_list_path(config_path))
@@ -367,7 +367,7 @@ def _cmd_sync(args: argparse.Namespace, rt: Runtime) -> int:
     if failure is not None:
         raise failure
     if stats.stop_reason is hister.StopReason.CURSOR_REPEAT:
-        print("sitecheck: Hister repeated a paging cursor; the sync is incomplete", file=rt.stderr)
+        print("sitecheck: Nogon repeated a paging cursor; the sync is incomplete", file=rt.stderr)
         return EXIT_FAILURE
     return EXIT_OK
 
@@ -681,7 +681,7 @@ def _cmd_leakcheck(args: argparse.Namespace, rt: Runtime) -> int:
         hister_configured = config.load_hister_settings(environ=rt.environ, warnings=rt.stderr)
         if hister_configured is not None and hister_pages == 0:
             raise config.ConfigError(
-                f"Hister is configured but {db_path} holds no pages from it: run "
+                f"Nogon is configured but {db_path} holds no pages from it: run "
                 "`sitecheck sync` first (--allow-empty-inventory to scan anyway)"
             )
 
@@ -784,7 +784,7 @@ def _selection_pages(db: store.Store, policy: _UrlPolicy) -> list[selection.Page
 
 
 def _hister_host(rt: Runtime) -> str | None:
-    """The configured Hister server's host, which the URL policy excludes; no network."""
+    """The configured Nogon server's host, which the URL policy excludes; no network."""
     settings = config.load_hister_settings(environ=rt.environ, warnings=rt.stderr)
     if settings is None:
         return None
@@ -1246,7 +1246,7 @@ def _doctor_servo(option: str | None, rt: Runtime, report_check: _ReportCheck) -
             text=True,
             errors="replace",
             timeout=_SUBPROCESS_TIMEOUT_S,
-            # Nothing of the harness's environment (such as a Hister token) is needed.
+            # Nothing of the harness's environment (such as a Nogon token) is needed.
             env=config.child_environment(rt.environ),
             check=False,
         )
@@ -1387,7 +1387,7 @@ def _parser() -> _Parser:
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    sync = commands.add_parser("sync", help="import history from Hister (prints counts only)")
+    sync = commands.add_parser("sync", help="import history from Nogon (prints counts only)")
     sync.add_argument("--full", action="store_true", help="ignore the last sync time")
     sync.add_argument(
         "--max-pages",
@@ -1489,7 +1489,7 @@ def _parser() -> _Parser:
 
     doctor = commands.add_parser("doctor", help="check the setup")
     doctor.add_argument("--servo", metavar="PATH", help="servoshell to check")
-    doctor.add_argument("--offline", action="store_true", help="do not contact Hister")
+    doctor.add_argument("--offline", action="store_true", help="do not contact Nogon")
     doctor.set_defaults(handler=_cmd_doctor)
     return parser
 

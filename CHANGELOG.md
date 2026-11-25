@@ -206,6 +206,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Hister is now labeled Nogon in Combray and sitecheck. Existing server
+  addresses, access tokens and queued captures carry over.
+
 - `scripts/build.sh` now builds the debug APK by default and `--install`
   installs it without extra flags; pass `--release` for the signed release
   variant (the `COMBRAY_KEYSTORE_*` / `COMBRAY_KEY_*` variables still apply

@@ -38,7 +38,7 @@ tailscale serve --bg --https=8443 http://127.0.0.1:8787
 tailscale serve status
 ```
 
-The service is then at `https://<machine>.<tailnet>.ts.net:8443`. Pick a free HTTPS port: Hister may already use 443 on the same machine. This is the Tailscale 1.52 and later syntax; check `tailscale serve --help` on your version. HTTPS needs MagicDNS and HTTPS certificates turned on for the tailnet. `tailscale serve --https=8443 off` stops it.
+The service is then at `https://<machine>.<tailnet>.ts.net:8443`. Pick a free HTTPS port: Nogon may already use 443 on the same machine. This is the Tailscale 1.52 and later syntax; check `tailscale serve --help` on your version. HTTPS needs MagicDNS and HTTPS certificates turned on for the tailnet. `tailscale serve --https=8443 off` stops it.
 
 Alternatives: a reverse proxy with TLS in front of `127.0.0.1:8787`, or `REPORTS_BIND_ADDRESS` set to the machine's tailnet IPv4 address over plain HTTP. WireGuard encrypts that hop, but Combray's settings warn about any plain HTTP address. Never bind to a public address.
 

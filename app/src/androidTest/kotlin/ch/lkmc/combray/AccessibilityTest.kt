@@ -176,7 +176,7 @@ class AccessibilityTest {
             Bar(PAGE, openTabs = 1, SaveStatus.Unsaved, histerStored = true)
         }
 
-        compose.onNodeWithContentDescription("Sent to Hister", substring = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Sent to Nogon", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -290,7 +290,7 @@ class AccessibilityTest {
         // The home dock: one search affordance and labeled actions, reflowed at 200% font.
         assertTargetsAreAccessible()
         compose.onNodeWithText("Search with Kagi or enter address").assertIsDisplayed()
-        for (label in listOf("Hister", "Karakeep", "Recent", "Menu")) {
+        for (label in listOf("Nogon", "Karakeep", "Recent", "Menu")) {
             compose.onNodeWithText(label).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("New tab").assertIsDisplayed()

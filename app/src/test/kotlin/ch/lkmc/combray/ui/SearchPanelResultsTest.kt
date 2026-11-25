@@ -33,7 +33,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** The Hister scope keeps the last answer while a search runs and binds pages to their search. */
+/** The Nogon scope keeps the last answer while a search runs and binds pages to their search. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], application = Application::class, qualifiers = "w320dp-h640dp")
 class SearchPanelResultsTest {
@@ -80,7 +80,7 @@ class SearchPanelResultsTest {
         compose.onNode(hasSetTextAction()).performTextInput(" two")
         request(1)
         answer(1, HisterSearch.Unreachable("network"))
-        compose.onNodeWithText("Could not reach Hister (network).", substring = true).assertExists()
+        compose.onNodeWithText("Could not reach Nogon (network).", substring = true).assertExists()
         compose.onNodeWithText("One").assertDoesNotExist()
     }
 
@@ -109,13 +109,13 @@ class SearchPanelResultsTest {
         compose.onNodeWithText(MORE).performClick()
         answer(1, HisterSearch.Unreachable("network"))
         compose.onNodeWithText("One").assertExists()
-        compose.onNodeWithText("Could not reach Hister (network).", substring = true).assertExists()
+        compose.onNodeWithText("Could not reach Nogon (network).", substring = true).assertExists()
         compose.onNodeWithText(MORE).assertIsEnabled().performClick()
         assertEquals("page-2", request(2).page.cursor)
         answer(2, results("Two", null))
         compose.onNodeWithText("One").assertExists()
         compose.onNodeWithText("Two").assertExists()
-        compose.onNodeWithText("Could not reach Hister (network).", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Could not reach Nogon (network).", substring = true).assertDoesNotExist()
     }
 
     @Test

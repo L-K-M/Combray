@@ -1,6 +1,6 @@
 """Tests for sitecheck.cli: argument handling, exit codes and command flows, with fake engines.
 
-The only server involved is a fake Hister on 127.0.0.1; no engine process starts.
+The only server involved is a fake Nogon on 127.0.0.1; no engine process starts.
 """
 
 from __future__ import annotations
@@ -750,7 +750,7 @@ class SyncTest(CliTestCase):
     def test_sync_needs_hister_settings(self) -> None:
         code, _, err = self.sitecheck("sync")
         self.assertEqual(code, cli.EXIT_USAGE)
-        self.assertIn("Hister is not configured", err)
+        self.assertIn("Nogon is not configured", err)
 
     def test_sync_stores_eligible_pages_and_hashes_excluded_ones(self) -> None:
         reset = "https://www.example-bank.org/password/reset?token=0123456789abcdef0123456789"

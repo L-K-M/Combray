@@ -411,11 +411,11 @@ class HomeTest {
         val calls = serviceCalls()
         assertEquals("opening Home called a configured service: $calls", 0, calls.size)
 
-        dock("Hister").performClick()
+        dock("Nogon").performClick()
         awaitText(compose.activity.getString(R.string.search_all_hint))
         device.idle()
         compose.waitForIdle()
-        assertTrue("opening the Hister scope searched already", serviceCalls().none { it.getString("service") == "hister" })
+        assertTrue("opening the Nogon scope searched already", serviceCalls().none { it.getString("service") == "hister" })
         back()
         compose.waitUntilDoesNotExist(hasText(compose.activity.getString(R.string.search_all_hint)), Device.LOAD_TIMEOUT_MS)
 

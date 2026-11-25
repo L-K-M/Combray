@@ -3,7 +3,7 @@
 `sitecheck` loads websites in a local desktop build of Combray's downstream Servo
 (`servoshell`) and in headless Chromium, compares the two, and keeps a private,
 prioritized list of pages that do not work in Servo. The pages come from the owner's
-browsing history in Hister, plus a public seed list. The nightly engine maintenance task
+browsing history in Nogon, plus a public seed list. The nightly engine maintenance task
 ([docs/SITECHECK.md](../../docs/SITECHECK.md)) uses it to find Servo bugs worth fixing
 and to confirm the fixes.
 
@@ -22,10 +22,10 @@ contacts the upstream Servo project.
 - **Excluded pages are kept by hash.** A history URL the policy excludes is stored as
   `excluded:<hash>` with its host and site only, so tokens and search queries in such
   URLs are not kept, while the host still feeds the leak check.
-- **The Hister token** is read from `hister.env` or the environment, sent only in the
+- **The Nogon token** is read from `hister.env` or the environment, sent only in the
   `X-Access-Token` header to the configured origin (redirects to other origins are
   refused, proxies are bypassed), and never printed, logged or passed on a command line.
-  Once read, the Hister settings are removed from the process environment, and
+  Once read, the Nogon settings are removed from the process environment, and
   `servoshell`, Playwright's driver and Chromium get an allowlisted environment, so the
   token never reaches an engine.
 - **Re-visiting history must not act for the owner.** Both engines load each page with
@@ -46,7 +46,7 @@ contacts the upstream Servo project.
   `seed` and `sync`. URLs named on the command line skip the history-oriented
   exclusions (local test servers and files are how reduced test cases are checked) but
   are still refused when they carry credentials, match the deny list, point at the
-  Hister server or look like an action.
+  Nogon server or look like an action.
 - **No engine outlives a command.** Each page gets its own servoshell process group,
   killed when the page is done; an atexit handler and the SIGINT, SIGTERM and SIGHUP
   handlers kill any that remain. The group is led by a small supervisor
@@ -91,8 +91,8 @@ All optional, in `~/.config/combray-sitecheck/` (or `$COMBRAY_SITECHECK_CONFIG`)
   `HISTER_TOKEN` in the environment override it.
 
   ```sh
-  HISTER_URL=https://hister.example.net
-  HISTER_TOKEN=<access token of your Hister user>
+  HISTER_URL=https://nogon.example.net
+  HISTER_TOKEN=<access token of your Nogon user>
   ```
 
 - `deny.txt`: one host suffix (`example.com` also covers `www.example.com`) or http(s)
@@ -116,8 +116,8 @@ lock, so a second one fails at once instead of competing for memory.
 
 | Command | What it does |
 |---|---|
-| `doctor [--servo PATH] [--offline]` | Checks the data directory, store, Hister settings (prints the host only; `--offline` skips contacting it), deny and seed lists, servoshell (and whether its WebDriver port answers on the network), Pillow, Chromium and free disk |
-| `sync [--full] [--max-pages N]` | Imports history from Hister into the store and prints counts only. Incremental after the first sync (one day of overlap); `--full` rereads everything |
+| `doctor [--servo PATH] [--offline]` | Checks the data directory, store, Nogon settings (prints the host only; `--offline` skips contacting it), deny and seed lists, servoshell (and whether its WebDriver port answers on the network), Pillow, Chromium and free disk |
+| `sync [--full] [--max-pages N]` | Imports history from Nogon into the store and prints counts only. Incremental after the first sync (one day of overlap); `--full` rereads everything |
 | `seed [--file PATH]` | Adds the bundled `seeds.txt` (or `PATH`) and the private `seeds.txt` as seed pages |
 | `select [--budget N] [--seed S] [--json]` | Prints the pages a run would check |
 | `run [--servo PATH] [--budget N \| --urls FILE \| URL ...]` | Checks pages and records the results, then writes the report (also for a run that aborted). Options: `--label L`, `--no-reference` (judges only crash and hang), `--fresh-reference`, `--minutes M`, `--compare RUN\|latest`, `--retries N` |
@@ -126,7 +126,7 @@ lock, so a second one fails at once instead of competing for memory.
 | `issues [--run ID\|latest] [--label L] [--json] [--all]` | Lists a run's open issues by priority; `--all` adds wontfix and upstream ones. The JSON says which run (`run_id`, `label`), whether it `finished`, and its page and verdict counts |
 | `urls [--run ID\|latest] [--label L] [--verdict V ...] [--limit N]` | Prints a run's pages whose final verdict is one of `V` (default `ok`), one per line, every site before any site's second page; for regression sweeps with `run --urls`. The list is history: keep it in the data directory |
 | `mark SIGNATURE --status open\|fixed\|wontfix\|upstream [--note TEXT]` | Sets an issue's status |
-| `leakcheck [--git-range BASE..HEAD] [--repo PATH] [--exclude-ref REF ...] [--text FILE ...]` | Scans every commit of a range (added lines, file names, message, a merge's own lines), the branch name, and text files for hosts and URLs from the store, and commit messages and text files for upstream contact (references to the upstream project's issues and pull requests, and @-mentions in text files outside code), which GitHub would turn into links or notifications on the upstream side; `--exclude-ref` skips commits reachable from REF, such as a merged upstream release. Refuses (exit 2) an inventory with nothing to look for, or one without Hister pages while Hister is configured, unless `--allow-empty-inventory` |
+| `leakcheck [--git-range BASE..HEAD] [--repo PATH] [--exclude-ref REF ...] [--text FILE ...]` | Scans every commit of a range (added lines, file names, message, a merge's own lines), the branch name, and text files for hosts and URLs from the store, and commit messages and text files for upstream contact (references to the upstream project's issues and pull requests, and @-mentions in text files outside code), which GitHub would turn into links or notifications on the upstream side; `--exclude-ref` skips commits reachable from REF, such as a merged upstream release. Refuses (exit 2) an inventory with nothing to look for, or one without Nogon pages while Nogon is configured, unless `--allow-empty-inventory` |
 
 Examples:
 
@@ -306,7 +306,7 @@ cd testing/sitecheck && uv run python -m unittest discover -s tests -t .
 uvx ruff@0.17.2 check sitecheck tests && uvx ruff@0.17.2 format --check sitecheck tests
 ```
 
-Tests use fakes for both engines and Hister and need no network. With
+Tests use fakes for both engines and Nogon and need no network. With
 `SITECHECK_LIVE_SERVO=<path to servoshell>`, `tests/test_servo.py` also runs local
 `file:` fixtures in the real servoshell, and with `SITECHECK_LIVE_CHROMIUM=1` (in the uv
 environment), `tests/test_reference.py` runs them in Playwright's Chromium.

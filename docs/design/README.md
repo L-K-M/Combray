@@ -12,7 +12,7 @@ The [editable source fragment](combray-concepts.fragment.html) preserves the ori
 - **Recent sheet:** a list of open/recent pages rises from the bottom over the current page.
 - **Recent home:** Recent becomes the dedicated home surface, keeping bottom navigation in place.
 
-The user liked the concepts; there is no recorded exclusive final choice. The implementation plan proposes starting with the sheet. Both demonstrate bottom address/search, Save, Recent and More; closing a row leaves it in Recent; reopening returns it to an open state; Search all history opens a Hister-style sample view.
+The user liked the concepts; there is no recorded exclusive final choice. The implementation plan proposes starting with the sheet. Both demonstrate bottom address/search, Save, Recent and More; closing a row leaves it in Recent; reopening returns it to an open state; Search all history opens a Nogon-style sample view.
 
 ## Visual direction
 
@@ -22,6 +22,6 @@ Use the original [icon](../../media-sources/icon.png) and [asset notes](../../me
 
 ## Known demo limitations
 
-The demo is deliberately not a state-management specification. It has no Servo, network integration, native lifecycle, durable queue or real history. It reuses a small row model; it does not establish the required separation of logical tabs, committed visits and document identity. Closing the current demo row may leave sample article content underneath; the native browser must select another open tab or internal home immediately. The sample Hister filter searches sample labels rather than indexed page bodies. Save acknowledgments are simulated.
+The demo is deliberately not a state-management specification. It has no Servo, network integration, native lifecycle, durable queue or real history. It reuses a small row model; it does not establish the required separation of logical tabs, committed visits and document identity. Closing the current demo row may leave sample article content underneath; the native browser must select another open tab or internal home immediately. The sample Nogon filter searches sample labels rather than indexed page bodies. Save acknowledgments are simulated.
 
 Use the [implementation plan](../IMPLEMENTATION_PLAN.md) when interaction semantics or failure behavior are ambiguous. Keep responsive layout, touch targets, TalkBack, font scaling, keyboard/system insets and real Android Back behavior part of implementation acceptance, even when the static preview cannot demonstrate them.
