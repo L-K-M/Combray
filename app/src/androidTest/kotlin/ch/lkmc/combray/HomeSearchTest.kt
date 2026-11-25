@@ -60,7 +60,7 @@ class HomeSearchTest {
         compose.onNode(hasSetTextAction()).assertIsNotFocused()
         compose.onNodeWithContentDescription("Close").assertDoesNotExist()
         assertEquals(blank, device.browser.browserState.value.activeTab?.id)
-        compose.onNodeWithText("Hister").assertIsDisplayed()
+        compose.onNodeWithText("Nogon").assertIsDisplayed()
     }
 
     @Test

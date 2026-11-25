@@ -9,11 +9,11 @@ A personal Android browser powered by **Servo**, with controls at the bottom and
 
 <img src="media-sources/icon.png" alt="Combray: an ivory folded C on a square pine-green background" width="160" height="160">
 
-Combray connects to **Karakeep** for quick saves, **Hister** for long-term history and full-text search, **Kagi** for web search, and its own self-hosted report service, which receives More › Report this site and from which Paseo hands site reports to coding agents. The initial audience is its owner, for personal use.
+Combray connects to **Karakeep** for quick saves, **Nogon** (formerly Hister) for long-term history and full-text search, **Kagi** for web search, and its own self-hosted report service, which receives More › Report this site and from which Paseo hands site reports to coding agents. The initial audience is its owner, for personal use.
 
 ## Status
 
-Combray runs on a pinned commit of [our downstream Servo](https://github.com/L-K-M/servo/tree/combray/0.7), based on v0.7.0, through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Hister capture of rendered page text with long-term search. The device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging, local signing support and third-party notices in the app; personal signing and release CI remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
+Combray runs on a pinned commit of [our downstream Servo](https://github.com/L-K-M/servo/tree/combray/0.7), based on v0.7.0, through its own native bridge (M0). The app (M1–M3) has bottom controls, independent tabs that survive process death, one Recent list for tabs and recent history, Kagi search, one-tap Karakeep saves through a durable queue, and opt-in Nogon capture of rendered page text with long-term search. The device checks pass on an x86_64 emulator against synthetic pages and fake services; **no physical device, real service, live site or login has been tried yet**. M4 has started with verified APK staging, local signing support and third-party notices in the app; personal signing and release CI remain pending. Status per check, open engine blockers and the next task are in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#9-milestones-and-implementation-tasks).
 
 ## Start here
 
@@ -58,7 +58,7 @@ scripts/release.sh X.Y.Z --push  # bump, tag vX.Y.Z, push; the tag publishes the
 | `app/`, `core/`, `engine/` | The Android app: Compose UI; logical tabs, history, outbox and service clients; Kotlin engine port |
 | `native/` | Combray's Rust bridge to the downstream Servo commit in `scripts/m0/servo-pin.sh` |
 | `services/site-reports/` | Self-hosted report service that receives Report this site and serves reports to Paseo (Docker Compose) |
-| `testing/fixtures/` | Synthetic pages and fake Karakeep, Hister and report services for the device checks (`scripts/check-app.sh`) |
+| `testing/fixtures/` | Synthetic pages and fake Karakeep, Nogon and report services for the device checks (`scripts/check-app.sh`) |
 | `spike/` | M0 engine harness app and fixture site (test tooling) |
 | `scripts/m0/` | Fetch, build, emulator and check scripts for M0 |
 | `media-sources/` | Original square icon and generation provenance |

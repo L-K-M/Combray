@@ -12,7 +12,7 @@ and at large text sizes. Warm paper, pine, sage and pine-charcoal use the
 existing theme. No page renderer, preview fetch or service request is needed
 to show Home.
 
-The Home dock contains a single search/address affordance and Hister,
+The Home dock contains a single search/address affordance and Nogon,
 Karakeep, **+**, Recent and More. On a page the actions are Back, Save,
 Share, **+**, Recent and More, with the address on a separate row when
 needed. **+** stays beside the field while editing and is available in Find
@@ -61,7 +61,7 @@ switch to that tab, while history rows navigate in the tab being edited.
 Empty queries and no matches show no suggestion list. Typing contacts no
 server; explicit submission opens the ordinary Kagi results website.
 
-Hister and Karakeep open their existing labeled scopes in Recent. Hister
+Nogon and Karakeep open their existing labeled scopes in Recent. Nogon
 search needs a query; Karakeep lists saved links after its action is tapped.
 Unconfigured scopes explain setup and link to Settings. Recent still opens
 on Open tabs. Visible counts obey Show tab count, off by default.

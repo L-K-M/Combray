@@ -156,7 +156,7 @@ class HisterClient(private val transport: HttpTransport) {
     private fun headers(token: String) = mapOf(
         "X-Access-Token" to token,
         "Accept" to "application/json",
-        // Hister's documented native-client convention for its CSRF guard; auth still applies.
+        // Both Hister and Nogon accept the legacy native-client origin; auth still applies.
         // Android's HttpURLConnection sends it (the desktop JDK drops it by default).
         "Origin" to "hister://",
     )

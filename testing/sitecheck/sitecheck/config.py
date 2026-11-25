@@ -1,7 +1,7 @@
 """Paths, private configuration files and the engine settings both engines share.
 
 Browsing history is private, so everything derived from it lives in the data
-directory (mode 0700), and the Hister token is only ever read from a file or the
+directory (mode 0700), and the Nogon token is only ever read from a file or the
 environment. Configuration files are parsed as data and never executed.
 
 The engine settings mirror Combray's Android build (``native/src/engine.rs``) so a
@@ -119,7 +119,7 @@ DEFAULT_VISIT_TIMING = VisitTiming()
 
 # What the engine processes (servoshell, Playwright's driver and Chromium) inherit
 # from the harness's environment: only what a headless browser needs. In particular
-# the Hister token (HISTER_TOKEN may be set in the environment) never reaches an
+# the Nogon token (HISTER_TOKEN may be set in the environment) never reaches an
 # engine that runs arbitrary web content.
 _CHILD_ENV_NAMES = frozenset(
     {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LANGUAGE", "TZ"}
@@ -155,7 +155,7 @@ class RunLockedError(ConfigError):
 
 @dataclass(frozen=True, repr=False)
 class HisterSettings:
-    """Where to reach Hister and how to authenticate. The token never appears in repr()."""
+    """Where to reach Nogon and how to authenticate. The token never appears in repr()."""
 
     url: str
     token: str
@@ -177,7 +177,7 @@ def child_environment(environ: Mapping[str, str] | None = None) -> dict[str, str
 
 
 def scrub_secrets(environ: MutableMapping[str, str]) -> None:
-    """Remove the Hister settings from `environ` (normally os.environ) once read.
+    """Remove the Nogon settings from `environ` (normally os.environ) once read.
 
     Child processes then cannot inherit the token, whichever way they are started
     (Playwright's driver copies os.environ when it starts).
@@ -332,9 +332,9 @@ def load_hister_settings(
     environ: Mapping[str, str] | None = None,
     warnings: TextIO | None = None,
 ) -> HisterSettings | None:
-    """Read the Hister URL and token from `hister.env`, overridden by the environment.
+    """Read the Nogon URL and token from `hister.env`, overridden by the environment.
 
-    Returns None when either value is missing or empty (Hister is not configured).
+    Returns None when either value is missing or empty (Nogon is not configured).
     The file holds `KEY=VALUE` lines, whole-line `#` comments and blank lines; a value
     may be wrapped in matching single or double quotes, which are removed, and
     surrounding whitespace is ignored. Nothing is expanded or executed. A non-empty

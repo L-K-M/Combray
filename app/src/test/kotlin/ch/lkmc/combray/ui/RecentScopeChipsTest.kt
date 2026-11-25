@@ -16,7 +16,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The scope chips wrap inside the row, so Open tabs, All, Hister and Karakeep all stay within
+ * The scope chips wrap inside the row, so Open tabs, All, Nogon and Karakeep all stay within
  * the sheet's width instead of scrolling off with no cue. The row is deliberately narrower than
  * the four chips so a single-line scroller would run past it.
  */
@@ -34,7 +34,7 @@ class RecentScopeChipsTest {
             }
         }
 
-        for (label in listOf("Open tabs", "All", "Hister", "Karakeep")) {
+        for (label in listOf("Open tabs", "All", "Nogon", "Karakeep")) {
             val bounds = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
             // A chip scrolled out of a single-line row has no laid-out bounds.
             assertTrue("$label has no laid-out bounds", bounds.width > 0f && bounds.height > 0f)
