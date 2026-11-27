@@ -41,6 +41,19 @@ class FinalVerdictTest(unittest.TestCase):
         self.assertIs(final.kind, VerdictKind.FLAKY)
         self.assertEqual(final.signatures, ["flaky"])
 
+    def test_a_flaky_page_is_named_after_its_most_severe_failure(self) -> None:
+        final = runner.final_verdict(
+            [
+                verdict(VerdictKind.VISUAL_DIFF, "visual-diff@tag"),
+                verdict(VerdictKind.OK),
+                verdict(VerdictKind.CRASH, "crash:a.rs:1"),
+                verdict(VerdictKind.CRASH, "crash:b.rs:2"),
+            ]
+        )
+        self.assertIs(final.kind, VerdictKind.FLAKY)
+        self.assertEqual(final.signatures, ["flaky:crash:a.rs:1"])
+        self.assertIn("visual-diff, ok, crash, crash", final.findings[0].detail)
+
     def test_a_repeated_failure_keeps_the_most_severe_and_every_signature(self) -> None:
         first = verdict(VerdictKind.HANG, "hang")
         second = verdict(VerdictKind.CRASH, "crash:b.rs:2")

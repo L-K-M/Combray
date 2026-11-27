@@ -188,7 +188,7 @@ local servers (loopback or private hosts, non-default ports) are ever cached.
    | `images` | 2 | at least 3 more broken images, or under half the images the reference loaded |
    | `slow-load` | 1 | only Servo's load event timed out, and nothing else fired |
    | `visual-diff` | 1 | screenshot similarity under 0.55 (the lower of a pixel and an average-hash measure) |
-   | `flaky` | 1 | a failure that did not repeat; signature `flaky:<first signature>` |
+   | `flaky` | 1 | a failure that did not repeat; signature `flaky:<signature of the most severe failing attempt>` |
    | `ok` | 0 | none of the above |
    | `reference-failed` | 0 | Chromium could not load the page either, or hung on it too, or got only an interstitial (little text, no image) while Servo got the page; excluded from triage |
    | `not-compared` | 0 | run with `--no-reference`: only crash and hang were judged; excluded from triage |
