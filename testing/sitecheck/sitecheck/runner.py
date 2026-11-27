@@ -449,7 +449,9 @@ def final_verdict(verdicts: Sequence[Verdict]) -> Verdict:
     """A page's verdict over all its attempts.
 
     - A failure in one attempt and ok in another: `flaky`. Its signature is
-      ``flaky:<first failure's signature>``, so an intermittent panic stays traceable.
+      ``flaky:<signature of the most severe failing attempt>`` (ties go to the
+      kind that ranks first, then to the earlier attempt), so an intermittent
+      panic stays traceable even when a milder failure came first.
     - Otherwise, when attempts failed, the most severe failure, carrying the
       findings of every failing attempt (each signature once), so a crash on the
       first load is not replaced by a milder failure on the retry, and a later
@@ -470,9 +472,9 @@ def final_verdict(verdicts: Sequence[Verdict]) -> Verdict:
     if not any(verdict.kind is VerdictKind.OK for verdict in evidence):
         return _merged_failures(failures)
 
-    first = failures[0]
+    worst = _by_severity(failures)[0]
     signature = (
-        f"{_FLAKY_SIGNATURE}:{first.signatures[0]}" if first.signatures else _FLAKY_SIGNATURE
+        f"{_FLAKY_SIGNATURE}:{worst.signatures[0]}" if worst.signatures else _FLAKY_SIGNATURE
     )
     detail = "attempts: " + ", ".join(verdict.kind.value for verdict in verdicts)
     severity = compare.SEVERITY[VerdictKind.FLAKY]
@@ -481,12 +483,17 @@ def final_verdict(verdicts: Sequence[Verdict]) -> Verdict:
     )
 
 
+def _by_severity(failures: Sequence[Verdict]) -> list[Verdict]:
+    """Most severe first, then by kind; failures that tie on both keep their attempt order."""
+    return sorted(
+        failures, key=lambda verdict: (-verdict.severity, compare.KIND_ORDER[verdict.kind])
+    )
+
+
 def _merged_failures(failures: Sequence[Verdict]) -> Verdict:
     if len(failures) == 1:
         return failures[0]
-    ordered = sorted(
-        failures, key=lambda verdict: (-verdict.severity, compare.KIND_ORDER[verdict.kind])
-    )
+    ordered = _by_severity(failures)
     worst = ordered[0]
     findings: list[Finding] = []
     seen: set[str | None] = set()
