@@ -449,9 +449,9 @@ def final_verdict(verdicts: Sequence[Verdict]) -> Verdict:
     """A page's verdict over all its attempts.
 
     - A failure in one attempt and ok in another: `flaky`. Its signature is
-      ``flaky:<signature of the most severe failing attempt>`` (the earliest of
-      several equally severe ones), so an intermittent panic stays traceable even
-      when a milder failure came first.
+      ``flaky:<signature of the most severe failing attempt>`` (ties go to the
+      kind that ranks first, then to the earlier attempt), so an intermittent
+      panic stays traceable even when a milder failure came first.
     - Otherwise, when attempts failed, the most severe failure, carrying the
       findings of every failing attempt (each signature once), so a crash on the
       first load is not replaced by a milder failure on the retry, and a later
@@ -484,7 +484,7 @@ def final_verdict(verdicts: Sequence[Verdict]) -> Verdict:
 
 
 def _by_severity(failures: Sequence[Verdict]) -> list[Verdict]:
-    """Most severe first; the sort is stable, so equal failures keep their attempt order."""
+    """Most severe first, then by kind; failures that tie on both keep their attempt order."""
     return sorted(
         failures, key=lambda verdict: (-verdict.severity, compare.KIND_ORDER[verdict.kind])
     )
