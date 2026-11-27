@@ -4709,3 +4709,46 @@ builds, with details and reruns recorded in the engine PR.
 The Combray Engine workflow builds arm64 and x86_64 and runs the app
 fixture suite on an x86_64 emulator. Those fixtures exercise the pinned
 engine through the app. The new DOM cases were tested in desktop WPT.
+
+## 67. Font face set entries and `meta` media (27 November 2026)
+
+Pinned source: `a918f24eb427fbbef6ff11198068194fdd931e1a` on `combray/0.7`.
+
+Downstream changes are in [Servo PR #58](https://github.com/L-K-M/servo/pull/58)
+and [Servo PR #59](https://github.com/L-K-M/servo/pull/59), found by the
+nightly site check. They build on the §66 pin,
+`9b2cc39e7a9eba5ed2c4aa41950ea69464f7f58a`; the only other change since
+then is the review workflow's fallback reviewer. `Cargo.lock`, the
+toolchain and the resources are unchanged.
+
+### Font faces of `@font-face` rules
+
+Style elements with identical text share their parsed rules. With two
+such elements declaring a font face, the font context took the rule's
+own entry for a conflicting declaration and reported the rule as added
+and removed in the same update, and script found no face for the removed
+rule. `document.fonts.clear()` also removed the faces of `@font-face`
+rules, which CSS Font Loading keeps, with the same result once such a
+rule was removed. Engine builds with debug assertions panicked in the
+script thread; other builds logged a warning and left `document.fonts`
+and the font context disagreeing. Combray's release build has no debug
+assertions, so the phone was not crashing on these pages.
+
+### `meta` media
+
+`HTMLMetaElement` reflects its `media` content attribute. Scripts that
+filter `theme-color` metas by `meta.media` threw a `TypeError` before.
+
+### Evidence
+
+The macOS medium-profile servoshell ran two new tests for the font
+cases (one crashed and one failed before), `css/css-font-loading/`,
+`css/css-fonts/`, `html/dom/reflection-metadata.html`,
+`html/dom/idlharness.https.html` and the `meta` element directory. The
+unexpected results that remained were the same on the §66 build on that
+machine. Site-check sweeps over 20 pages that were fine before showed no
+regression. Details are in the two engine PRs.
+
+The Combray Engine workflow builds arm64 and x86_64 and runs the app
+fixture suite on an x86_64 emulator. Those fixtures exercise the pinned
+engine through the app. The new DOM cases were tested in desktop WPT.
