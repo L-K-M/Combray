@@ -938,3 +938,6 @@ All notable changes to this project are documented here. The format follows
 - Opening a loaded frame's document keeps requests running when there
   is no navigation to stop. When stopping a navigation does cancel a
   request, its fetch or XHR reports the cancellation to the page.
+- A web font declared by two identical style blocks stays registered,
+  and `document.fonts.clear()` keeps the fonts that style sheets declare.
+- Scripts can read `media` on `<meta>` elements, as theme-color scripts do.
