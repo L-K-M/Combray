@@ -18,7 +18,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/servo-pin.sh"
 
 # Pinned inputs. Change them only together with docs/ENGINE_SPIKE.md and docs/BUILDING.md.
-export COMBRAY_RUST_TOOLCHAIN="1.97.1"
+export COMBRAY_RUST_TOOLCHAIN="1.99.1"
 export COMBRAY_NDK_VERSION="29.0.14206865"
 # Upstream compiles against API 29 but links with API 30 linker wrappers (.cargo/config.toml).
 export COMBRAY_ANDROID_API_LEVEL="29"
