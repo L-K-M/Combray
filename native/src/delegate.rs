@@ -183,6 +183,11 @@ impl WebViewDelegate for TabDelegate {
             LoadStatus::Started => LoadPhase::Started,
             LoadStatus::HeadParsed => LoadPhase::HeadParsed,
             LoadStatus::Complete => LoadPhase::Complete,
+            // New in Servo 0.8: the embedder's stop or `window.stop()` ended the load. The
+            // toolbar's stop reports through its own callback (`Engine::loading_stopped`), and
+            // the app has no phase for a load that script stopped, so nothing is reported here,
+            // as with Servo 0.7.
+            LoadStatus::Stopped => return,
         };
         self.push(DelegateEvent::LoadStatus {
             view: self.view,
@@ -338,9 +343,9 @@ impl WebViewDelegate for TabDelegate {
             .referrer_url
             .as_ref()
             .filter(|referrer| matches!(referrer.scheme(), "http" | "https"))
-            .map(|referrer| referrer.origin().ascii_serialization());
+            .map(|referrer| referrer.origin().ascii_serialization().into_owned());
         // A cancelled load is a network error: the element fires `error` without any download.
-        let url = request.url.clone();
+        let url = request.url.clone().into_url();
         load.intercept(WebResourceResponse::new(url)).cancel();
         self.push(DelegateEvent::MediaBlocked {
             view: self.view,

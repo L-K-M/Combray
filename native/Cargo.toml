@@ -19,9 +19,9 @@ path = "src/lib.rs"
 flate2 = "=1.1.9"
 log = { version = "=0.4.34", features = ["release_max_level_info"] }
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
+serde_json = "=1.0.154"
 sha2 = "=0.10.9"
-url = "=2.5.8"
+url = "=2.5.9"
 
 # Everything that touches Servo or JNI only builds for Android; host builds compile the pure
 # modules so their unit tests run without a host Servo build.

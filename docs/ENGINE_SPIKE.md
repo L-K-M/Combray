@@ -4752,3 +4752,70 @@ regression. Details are in the two engine PRs.
 The Combray Engine workflow builds arm64 and x86_64 and runs the app
 fixture suite on an x86_64 emulator. Those fixtures exercise the pinned
 engine through the app. The new DOM cases were tested in desktop WPT.
+
+## 68. Servo v0.8.0 (28 November 2026)
+
+Pinned source: `9d87c3588e1655e33016280433f038a391ec0a52` on `combray/0.8`, the downstream line on upstream
+v0.8.0 (`4e136d8ef31b7c4748fbfac606ca463f3efd7537`).
+
+[Servo PR #52](https://github.com/L-K-M/servo/pull/52) merged v0.8.0 into
+the downstream line. Every downstream engine change of `combray/0.7` is
+kept or, where v0.8.0 has it, dropped in favour of upstream's code; the PR
+lists the conflict resolutions, the dropped changes and the fixes that
+came out of validating the merge. Two points matter for the app:
+
+- The downstream input-method pipeline is kept as `combray/0.7` shipped
+  it. v0.8.0's own composition tests expect another event order (a
+  `beforeinput` before every composition update, no `input` after
+  `compositionend`); the two tests are ignored downstream until the order
+  is aligned.
+- Requests that stopping a document ends are settled as in §66, ported to
+  v0.8.0's fetch groups.
+
+On top of the merge:
+
+- [Servo PR #60](https://github.com/L-K-M/servo/pull/60): backports of
+  three upstream lockfile commits for cargo-deny advisories: `libz-sys`
+  1.1.33, `url` 2.5.9 and `cookie` 0.18.3. `cookie` 0.16 stays in the
+  graph through the `webdriver` crate; the advisory's feature is not
+  enabled there.
+- [Servo PR #61](https://github.com/L-K-M/servo/pull/61):
+  `Element.checkVisibility()` from CSSOM View, found by the nightly site
+  check. Without it, scripts that filter elements by it threw a
+  `TypeError`. `content-visibility` is not supported, so those steps of
+  the algorithm do nothing.
+
+### Bridge changes for the v0.8 embedder API
+
+- `LoadStatus` has a new `Stopped` value: Servo reports it for a
+  top-level document when the embedder or `window.stop()` stops its load.
+  The bridge does not forward it. The toolbar's stop still reports through
+  its own callback, and a load that script stops gets no phase, as with
+  v0.7. Whether the app should end its loading state on it is an open
+  follow-up.
+- `WebResourceRequest::url` and `referrer_url` are `ServoUrl` now, while
+  `WebResourceResponse::new` takes a `url::Url`, and an origin's ASCII
+  serialization is borrowed where it can be. The media interception
+  converts both; what it reports is unchanged.
+
+`native/Cargo.lock` is Servo's v0.8 lockfile reduced to this crate's
+graph, with no version changes; the exact `serde_json` and `url` pins
+follow it (1.0.154, 2.5.9). The Rust toolchain moves to 1.99.1, as
+Servo's does. SpiderMonkey is `mozjs_sys` 153.6.0-1. The notices were
+regenerated.
+
+### Evidence
+
+The engine PRs record the desktop validation: the macOS medium-profile
+servoshell build, the regression tests of every merged change, WPT
+comparisons with the `combray/0.7` build and with pristine upstream
+v0.8.0, embedder integration tests one per process, and site-check
+comparisons page by page without a regression.
+
+Host checks for this pin on macOS: `cargo check --locked --release
+--target x86_64-linux-android` in `native/` (the bridge compiles against
+the v0.8 engine), `cargo fmt --check` and `cargo test --lib` (206) in
+`native/`, `python3 scripts/check_docs.py`, `git diff --check` and the
+notices test. No emulator run was made on that host: both native ABI
+builds, packaging and the emulator fixture checks are the Engine
+workflow's evidence, recorded in the pin PR.

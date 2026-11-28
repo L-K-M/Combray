@@ -206,6 +206,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Move the engine to Servo v0.8.0 (downstream `combray/0.8`), with every
+  downstream engine change carried over. It also takes patched `url`,
+  `cookie` and zlib crates and adds `Element.checkVisibility()`, which
+  some pages call to filter the elements they show.
+
 - Hister is now labeled Nogon in Combray and sitecheck. Existing server
   addresses, access tokens and queued captures carry over.
 

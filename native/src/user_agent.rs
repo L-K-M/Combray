@@ -2,13 +2,13 @@
 //! sends.
 //!
 //! Servo's Android user agent claims Firefox (`rv:153.0`, `Firefox/153.0`) but writes
-//! `Servo/0.7.0` where Firefox writes `Gecko/153.0`. Some site firewalls take a user agent that
+//! `Servo/0.8.0` where Firefox writes `Gecko/153.0`. Some site firewalls take a user agent that
 //! names Firefox without a `Gecko/` token for a forged one and answer every page with 403. With the
 //! token in front of Servo's, the string reads like Firefox for Android's and still names Servo:
 //!
 //! ```text
-//! Servo:   Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0
-//! Combray: Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0
+//! Servo:   Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.8.0 Firefox/153.0
+//! Combray: Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.8.0 Firefox/153.0
 //! ```
 //!
 //! Servo sends its `user_agent` preference both as the HTTP header and as `navigator.userAgent`,
@@ -56,14 +56,14 @@ mod tests {
     use super::with_gecko_token;
 
     /// `UserAgentPlatform::Android` in the pinned Servo's components/config/prefs.rs, for Servo
-    /// 0.7.0 (`the_pinned_servo_sends_servo_android` keeps it current).
+    /// 0.8.0 (`the_pinned_servo_sends_servo_android` keeps it current).
     const SERVO_ANDROID: &str =
-        "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.7.0 Firefox/153.0";
-    const SERVO_VERSION_TOKEN: &str = "Servo/0.7.0";
+        "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Servo/0.8.0 Firefox/153.0";
+    const SERVO_VERSION_TOKEN: &str = "Servo/0.8.0";
     /// What Combray sends for `SERVO_ANDROID`. The site-check harness sends the same agent, and
     /// testing/sitecheck/tests/test_config.py fails when its template differs from this one.
     const COMBRAY_ANDROID: &str =
-        "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.7.0 Firefox/153.0";
+        "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Gecko/153.0 Servo/0.8.0 Firefox/153.0";
 
     /// The pinned Servo's preferences source: cargo resolves the Android-only `servo` dependency
     /// from this checkout even on the host, so it is there whenever these tests build.
@@ -124,13 +124,13 @@ mod tests {
     fn an_agent_of_another_shape_is_left_to_the_caller() {
         for agent in [
             "",
-            "Mozilla/5.0 (Android 10; Mobile) Servo/0.7.0 Firefox/153.0",
-            "Mozilla/5.0 (Android 10; Mobile; rv:153.0 Servo/0.7.0 Firefox/153.0",
-            "Mozilla/5.0 (Android 10; Mobile; rv:) Servo/0.7.0 Firefox/153.0",
-            "Mozilla/5.0 (Android 10; Mobile; rv:153.x) Servo/0.7.0 Firefox/153.0",
-            "Mozilla/5.0 (Android 10; Mobile; rv:153..0) Servo/0.7.0 Firefox/153.0",
+            "Mozilla/5.0 (Android 10; Mobile) Servo/0.8.0 Firefox/153.0",
+            "Mozilla/5.0 (Android 10; Mobile; rv:153.0 Servo/0.8.0 Firefox/153.0",
+            "Mozilla/5.0 (Android 10; Mobile; rv:) Servo/0.8.0 Firefox/153.0",
+            "Mozilla/5.0 (Android 10; Mobile; rv:153.x) Servo/0.8.0 Firefox/153.0",
+            "Mozilla/5.0 (Android 10; Mobile; rv:153..0) Servo/0.8.0 Firefox/153.0",
             "Mozilla/5.0 (Android 10; Mobile; rv:153.0) Firefox/153.0",
-            "Servo/0.7.0 Mozilla/5.0 (Android 10; Mobile; rv:153.0) Firefox/153.0",
+            "Servo/0.8.0 Mozilla/5.0 (Android 10; Mobile; rv:153.0) Firefox/153.0",
         ] {
             assert_eq!(with_gecko_token(agent), None, "{agent:?}");
         }

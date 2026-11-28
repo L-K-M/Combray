@@ -373,8 +373,8 @@ files = ["LICENSE"]
 
 [[crate]]
 name = "taffy"
-version = "0.14.0"
-repo-files = ["native/licenses/taffy-0.14.0/LICENSE"]
+version = "0.15.1"
+repo-files = ["native/licenses/taffy-0.15.1/LICENSE"]
 
 [[crate]]
 name = "void"
